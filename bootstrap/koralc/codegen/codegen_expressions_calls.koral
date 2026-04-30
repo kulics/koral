@@ -423,6 +423,47 @@ given CodeGen {
             }
         }
 
+        if args.count() > 0 and symbol.def_id.id > 0 then {
+            let raw_symbol_name = self.context.symbol_name(symbol)
+            let actual_receiver_arg = when args[(UInt)0].val.expr_kind in {
+                .TraitObjectConversion(inner, _, _) then inner,
+                _ then args[(UInt)0],
+            }
+            let actual_receiver_type = self.concretize_codegen_type(actual_receiver_arg.expr_type)
+            let mut remaining_args = [TypedExpr ref]List.new()
+            let mut arg_index UInt = (UInt)1
+            while arg_index < args.count() then {
+                remaining_args.push(args[arg_index])
+                arg_index += (UInt)1
+            }
+            when self.method_owner_type(symbol.def_id) in {
+                .Some(owner_type) then {
+                    let concrete_owner_type = self.concretize_codegen_type(owner_type)
+                    let owner_matches_receiver = self.concrete_receiver_lookup_key(concrete_owner_type) == self.concrete_receiver_lookup_key(actual_receiver_type)
+                    let self_param_matches_receiver = when self.context.get_function_param_type(symbol.def_id, (UInt)0) in {
+                        .Some(self_param_type) then self.codegen_types_equal(self.concretize_codegen_type(self_param_type), actual_receiver_type),
+                        .None() then false,
+                    }
+                    if not owner_matches_receiver or not self_param_matches_receiver then {
+                        when self.lookup_receiver_method(actual_receiver_type, raw_symbol_name) in {
+                            .Some(rebound_method) then {
+                                let effective_receiver_result_type = self.preferred_receiver_method_result_type(result_type, rebound_method.symbol_type)
+                                return self.generate_receiver_method_call(actual_receiver_arg, actual_receiver_type, box(rebound_method), remaining_args, effective_receiver_result_type)
+                            },
+                            .None() then when self.lookup_receiver_method_by_signature(actual_receiver_type, raw_symbol_name, remaining_args, result_type) in {
+                                .Some(rebound_method) then {
+                                    let effective_receiver_result_type = self.preferred_receiver_method_result_type(result_type, rebound_method.symbol_type)
+                                    return self.generate_receiver_method_call(actual_receiver_arg, actual_receiver_type, box(rebound_method), remaining_args, effective_receiver_result_type)
+                                },
+                                .None() then {},
+                            },
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        }
+
         if args.count() > 0 and symbol.def_id.id == 0 then {
             let raw_symbol_name = self.context.symbol_name(symbol)
             let receiver_type = self.concretize_codegen_type(args[(UInt)0].val.expr_type)

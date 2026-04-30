@@ -306,6 +306,32 @@ given CodeGen {
         return layout_key(normalized_requested) == layout_key(normalized_candidate)
     }
 
+    private trait_vtable_receiver_has_full_impl(self, trait_name String, concrete_type Type) Bool = {
+        let normalized_concrete_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type))
+        let members = self.get_ordered_trait_members_for_vtable(trait_name, normalized_concrete_type, [Type ref]List.new())
+        if members.is_empty() then {
+            return false
+        }
+        for member in members then {
+            if self.resolve_method_def_id(normalized_concrete_type, trait_name, member.name) is .None() then {
+                return false
+            }
+        }
+        return true
+    }
+
+    private trait_vtable_receiver_type(self, trait_name String, concrete_type Type) Type = {
+        let direct_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type))
+        if self.trait_vtable_receiver_has_full_impl(trait_name, direct_type) then {
+            return direct_type
+        }
+        let unwrapped_type = self.unwrap_vtable_receiver_value_type(concrete_type)
+        if self.trait_vtable_receiver_has_full_impl(trait_name, unwrapped_type) then {
+            return unwrapped_type
+        }
+        return direct_type
+    }
+
     // ── 方法名解析 ────────────────────────────────────────────────────────────
 
     /// 解析具体类型对 trait 方法的实际 C 函数名
@@ -1036,7 +1062,15 @@ given CodeGen {
             let mut actual_method_def_ids = [String, DefId]Dict.new()
 
             for member in ordered_members then {
-                let actual_method_def_id_opt = self.resolve_method_def_id(concrete_type, trait_name, member.name)
+                let actual_method_def_id_opt = when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
+                    .Some(actual_method_def_id) then [DefId]Option.Some(actual_method_def_id),
+                    .None() then {
+                        let fallback_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
+                        yield if layout_key(fallback_concrete_type) == layout_key(concrete_type)
+                            then [DefId]Option.None()
+                            else self.resolve_method_def_id(fallback_concrete_type, trait_name, member.name)
+                    },
+                }
                 when actual_method_def_id_opt in {
                     .Some(actual_method_def_id) then {
                         actual_method_def_ids.insert(member.name, actual_method_def_id)
@@ -1312,7 +1346,7 @@ given CodeGen {
             _ then {},
         }
 
-        let normalized_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
+        let normalized_concrete_type = self.trait_vtable_receiver_type(trait_name, concrete_type)
         let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
             .Some(name) then name,
             .None() then self.c_type_name(normalized_concrete_type),
@@ -1381,7 +1415,7 @@ given CodeGen {
     }
 
     public generate_trait_object_conversion_from_ref_value(self mut ref, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
-        let normalized_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
+        let normalized_concrete_type = self.trait_vtable_receiver_type(trait_name, concrete_type)
         let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
             .Some(name) then name,
             .None() then self.c_type_name(normalized_concrete_type),
@@ -1419,6 +1453,11 @@ given CodeGen {
     public generate_trait_method_call_typed(self mut ref, receiver TypedExpr ref, trait_type Type, method_name String, args [TypedExpr ref]List, result_type Type) String = {
         let trait_name = self.trait_name_of_trait_type(trait_type)
         let trait_type_args = self.trait_type_args_of_trait_type(trait_type)
+        let concrete_receiver_type = self.concrete_trait_receiver_type_for_codegen(receiver)
+        let receiver_requires_dynamic_trait_dispatch = when concrete_receiver_type in {
+            .TraitObject(_, _) then true,
+            _ then false,
+        }
         if self.is_to_ref_method_name(method_name) and args.is_empty() then {
             when receiver.expr_type in {
                 .WeakReferenceType(inner_ref) then when inner_ref.val in {
@@ -1456,19 +1495,39 @@ given CodeGen {
                 _ then {},
             }
         }
-        when receiver.expr_kind in {
-            .TraitObjectConversion(inner, _, concrete_type) then {
-                let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
-                if self.lookup_trait_method_def_id(concrete_receiver_type, trait_name, method_name) is .Some(actual_def_id) then {
+        if not receiver_requires_dynamic_trait_dispatch then {
+            when self.lookup_trait_method_def_id(concrete_receiver_type, trait_name, method_name) in {
+                .Some(actual_def_id) then {
+                    let direct_receiver = when receiver.expr_kind in {
+                        .TraitObjectConversion(inner, _, _) then inner,
+                        _ then receiver,
+                    }
                     let actual_symbol = self.bound_method_symbol_or_fallback(
                         actual_def_id,
                         concrete_receiver_type,
                         method_name,
                         result_type,
+                        "direct trait dispatch \(trait_name).\(method_name)"
+                    )
+                    let effective_result_type = self.requested_or_symbol_result_type(result_type, actual_symbol.symbol_type)
+                    return self.generate_receiver_method_call(direct_receiver, concrete_receiver_type, box(actual_symbol), args, effective_result_type)
+                },
+                .None() then {},
+            }
+        }
+        when receiver.expr_kind in {
+            .TraitObjectConversion(inner, _, concrete_type) then {
+                let converted_receiver_type = self.concretize_codegen_type(concrete_type)
+                if self.lookup_trait_method_def_id(converted_receiver_type, trait_name, method_name) is .Some(actual_def_id) then {
+                    let actual_symbol = self.bound_method_symbol_or_fallback(
+                        actual_def_id,
+                        converted_receiver_type,
+                        method_name,
+                        result_type,
                         "trait object conversion dispatch \(trait_name).\(method_name)"
                     )
                     let effective_result_type = self.requested_or_symbol_result_type(result_type, actual_symbol.symbol_type)
-                    return self.generate_receiver_method_call(inner, concrete_receiver_type, box(actual_symbol), args, effective_result_type)
+                    return self.generate_receiver_method_call(inner, converted_receiver_type, box(actual_symbol), args, effective_result_type)
                 }
             },
             _ then {},
@@ -1476,7 +1535,6 @@ given CodeGen {
 
         // 1. 求值接收者并规范化为 struct __koral_TraitRef
         let receiver_result = self.generate_trait_tool_argument(receiver, trait_type)
-        let concrete_receiver_type = self.concrete_trait_receiver_type_for_codegen(receiver)
         let members = self.get_ordered_trait_members_for_vtable(trait_name, concrete_receiver_type, trait_type_args)
         let mut dispatch_method_name = method_name
         let mut found_exact_member = false

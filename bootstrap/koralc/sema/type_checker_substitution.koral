@@ -317,7 +317,24 @@ given TypeChecker {
                 yield box(TypedExprKind.IntrinsicCall(new_node))
             },
             .MemberPath(base, path) then box(TypedExprKind.MemberPath(self.apply_subst_to_expr(subst, base), path)),
-            .MethodReference(base, receiver_type, method, _, _, dispatch_callsite) then box(TypedExprKind.MethodReference(self.apply_subst_to_expr(subst, base), subst.apply(receiver_type), box(self.apply_subst_to_symbol(subst, method)), [Type]List.new(), [Type]List.new(), dispatch_callsite)),
+            .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
+                let mut new_type_args = [Type]List.new()
+                for type_arg in type_args then {
+                    new_type_args.push(subst.apply(type_arg))
+                }
+                let mut new_method_type_args = [Type]List.new()
+                for method_type_arg in method_type_args then {
+                    new_method_type_args.push(subst.apply(method_type_arg))
+                }
+                yield box(TypedExprKind.MethodReference(
+                    self.apply_subst_to_expr(subst, base),
+                    subst.apply(receiver_type),
+                    box(self.apply_subst_to_symbol(subst, method)),
+                    new_type_args,
+                    new_method_type_args,
+                    dispatch_callsite,
+                ))
+            },
             .Block(statements) then {
                 let mut new_statements = [TypedStatement]List.new()
                 for stmt in statements then {
@@ -330,11 +347,26 @@ given TypeChecker {
             .IsExpr(subject, pattern, negated) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated)),
             .WhenExpr(subject, arms) then box(TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms))),
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
-            .StaticMethodCall(receiver_type, _, method, _, _, args) then {
+            .StaticMethodCall(receiver_type, _, method, type_args, method_type_args, args) then {
                 let substituted_receiver = subst.apply(receiver_type)
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
+                let mut substituted_type_args = [Type]List.new()
+                for type_arg in type_args then {
+                    substituted_type_args.push(subst.apply(type_arg))
+                }
+                let mut substituted_method_type_args = [Type]List.new()
+                for method_type_arg in method_type_args then {
+                    substituted_method_type_args.push(subst.apply(method_type_arg))
+                }
                 let substituted_args = self.apply_subst_to_expr_list(subst, args)
-                yield box(TypedExprKind.StaticMethodCall(substituted_receiver, self.context().symbol_name(substituted_method), box(substituted_method), [Type]List.new(), [Type]List.new(), substituted_args))
+                yield box(TypedExprKind.StaticMethodCall(
+                    substituted_receiver,
+                    self.context().symbol_name(substituted_method),
+                    box(substituted_method),
+                    substituted_type_args,
+                    substituted_method_type_args,
+                    substituted_args,
+                ))
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
                 let substituted_method = self.apply_subst_to_symbol(subst, method)
