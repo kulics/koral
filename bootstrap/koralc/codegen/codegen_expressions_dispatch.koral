@@ -112,6 +112,19 @@ given CodeGen {
                     }
                     arg_index += 1
                 }
+                let concrete_requested_result = self.concretize_codegen_type(requested_result_type)
+                if not self.type_contains_generic(concrete_requested_result)
+                    and not is_placeholder_inferred_type(concrete_requested_result)
+                then when concrete_requested_result in {
+                    .Unknown() then {},
+                    .VoidType() then {},
+                    _ then {
+                        let concrete_return_type = self.concretize_codegen_type(self.function_type_return_type(function_type))
+                        if not self.codegen_types_equal(concrete_return_type, concrete_requested_result) then {
+                            return false
+                        }
+                    },
+                }
                 return true
             },
             .None() then false,
@@ -121,10 +134,24 @@ given CodeGen {
     private receiver_param_type_matches_call_receiver(self, receiver_param_type Type, receiver_type Type) Bool = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         return when receiver_param_type in {
-            .ReferenceType(inner_ref) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(concrete_receiver_type),
-            .MutableReferenceType(inner_ref) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(concrete_receiver_type),
-            .WeakReferenceType(inner_ref) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(concrete_receiver_type),
-            .MutableWeakReferenceType(inner_ref) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(concrete_receiver_type),
+            .ReferenceType(inner_ref) then when concrete_receiver_type in {
+                .ReferenceType(actual_inner) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(actual_inner.val),
+                .MutableReferenceType(actual_inner) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(actual_inner.val),
+                _ then false,
+            },
+            .MutableReferenceType(inner_ref) then when concrete_receiver_type in {
+                .MutableReferenceType(actual_inner) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(actual_inner.val),
+                _ then false,
+            },
+            .WeakReferenceType(inner_ref) then when concrete_receiver_type in {
+                .WeakReferenceType(actual_inner) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(actual_inner.val),
+                .MutableWeakReferenceType(actual_inner) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(actual_inner.val),
+                _ then false,
+            },
+            .MutableWeakReferenceType(inner_ref) then when concrete_receiver_type in {
+                .MutableWeakReferenceType(actual_inner) then self.concrete_receiver_lookup_key(inner_ref.val) == self.concrete_receiver_lookup_key(actual_inner.val),
+                _ then false,
+            },
             _ then self.concrete_receiver_lookup_key(receiver_param_type) == self.concrete_receiver_lookup_key(concrete_receiver_type),
         }
     }
@@ -438,6 +465,15 @@ given CodeGen {
         let fallback_method_name = self.context.symbol_name(method)
         let method_name = if method.def_id.id == 0 then fallback_method_name else self.semantic_receiver_method_name(method) or else fallback_method_name
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
+        let direct_dispatch_base = when base.expr_kind in {
+            .TraitObjectConversion(inner, _, _) then {
+                yield when lookup_base_type in {
+                    .TraitObject(_, _) then base,
+                    _ then inner,
+                }
+            },
+            _ then base,
+        }
         if self.is_to_ref_method_name(method_name) and args.is_empty() then {
             let upgrade_result_type = when base.expr_type in {
                 .WeakReferenceType(inner) then {
@@ -534,7 +570,7 @@ given CodeGen {
             .None() then {},
         }
         if method_opt is .None() then {
-            if self.try_generate_receiver_dispatch_call(base, base_type, args, result_type, dispatch_callsite) is .Some(dispatch_call) then {
+            if self.try_generate_receiver_dispatch_call(direct_dispatch_base, base_type, args, result_type, dispatch_callsite) is .Some(dispatch_call) then {
                 return dispatch_call
             }
         }
@@ -546,12 +582,12 @@ given CodeGen {
         }
         if method_opt is .Some(method_symbol) then {
             let effective_result_type = self.preferred_receiver_method_result_type(result_type, method_symbol.symbol_type)
-            return self.generate_receiver_method_call(base, lookup_base_type, box(method_symbol), args, effective_result_type)
+            return self.generate_receiver_method_call(direct_dispatch_base, lookup_base_type, box(method_symbol), args, effective_result_type)
         }
 
         if self.lookup_static_method_symbol(lookup_base_type, method_name, effective_result_type) is .Some(static_symbol) then {
             let effective_static_result_type = self.requested_or_symbol_result_type(result_type, static_symbol.symbol_type)
-            return self.generate_receiver_method_call(base, lookup_base_type, box(static_symbol), args, effective_static_result_type)
+            return self.generate_receiver_method_call(direct_dispatch_base, lookup_base_type, box(static_symbol), args, effective_static_result_type)
         }
         let receiver_key = self.concrete_receiver_lookup_key(lookup_base_type)
         panic("CodeGen dispatch error: unresolved receiver method '\(method_name)' for receiver '\(receiver_key)'")
@@ -578,13 +614,14 @@ given CodeGen {
                     _ then {
                         let source_result = self.generate_expression_ssa(expr)
                         let concrete_type = expr.expr_type
+                        let normalized_concrete_type = self.trait_vtable_receiver_type(trait_name, concrete_type)
                         let concrete_c_type = self.c_type_name(concrete_type)
                         let value_result = self.copy_expr_if_lvalue_owned(expr, source_result, concrete_type)
                         let stored_value = self.next_temp_with_init(concrete_c_type, value_result)
                         let trait_result = self.next_temp_with_decl("struct __koral_TraitRef")
-                        let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
+                        let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
                             .Some(name) then name,
-                            .None() then self.c_type_name(concrete_type),
+                            .None() then self.c_type_name(normalized_concrete_type),
                         }
                         let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
                         self.add_indent()

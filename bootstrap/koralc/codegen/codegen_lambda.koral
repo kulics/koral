@@ -163,6 +163,18 @@ given CodeGen {
                     self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
                 }
             },
+            .MethodReference(base_ref, _, _, _, _, _) then {
+                self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
+            },
+            .TraitMethodPlaceholder(base_ref, _, _, _, _) then {
+                self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
+            },
+            .TraitMethodCall(receiver_ref, _, _, args, _, _) then {
+                self.collect_captured_in_expr(receiver_ref, param_names, seen_ids, captured)
+                for arg in args then {
+                    self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
+                }
+            },
             .MemberPath(base_ref, _) then {
                 self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
             },
@@ -223,6 +235,49 @@ given CodeGen {
             .StaticMethodCall(_, _, _, _, _, args) then {
                 for arg in args then {
                     self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
+                }
+            },
+            .IntrinsicCall(node) then {
+                when node in {
+                    .RefCount(ref_expr) then self.collect_captured_in_expr(ref_expr, param_names, seen_ids, captured),
+                    .RefIsBorrow(ref_expr) then self.collect_captured_in_expr(ref_expr, param_names, seen_ids, captured),
+                    .MakeRef(pointer_expr, owner_expr, _) then {
+                        self.collect_captured_in_expr(pointer_expr, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(owner_expr, param_names, seen_ids, captured)
+                    },
+                    .MakeMutRef(pointer_expr, owner_expr, _) then {
+                        self.collect_captured_in_expr(pointer_expr, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(owner_expr, param_names, seen_ids, captured)
+                    },
+                    .DowngradeRef(ref_expr, _) then self.collect_captured_in_expr(ref_expr, param_names, seen_ids, captured),
+                    .DowngradeMutRef(ref_expr, _) then self.collect_captured_in_expr(ref_expr, param_names, seen_ids, captured),
+                    .UpgradeRef(weak_expr, _) then self.collect_captured_in_expr(weak_expr, param_names, seen_ids, captured),
+                    .UpgradeMutRef(weak_expr, _) then self.collect_captured_in_expr(weak_expr, param_names, seen_ids, captured),
+                    .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                        self.collect_captured_in_expr(out_handle, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(out_tid, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(closure, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(stack_size, param_names, seen_ids, captured)
+                    },
+                    .AllocMemory(count, _) then self.collect_captured_in_expr(count, param_names, seen_ids, captured),
+                    .DeallocMemory(pointer_expr) then self.collect_captured_in_expr(pointer_expr, param_names, seen_ids, captured),
+                    .CopyMemory(dest, source, count) then {
+                        self.collect_captured_in_expr(dest, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(source, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(count, param_names, seen_ids, captured)
+                    },
+                    .MoveMemory(dest, source, count) then {
+                        self.collect_captured_in_expr(dest, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(source, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(count, param_names, seen_ids, captured)
+                    },
+                    .InitMemory(pointer_expr, value_expr) then {
+                        self.collect_captured_in_expr(pointer_expr, param_names, seen_ids, captured)
+                        self.collect_captured_in_expr(value_expr, param_names, seen_ids, captured)
+                    },
+                    .DeinitMemory(pointer_expr) then self.collect_captured_in_expr(pointer_expr, param_names, seen_ids, captured),
+                    .TakeMemory(pointer_expr, _) then self.collect_captured_in_expr(pointer_expr, param_names, seen_ids, captured),
+                    .NullPtr(_) then {},
                 }
             },
             .TraitObjectConversion(inner_ref, _, _) then {

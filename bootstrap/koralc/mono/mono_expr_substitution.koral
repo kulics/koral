@@ -186,11 +186,19 @@ private let substitute_expr_kind(
         .MemberPath(base, path) then {
             yield box(TypedExprKind.MemberPath(substitute_types_in_expression(mono, base, substitution), path))
         },
-        .MethodReference(base, receiver_type, method, _, _, dispatch_callsite) then {
+        .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let new_method = substitute_symbol(mono, method, substitution)
-            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), [Type]List.new(), [Type]List.new(), dispatch_callsite))
+            let mut new_type_args = [Type]List.new()
+            for type_arg in type_args then {
+                new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
+            }
+            let mut new_method_type_args = [Type]List.new()
+            for method_type_arg in method_type_args then {
+                new_method_type_args.push(mono.substitute_type_impl(method_type_arg, substitution))
+            }
+            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, new_method_type_args, dispatch_callsite))
         },
 
         // Block: substitute all statements.
@@ -248,16 +256,24 @@ private let substitute_expr_kind(
         },
 
         // StaticMethodCall: substitute all args.
-        .StaticMethodCall(receiver_type, _, method, _, _, args) then {
+        .StaticMethodCall(receiver_type, _, method, type_args, method_type_args, args) then {
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let method_after_subst = substitute_symbol(mono, method, substitution)
+            let mut new_type_args = [Type]List.new()
+            for type_arg in type_args then {
+                new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
+            }
+            let mut new_method_type_args = [Type]List.new()
+            for method_type_arg in method_type_args then {
+                new_method_type_args.push(mono.substitute_type_impl(method_type_arg, substitution))
+            }
             let mut new_args = [TypedExpr ref]List.new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
             // Keep static method symbol logical here; concrete binding happens in
             // resolve_static_method_call_to_call to match Swift's call pipeline.
-            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, mono.storage.context.symbol_name(method_after_subst), box(method_after_subst), [Type]List.new(), [Type]List.new(), new_args))
+            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, mono.storage.context.symbol_name(method_after_subst), box(method_after_subst), new_type_args, new_method_type_args, new_args))
         },
 
         .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
