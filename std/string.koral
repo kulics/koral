@@ -178,13 +178,13 @@ given String {
         return false
     }
 
-    private bounds_check_read(self, index UInt) Void = {
+    private bounds_check_read(self ref, index UInt) Void = {
         if index > self.storage.len then {
             panic("String index out of bounds")
         }
     }
 
-    private bounds_check_write(self, index UInt) Void = {
+    private bounds_check_write(self ref, index UInt) Void = {
         if index >= self.storage.len then {
             panic("String index out of bounds")
         }
@@ -214,9 +214,9 @@ given String {
         self.storage = new_storage
     }
 
-    public count(self) UInt = self.storage.len
-    public is_empty(self) Bool = self.storage.len == 0
-    public capacity(self) UInt = self.storage.cap - 1
+    public count(self ref) UInt = self.storage.len
+    public is_empty(self ref) Bool = self.storage.len == 0
+    public capacity(self ref) UInt = self.storage.cap - 1
 
     public to_bytes(self) [UInt8]List = {
         let len = self.storage.len
@@ -228,7 +228,7 @@ given String {
         return bytes
     }
 
-    public get(self, index UInt) [UInt8]Option = {
+    public get(self ref, index UInt) [UInt8]Option = {
         if index >= self.storage.len then {
             return [UInt8]Option.None()
         }
@@ -272,7 +272,7 @@ given String {
         self.ensure_capacity(capacity + 1)
     }
 
-    public starts_with(self, prefix String) Bool = {
+    public starts_with(self ref, prefix String) Bool = {
         if prefix.storage.len > self.storage.len then {
             return false
         }
@@ -286,7 +286,7 @@ given String {
         return true
     }
 
-    public ends_with(self, suffix String) Bool = {
+    public ends_with(self ref, suffix String) Bool = {
         if suffix.storage.len > self.storage.len then {
             return false
         }
@@ -301,9 +301,9 @@ given String {
         return true
     }
 
-    public find(self, pat String) [UInt]Option = self.find_from(0, pat)
+    public find(self ref, pat String) [UInt]Option = self.find_from(0, pat)
 
-    public find_last(self, pat String) [UInt]Option = {
+    public find_last(self ref, pat String) [UInt]Option = {
         if pat.storage.len == 0 then {
             return [UInt]Option.None()
         }
@@ -317,7 +317,7 @@ given String {
         return result
     }
 
-    private make_substring(self, start UInt, len UInt) String = {
+    private make_substring(self ref, start UInt, len UInt) String = {
         if start + len > self.storage.len then {
             panic("substring out of bounds")
         }
@@ -331,7 +331,7 @@ given String {
 
     private is_utf8_continuation_byte(b UInt8) Bool = (b & 192) == 128
 
-    public is_rune_boundary(self, byte_index UInt) Bool = {
+    public is_rune_boundary(self ref, byte_index UInt) Bool = {
         if byte_index > self.storage.len then {
             return false
         }
@@ -341,7 +341,7 @@ given String {
         return not String.is_utf8_continuation_byte(self.storage.data[byte_index])
     }
 
-    private validate_substring_bounds(self, start UInt, end UInt) Void = {
+    private validate_substring_bounds(self ref, start UInt, end UInt) Void = {
         if start > end then {
             panic("substring invalid range")
         }
@@ -353,7 +353,7 @@ given String {
         }
     }
 
-    public slice_spec(self, range [UInt]Range) SliceSpec = {
+    public slice_spec(self ref, range [UInt]Range) SliceSpec = {
         let len = self.storage.len
         let mut start UInt = 0
         let mut end UInt = 0
@@ -437,7 +437,7 @@ given String {
         return SliceSpec.new(offset: start, len: end - start)
     }
 
-    public substring(self, range [UInt]Range) String = {
+    public substring(self ref, range [UInt]Range) String = {
         let span = self.slice_spec(range)
         return self.make_substring(span.offset(), span.len())
     }
@@ -463,7 +463,7 @@ given String {
         return head.trim_ascii_end()
     }
 
-    public is_ascii(self) Bool = {
+    public is_ascii(self ref) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
             if self.storage.data[i] >= 128 then {
@@ -474,7 +474,7 @@ given String {
         return true
     }
 
-    public is_ascii_whitespace(self) Bool = {
+    public is_ascii_whitespace(self ref) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
             if not String.is_ascii_space(self.storage.data[i]) then {
@@ -540,7 +540,7 @@ given String {
         return String(storage)
     }
 
-    public find_from(self, start UInt, pat String) [UInt]Option = {
+    public find_from(self ref, start UInt, pat String) [UInt]Option = {
         if pat.storage.len == 0 then {
             return [UInt]Option.None()
         }
@@ -570,7 +570,7 @@ given String {
         return [UInt]Option.None()
     }
 
-    public contains(self, pat String) Bool = self.find_from(0, pat).is_some()
+    public contains(self ref, pat String) Bool = self.find_from(0, pat).is_some()
 
     public repeat(self, times UInt) String = {
         if times == 0 then {
@@ -830,16 +830,10 @@ given String [UInt, UInt8]Index {
         if key >= self.storage.len then {
             panic("String index out of bounds")
         }
-        return [UInt8, StringStorage]make_ref(self.storage.data + key, self.storage)
-    }
-}
-
-given String {
-    public at(self, key UInt) UInt8 = {
-        if key >= self.storage.len then {
-            panic("String index out of bounds")
+        if ref_is_borrow(self) then {
+            return [UInt8, String]make_ref(self.storage.data + key, self)
         }
-        return self.storage.data[key]
+        return [UInt8, StringStorage]make_ref(self.storage.data + key, self.storage)
     }
 }
 

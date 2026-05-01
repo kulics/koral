@@ -45,7 +45,7 @@ given[T Deref] [T]List {
         return [T]List(storage)
     }
 
-    public count(self) UInt = self.storage.len
+    public count(self ref) UInt = self.storage.len
 
     public reserve(self mut ref, additional UInt) Void = {
         self.ensure_capacity(self.storage.len + additional)
@@ -203,23 +203,23 @@ given[T Deref] [T]List {
         return value
     }
 
-    public get(self, index UInt) [T]Option = {
+    public get(self ref, index UInt) [T]Option = {
         if index >= self.storage.len then {
             return [T]Option.None()
         }
         return [T]Option.Some(self.storage.source[index])
     }
 
-    public first(self) [T]Option = self.get(0)
+    public first(self ref) [T]Option = self.get(0)
 
-    public last(self) [T]Option = {
+    public last(self ref) [T]Option = {
         if self.storage.len == 0 then {
             return [T]Option.None()
         }
         return self.get(self.storage.len - 1)
     }
 
-    public is_empty(self) Bool = self.storage.len == 0
+    public is_empty(self ref) Bool = self.storage.len == 0
 
     public clear(self mut ref) Void = {
         self.ensure_unique()
@@ -271,14 +271,14 @@ given[T Deref] [T]List {
         }
     }
 
-    public borrow_ptr(self) T ptr = self.storage.source
+    public borrow_ptr(self ref) T ptr = self.storage.source
 
     public borrow_mut_ptr(self mut ref) T mut ptr = {
         self.ensure_unique()
         return self.storage.source
     }
 
-    private make_slice(self, start UInt, len UInt) [T]List = {
+    private make_slice(self ref, start UInt, len UInt) [T]List = {
         if start + len > self.storage.len then {
             panic("List slice out of bounds")
         }
@@ -291,7 +291,7 @@ given[T Deref] [T]List {
         return result
     }
 
-    public slice_spec(self, range [UInt]Range) SliceSpec = {
+    public slice_spec(self ref, range [UInt]Range) SliceSpec = {
         let len = self.storage.len
         let mut start UInt = 0
         let mut end UInt = 0
@@ -374,7 +374,7 @@ given[T Deref] [T]List {
         return SliceSpec.new(offset: start, len: end - start)
     }
 
-    public sublist(self, range [UInt]Range) [T]List = {
+    public sublist(self ref, range [UInt]Range) [T]List = {
         let span = self.slice_spec(range)
         return self.make_slice(span.offset(), span.len())
     }
@@ -383,24 +383,6 @@ given[T Deref] [T]List {
 
     // Identity element for concatenation is the empty list.
     public empty() Self = [T]List.with_capacity(0)
-
-    // Concatenation.
-    public add(self, other Self) Self = {
-        if self.is_empty() then {
-            return other
-        }
-        if other.is_empty() then {
-            return self
-        }
-        let mut result = [T]List.with_capacity(self.storage.len + other.storage.len)
-        for v in self then {
-            result.push(v);
-        }
-        for v in other then {
-            result.push(v);
-        }
-        return result
-    }
 
     public enumerate(self) [T, [T]ListIterator]EnumerateIterator =
         self.iterator().enumerate()
@@ -441,7 +423,7 @@ given[T Deref] [T]List {
 
     // Binary search by key extraction. List must be sorted by the same key.
     // Returns (index, true) if found, (insertion_point, false) if not found.
-    public [K Ord]binary_search_by(self, key [T, K]Func, target K) [UInt, Bool]Pair = {
+    public [K Ord]binary_search_by(self ref, key [T, K]Func, target K) [UInt, Bool]Pair = {
         let mut lo UInt = 0
         let mut hi = self.storage.len
         while lo < hi then {
@@ -476,7 +458,7 @@ given[T Eq and Deref] [T]List Eq {
 }
 
 given[T Eq and Deref] [T]List {
-    public contains(self, value T) Bool = {
+    public contains(self ref, value T) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
             if self.storage.source[i] == value then {
@@ -558,6 +540,9 @@ given[T Deref] [T]List [UInt, T]Index {
         if key >= self.storage.len then {
             panic("List index out of bounds")
         }
+        if ref_is_borrow(self) then {
+            return [T, [T]List]make_ref(self.storage.source + key, self)
+        }
         return [T, [T]ListStorage]make_ref(self.storage.source + key, self.storage)
     }
 }
@@ -568,6 +553,9 @@ given[T Deref] [T]List [UInt, T]MutIndex {
             panic("List index out of bounds")
         }
         self.ensure_unique()
+        if ref_is_borrow(self) then {
+            return [T, [T]List]make_mut_ref(self.storage.source + key, self)
+        }
         return [T, [T]ListStorage]make_mut_ref(self.storage.source + key, self.storage)
     }
 }
@@ -640,7 +628,7 @@ given[T Deref] [T]List {
 given[T Ord and Deref] [T]List {
     // Binary search on a sorted list.
     // Returns (index, true) if found, (insertion_point, false) if not found.
-    public binary_search(self, target T) [UInt, Bool]Pair = {
+    public binary_search(self ref, target T) [UInt, Bool]Pair = {
         let mut lo UInt = 0
         let mut hi = self.storage.len
         while lo < hi then {

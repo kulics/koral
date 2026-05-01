@@ -2087,14 +2087,19 @@ public class CodeGen {
     case .makeRef(let ptr, let owner, let resultType),
          .makeMutRef(let ptr, let owner, let resultType):
       let ptrVal = generateExpressionSSA(ptr)
-      let ownerVal = generateExpressionSSA(owner)
+      let ownerVal: String
+      if isAddressableLValueExpr(owner) {
+        ownerVal = buildRefComponents(owner).path
+      } else {
+        ownerVal = generateExpressionSSA(owner)
+      }
       let result = nextTempWithDecl(cType: cTypeName(resultType))
       addIndent()
       buffer += "\(result).ptr = (void*)\(ptrVal);\n"
       addIndent()
       buffer += "\(result).control = \(ownerVal).control;\n"
       addIndent()
-      buffer += "__koral_retain(\(result).control);\n"
+      buffer += "if (\(result).control) { __koral_retain(\(result).control); }\n"
       return result
 
     case .downgradeRef(let val, _), .downgradeMutRef(let val, _):

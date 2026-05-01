@@ -66,7 +66,7 @@ given[K Hash, V Any] [K, V]Dict {
         return [K, V]Dict(storage)
     }
 
-    public count(self) UInt = self.storage.count
+    public count(self ref) UInt = self.storage.count
 
     private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
@@ -84,7 +84,7 @@ given[K Hash, V Any] [K, V]Dict {
     }
 
     // Using when for bucket handling
-    private find_slot(self, key K) [UInt]Option = {
+    private find_slot(self ref, key K) [UInt]Option = {
         let h = key.hash()
         let mut idx = h % self.storage.capacity
         let mut first_deleted = [UInt]Option.None()
@@ -205,7 +205,7 @@ given[K Hash, V Any] [K, V]Dict {
         }
     }
 
-    public get(self, key K) [V]Option = {
+    public get(self ref, key K) [V]Option = {
         when self.find_slot(key) in {
             .None then {
                 return [V]Option.None()
@@ -236,7 +236,7 @@ given[K Hash, V Any] [K, V]Dict {
         }
     }
 
-    public contains_key(self, key K) Bool = when self.get(key) in {
+    public contains_key(self ref, key K) Bool = when self.get(key) in {
         .Some(_) then true,
         .None then false,
     }
@@ -263,7 +263,7 @@ given[K Hash, V Any] [K, V]Dict {
         }
     }
 
-    public is_empty(self) Bool = self.storage.count == 0
+    public is_empty(self ref) Bool = self.storage.count == 0
 
     public clear(self mut ref) Void = {
         self.ensure_unique()
@@ -379,7 +379,10 @@ given[K Hash, V Any] [K, V]Dict [K, V]Index {
                 return panic("Dict key not found")
             },
             .Some(idx) then {
-                let bucket = [[K, V]DictBucket, [K, V]DictStorage]make_ref(self.storage.buckets + idx, self.storage)
+                let bucket = if ref_is_borrow(self) then
+                    [[K, V]DictBucket, [K, V]Dict]make_ref(self.storage.buckets + idx, self)
+                else
+                    [[K, V]DictBucket, [K, V]DictStorage]make_ref(self.storage.buckets + idx, self.storage)
                 when bucket in {
                     .Occupied(e) then {
                         return e.second.ref

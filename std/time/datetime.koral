@@ -22,7 +22,7 @@ public type DateTime(private unix_secs Int64, private nanos Int32, private tz Ti
 
 given TimeZone {
     /// Returns the timezone name.
-    public name(self) String = 
+    public name(self ref) String = 
         when self.kind in {
             .Utc() then "UTC",
             .Local(n) then n,
@@ -47,7 +47,7 @@ given TimeZone {
         }
 
     /// Returns the UTC offset at the given DateTime as a Duration.
-    public offset_at(self, datetime DateTime) Duration = 
+    public offset_at(self ref, datetime DateTime) Duration = 
         when self.kind in {
             .Utc() then Duration.zero(),
             .Fixed(offset_secs) then 1s * (Int)offset_secs,
@@ -127,7 +127,7 @@ given DateTime {
 
 given DateTime {
     /// Returns the year.
-    public year(self) Int = {
+    public year(self ref) Int = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
@@ -136,7 +136,7 @@ given DateTime {
     }
 
     /// Returns the month (1-12).
-    public month(self) Int = {
+    public month(self ref) Int = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
@@ -145,7 +145,7 @@ given DateTime {
     }
 
     /// Returns the day of month (1-31).
-    public day(self) Int = {
+    public day(self ref) Int = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
@@ -154,7 +154,7 @@ given DateTime {
     }
 
     /// Returns the hour (0-23).
-    public hour(self) Int = {
+    public hour(self ref) Int = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
@@ -162,7 +162,7 @@ given DateTime {
     }
 
     /// Returns the minute (0-59).
-    public minute(self) Int = {
+    public minute(self ref) Int = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
@@ -170,7 +170,7 @@ given DateTime {
     }
 
     /// Returns the second (0-59).
-    public second(self) Int = {
+    public second(self ref) Int = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
@@ -178,10 +178,10 @@ given DateTime {
     }
 
     /// Returns the associated timezone.
-    public timezone(self) TimeZone = self.tz
+    public timezone(self ref) TimeZone = self.tz
 
     /// Returns the date part as a Date value.
-    public date(self) Date = {
+    public date(self ref) Date = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
@@ -190,7 +190,7 @@ given DateTime {
     }
 
     /// Returns the time-of-day part as a ClockTime value.
-    public time(self) ClockTime = {
+    public time(self ref) ClockTime = {
         let offset = self.tz.offset_at(self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
@@ -202,7 +202,10 @@ given DateTime {
     }
 
     /// Returns the day of week (0=Monday .. 6=Sunday, ISO 8601).
-    public weekday(self) Int = self.date().weekday()
+    public weekday(self ref) Int = {
+        let d = self.date()
+        return d.weekday()
+    }
 }
 
 // ============================================================================
@@ -400,23 +403,23 @@ given DateTime Parseable {
         // Parse date: YYYY-MM-DD
         let yr = parse_digits(s, 0, 4)
         if yr.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 4-digit year")) }
-        if s.at(4) <> (UInt8)45 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected '-' after year")) } // '-'
+        if s[4] <> (UInt8)45 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected '-' after year")) } // '-'
         let mo = parse_digits(s, 5, 2)
         if mo.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit month")) }
-        if s.at(7) <> (UInt8)45 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected '-' after month")) } // '-'
+        if s[7] <> (UInt8)45 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected '-' after month")) } // '-'
         let dy = parse_digits(s, 8, 2)
         if dy.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit day")) }
 
         // 'T' separator
-        if s.at(10) <> (UInt8)84 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 'T' separator")) } // 'T'
+        if s[10] <> (UInt8)84 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 'T' separator")) } // 'T'
 
         // Parse time: HH:MM:SS
         let hr = parse_digits(s, 11, 2)
         if hr.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit hour")) }
-        if s.at(13) <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' after hour")) } // ':'
+        if s[13] <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' after hour")) } // ':'
         let mi = parse_digits(s, 14, 2)
         if mi.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit minute")) }
-        if s.at(16) <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' after minute")) } // ':'
+        if s[16] <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' after minute")) } // ':'
         let se = parse_digits(s, 17, 2)
         if se.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit second")) }
 
@@ -424,7 +427,7 @@ given DateTime Parseable {
         let mut nanos = 0
 
         // Optional fractional seconds
-        if pos < len and s.at((UInt)pos) == (UInt8)46 then { // '.'
+        if pos < len and s[(UInt)pos] == (UInt8)46 then { // '.'
             pos = pos + 1
             let frac = parse_frac_digits(s, pos)
             if frac.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: invalid fractional seconds")) }
@@ -434,7 +437,7 @@ given DateTime Parseable {
 
         // Timezone: 'Z' or '+HH:MM' or '-HH:MM'
         if pos >= len then { return [DateTime]Result.Error(box("invalid ISO 8601: missing timezone")) }
-        let tz_char = s.at((UInt)pos)
+        let tz_char = s[(UInt)pos]
 
         let tz = if tz_char == (UInt8)90 then { // 'Z'
             pos = pos + 1
@@ -445,7 +448,7 @@ given DateTime Parseable {
             let oh = parse_digits(s, pos, 2)
             if oh.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit timezone hour")) }
             pos = pos + 2
-            if pos >= len or s.at((UInt)pos) <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' in timezone offset")) } // ':'
+            if pos >= len or s[(UInt)pos] <> (UInt8)58 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected ':' in timezone offset")) } // ':'
             pos = pos + 1
             let om = parse_digits(s, pos, 2)
             if om.value < 0 then { return [DateTime]Result.Error(box("invalid ISO 8601: expected 2-digit timezone minute")) }
