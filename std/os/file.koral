@@ -94,14 +94,14 @@ public type File(protected storage FileStorage ref)
 given File {
     /// Returns the underlying OS file descriptor.
     /// This is a low-level operation for interop with OS APIs and cross-module fd sharing.
-    public fd(self) Int = (Int)self.storage.fd
+    public fd(self ref) Int = (Int)self.storage.fd
 
     /// Get the file path (returns the normalized path from when the file was opened).
     /// Does not resolve symlinks or relative paths; use canonicalize_path for that.
-    public path(self) Path = self.storage.path
+    public path(self ref) Path = self.storage.path
 
     /// Get file metadata by querying via the file descriptor (no path needed).
-    public info(self) [FileInfo]Result = {
+    public info(self ref) [FileInfo]Result = {
         let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
         let result = __koral_fstat(self.storage.fd, stat_buf.ptr)
         if result <> 0 then {
@@ -124,7 +124,7 @@ given File {
     }
 
     /// Sync file data to disk (fsync, ensures physical persistence).
-    public sync(self) [Void]Result = {
+    public sync(self ref) [Void]Result = {
         let result = __koral_fsync(self.storage.fd)
         if result <> 0 then {
             return [Void]Result.Error(box(last_error_message()))
@@ -136,7 +136,7 @@ given File {
     // Based on flock(2) (Unix) / LockFileEx (Windows), whole-file advisory lock
 
     /// Acquire an exclusive lock (blocking, waits until acquired)
-    public lock(self) [Void]Result = {
+    public lock(self ref) [Void]Result = {
         let result = __koral_flock(self.storage.fd, 2) // LOCK_EX
         if result <> 0 then {
             return [Void]Result.Error(box(last_error_message()))
@@ -145,7 +145,7 @@ given File {
     }
 
     /// Acquire a shared lock (blocking, waits until acquired)
-    public lock_shared(self) [Void]Result = {
+    public lock_shared(self ref) [Void]Result = {
         let result = __koral_flock(self.storage.fd, 1) // LOCK_SH
         if result <> 0 then {
             return [Void]Result.Error(box(last_error_message()))
@@ -155,7 +155,7 @@ given File {
 
     /// Try to acquire an exclusive lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
-    public try_lock(self) [Bool]Result = {
+    public try_lock(self ref) [Bool]Result = {
         let result = __koral_flock(self.storage.fd, 6) // LOCK_EX | LOCK_NB
         if result == 0 then {
             return [Bool]Result.Ok(true)
@@ -168,7 +168,7 @@ given File {
 
     /// Try to acquire a shared lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
-    public try_lock_shared(self) [Bool]Result = {
+    public try_lock_shared(self ref) [Bool]Result = {
         let result = __koral_flock(self.storage.fd, 5) // LOCK_SH | LOCK_NB
         if result == 0 then {
             return [Bool]Result.Ok(true)
@@ -180,7 +180,7 @@ given File {
     }
 
     /// Release the lock
-    public unlock(self) [Void]Result = {
+    public unlock(self ref) [Void]Result = {
         let result = __koral_flock(self.storage.fd, 8) // LOCK_UN
         if result <> 0 then {
             return [Void]Result.Error(box(last_error_message()))
@@ -191,7 +191,7 @@ given File {
 
 given File Reader {
     // Unbuffered: directly calls POSIX read, errors returned immediately
-    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
+    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
         let span = into.slice_spec(range)
         let start = span.offset()
         let end = span.end()
@@ -209,7 +209,7 @@ given File Reader {
 
 given File Writer {
     // Unbuffered: directly calls POSIX write, errors returned immediately
-    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+    public write(self ref, from: [UInt8]List ref, range [UInt]Range) [UInt]Result = {
         let span = from.slice_spec(range)
         let start = span.offset()
         let end = span.end()
@@ -225,11 +225,11 @@ given File Writer {
     }
 
     /// flush is a no-op on unbuffered File (data is already in kernel buffer).
-    public flush(self) [Void]Result = [Void]Result.Ok({})
+    public flush(self ref) [Void]Result = [Void]Result.Ok({})
 }
 
 given File Seeker {
-    public seek(self, pos Io.SeekOrigin) [UInt64]Result = {
+    public seek(self ref, pos Io.SeekOrigin) [UInt64]Result = {
         let mut offset Int64 = 0
         let mut whence Int32 = 0
         when pos in {

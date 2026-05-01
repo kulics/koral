@@ -71,7 +71,7 @@ given Regex {
         let mut i UInt = 0
         let len = pattern.count()
         while i < len then {
-            let ch = pattern.at(i)
+            let ch = pattern[i]
             if ch == '\\' then {
                 i += 2  // 跳过转义字符
                 continue
@@ -91,7 +91,7 @@ given Regex {
 
 given Regex {
     // 最快路径：不捕获任何 group，只测试是否匹配
-    public matches(self, text String) Bool = {
+    public matches(self ref, text String) Bool = {
         let starts = [Int32]alloc_memory(1)
         let ends = [Int32]alloc_memory(1)
 
@@ -106,11 +106,11 @@ given Regex {
     }
 
     // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
-    public find(self, text String) [Match]Option =
+    public find(self ref, text String) [Match]Option =
         Regex.find_at(self, text, 0)
 
     // 从指定偏移开始查找（内部方法，仅 $0）
-    find_at(self, text String, offset UInt) [Match]Option = {
+    find_at(self ref, text String, offset UInt) [Match]Option = {
         let starts = [Int32]alloc_memory(1)
         let ends = [Int32]alloc_memory(1)
 
@@ -139,15 +139,15 @@ given Regex {
 // ============================================================================
 
 given Regex {
-    public find_all(self, text String) MatchIterator =
-        MatchIterator(self, text, 0)
+    public find_all(self ref, text String) MatchIterator =
+        MatchIterator(self.val, text, 0)
 
     // 完整路径：捕获所有 group
-    public captures(self, text String) [Captures]Option =
+    public captures(self ref, text String) [Captures]Option =
         Regex.captures_at(self, text, 0)
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
-    captures_at(self, text String, offset UInt) [Captures]Option = {
+    captures_at(self ref, text String, offset UInt) [Captures]Option = {
         let max_groups = (Int32)(self.storage.groups + 1)  // +1 for $0
         let starts = [Int32]alloc_memory((UInt)max_groups)
         let ends = [Int32]alloc_memory((UInt)max_groups)
@@ -178,8 +178,8 @@ given Regex {
         return [Captures]Option.Some(Captures(text, start_list, end_list))
     }
 
-    public captures_all(self, text String) CapturesIterator =
-        CapturesIterator(self, text, 0)
+    public captures_all(self ref, text String) CapturesIterator =
+        CapturesIterator(self.val, text, 0)
 }
 
 // ============================================================================
@@ -187,7 +187,7 @@ given Regex {
 // ============================================================================
 
 given Regex {
-    public replace(self, text String, with: String) String = {
+    public replace(self ref, text String, with: String) String = {
         when self.captures(text) in {
             .None then {
                 return text
@@ -206,7 +206,7 @@ given Regex {
         }
     }
 
-    public replace_all(self, text String, with: String) String = {
+    public replace_all(self ref, text String, with: String) String = {
         let mut result = String.new()
         let mut offset UInt = 0
         let text_len = text.count()
@@ -222,7 +222,7 @@ given Regex {
                     result.push_string(Regex.expand_replacement(with, c))
                     if c.end() == offset then {
                         if offset < text_len then {
-                            result.push_byte(text.at(offset))
+                            result.push_byte(text[offset])
                         }
                         offset += 1
                     } else {
@@ -248,9 +248,9 @@ given Regex {
         let len = replacement.count()
 
         while i < len then {
-            let ch = replacement.at(i)
+            let ch = replacement[i]
             if ch == '$' and i + 1 < len then {
-                let next = replacement.at(i + 1)
+                let next = replacement[i + 1]
                 if next >= '0' and next <= '9' then {
                     let group_idx = (UInt)(next - '0')
                     when c.group(group_idx) in {
@@ -279,6 +279,6 @@ given Regex {
 // ============================================================================
 
 given Regex {
-    public split(self, text String) RegexSplitIterator =
-        RegexSplitIterator(self, text, 0, false)
+    public split(self ref, text String) RegexSplitIterator =
+        RegexSplitIterator(self.val, text, 0, false)
 }

@@ -1,0 +1,109 @@
+// EXPECT: ref_at borrow before: 1
+// EXPECT: ref_at borrow after: 1
+// EXPECT: mut_ref_at borrow before: 1
+// EXPECT: mut_ref_at borrow after: 1
+// EXPECT: list_index_borrow_owner_fastpath ok
+
+type [T Any]FastListStorage(mut source T mut ptr, mut len UInt, cap UInt)
+
+given[T Deref] [T]FastListStorage Drop {
+    drop(self mut ref) = {
+        if ref_is_borrow(self) then {
+            return
+        }
+        let mut i UInt = 0
+        while i < self.len then {
+            deinit_memory(self.source + i)
+            i += 1
+        }
+        dealloc_memory(self.source)
+    }
+}
+
+type [T Any]FastList(mut storage [T]FastListStorage mut ref)
+
+given[T Deref] [T]FastList {
+    new(cap UInt) Self = {
+        let real_cap = if cap == 0 then 1 else cap
+        let source = [T]alloc_memory(real_cap)
+        let storage = box([T]FastListStorage(source, 0, real_cap))
+        return [T]FastList(storage)
+    }
+
+    push(self mut ref, value T) Void = {
+        if self.storage.len >= self.storage.cap then {
+            panic("FastList capacity exceeded")
+        }
+        init_memory(self.storage.source + self.storage.len, value)
+        self.storage.len += 1
+    }
+
+}
+
+given[T Deref] [T]FastList [UInt, T]Index {
+    ref_at(self ref, key UInt) T ref = {
+        if key >= self.storage.len then {
+            panic("FastList index out of bounds")
+        }
+
+        if ref_is_borrow(self) then {
+            print("ref_at borrow before: ")
+            println(ref_count(self.storage))
+            let out = [T, [T]FastList]make_ref(self.storage.source + key, self)
+            print("ref_at borrow after: ")
+            println(ref_count(self.storage))
+            return out
+        }
+        return [T, [T]FastListStorage]make_ref(self.storage.source + key, self.storage)
+    }
+}
+
+given[T Deref] [T]FastList [UInt, T]MutIndex {
+    mut_ref_at(self mut ref, key UInt) T mut ref = {
+        if key >= self.storage.len then {
+            panic("FastList index out of bounds")
+        }
+
+        if ref_is_borrow(self) then {
+            print("mut_ref_at borrow before: ")
+            println(ref_count(self.storage))
+            let out = [T, [T]FastList]make_mut_ref(self.storage.source + key, self)
+            print("mut_ref_at borrow after: ")
+            println(ref_count(self.storage))
+            return out
+        }
+        return [T, [T]FastListStorage]make_mut_ref(self.storage.source + key, self.storage)
+    }
+}
+
+let test_single_read() Void = {
+    let mut a = 11
+    let mut b = 22
+
+    let mut xs = [Int ref]FastList.new(4)
+    xs.push(a.ref)
+    xs.push(b.ref)
+
+    let r = xs[1]
+    assert(r.val == 22, "index read value")
+}
+
+let test_single_write() Void = {
+    let mut a = 1
+    let mut b = 2
+    let mut c = 3
+
+    let mut xs = [Int ref]FastList.new(4)
+    xs.push(a.ref)
+    xs.push(b.ref)
+
+    xs[0] = c.ref
+    let r = xs[0]
+    assert(r.val == 3, "index write value")
+}
+
+let main() Void = {
+    test_single_read()
+    test_single_write()
+    println("list_index_borrow_owner_fastpath ok")
+}

@@ -38,15 +38,15 @@ given[T Deref] [T]Deque {
         return [T]Deque(storage)
     }
 
-    public count(self) UInt = self.storage.len
+    public count(self ref) UInt = self.storage.len
 
     public reserve(self mut ref, additional UInt) Void = {
         self.ensure_capacity(self.storage.len + additional)
     }
 
-    public is_empty(self) Bool = self.storage.len == 0
+    public is_empty(self ref) Bool = self.storage.len == 0
 
-    private physical_index(self, logical_index UInt) UInt = (self.storage.head + logical_index) % self.storage.cap
+    private physical_index(self ref, logical_index UInt) UInt = (self.storage.head + logical_index) % self.storage.cap
 
     private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
@@ -138,16 +138,16 @@ given[T Deref] [T]Deque {
         return [T]Option.Some(value)
     }
 
-    public first(self) [T]Option = self.get(0)
+    public first(self ref) [T]Option = self.get(0)
 
-    public last(self) [T]Option = {
+    public last(self ref) [T]Option = {
         if self.storage.len == 0 then {
             return [T]Option.None()
         }
         return self.get(self.storage.len - 1)
     }
 
-    public get(self, index UInt) [T]Option = {
+    public get(self ref, index UInt) [T]Option = {
         if index >= self.storage.len then {
             return [T]Option.None()
         }
@@ -214,7 +214,7 @@ given[T Deref] [T]Deque {
 }
 
 given[T Eq and Deref] [T]Deque {
-    public contains(self, value T) Bool = {
+    public contains(self ref, value T) Bool = {
         let mut i UInt = 0
         while i < self.storage.len then {
             let physical = self.physical_index(i)
@@ -225,7 +225,6 @@ given[T Eq and Deref] [T]Deque {
         }
         return false
     }
-
 }
 
 given[T Deref] [T]Deque [T, [T]DequeIterator]Iterable {
@@ -250,6 +249,9 @@ given[T Deref] [T]Deque [UInt, T]Index {
             panic("Deque index out of bounds")
         }
         let physical = self.physical_index(key)
+        if ref_is_borrow(self) then {
+            return [T, [T]Deque]make_ref(self.storage.source + physical, self)
+        }
         return [T, [T]DequeStorage]make_ref(self.storage.source + physical, self.storage)
     }
 }
@@ -261,6 +263,9 @@ given[T Deref] [T]Deque [UInt, T]MutIndex {
         }
         self.ensure_unique()
         let physical = self.physical_index(key)
+        if ref_is_borrow(self) then {
+            return [T, [T]Deque]make_mut_ref(self.storage.source + physical, self)
+        }
         return [T, [T]DequeStorage]make_mut_ref(self.storage.source + physical, self.storage)
     }
 }
