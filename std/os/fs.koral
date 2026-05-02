@@ -52,8 +52,8 @@ foreign let __koral_mkstemp(template UInt8 ptr) Int32
 // ============================================================================
 
 /// Read file content as a byte list (binary)
-public let [T ToPath]read_file(path T) [[UInt8]List]Result = {
-    return when open_file(path.to_path(), OpenMode.Read()) in {
+public let [T IntoPath]read_file(path T) [[UInt8]List]Result = {
+    return when open_file(path.into_path(), OpenMode.Read()) in {
         .Ok(f) then {
             let mut out = [UInt8]List.new()
             let mut chunk = make_bytes(4096)
@@ -79,8 +79,8 @@ public let [T ToPath]read_file(path T) [[UInt8]List]Result = {
 }
 
 /// Write a byte list to file (binary, overwrite)
-public let [T ToPath]write_file(path T, content: [UInt8]List) [Void]Result = {
-    return when open_file(path.to_path(), OpenMode.Write()) in {
+public let [T IntoPath]write_file(path T, content: [UInt8]List) [Void]Result = {
+    return when open_file(path.into_path(), OpenMode.Write()) in {
         .Ok(f) then {
             let mut start UInt = 0
             let end = content.count()
@@ -106,8 +106,8 @@ public let [T ToPath]write_file(path T, content: [UInt8]List) [Void]Result = {
 }
 
 /// Append a byte list to file (binary)
-public let [T ToPath]append_file(path T, content: [UInt8]List) [Void]Result = {
-    return when open_file(path.to_path(), OpenMode.Append()) in {
+public let [T IntoPath]append_file(path T, content: [UInt8]List) [Void]Result = {
+    return when open_file(path.into_path(), OpenMode.Append()) in {
         .Ok(f) then {
             let mut start UInt = 0
             let end = content.count()
@@ -138,7 +138,7 @@ public let [T ToPath]append_file(path T, content: [UInt8]List) [Void]Result = {
 // ============================================================================
 
 /// Read file content as a string (UTF-8 text)
-public let [T ToPath]read_text_file(path T) [String]Result = {
+public let [T IntoPath]read_text_file(path T) [String]Result = {
     return when read_file(path) in {
         .Ok(bytes) then {
             yield String.from_bytes(bytes)
@@ -148,12 +148,12 @@ public let [T ToPath]read_text_file(path T) [String]Result = {
 }
 
 /// Write a string to file (UTF-8 text, overwrite)
-public let [T ToPath]write_text_file(path T, content: String) [Void]Result = {
+public let [T IntoPath]write_text_file(path T, content: String) [Void]Result = {
     return write_file(path, content: content.to_bytes())
 }
 
 /// Append a string to file (UTF-8 text)
-public let [T ToPath]append_text_file(path T, content: String) [Void]Result = {
+public let [T IntoPath]append_text_file(path T, content: String) [Void]Result = {
     return append_file(path, content: content.to_bytes())
 }
 
@@ -162,15 +162,15 @@ public let [T ToPath]append_text_file(path T, content: String) [Void]Result = {
 // ============================================================================
 
 /// Copy file (reads source as bytes, writes to destination)
-public let [T1 ToPath, T2 ToPath]copy_file(src T1, to: T2) [Void]Result =
+public let [T1 IntoPath, T2 IntoPath]copy_file(src T1, to: T2) [Void]Result =
     when read_file(src) in {
         .Ok(bytes) then write_file(to, content: bytes),
         .Error(e) then [Void]Result.Error(e),
     }
 
 /// Remove (delete) a file
-public let [T ToPath]remove_file(path T) [Void]Result = {
-    let s = path.to_path().to_string()
+public let [T IntoPath]remove_file(path T) [Void]Result = {
+    let s = path.into_path().to_string()
     return if __koral_remove(s.storage.data) == 0 then
         [Void]Result.Ok({})
     else
@@ -178,9 +178,9 @@ public let [T ToPath]remove_file(path T) [Void]Result = {
 }
 
 /// Rename or move a file/directory
-public let [T1 ToPath, T2 ToPath]rename_path(src T1, to: T2) [Void]Result = {
-    let src_s = src.to_path().to_string()
-    let to_s = to.to_path().to_string()
+public let [T1 IntoPath, T2 IntoPath]rename_path(src T1, to: T2) [Void]Result = {
+    let src_s = src.into_path().to_string()
+    let to_s = to.into_path().to_string()
     return if __koral_rename(src_s.storage.data, to_s.storage.data) == 0 then
         [Void]Result.Ok({})
     else
@@ -192,14 +192,14 @@ public let [T1 ToPath, T2 ToPath]rename_path(src T1, to: T2) [Void]Result = {
 // ============================================================================
 
 /// Check if path exists on disk.
-public let [T ToPath]path_exist(path T) Bool = {
-    let s = path.to_path().to_string()
+public let [T IntoPath]path_exist(path T) Bool = {
+    let s = path.into_path().to_string()
     return __koral_path_exists(s.storage.data) <> 0
 }
 
 /// Convert to absolute path (does not resolve symlinks)
-public let [T ToPath]absolute_path(path T) [Path]Result = {
-    let p = path.to_path()
+public let [T IntoPath]absolute_path(path T) [Path]Result = {
+    let p = path.into_path()
     if p.is_absolute() then {
         return [Path]Result.Ok(p)
     }
@@ -214,8 +214,8 @@ public let [T ToPath]absolute_path(path T) [Path]Result = {
 }
 
 /// Canonicalize path (resolves symlinks and relative components)
-public let [T ToPath]canonicalize_path(path T) [Path]Result = {
-    let s = path.to_path().to_string()
+public let [T IntoPath]canonicalize_path(path T) [Path]Result = {
+    let s = path.into_path().to_string()
     let buf = [UInt8]alloc_memory(4096)
     finally dealloc_memory(buf)
     let result = __koral_realpath(s.storage.data, buf, 4096)
@@ -223,7 +223,7 @@ public let [T ToPath]canonicalize_path(path T) [Path]Result = {
         return [Path]Result.Error(box(last_error_message()))
     }
     return when String.from_cstring(buf) in {
-        .Ok(resolved) then [Path]Result.Ok(resolved.to_path()),
+        .Ok(resolved) then [Path]Result.Ok(resolved.into_path()),
         .Error(e) then [Path]Result.Error(e),
     }
 }
@@ -234,8 +234,8 @@ public let [T ToPath]canonicalize_path(path T) [Path]Result = {
 // ============================================================================
 
 /// Open a file and return a File handle (unbuffered, directly wraps fd).
-public let [T ToPath]open_file(path T, mode OpenMode) [File]Result = {
-    let normalized = path.to_path().normalize()
+public let [T IntoPath]open_file(path T, mode OpenMode) [File]Result = {
+    let normalized = path.into_path().normalize()
     let s = normalized.to_string()
     let mut open_mode Int32 = 0
     let mut perm UInt32 = 0
@@ -254,15 +254,15 @@ public let [T ToPath]open_file(path T, mode OpenMode) [File]Result = {
 }
 
 /// Create a new file (fails if file already exists).
-public let [T ToPath]create_file(path T) [File]Result = open_file(path, .Create())
+public let [T IntoPath]create_file(path T) [File]Result = open_file(path, .Create())
 
 // ============================================================================
 // File Metadata Queries
 // ============================================================================
 
 /// Query file/directory metadata information (follows symlinks).
-public let [T ToPath]file_info(path T) [FileInfo]Result = {
-    let s = path.to_path().normalize().to_string()
+public let [T IntoPath]file_info(path T) [FileInfo]Result = {
+    let s = path.into_path().normalize().to_string()
     let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
     let result = __koral_stat(s.storage.data, stat_buf.ptr)
     if result <> 0 then {
@@ -285,8 +285,8 @@ public let [T ToPath]file_info(path T) [FileInfo]Result = {
 }
 
 /// Query symlink metadata (does NOT follow symlinks).
-public let [T ToPath]symlink_info(path T) [FileInfo]Result = {
-    let s = path.to_path().normalize().to_string()
+public let [T IntoPath]symlink_info(path T) [FileInfo]Result = {
+    let s = path.into_path().normalize().to_string()
     let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
     let result = __koral_lstat(s.storage.data, stat_buf.ptr)
     if result <> 0 then {
@@ -313,8 +313,8 @@ public let [T ToPath]symlink_info(path T) [FileInfo]Result = {
 // ============================================================================
 
 /// Set file permissions
-public let [T ToPath]set_permissions(path T, perm Permission) [Void]Result = {
-    let s = path.to_path().normalize().to_string()
+public let [T IntoPath]set_permissions(path T, perm Permission) [Void]Result = {
+    let s = path.into_path().normalize().to_string()
     let result = __koral_chmod(s.storage.data, perm.mode())
     if result <> 0 then {
         return [Void]Result.Error(box(last_error_message()))
@@ -323,9 +323,9 @@ public let [T ToPath]set_permissions(path T, perm Permission) [Void]Result = {
 }
 
 /// Create a hard link at `link` pointing to `to`
-public let [T1 ToPath, T2 ToPath]create_hard_link(link T1, to: T2) [Void]Result = {
-    let norm_target = to.to_path().normalize().to_string()
-    let norm_link = link.to_path().normalize().to_string()
+public let [T1 IntoPath, T2 IntoPath]create_hard_link(link T1, to: T2) [Void]Result = {
+    let norm_target = to.into_path().normalize().to_string()
+    let norm_link = link.into_path().normalize().to_string()
     let result = __koral_link(norm_target.storage.data, norm_link.storage.data)
     if result <> 0 then {
         return [Void]Result.Error(box(last_error_message()))
@@ -334,9 +334,9 @@ public let [T1 ToPath, T2 ToPath]create_hard_link(link T1, to: T2) [Void]Result 
 }
 
 /// Create a symbolic link at `link` pointing to `to`
-public let [T1 ToPath, T2 ToPath]create_symlink(link T1, to: T2) [Void]Result = {
-    let norm_target = to.to_path().normalize().to_string()
-    let norm_link = link.to_path().normalize().to_string()
+public let [T1 IntoPath, T2 IntoPath]create_symlink(link T1, to: T2) [Void]Result = {
+    let norm_target = to.into_path().normalize().to_string()
+    let norm_link = link.into_path().normalize().to_string()
     let result = __koral_symlink(norm_target.storage.data, norm_link.storage.data)
     if result <> 0 then {
         return [Void]Result.Error(box(last_error_message()))
@@ -345,8 +345,8 @@ public let [T1 ToPath, T2 ToPath]create_symlink(link T1, to: T2) [Void]Result = 
 }
 
 /// Read the target path of a symbolic link
-public let [T ToPath]read_symlink(path T) [Path]Result = {
-    let s = path.to_path().normalize().to_string()
+public let [T IntoPath]read_symlink(path T) [Path]Result = {
+    let s = path.into_path().normalize().to_string()
     let buf = [UInt8]alloc_memory(4096)
     finally dealloc_memory(buf)
     let result = __koral_readlink(s.storage.data, buf, 4096)
@@ -354,12 +354,12 @@ public let [T ToPath]read_symlink(path T) [Path]Result = {
         return [Path]Result.Error(box(last_error_message()))
     }
     let target = String.from_utf8_ptr_unchecked(buf, (UInt)result)
-    return [Path]Result.Ok(target.to_path())
+    return [Path]Result.Ok(target.into_path())
 }
 
 /// Truncate a file to the specified size
-public let [T ToPath]truncate_file(path T, size UInt64) [Void]Result = {
-    let s = path.to_path().normalize().to_string()
+public let [T IntoPath]truncate_file(path T, size UInt64) [Void]Result = {
+    let s = path.into_path().normalize().to_string()
     let result = __koral_truncate(s.storage.data, (Int64)size)
     if result <> 0 then {
         return [Void]Result.Error(box(last_error_message()))
@@ -374,8 +374,8 @@ public let [T ToPath]truncate_file(path T, size UInt64) [Void]Result = {
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
 /// Returns an open File handle (use file.path() to get the path).
-public let [T ToPath]create_temp_file(dir T, prefix: String) [File]Result = {
-    let dir_path = dir.to_path()
+public let [T IntoPath]create_temp_file(dir T, prefix: String) [File]Result = {
+    let dir_path = dir.into_path()
     let base = if dir_path.is_empty() then temp_dir() else dir_path
     let base_str = base.to_string()
     let mut template = String.new()
@@ -390,5 +390,5 @@ public let [T ToPath]create_temp_file(dir T, prefix: String) [File]Result = {
         return [File]Result.Error(box(last_error_message()))
     }
     let file_path = String.from_cstring_unchecked(template.storage.data)
-    return [File]Result.Ok(File(box(FileStorage(fd, file_path.to_path()))))
+    return [File]Result.Ok(File(box(FileStorage(fd, file_path.into_path()))))
 }
