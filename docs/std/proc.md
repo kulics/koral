@@ -60,7 +60,7 @@ given Command {
     public set_env(self, name String, value String) Command
     public clear_env(self) Command
     public remove_env(self, name String) Command
-    public [T ToPath]set_current_dir(self, path T) Command
+    public [T IntoPath]set_current_dir(self, path T) Command
     public set_stdin(self, cfg IoRedirect) Command
     public set_stdout(self, cfg IoRedirect) Command
     public set_stderr(self, cfg IoRedirect) Command
@@ -70,60 +70,60 @@ given Command {
 }
 
 given CommandOutput {
-    public is_success(self) Bool
-    public code(self) [Int]Option
+    public is_success(self ref) Bool
+    public code(self ref) [Int]Option
 }
 
 given CommandOutput ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given ExitStatus {
-    public code(self) [Int]Option
-    public is_success(self) Bool
-    public signal(self) [Int]Option
+    public code(self ref) [Int]Option
+    public is_success(self ref) Bool
+    public signal(self ref) [Int]Option
 }
 
 given ExitStatus ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given StdinPipe {
-    public fd(self) Int
+    public fd(self ref) Int
 }
 
 given StdinPipe Writer {
-    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self) [Void]Result
+    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public flush(self ref) [Void]Result
 }
 
 given StdoutPipe {
-    public fd(self) Int
+    public fd(self ref) Int
 }
 
 given StdoutPipe Reader {
-    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 given StderrPipe {
-    public fd(self) Int
+    public fd(self ref) Int
 }
 
 given StderrPipe Reader {
-    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 given Process {
-    public pid(self) UInt32
-    public wait(self) [ExitStatus]Result
-    public wait_output(self) [CommandOutput]Result
-    public try_wait(self) [[ExitStatus]Option]Result
-    public take_stdin_pipe(self) [StdinPipe]Option
-    public take_stdout_pipe(self) [StdoutPipe]Option
-    public take_stderr_pipe(self) [StderrPipe]Option
+    public pid(self ref) UInt32
+    public wait(self ref) [ExitStatus]Result
+    public wait_output(self ref) [CommandOutput]Result
+    public try_wait(self ref) [[ExitStatus]Option]Result
+    public take_stdin_pipe(self ref) [StdinPipe]Option
+    public take_stdout_pipe(self ref) [StdoutPipe]Option
+    public take_stderr_pipe(self ref) [StderrPipe]Option
 }
 
 given IoRedirect ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 ```

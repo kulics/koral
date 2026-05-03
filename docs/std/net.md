@@ -8,8 +8,8 @@ This page lists the public API of module `Std.Net` (declaration-only syntax), or
 
 ## Traits
 ```koral
-public trait ToSocketAddr {
-    to_socket_addr(self) [SocketAddr]Result
+public trait IntoSocketAddr {
+    into_socket_addr(self) [SocketAddr]Result
 }
 ```
 
@@ -46,12 +46,12 @@ given Ipv4Addr {
     public localhost() Ipv4Addr
     public unspecified() Ipv4Addr
     public broadcast() Ipv4Addr
-    public octets(self) [UInt8]List
-    public is_loopback(self) Bool
-    public is_unspecified(self) Bool
-    public is_broadcast(self) Bool
-    public is_multicast(self) Bool
-    public is_private(self) Bool
+    public octets(self ref) [UInt8]List
+    public is_loopback(self ref) Bool
+    public is_unspecified(self ref) Bool
+    public is_broadcast(self ref) Bool
+    public is_multicast(self ref) Bool
+    public is_private(self ref) Bool
 }
 
 given Ipv4Addr Eq {
@@ -59,7 +59,7 @@ given Ipv4Addr Eq {
 }
 
 given Ipv4Addr ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given Ipv4Addr Parseable {
@@ -70,10 +70,10 @@ given Ipv6Addr {
     public new(a UInt16, b UInt16, c UInt16, d UInt16, e UInt16, f UInt16, g UInt16, h UInt16) Ipv6Addr
     public localhost() Ipv6Addr
     public unspecified() Ipv6Addr
-    public segments(self) [UInt16]List
-    public is_loopback(self) Bool
-    public is_unspecified(self) Bool
-    public is_multicast(self) Bool
+    public segments(self ref) [UInt16]List
+    public is_loopback(self ref) Bool
+    public is_unspecified(self ref) Bool
+    public is_multicast(self ref) Bool
 }
 
 given Ipv6Addr Eq {
@@ -81,7 +81,7 @@ given Ipv6Addr Eq {
 }
 
 given Ipv6Addr ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given Ipv6Addr Parseable {
@@ -89,11 +89,11 @@ given Ipv6Addr Parseable {
 }
 
 given IpAddr {
-    public is_loopback(self) Bool
-    public is_unspecified(self) Bool
-    public is_multicast(self) Bool
-    public is_ipv4(self) Bool
-    public is_ipv6(self) Bool
+    public is_loopback(self ref) Bool
+    public is_unspecified(self ref) Bool
+    public is_multicast(self ref) Bool
+    public is_ipv4(self ref) Bool
+    public is_ipv6(self ref) Bool
 }
 
 given IpAddr Eq {
@@ -101,35 +101,35 @@ given IpAddr Eq {
 }
 
 given IpAddr ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given IpAddr Parseable {
     public parse(s String) [Self]Result
 }
 
-given String ToSocketAddr {
-    public to_socket_addr(self) [SocketAddr]Result
+given String IntoSocketAddr {
+    public into_socket_addr(self) [SocketAddr]Result
 }
 
-given SocketAddr ToSocketAddr {
-    public to_socket_addr(self) [SocketAddr]Result
+given SocketAddr IntoSocketAddr {
+    public into_socket_addr(self) [SocketAddr]Result
 }
 
 given SocketAddr {
     public new(ip IpAddr, port UInt16) SocketAddr
     public from_ipv4(addr Ipv4Addr, port UInt16) SocketAddr
     public from_ipv6(addr Ipv6Addr, port UInt16) SocketAddr
-    public ip(self) IpAddr
-    public port(self) UInt16
-    public is_ipv4(self) Bool
-    public is_ipv6(self) Bool
-    public to_sockaddr_bytes(self) [UInt8]List
+    public ip(self ref) IpAddr
+    public port(self ref) UInt16
+    public is_ipv4(self ref) Bool
+    public is_ipv6(self ref) Bool
+    public to_sockaddr_bytes(self ref) [UInt8]List
     public from_sockaddr_bytes(buf [UInt8]List) [SocketAddr]Result
 }
 
 given SocketAddr ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given SocketAddr Parseable {
@@ -141,50 +141,50 @@ given SocketAddr Eq {
 }
 
 given TcpListener {
-    public fd(self) Int
-    public [T ToSocketAddr]bind(addr T) [TcpListener]Result
-    public accept(self) [[TcpSocket, SocketAddr]Pair]Result
-    public local_addr(self) [SocketAddr]Result
+    public fd(self ref) Int
+    public [T IntoSocketAddr]bind(addr T) [TcpListener]Result
+    public accept(self ref) [[TcpSocket, SocketAddr]Pair]Result
+    public local_addr(self ref) [SocketAddr]Result
 }
 
 given TcpSocket {
-    public fd(self) Int
-    public [T ToSocketAddr]connect(addr T) [TcpSocket]Result
-    public local_addr(self) [SocketAddr]Result
-    public peer_addr(self) [SocketAddr]Result
-    public shutdown(self, how Shutdown) [Void]Result
-    public set_nodelay(self, nodelay Bool) [Void]Result
-    public nodelay(self) [Bool]Result
-    public set_read_timeout(self, timeout [Duration]Option) [Void]Result
-    public set_write_timeout(self, timeout [Duration]Option) [Void]Result
-    public read_timeout(self) [[Duration]Option]Result
-    public write_timeout(self) [[Duration]Option]Result
+    public fd(self ref) Int
+    public [T IntoSocketAddr]connect(addr T) [TcpSocket]Result
+    public local_addr(self ref) [SocketAddr]Result
+    public peer_addr(self ref) [SocketAddr]Result
+    public shutdown(self ref, how Shutdown) [Void]Result
+    public set_nodelay(self ref, nodelay Bool) [Void]Result
+    public nodelay(self ref) [Bool]Result
+    public set_read_timeout(self ref, timeout [Duration]Option) [Void]Result
+    public set_write_timeout(self ref, timeout [Duration]Option) [Void]Result
+    public read_timeout(self ref) [[Duration]Option]Result
+    public write_timeout(self ref) [[Duration]Option]Result
 }
 
 given TcpSocket Reader {
-    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 given TcpSocket Writer {
-    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self) [Void]Result
+    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public flush(self ref) [Void]Result
 }
 
 given UdpSocket {
-    public fd(self) Int
-    public [T ToSocketAddr]bind(addr T) [UdpSocket]Result
-    public [T ToSocketAddr]send_to(self, addr T, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public recv_from(self, into: [UInt8]List mut ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
-    public [T ToSocketAddr]connect(self, addr T) [Void]Result
-    public send(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public recv(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
-    public local_addr(self) [SocketAddr]Result
-    public peer_addr(self) [SocketAddr]Result
-    public set_broadcast(self, broadcast Bool) [Void]Result
-    public broadcast(self) [Bool]Result
-    public set_read_timeout(self, timeout [Duration]Option) [Void]Result
-    public set_write_timeout(self, timeout [Duration]Option) [Void]Result
-    public read_timeout(self) [[Duration]Option]Result
-    public write_timeout(self) [[Duration]Option]Result
+    public fd(self ref) Int
+    public [T IntoSocketAddr]bind(addr T) [UdpSocket]Result
+    public [T IntoSocketAddr]send_to(self ref, addr T, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public recv_from(self ref, into: [UInt8]List mut ref, range [UInt]Range) [[UInt, SocketAddr]Pair]Result
+    public [T IntoSocketAddr]connect(self ref, addr T) [Void]Result
+    public send(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public recv(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public local_addr(self ref) [SocketAddr]Result
+    public peer_addr(self ref) [SocketAddr]Result
+    public set_broadcast(self ref, broadcast Bool) [Void]Result
+    public broadcast(self ref) [Bool]Result
+    public set_read_timeout(self ref, timeout [Duration]Option) [Void]Result
+    public set_write_timeout(self ref, timeout [Duration]Option) [Void]Result
+    public read_timeout(self ref) [[Duration]Option]Result
+    public write_timeout(self ref) [[Duration]Option]Result
 }
 ```

@@ -190,23 +190,23 @@ given Regex {
 }
 
 given Regex {
-    public matches(self, text String) Bool
-    public find(self, text String) [Match]Option
+    public matches(self ref, text String) Bool
+    public find(self ref, text String) [Match]Option
 }
 
 given Regex {
-    public find_all(self, text String) MatchIterator
-    public captures(self, text String) [Captures]Option
-    public captures_all(self, text String) CapturesIterator
+    public find_all(self ref, text String) MatchIterator
+    public captures(self ref, text String) [Captures]Option
+    public captures_all(self ref, text String) CapturesIterator
 }
 
 given Regex {
-    public replace(self, text String, with: String) String
-    public replace_all(self, text String, with: String) String
+    public replace(self ref, text String, with: String) String
+    public replace_all(self ref, text String, with: String) String
 }
 
 given Regex {
-    public split(self, text String) RegexSplitIterator
+    public split(self ref, text String) RegexSplitIterator
 }
 
 given RegexFlag {
@@ -218,24 +218,24 @@ given RegexFlag {
 }
 
 given Regex {
-    public pattern(self) String
-    public group_count(self) UInt
+    public pattern(self ref) String
+    public group_count(self ref) UInt
 }
 
 given Match {
-    public text(self) String
-    public start(self) UInt
-    public end(self) UInt
+    public text(self ref) String
+    public start(self ref) UInt
+    public end(self ref) UInt
 }
 
 given Captures {
-    public text(self) String
-    public start(self) UInt
-    public end(self) UInt
-    public group_count(self) UInt
-    public group(self, index UInt) [String]Option
-    public group_start(self, index UInt) [UInt]Option
-    public group_end(self, index UInt) [UInt]Option
+    public text(self ref) String
+    public start(self ref) UInt
+    public end(self ref) UInt
+    public group_count(self ref) UInt
+    public group(self ref, index UInt) [String]Option
+    public group_start(self ref, index UInt) [UInt]Option
+    public group_end(self ref, index UInt) [UInt]Option
 }
 
 given MatchIterator [Match]Iterator {

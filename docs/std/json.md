@@ -29,28 +29,28 @@ public type JsonValue {
 ## Given Implementations
 ```koral
 given JsonError Error {
-    public message(self) String
+    public message(self ref) String
 }
 
 given JsonError ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 
 given JsonValue {
-    public is_null(self) Bool
-    public is_bool(self) Bool
-    public is_number(self) Bool
-    public is_string(self) Bool
-    public is_array(self) Bool
-    public is_object(self) Bool
-    public as_bool(self) [Bool]Option
-    public as_number(self) [Float64]Option
-    public as_string(self) [String]Option
-    public as_array(self) [[JsonValue ref]List]Option
-    public as_object(self) [[String, JsonValue ref]Dict]Option
-    public get_field(self, key String) [JsonValue ref]Option
-    public get_element(self, index UInt) [JsonValue ref]Option
-    public to_string_pretty(self) String
+    public is_null(self ref) Bool
+    public is_bool(self ref) Bool
+    public is_number(self ref) Bool
+    public is_string(self ref) Bool
+    public is_array(self ref) Bool
+    public is_object(self ref) Bool
+    public as_bool(self ref) [Bool]Option
+    public as_number(self ref) [Float64]Option
+    public as_string(self ref) [String]Option
+    public as_array(self ref) [[JsonValue ref]List]Option
+    public as_object(self ref) [[String, JsonValue ref]Dict]Option
+    public get_field(self ref, key String) [JsonValue ref]Option
+    public get_element(self ref, index UInt) [JsonValue ref]Option
+    public to_string_pretty(self ref) String
 }
 
 given JsonValue Eq {
@@ -62,6 +62,6 @@ given JsonValue Parseable {
 }
 
 given JsonValue ToString {
-    public to_string(self) String
+    public to_string(self ref) String
 }
 ```

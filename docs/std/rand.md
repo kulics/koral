@@ -11,7 +11,7 @@ public let default_random() [DefaultRandomSource]Random
 ## Traits
 ```koral
 public trait RandomSource {
-    generate(self) UInt64
+    generate(self ref) UInt64
 }
 
 public trait Randomizable {
@@ -30,11 +30,11 @@ public type DefaultRandomSource
 ```koral
 given[R RandomSource] [R]Random {
     public new(rng R) [R]Random
-    public [T Randomizable]next(self) T
-    public next_int(self, range [Int]Range) Int
-    public next_uint(self, range [UInt]Range) UInt
-    public [T Any]shuffle(self, list [T]List ref) Void
-    public [T Any]choose(self, list [T]List) [T]Option
+    public [T Randomizable]next(self ref) T
+    public next_int(self ref, range [Int]Range) Int
+    public next_uint(self ref, range [UInt]Range) UInt
+    public [T Deref]shuffle(self ref, list [T]List mut ref) Void
+    public [T Deref]choose(self ref, list [T]List) [T]Option
 }
 
 given UInt64 Randomizable {
@@ -95,6 +95,6 @@ given DefaultRandomSource {
 }
 
 given DefaultRandomSource RandomSource {
-    public generate(self) UInt64
+    public generate(self ref) UInt64
 }
 ```

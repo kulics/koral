@@ -38,23 +38,23 @@ given Task {
 }
 
 given Thread {
-    public wait(self) [Void]Result
-    public detach(self) Void
-    public id(self) UInt64
-    public name(self) [String]Option
+    public wait(self ref) [Void]Result
+    public detach(self ref) Void
+    public id(self ref) UInt64
+    public name(self ref) [String]Option
 }
 
 given Timer {
     public new(d Duration) Timer
-    public wait(self) Void
-    public reset(self, d Duration) Void
-    public cancel(self) Void
+    public wait(self ref) Void
+    public reset(self ref, d Duration) Void
+    public cancel(self ref) Void
 }
 
 given Ticker {
     public new(interval Duration) Ticker
-    public wait(self) Void
-    public reset(self, interval Duration) Void
-    public cancel(self) Void
+    public wait(self ref) Void
+    public reset(self ref, interval Duration) Void
+    public cancel(self ref) Void
 }
 ```
