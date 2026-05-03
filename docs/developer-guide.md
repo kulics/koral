@@ -236,6 +236,13 @@ Common `self` cases:
 - linear builders such as `Task.set_name(...).set_stack_size(...).spawn()`
 - explicit ownership-conversion methods with `into_*` naming
 
+Builder-style APIs need one extra distinction:
+
+- keep `self` when the builder is intentionally modeled as a linear fluent pipeline whose chained calls conceptually move from one configuration stage to the next
+- prefer `self ref` when the API is really a reusable handle with derived helper methods or repeatable configuration/query operations, even if the implementation stores state behind a ref
+
+In other words, "internally ref-backed" does not automatically make a builder-style API borrowed. Use `self` only when the chaining behavior is part of the public contract, not merely because returning `self` is convenient.
+
 ### Returned New Values Do Not Imply `self`
 
 Returning a new value is not, by itself, a reason to use `self`.
@@ -255,6 +262,8 @@ Examples include:
 - `ClockTime`
 - `MonoTime`
 - sometimes `DateTime` when treated as a compact timestamp value rather than a heavy handle
+- compact address or identifier values such as `Ipv4Addr`, `Ipv6Addr`, `IpAddr`, and `SocketAddr`
+- compact bitflag wrappers such as `RegexFlag`
 
 For such types, it is acceptable to keep observation and pure derivation methods on `self` when all of the following are true:
 
@@ -264,6 +273,8 @@ For such types, it is acceptable to keep observation and pure derivation methods
 - borrowing would add signature noise without unlocking important mutation or aliasing guarantees
 
 Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where `self ref` materially improves reuse expectations for callers.
+
+This exception can also cover "sum-of-small-values" enums and tiny wrappers whose payloads are still plain value data rather than handles or heap ownership. Network address values and regex flag bitmasks fit this category; JSON values, strings, paths, and collections generally do not.
 
 ### Handle Types and Interior Mutation
 
@@ -342,6 +353,13 @@ For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiv
 
 If implementing a `self ref` method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the public receiver should be `self`.
 
+When migrating an existing method from `self` to `self ref`, recheck two common implementation leftovers:
+
+- branches that still `return self` even though the method returns an owned value
+- helper or iterator constructors that still receive `self` even though they expect an owned source value
+
+In both cases, the fix is often to pass or return `self.val` explicitly. This is a migration detail, not a reason to change the public receiver back to `self`.
+
 If the implementation would require copying a large value or heap-owning structure solely to satisfy a consuming iterator API, prefer one of these instead:
 
 - add a borrowed helper that traverses storage directly
@@ -359,6 +377,8 @@ For new traits, prefer the narrowest receiver that matches the semantic contract
 - consuming traits should use `self`
 
 Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
+
+`Formattable` should currently be treated the same way: it remains a value-receiver trait largely because it is rooted in scalar formatting and inherited widely across numeric types. Do not use its value-style receiver as evidence that unrelated derived or observational APIs should also prefer `self`.
 
 ### Naming Guidance
 
