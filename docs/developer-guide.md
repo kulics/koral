@@ -188,6 +188,198 @@ let owned Int mut ref = box(42)   // box() returns T mut ref
 // let rz = 42.ref            // error: rvalue cannot be borrowed
 ```
 
+## Standard Library Receiver Design
+
+When designing standard-library APIs, choose method receivers by ownership semantics first and implementation convenience second.
+
+Primary rule:
+
+- Use `self ref` for observation and derivation.
+- Use `self mut ref` for in-place mutation.
+- Use `self` only when the method semantically consumes the receiver.
+
+This is a semantic default, not a mechanical rule. For small immutable value types that behave like scalars in the API, using `self` for observation can still be reasonable when it keeps the whole type family consistent and avoids borrow-heavy signatures.
+
+This rule matters because receiver adjustment has asymmetric call behavior:
+
+- `self ref` accepts both lvalue and rvalue receivers. Rvalue calls may materialize a temporary.
+- `self mut ref` requires a writable lvalue receiver.
+- `self` transfers ownership and should therefore communicate real consumption, not just implementation preference.
+
+### Default Receiver Choices
+
+Use `self ref` when the call should leave the original value logically usable by the caller.
+
+Common `self ref` cases:
+
+- predicates such as `is_empty`, `contains`, `starts_with`
+- accessors and getters such as `count`, `name`, `pattern`
+- formatting and display such as `to_string`, `message`
+- pure derived values such as `dir_name`, `base_name`, `components`
+- view-producing methods that do not consume the source
+
+Use `self mut ref` when the method mutates the receiver in place.
+
+Common `self mut ref` cases:
+
+- container updates such as `push`, `insert`, `remove`, `clear`
+- stateful cursor updates on direct value types
+- mutation APIs returning removed values, such as `pop` or `remove_at`
+
+Use `self` only when consuming the receiver is part of the API contract.
+
+Common `self` cases:
+
+- terminal extraction such as `unwrap`, `expect`, `into_list`
+- transforming combinators on ownership-carrying enums such as `Option.map` and `Result.map`
+- iterator adapters or terminal operations that must consume iteration state
+- linear builders such as `Task.set_name(...).set_stack_size(...).spawn()`
+- explicit ownership-conversion methods with `into_*` naming
+
+### Returned New Values Do Not Imply `self`
+
+Returning a new value is not, by itself, a reason to use `self`.
+
+Prefer `self ref` when the method computes a new value but the caller should still think of the original receiver as available. Examples include path manipulation, string trimming, and structural projections.
+
+Prefer `self` only when the API is intentionally framed as consuming or forwarding ownership.
+
+### Small Pure Value Types
+
+For compact immutable value types, receiver design may prioritize value-style ergonomics over strict borrow minimality.
+
+Examples include:
+
+- `Duration`
+- `Date`
+- `ClockTime`
+- `MonoTime`
+- sometimes `DateTime` when treated as a compact timestamp value rather than a heavy handle
+
+For such types, it is acceptable to keep observation and pure derivation methods on `self` when all of the following are true:
+
+- the type is cheap to copy relative to the surrounding API
+- the methods conceptually behave like arithmetic or scalar queries
+- the family already uses value receivers consistently
+- borrowing would add signature noise without unlocking important mutation or aliasing guarantees
+
+Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where `self ref` materially improves reuse expectations for callers.
+
+### Handle Types and Interior Mutation
+
+Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by internal `mut ref` storage or OS resources.
+
+For such handle types, methods may use `self ref` even when the underlying state changes. In these cases the API models shared access to a handle, not direct value mutation of the outer type.
+
+Use this exception deliberately. Do not generalize handle-style `self ref` mutation to ordinary value types such as containers, strings, or path values.
+
+### Borrowed Methods Implemented via Iteration
+
+Do not let an iterator implementation detail force a public receiver to become `self`.
+
+If a method is semantically observational or purely derived, it should usually remain `self ref` even when the easiest implementation strategy is to iterate.
+
+Prefer the following order:
+
+1. Implement the method directly with borrowed traversal over storage or fields.
+2. If the type can cheaply create an iterator snapshot without semantically consuming the value, keep the public method on `self ref` and construct that iterator internally.
+3. Only keep the public receiver as `self` when iteration truly consumes unique state as part of the API contract.
+
+This distinction matters because many iterators are consuming in the iterator sense while their source container is not consuming in the API sense.
+
+Examples:
+
+- a `List` or `String` method may stay `self ref` even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
+- a stream, generator, or one-shot parser should not expose borrowed observation methods that secretly consume its progression state
+
+### Iterable as a Borrowed Protocol
+
+`Iterator` itself is inherently consuming and should stay `next(self mut ref)`.
+
+`Iterable`, however, is usually better modeled as a borrowed-producing protocol: creating an iterator is typically an observation of the source, not ownership transfer of the source.
+
+When evaluating `iterator(...)`, use this rule:
+
+- prefer `iterator(self ref)` when the iterator is just a snapshot of shared storage plus cursor state
+- keep `iterator(self)` only when creating the iterator must semantically consume unique progression state from the source itself
+
+Typical borrowed `Iterable` cases include:
+
+- containers such as `List`, `Set`, `Dict`, `Deque`, `Queue`, `Stack`, and `PriorityQueue`
+- range-like values where the range is a reusable description and the iterator carries the advancing cursor
+
+Typical consuming `Iterable`-like cases would be one-shot sources such as generators, streams, or parsers whose progression state lives in the source value itself.
+
+In current `std/`, `Iterable.iterator` now uses `self ref`, which matches the snapshot-style behavior of the existing container and range implementations. Treat that as the default model for reusable sources rather than as a special-case optimization.
+
+This is also why observational methods such as set algebra should not be forced onto `self` merely because they happen to call `iterator()`. If the source collection remains reusable, the public API should still be designed as borrowed.
+
+### Arithmetic Traits and Arithmetic-Like APIs
+
+Do not equate "returns a new value" or "looks like an operator" with consuming ownership.
+
+Core arithmetic traits such as `Add`, `Sub`, `Mul`, `Div`, `Rem`, and `Neg` are value-style protocols today and should generally stay that way. They primarily model scalar algebra over small immutable values, and changing them to borrowed receivers would impose broad signature churn across numeric APIs for little semantic gain.
+
+Use this distinction:
+
+- arithmetic traits describe pure value algebra and may remain `self` / value-parameter based
+- non-trait methods that merely resemble algebra should still choose receivers by the actual source type's ownership semantics
+
+Apply that rule to API design as follows:
+
+- for small pure value types such as `Duration`, `Date`, `ClockTime`, and `MonoTime`, arithmetic-style methods and nearby derived operations may stay on `self`
+- for heavier values or handle-adjacent types such as `DateTime`, use `self ref` when the method is observational or derived and not semantically consuming
+- for heap-owning containers, set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` should usually use `self ref` even though they are mathematically operator-like
+
+`duration_to` should be classified by type semantics, not by name alone:
+
+- on scalar-like time values, `duration_to(self, other)` can remain value-style
+- on heavier timestamp-like types, `duration_to(self ref, other)` is often the better expression of caller expectations
+
+Likewise, predicates such as `is_subset_of` and `is_superset_of` are observational set queries, not arithmetic consumption. They should follow the normal borrowed rule for containers.
+
+For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so changing container-like operands from value parameters to `ref` parameters often degrades call-site ergonomics more than it improves ownership clarity. In the current language design, `borrowed receiver + value operand` is often the right balance for APIs like set algebra and random generation helpers.
+
+If implementing a `self ref` method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the public receiver should be `self`.
+
+If the implementation would require copying a large value or heap-owning structure solely to satisfy a consuming iterator API, prefer one of these instead:
+
+- add a borrowed helper that traverses storage directly
+- add a dedicated borrowed-view iterator type or borrowed-producing helper
+- keep the method on `self` only if the operation is genuinely consumption-oriented
+
+Avoid exposing `.val`-style dereference-copy patterns in public API design discussions. The public rule should be driven by ownership semantics at the call site, not by the current convenience of a specific iterator implementation.
+
+### Trait Design Guidance
+
+For new traits, prefer the narrowest receiver that matches the semantic contract:
+
+- observation traits should usually use `self ref`
+- mutation traits should use `self mut ref`
+- consuming traits should use `self`
+
+Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
+
+### Naming Guidance
+
+Receiver choice and method naming should reinforce each other:
+
+- prefer `into_*` for consuming conversions and ownership-moving adapters
+- prefer `to_*`, `as_*`, `with_*`, and predicate/getter names for borrowed observation or derivation
+- avoid naming a borrowed method in a way that suggests linear consumption
+
+### Review Checklist
+
+Before adding or changing a method in `std/`, ask:
+
+1. After this call, should the caller still expect to use the original receiver value?
+2. Is any mutation directly observable on the receiver itself, or only through an underlying shared handle?
+3. Is the method a terminal operation, extraction, or ownership conversion?
+4. Does the method name match the ownership behavior implied by the receiver?
+5. Would switching from `self` to `self ref` silently broaden call sites by allowing rvalue temporary materialization, and is that desirable for this API?
+
+If the answer to (1) is yes, default to `self ref`. If the answer to (3) is yes, `self` is usually the right choice. If the answer to (2) is direct mutation, use `self mut ref`.
+
 ## Adding a New Type
 
 ### 1) Add a New `Type` Case

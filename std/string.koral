@@ -218,7 +218,7 @@ given String {
     public is_empty(self ref) Bool = self.storage.len == 0
     public capacity(self ref) UInt = self.storage.cap - 1
 
-    public to_bytes(self) [UInt8]List = {
+    public to_bytes(self ref) [UInt8]List = {
         let len = self.storage.len
         let mut bytes = make_bytes(len)
         if len == 0 then {
@@ -437,12 +437,12 @@ given String {
         return SliceSpec.new(offset: start, len: end - start)
     }
 
-    public substring(self, range [UInt]Range) String = {
+    public substring(self ref, range [UInt]Range) String = {
         let span = self.slice_spec(range)
         return self.make_substring(span.start(), span.len())
     }
 
-    public trim_ascii_start(self) String = {
+    public trim_ascii_start(self ref) String = {
         let mut i UInt = 0
         while i < self.storage.len and String.is_ascii_space(self.storage.data[i]) then {
             i += 1
@@ -450,7 +450,7 @@ given String {
         return self.make_substring(i, self.storage.len - i)
     }
 
-    public trim_ascii_end(self) String = {
+    public trim_ascii_end(self ref) String = {
         let mut end = self.storage.len
         while end > 0 and String.is_ascii_space(self.storage.data[end - 1]) then {
             end -= 1
@@ -458,7 +458,7 @@ given String {
         return self.make_substring(0, end)
     }
 
-    public trim_ascii(self) String = {
+    public trim_ascii(self ref) String = {
         let head = self.trim_ascii_start()
         return head.trim_ascii_end()
     }
@@ -489,7 +489,7 @@ given String {
     private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and b is <= 90 then b + 32 else b
     private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and b is <= 122 then b - 32 else b
 
-    public to_ascii_lowercase(self) String = {
+    public to_ascii_lowercase(self ref) String = {
         let cap = self.storage.len + 1
         let data = [UInt8]alloc_memory(cap)
         let mut i UInt = 0
@@ -502,7 +502,7 @@ given String {
         return String(storage)
     }
 
-    public to_ascii_uppercase(self) String = {
+    public to_ascii_uppercase(self ref) String = {
         let cap = self.storage.len + 1
         let data = [UInt8]alloc_memory(cap)
         let mut i UInt = 0
@@ -515,7 +515,7 @@ given String {
         return String(storage)
     }
 
-    public to_ascii_titlecase(self) String = {
+    public to_ascii_titlecase(self ref) String = {
         let cap = self.storage.len + 1
         let data = [UInt8]alloc_memory(cap)
         let mut in_word = false
@@ -572,7 +572,7 @@ given String {
 
     public contains(self ref, pat String) Bool = self.find_from(0, pat).is_some()
 
-    public repeat(self, times UInt) String = {
+    public repeat(self ref, times UInt) String = {
         if times == 0 then {
             return String.new()
         }
@@ -593,7 +593,7 @@ given String {
 
     // Replace only the first `n` occurrences of `pat` with `with`.
     // If n == 0, returns a copy of the string unchanged.
-    public replace_n(self, pat String, n UInt, with: String) String = {
+    public replace_n(self ref, pat String, n UInt, with: String) String = {
         if pat.storage.len == 0 then {
             panic("replace empty pattern")
         }
@@ -629,7 +629,7 @@ given String {
 
     // Split on the first occurrence of `sep`, returning (before, after).
     // Returns None if `sep` is not found.
-    public split_once(self, sep String) [[String, String]Pair]Option = {
+    public split_once(self ref, sep String) [[String, String]Pair]Option = {
         when self.find(sep) in {
             .Some(idx) then {
                 let before = self.make_substring(0, idx)
@@ -645,7 +645,7 @@ given String {
 
     // Split on the last occurrence of `sep`, returning (before, after).
     // Returns None if `sep` is not found.
-    public split_last_once(self, sep String) [[String, String]Pair]Option = {
+    public split_last_once(self ref, sep String) [[String, String]Pair]Option = {
         when self.find_last(sep) in {
             .Some(idx) then {
                 let before = self.make_substring(0, idx)
@@ -659,7 +659,7 @@ given String {
         }
     }
 
-    public replace_all(self, pat String, with: String) String = {
+    public replace_all(self ref, pat String, with: String) String = {
         if pat.storage.len == 0 then {
             panic("replace empty pattern")
         }
@@ -682,38 +682,38 @@ given String {
         return result
     }
 
-    public split_ascii_whitespace(self) StringSplitAsciiWhitespaceIterator =
-        StringSplitAsciiWhitespaceIterator(self, 0)
+    public split_ascii_whitespace(self ref) StringSplitAsciiWhitespaceIterator =
+        StringSplitAsciiWhitespaceIterator(self.val, 0)
 
-    public split(self, sep String) StringSplitIterator = {
-        return StringSplitIterator(self, sep, 0)
+    public split(self ref, sep String) StringSplitIterator = {
+        return StringSplitIterator(self.val, sep, 0)
     }
 
-    public lines(self) StringLinesIterator = StringLinesIterator(self, 0)
+    public lines(self ref) StringLinesIterator = StringLinesIterator(self.val, 0)
 
-    public trim_prefix(self, prefix String) String =
+    public trim_prefix(self ref, prefix String) String =
         if self.starts_with(prefix) then
             self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len)
         else
             self
 
-    public trim_suffix(self, suffix String) String = {
+    public trim_suffix(self ref, suffix String) String = {
         if self.ends_with(suffix) then {
             let remain = self.storage.len - suffix.storage.len
             return self.make_substring(0, remain)
         } else {
-            return self
+            return self.val
         }
     }
 
-    public strip_prefix(self, prefix String) [String]Option = {
+    public strip_prefix(self ref, prefix String) [String]Option = {
         if self.starts_with(prefix) then {
             return [String]Option.Some(self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len))
         }
         return [String]Option.None()
     }
 
-    public strip_suffix(self, suffix String) [String]Option = {
+    public strip_suffix(self ref, suffix String) [String]Option = {
         if self.ends_with(suffix) then {
             let remain = self.storage.len - suffix.storage.len
             return [String]Option.Some(self.make_substring(0, remain))
@@ -722,13 +722,13 @@ given String {
     }
 
     // Return byte iterator for iterating over raw UTF-8 bytes
-    public bytes(self) StringBytesIterator = StringBytesIterator(self, 0)
+    public bytes(self ref) StringBytesIterator = StringBytesIterator(self.val, 0)
 
     // Return rune iterator for iterating over Unicode code points
-    public runes(self) StringRunesIterator = StringRunesIterator(self, 0)
+    public runes(self ref) StringRunesIterator = StringRunesIterator(self.val, 0)
 
     // Convert string to a List of Runes for random access
-    public to_runes(self) [Rune]List = {
+    public to_runes(self ref) [Rune]List = {
         let mut list = [Rune]List.new()
         for r in self.runes() then {
             list.push(r)
