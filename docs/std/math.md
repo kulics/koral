@@ -76,11 +76,11 @@ public let [T Integer]ilog10(x T) UInt
 
 ## Traits
 ```koral
-public trait Numeric Sub and Mul and Ord {
+public trait Numeric [Self]Add and [Self]Sub and [Self]Mul and Ord {
     abs(self) Self
 }
 
-public trait FloatingPoint Numeric and Div and Neg {
+public trait FloatingPoint Numeric and [Self]Div and Neg {
     sqrt(x Self) Self
     cbrt(x Self) Self
     pow(self, exp Self) Self
@@ -133,7 +133,7 @@ public trait FloatMath FloatingPoint {
     log_gamma(x Self) Self
 }
 
-public trait Integer Numeric and Rem {
+public trait Integer Numeric and [Self]Div and [Self]Rem {
     wrapping_abs(self) Self
     pow(self, exp UInt) Self
     wrapping_pow(self, exp UInt) Self

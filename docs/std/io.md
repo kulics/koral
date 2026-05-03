@@ -9,16 +9,16 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 public trait Writer {
-    write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    flush(self) [Void]Result
+    write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    flush(self ref) [Void]Result
 }
 
 public trait Seeker {
-    seek(self, pos SeekOrigin) [UInt64]Result
+    seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 ```
 
@@ -48,69 +48,69 @@ public type SeekOrigin {
 given[R Reader] [R]BufReader {
     public new(r R) [R]BufReader
     public with_capacity(cap UInt, r R) [R]BufReader
-    public read_byte(self) [[UInt8]Option]Result
-    public read_rune(self) [[Rune]Option]Result
-    public read_until(self, delim UInt8, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
-    public read_line(self) [[String]Option]Result
-    public skip(self, n UInt) [UInt]Result
+    public read_byte(self ref) [[UInt8]Option]Result
+    public read_rune(self ref) [[Rune]Option]Result
+    public read_until(self ref, delim UInt8, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read_line(self ref) [[String]Option]Result
+    public skip(self ref, n UInt) [UInt]Result
 }
 
 given[R Reader] [R]BufReader Reader {
-    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 given[R Reader and Seeker] [R]BufReader Seeker {
-    public seek(self, pos SeekOrigin) [UInt64]Result
+    public seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 
 given[W Writer] [W]BufWriter {
     public new(w W) [W]BufWriter
     public with_capacity(cap UInt, w W) [W]BufWriter
-    public write_byte(self, b UInt8) [Void]Result
-    public write_string(self, s String) [Void]Result
-    public write_line(self, s String) [Void]Result
-    public write_rune(self, r Rune) [Void]Result
+    public write_byte(self ref, b UInt8) [Void]Result
+    public write_string(self ref, s String) [Void]Result
+    public write_line(self ref, s String) [Void]Result
+    public write_rune(self ref, r Rune) [Void]Result
 }
 
 given[W Writer] [W]BufWriter Writer {
-    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self) [Void]Result
+    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public flush(self ref) [Void]Result
 }
 
 given[W Writer and Seeker] [W]BufWriter Seeker {
-    public seek(self, pos SeekOrigin) [UInt64]Result
+    public seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 
 given ByteBuffer {
-    public zero() ByteBuffer
+    public new() ByteBuffer
     public with_capacity(cap UInt) ByteBuffer
     public from_string(s String) ByteBuffer
     public from_bytes(bytes [UInt8]List) ByteBuffer
 }
 
 given ByteBuffer Reader {
-    public read(self, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
 given ByteBuffer Writer {
-    public write(self, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self) [Void]Result
+    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
+    public flush(self ref) [Void]Result
 }
 
 given ByteBuffer Seeker {
-    public seek(self, pos SeekOrigin) [UInt64]Result
+    public seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 
 given IoError Error {
-    public message(self) String
+    public message(self ref) String
 }
 
 given Reader {
-    public read_all(self) [[UInt8]List]Result
+    public read_all(self ref) [[UInt8]List]Result
     public [W Writer]copy_all_to(self, dst W) [UInt]Result
 }
 
 given Writer {
-    public write_all(self, from: [UInt8]List, range [UInt]Range) [Void]Result
+    public write_all(self ref, from: [UInt8]List, range [UInt]Range) [Void]Result
 }
 ```
