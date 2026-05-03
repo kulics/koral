@@ -1150,7 +1150,7 @@ extension TypeChecker {
             try recordGenericTraitBounds(method.typeParameters)
 
             try currentScope.defineType("Self", type: genericSelfType)
-            currentScope.define("self", genericSelfType, mutable: false)
+            currentScope.define("self", genericSelfType, mutable: method.parameters.first?.mutable == true)
 
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Symbol in
@@ -1232,7 +1232,7 @@ extension TypeChecker {
             }
 
             try currentScope.defineType("Self", type: type)
-            currentScope.define("self", type, mutable: false)
+            currentScope.define("self", type, mutable: method.parameters.first?.mutable == true)
 
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Parameter in
@@ -2293,8 +2293,6 @@ extension TypeChecker {
             try recordGenericTraitBounds(method.typeParameters)
             
             try currentScope.defineType("Self", type: genericSelfType)
-            currentScope.define("self", genericSelfType, mutable: false)
-            
             let (typedBody, _) = try checkFunctionBody(
               template.checkedParameters ?? [],
               template.checkedReturnType ?? .void,
@@ -2361,7 +2359,7 @@ extension TypeChecker {
           }
 
           try currentScope.defineType("Self", type: type)
-          currentScope.define("self", type, mutable: false)
+          currentScope.define("self", type, mutable: method.parameters.first?.mutable == true)
 
           let returnType = try resolveTypeNode(method.returnType)
           let params = try method.parameters.map { param -> Symbol in
@@ -2423,8 +2421,6 @@ extension TypeChecker {
           try recordGenericTraitBounds(info.method.typeParameters)
 
           try currentScope.defineType("Self", type: type)
-          currentScope.define("self", type, mutable: false)
-
           let (typedBody, _) = try checkFunctionBody(info.params, info.returnType, info.method.body)
           return typedBody
         }
@@ -2680,7 +2676,7 @@ extension TypeChecker {
           try recordGenericTraitBounds(method.typeParameters)
 
           try currentScope.defineType("Self", type: selfType)
-          currentScope.define("self", selfType, mutable: false)
+          currentScope.define("self", selfType, mutable: method.parameters.first?.mutable == true)
 
           let resolvedReturn = try resolveTypeNode(method.returnType)
           let resolvedParams = try method.parameters.map { param -> Symbol in
@@ -2753,7 +2749,7 @@ extension TypeChecker {
           try recordGenericTraitBounds(method.typeParameters)
 
           try currentScope.defineType("Self", type: selfType)
-          currentScope.define("self", selfType, mutable: false)
+          currentScope.define("self", selfType, mutable: method.parameters.first?.mutable == true)
 
           var traitTypeSubstitution: [String: Type] = [:]
           for (index, traitParam) in traitInfo.typeParameters.enumerated() {

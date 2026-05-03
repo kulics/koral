@@ -1,0 +1,39 @@
+// EXPECT: before: 2
+// EXPECT: after-one: 2
+// EXPECT: after-two: 2
+// EXPECT: value: 7
+
+// Regression test for self-ref receiver temporary materialization cleanup.
+// Calling a `self ref` method on an lvalue value-type receiver copies the
+// receiver for the call. That temporary must be dropped immediately after the
+// call so ref-counted fields do not leak across statements.
+
+type ReaderBox(storage Int mut ref)
+
+given ReaderBox {
+    read(self ref) Int = self.storage.val
+}
+
+let main() Void = {
+    let root Int mut ref = box(7)
+    let holder = ReaderBox(root)
+
+    print("before: ")
+    println(ref_count(root))
+
+    let first = holder.read()
+
+    print("after-one: ")
+    println(ref_count(root))
+
+    let second = holder.read()
+
+    print("after-two: ")
+    println(ref_count(root))
+
+    assert(first == 7, "first read")
+    assert(second == 7, "second read")
+
+    print("value: ")
+    println(second)
+}

@@ -113,7 +113,7 @@ public class Monomorphizer {
             SemanticErrorContext.currentFileName = currentFileName
         }
     }
-    
+
     /// Collected vtable generation requests: (concreteType, trait) combinations
     /// that need vtable generation during code generation.
     internal var vtableRequests: Set<VtableRequest> = []

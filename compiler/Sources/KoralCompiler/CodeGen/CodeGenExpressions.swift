@@ -531,7 +531,8 @@ extension CodeGen {
         if arg.valueCategory == .rvalue && needsDrop(arg.type) {
           let shouldDropConsumedRvalueSource: Bool
           switch arg {
-          case .call, .genericCall, .staticMethodCall, .intrinsicCall, .traitMethodCall:
+          case .call, .genericCall, .staticMethodCall, .intrinsicCall, .traitMethodCall,
+               .referenceExpression, .castExpression:
             shouldDropConsumedRvalueSource = true
           default:
             shouldDropConsumedRvalueSource = false

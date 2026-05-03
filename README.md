@@ -223,6 +223,10 @@ Reference creation rules:
 - `.ref` result type depends on the source's mutability: `let mut` binding → `T mut ref`, `let` binding → `T ref`, mutable path → `T mut ref`.
 - `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected by the compiler.
+- Method/subscript receiver adjustment is a special case: a call whose receiver is declared as `self ref` may use an rvalue receiver. The compiler materializes a stable temporary for the duration of that call.
+- This receiver-only rule does **not** make `expr.ref` on rvalues legal.
+- `self mut ref` still requires a writable lvalue receiver; rvalues are rejected.
+- Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
 - `T ref` is read-only: `.val` read only. `T mut ref` supports `.val` read and `.val = expr` assignment.
 - `T ptr` is read-only: `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
 - Use `box(expr)` for owned heap references from literals/temporaries — returns `T mut ref`.

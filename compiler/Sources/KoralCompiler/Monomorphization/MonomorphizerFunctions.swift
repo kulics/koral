@@ -20,6 +20,78 @@ extension Monomorphizer {
         return context.getName(methodSymbol.defId) ?? ""
     }
 
+    internal func alignMethodReferenceBase(_ base: TypedExpressionNode, to methodType: Type) -> TypedExpressionNode {
+        guard case .function(let params, _) = methodType,
+              let receiverType = params.first?.type else {
+            return base
+        }
+
+        if base.type == receiverType {
+            return base
+        }
+
+        switch (base.type, receiverType) {
+        case (.mutableReference(let inner), .reference(let expectedInner)) where inner == expectedInner:
+            return base
+        case (.mutableWeakReference(let inner), .weakReference(let expectedInner)) where inner == expectedInner:
+            return base
+        case (_, .reference(let inner)) where inner == base.type:
+            return .referenceExpression(expression: base, type: receiverType)
+        case (_, .mutableReference(let inner)) where inner == base.type:
+            return .referenceExpression(expression: base, type: receiverType)
+        case (_, .weakReference(let inner)) where inner == base.type:
+            return .referenceExpression(expression: base, type: receiverType)
+        case (_, .mutableWeakReference(let inner)) where inner == base.type:
+            return .referenceExpression(expression: base, type: receiverType)
+        case (.reference(let inner), _) where inner == receiverType:
+            return .derefExpression(expression: base, type: inner)
+        case (.mutableReference(let inner), _) where inner == receiverType:
+            return .derefExpression(expression: base, type: inner)
+        case (.weakReference(let inner), _) where inner == receiverType:
+            return .derefExpression(expression: base, type: inner)
+        case (.mutableWeakReference(let inner), _) where inner == receiverType:
+            return .derefExpression(expression: base, type: inner)
+        default:
+            break
+        }
+
+        if case .referenceExpression(let inner, _) = base {
+            if inner.type == receiverType {
+                return inner
+            }
+            switch (inner.type, receiverType) {
+            case (.mutableReference(let innerType), .reference(let expectedInner)) where innerType == expectedInner:
+                return inner
+            case (.mutableWeakReference(let innerType), .weakReference(let expectedInner)) where innerType == expectedInner:
+                return inner
+            default:
+                break
+            }
+        }
+
+        return base
+    }
+
+    private func finalizeDirectMethodCandidate(_ symbol: Symbol, expectedMethodType: Type?) -> Symbol? {
+        guard let expectedMethodType else {
+            return copySymbolPreservingDefId(symbol)
+        }
+        guard case .function(let expectedParams, _) = expectedMethodType,
+              let expectedReceiver = expectedParams.first?.type else {
+            return copySymbolPreservingDefId(symbol)
+        }
+        switch expectedReceiver {
+        case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+            break
+        default:
+            return copySymbolPreservingDefId(symbol)
+        }
+        guard methodTypeMatchesExpected(symbol.type, expected: expectedMethodType) else {
+            return nil
+        }
+        return copySymbolPreservingDefId(symbol)
+    }
+
     internal func lookupConcreteMethodSymbol(
         on selfType: Type,
         method: Symbol,
@@ -527,20 +599,27 @@ extension Monomorphizer {
                ) {
                 let innerResolved = resolveParameterizedType(inner)
                 if !context.containsGenericParameter(innerResolved) {
-                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                        methodInfo: ext,
-                        baseType: selfType,
-                        extensionTypeArgs: [innerResolved],
-                        providedMethodTypeArgs: methodTypeArgs,
-                        expectedMethodType: expectedMethodType
-                    )
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: "Ref",
-                        genericArgs: [innerResolved],
-                        methodTypeArgs: resolvedMethodTypeArgs,
-                        methodInfo: ext
-                    )
+                    do {
+                        let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                            methodInfo: ext,
+                            baseType: selfType,
+                            extensionTypeArgs: [innerResolved],
+                            providedMethodTypeArgs: methodTypeArgs,
+                            expectedMethodType: expectedMethodType
+                        )
+                        let instantiated = try instantiateExtensionMethodFromEntry(
+                            baseType: selfType,
+                            structureName: "Ref",
+                            genericArgs: [innerResolved],
+                            methodTypeArgs: resolvedMethodTypeArgs,
+                            methodInfo: ext
+                        )
+                        if methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) {
+                            return instantiated
+                        }
+                    } catch {
+                        throw error
+                    }
                 }
             }
             // Fall back to auto-deref: look up the method on the inner type
@@ -560,20 +639,27 @@ extension Monomorphizer {
                ) {
                 let innerResolved = resolveParameterizedType(inner)
                 if !context.containsGenericParameter(innerResolved) {
-                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                        methodInfo: ext,
-                        baseType: selfType,
-                        extensionTypeArgs: [innerResolved],
-                        providedMethodTypeArgs: methodTypeArgs,
-                        expectedMethodType: expectedMethodType
-                    )
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: "MutRef",
-                        genericArgs: [innerResolved],
-                        methodTypeArgs: resolvedMethodTypeArgs,
-                        methodInfo: ext
-                    )
+                    do {
+                        let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                            methodInfo: ext,
+                            baseType: selfType,
+                            extensionTypeArgs: [innerResolved],
+                            providedMethodTypeArgs: methodTypeArgs,
+                            expectedMethodType: expectedMethodType
+                        )
+                        let instantiated = try instantiateExtensionMethodFromEntry(
+                            baseType: selfType,
+                            structureName: "MutRef",
+                            genericArgs: [innerResolved],
+                            methodTypeArgs: resolvedMethodTypeArgs,
+                            methodInfo: ext
+                        )
+                        if methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) {
+                            return instantiated
+                        }
+                    } catch {
+                        throw error
+                    }
                 }
             }
             if let refExtensions = input.genericTemplates.extensionMethods["Ref"],
@@ -584,20 +670,27 @@ extension Monomorphizer {
                ) {
                 let innerResolved = resolveParameterizedType(inner)
                 if !context.containsGenericParameter(innerResolved) {
-                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                        methodInfo: ext,
-                        baseType: selfType,
-                        extensionTypeArgs: [innerResolved],
-                        providedMethodTypeArgs: methodTypeArgs,
-                        expectedMethodType: expectedMethodType
-                    )
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: "Ref",
-                        genericArgs: [innerResolved],
-                        methodTypeArgs: resolvedMethodTypeArgs,
-                        methodInfo: ext
-                    )
+                    do {
+                        let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                            methodInfo: ext,
+                            baseType: selfType,
+                            extensionTypeArgs: [innerResolved],
+                            providedMethodTypeArgs: methodTypeArgs,
+                            expectedMethodType: expectedMethodType
+                        )
+                        let instantiated = try instantiateExtensionMethodFromEntry(
+                            baseType: selfType,
+                            structureName: "Ref",
+                            genericArgs: [innerResolved],
+                            methodTypeArgs: resolvedMethodTypeArgs,
+                            methodInfo: ext
+                        )
+                        if methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) {
+                            return instantiated
+                        }
+                    } catch {
+                        throw error
+                    }
                 }
             }
             return try lookupConcreteMethodSymbol(
@@ -842,7 +935,7 @@ extension Monomorphizer {
                         kind: .function
                     )
                 }
-                return copySymbolPreservingDefId(entry.symbol)
+                return finalizeDirectMethodCandidate(entry.symbol, expectedMethodType: expectedMethodType)
             }
             // Try generic extension methods - use stored templateName if available
                 if let ext = selectExtensionTemplateForBase(
@@ -967,7 +1060,7 @@ extension Monomorphizer {
                         kind: .function
                     )
                 }
-                return copySymbolPreservingDefId(entry.symbol)
+                return finalizeDirectMethodCandidate(entry.symbol, expectedMethodType: expectedMethodType)
             }
             // Use stored templateName if available
                 if let ext = selectExtensionTemplateForBase(
@@ -1097,7 +1190,7 @@ extension Monomorphizer {
                         methodInfo: ext
                     )
                 }
-                return copySymbolPreservingDefId(entry.symbol)
+                return finalizeDirectMethodCandidate(entry.symbol, expectedMethodType: expectedMethodType)
             }
             // Check intrinsic extension methods for primitive types
                 if let extensions = input.genericTemplates.intrinsicExtensionMethods[typeName],

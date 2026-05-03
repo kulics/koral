@@ -169,6 +169,13 @@ Koral uses `ref` and `mut ref` as managed reference types. `T ref` is a read-onl
 - `.ref` on rvalues is rejected.
 - To create a managed reference from a temporary/literal, use `box(expr)`, which returns `T mut ref`.
 
+Receiver adjustment for methods and subscripts has one extra rule:
+
+- A call whose receiver is declared as `self ref` may use an rvalue receiver expression. The compiler materializes a stable temporary for the duration of that call.
+- This special case applies only to receiver adjustment. It does **not** make `expr.ref` on rvalues legal.
+- `self mut ref` still requires a writable lvalue receiver; rvalues are rejected.
+- Because `self ref` on rvalues may materialize temporaries, such calls can introduce hidden retain/allocation cost.
+
 ```koral
 let mut x = 10
 let rx Int mut ref = x.ref   // let mut → T mut ref
@@ -499,7 +506,7 @@ let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` and `mut ref` are Koral's managed reference types. `T ref` is read-only, `T mut ref` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `T mut ref`). Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` and `mut ref` are Koral's managed reference types. `T ref` is read-only, `T mut ref` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `T mut ref`). Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self mut ref` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators

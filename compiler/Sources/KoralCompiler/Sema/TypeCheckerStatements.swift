@@ -79,6 +79,10 @@ extension TypeChecker {
         // Pass expected type for implicit member expression support
         typedValue = try inferTypedExpression(value, expectedType: expectedType)
       }
+
+      if expectedType == nil, case .identifier("self") = value {
+        typedValue = autoDereferenceValueContext(typedValue)
+      }
       
       let type: Type
       if let expectedType = expectedType {

@@ -298,7 +298,7 @@ public class NameCollector: CompilerPass {
     ) throws {
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
-        
+
         // 检查重复定义
         if collectedTraits[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: span)
@@ -351,12 +351,12 @@ public class NameCollector: CompilerPass {
         
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
-        
-        // 检查重复定义（非私有类型，在同一模块中）
+
+        // 检查重复定义（非私有类型，在同一模块+文件中）
         if !isPrivate && collectedTypes[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: span)
         }
-        
+
         // 检查泛型模板重复
         if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: span)
@@ -424,12 +424,12 @@ public class NameCollector: CompilerPass {
         
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
-        
-        // 检查重复定义（非私有类型，在同一模块中）
+
+        // 检查重复定义（非私有类型，在同一模块+文件中）
         if !isPrivate && collectedTypes[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: span)
         }
-        
+
         // 检查泛型模板重复
         if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: span)
@@ -579,8 +579,11 @@ public class NameCollector: CompilerPass {
             throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
         }
         
+        // 生成完整限定名用于重复检查
+        let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
+
         // 检查重复定义
-        if collectedTypes[name] != nil || collectedGenericTemplates[name] != nil {
+        if collectedTypes[qualifiedName] != nil || collectedGenericTemplates[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: span)
         }
         
@@ -604,7 +607,7 @@ public class NameCollector: CompilerPass {
 
         // 收集类型信息
         if !typeParameters.isEmpty {
-            collectedGenericTemplates[name] = CollectedGenericTemplateInfo(
+            collectedGenericTemplates[qualifiedName] = CollectedGenericTemplateInfo(
                 defId: defId,
                 name: name,
                 kind: .structure,
@@ -612,7 +615,7 @@ public class NameCollector: CompilerPass {
                 access: .protected
             )
         } else {
-            collectedTypes[name] = CollectedTypeInfo(
+            collectedTypes[qualifiedName] = CollectedTypeInfo(
                 defId: defId,
                 name: name,
                 kind: .structure,
@@ -637,6 +640,7 @@ public class NameCollector: CompilerPass {
         isStdLib: Bool
     ) throws {
         let isPrivate = (access == .private)
+        // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
         if !isPrivate && collectedTypes[qualifiedName] != nil {
@@ -683,7 +687,7 @@ public class NameCollector: CompilerPass {
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
-        // 检查重复定义（非私有类型，在同一模块中）
+        // 检查重复定义（非私有类型，在同一模块+文件中）
         if !isPrivate && (collectedTypes[qualifiedName] != nil || collectedGenericTemplates[qualifiedName] != nil) {
             throw SemanticError.duplicateDefinition(name, span: span)
         }

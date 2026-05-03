@@ -354,8 +354,28 @@ extension TypeChecker {
     return mutable ? canTakeMutableReference(to: expr) : true
   }
 
+  func implicitReferenceInnerMatches(_ expectedInner: Type, actualType: Type) -> Bool {
+    if expectedInner == actualType || expectedInner.canonical == actualType.canonical {
+      return true
+    }
+
+    switch (expectedInner, actualType) {
+    case (.genericStruct(let templateName, let typeArgs), .structure(let defId)),
+         (.structure(let defId), .genericStruct(let templateName, let typeArgs)):
+      return context.getTemplateName(defId) == templateName
+        && context.getTypeArguments(defId) == typeArgs
+    case (.genericEnum(let templateName, let typeArgs), .`enum`(let defId)),
+         (.`enum`(let defId), .genericEnum(let templateName, let typeArgs)):
+      return context.getTemplateName(defId) == templateName
+        && context.getTypeArguments(defId) == typeArgs
+    default:
+      return false
+    }
+  }
+
   func makeImplicitReference(_ expr: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode? {
-    guard let (inner, mutable) = referenceTypeComponents(expectedType), inner == expr.type else {
+    guard let (inner, mutable) = referenceTypeComponents(expectedType),
+      implicitReferenceInnerMatches(inner, actualType: expr.type) else {
       return nil
     }
     guard expr.valueCategory == .lvalue else {
@@ -369,14 +389,68 @@ extension TypeChecker {
     return .referenceExpression(expression: expr, type: expectedType)
   }
 
+  func prepareReceiverBase(
+    _ base: TypedExpressionNode,
+    expectedType: Type,
+    methodName: String
+  ) throws -> (base: TypedExpressionNode, binding: (symbol: Symbol, value: TypedExpressionNode)?) {
+    guard base.valueCategory == .rvalue else {
+      return (base, nil)
+    }
+
+    switch expectedType {
+    case .reference(let inner) where implicitReferenceInnerMatches(inner, actualType: base.type):
+      let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
+      return (
+        .variable(identifier: tempSymbol),
+        (symbol: tempSymbol, value: base)
+      )
+    case .mutableReference(let inner) where implicitReferenceInnerMatches(inner, actualType: base.type):
+      throw SemanticError(
+        .generic("Cannot call 'self mut ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"),
+        span: currentSpan
+      )
+    default:
+      return (base, nil)
+    }
+  }
+
+  func wrapReceiverMaterialization(
+    _ binding: (symbol: Symbol, value: TypedExpressionNode)?,
+    body: TypedExpressionNode,
+    type: Type
+  ) -> TypedExpressionNode {
+    guard let binding else {
+      return body
+    }
+
+    return .makeLetBlock(
+      identifier: binding.symbol,
+      value: binding.value,
+      body: body,
+      type: type
+    )
+  }
+
   func makeImplicitDereference(_ expr: TypedExpressionNode, expectedType: Type) -> TypedExpressionNode? {
     switch expr.type {
-    case .reference(let inner) where inner == expectedType:
+    case .reference(let inner) where implicitReferenceInnerMatches(inner, actualType: expectedType):
       return .derefExpression(expression: expr, type: inner)
-    case .mutableReference(let inner) where inner == expectedType:
+    case .mutableReference(let inner) where implicitReferenceInnerMatches(inner, actualType: expectedType):
       return .derefExpression(expression: expr, type: inner)
     default:
       return nil
+    }
+  }
+
+  func autoDereferenceValueContext(_ expr: TypedExpressionNode) -> TypedExpressionNode {
+    switch expr.type {
+    case .reference(let inner):
+      return .derefExpression(expression: expr, type: inner)
+    case .mutableReference(let inner):
+      return .derefExpression(expression: expr, type: inner)
+    default:
+      return expr
     }
   }
 
@@ -388,14 +462,59 @@ extension TypeChecker {
   func canWidenMutableReference(_ expr: TypedExpressionNode, expectedType: Type) -> Bool {
     switch (expr.type, expectedType) {
     case (.mutableReference(let fromInner), .reference(let toInner)):
-      return fromInner == toInner
+      return implicitReferenceInnerMatches(fromInner, actualType: toInner)
     case (.mutablePointer(let fromElem), .pointer(let toElem)):
-      return fromElem == toElem
+      return implicitReferenceInnerMatches(fromElem, actualType: toElem)
     case (.mutableWeakReference(let fromInner), .weakReference(let toInner)):
-      return fromInner == toInner
+      return implicitReferenceInnerMatches(fromInner, actualType: toInner)
     default:
       return false
     }
+  }
+
+  func inferArgumentExpression(
+    _ arg: ExpressionNode,
+    expectedType: Type
+  ) throws -> TypedExpressionNode {
+    var typedArg: TypedExpressionNode
+    if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
+      typedArg = try inferLambdaExpression(
+        parameters: lambdaParams,
+        returnType: returnType,
+        body: body,
+        expectedType: expectedType
+      )
+    } else if case .rangeExpression(let op, let left, let right) = arg {
+      typedArg = try inferRangeExpression(
+        operator: op,
+        left: left,
+        right: right,
+        expectedType: expectedType
+      )
+    } else {
+      typedArg = try inferTypedExpression(arg, expectedType: expectedType)
+    }
+
+    typedArg = try coerceLiteral(typedArg, to: expectedType)
+    if typedArg.type == .never {
+      return typedArg
+    }
+    if typedArg.type != expectedType {
+      if let implicitRef = try makeImplicitReference(typedArg, expectedType: expectedType) {
+        typedArg = implicitRef
+      } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: expectedType) {
+        typedArg = implicitDeref
+      } else if canWidenMutableReference(typedArg, expectedType: expectedType) {
+        return typedArg
+      } else {
+        throw SemanticError.typeMismatch(
+          expected: expectedType.description,
+          got: typedArg.type.description
+        )
+      }
+    }
+
+    return typedArg
   }
 
   private func tryOptimizeLiteralCast(
@@ -466,6 +585,12 @@ extension TypeChecker {
 
     var typedThen = thenBranch
     var resultType: Type
+    if let implicitDeref = makeImplicitDereference(typedThen, expectedType: typedElse.type) {
+      typedThen = implicitDeref
+    }
+    if let implicitDeref = makeImplicitDereference(typedElse, expectedType: typedThen.type) {
+      typedElse = implicitDeref
+    }
     if typedThen.type == typedElse.type {
       resultType = typedThen.type
     } else if typedThen.type == .never {
@@ -892,7 +1017,7 @@ extension TypeChecker {
         return optimized
       }
 
-      let typedInner = try inferTypedExpression(innerExpr)
+      let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
 
       if !isValidExplicitCast(from: typedInner.type, to: targetType) {
         throw SemanticError.invalidOperation(
@@ -1029,9 +1154,11 @@ extension TypeChecker {
       if currentScope.isMoved(name) {
         throw SemanticError.variableMoved(name)
       }
-      guard let info = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) else {
+      guard let resolvedInfo = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) else {
         throw SemanticError.undefinedVariable(name)
       }
+
+      let info = resolvedInfo
 
       let hasLocal = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
       
@@ -1055,7 +1182,8 @@ extension TypeChecker {
       }
       
       let fallbackDefKind: DefKind = (!hasLocal && currentScope.isFunction(name, sourceFile: currentSourceFile)) ? .function : .variable
-      let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? defIdMap.allocate(
+      let defId = currentScope.lookup(name, sourceFile: currentSourceFile)
+        ?? defIdMap.allocate(
         modulePath: symbolModulePath,
         name: name,
         kind: fallbackDefKind,
@@ -1128,8 +1256,8 @@ extension TypeChecker {
       }
 
     case .arithmeticExpression(let left, let op, let right):
-      var typedLeft = try inferTypedExpression(left)
-      var typedRight = try inferTypedExpression(right)
+      var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
+      var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
 
       // Allow numeric literals to coerce to the other operand type only for numeric ops.
       let leftIsNumeric = isIntegerType(typedLeft.type) || isFloatType(typedLeft.type)
@@ -1144,8 +1272,8 @@ extension TypeChecker {
       return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight)
 
     case .comparisonExpression(let left, let op, let right):
-      var typedLeft = try inferTypedExpression(left)
-      var typedRight = try inferTypedExpression(right)
+      var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
+      var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
 
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
@@ -1243,7 +1371,7 @@ extension TypeChecker {
         return lowered
       }
 
-      let typedCondition = try inferTypedExpression(condition)
+      let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
       if typedCondition.type != .bool {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
@@ -1268,7 +1396,7 @@ extension TypeChecker {
         return lowered
       }
 
-      let typedCondition = try inferTypedExpression(condition)
+      let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
       if typedCondition.type != .bool {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
@@ -1304,7 +1432,7 @@ extension TypeChecker {
       return .orExpression(left: typedLeft, right: typedRight, type: .bool)
 
     case .unaryMinusExpression(let expr):
-      let typedExpr = try inferTypedExpression(expr)
+      let typedExpr = autoDereferenceValueContext(try inferTypedExpression(expr))
       if isIntegerType(typedExpr.type) {
         let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
         return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
@@ -1325,15 +1453,15 @@ extension TypeChecker {
       throw SemanticError.undefinedMember("neg", typedExpr.type.description)
 
     case .notExpression(let expr):
-      let typedExpr = try inferTypedExpression(expr)
+      let typedExpr = autoDereferenceValueContext(try inferTypedExpression(expr))
       if typedExpr.type != .bool {
         throw SemanticError.typeMismatch(expected: "Bool", got: typedExpr.type.description)
       }
       return .notExpression(expression: typedExpr, type: .bool)
 
     case .bitwiseExpression(let left, let op, let right):
-      var typedLeft = try inferTypedExpression(left)
-      var typedRight = try inferTypedExpression(right)
+      var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
+      var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
 
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
@@ -1402,7 +1530,8 @@ extension TypeChecker {
         }
         throw SemanticError(.generic("cannot take ref of temporary value"))
       }
-      if let innerExpected, typedInner.type != innerExpected {
+      if let innerExpected,
+         !implicitReferenceInnerMatches(innerExpected, actualType: typedInner.type) {
         throw SemanticError.typeMismatch(expected: innerExpected.description, got: typedInner.type.description)
       }
       let shouldProduceMutable = canTakeMutableReference(to: typedInner)
@@ -3288,14 +3417,16 @@ extension TypeChecker {
       }
       
       // Adjust base to match expected self parameter type
+      let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?
       var adjustedBase = base
+      if let firstParam = params.first {
+        let prepared = try prepareReceiverBase(adjustedBase, expectedType: firstParam.type, methodName: methodName)
+        adjustedBase = prepared.base
+        materializedReceiver = prepared.binding
+      } else {
+        materializedReceiver = nil
+      }
       if let firstParam = params.first, adjustedBase.type != firstParam.type {
-        if adjustedBase.valueCategory == .rvalue,
-           let (inner, mutable) = referenceTypeComponents(firstParam.type),
-           inner == adjustedBase.type {
-          let receiverKind = mutable ? "self mut ref" : "self ref"
-          throw SemanticError(.generic("Cannot call '\(receiverKind)' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
-        }
         if let implicitRef = try makeImplicitReference(adjustedBase, expectedType: firstParam.type) {
           adjustedBase = implicitRef
         } else if let implicitDeref = makeImplicitDereference(adjustedBase, expectedType: firstParam.type) {
@@ -3347,11 +3478,12 @@ extension TypeChecker {
         methodTypeArgs: methodTypeArgs,
         type: methodType
       )
-      return .call(
+      let call: TypedExpressionNode = .call(
         callee: adjustedCallee,
         arguments: typedArguments,
         type: returns
       )
+      return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
     }
 
     // Function call
@@ -3646,12 +3778,19 @@ extension TypeChecker {
         return .intrinsicCall(.refCount(val: val))
       }
       if base == "ref_is_borrow" {
-        _ = try args.map { try resolveTypeNode($0) }
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
         guard arguments.count == 1 else {
           throw SemanticError.invalidArgumentCount(
             function: base, expected: 1, got: arguments.count)
         }
-        let val = try inferTypedExpression(arguments[0])
+        let val = try inferArgumentExpression(
+          arguments[0],
+          expectedType: .reference(inner: resolvedArgs[0])
+        )
         return .intrinsicCall(.refIsBorrow(val: val))
       }
 
@@ -3664,7 +3803,10 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(function: base, expected: 2, got: arguments.count)
         }
         let ptr = try inferTypedExpression(arguments[0])
-        let owner = try inferTypedExpression(arguments[1])
+        let owner = try inferArgumentExpression(
+          arguments[1],
+          expectedType: .reference(inner: resolvedArgs[1])
+        )
         let elementType: Type
         switch ptr.type {
         case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
@@ -3690,7 +3832,10 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(function: base, expected: 2, got: arguments.count)
         }
         let ptr = try inferTypedExpression(arguments[0])
-        let owner = try inferTypedExpression(arguments[1])
+        let owner = try inferArgumentExpression(
+          arguments[1],
+          expectedType: .mutableReference(inner: resolvedArgs[1])
+        )
         guard case .mutablePointer(let elementType) = ptr.type else {
           throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) mut ptr", got: ptr.type.description)
         }
@@ -3877,14 +4022,8 @@ extension TypeChecker {
     }
     var finalTypedArguments: [TypedExpressionNode] = []
     for (argExpr, expectedType) in zip(arguments, resolvedParams) {
-      var typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
-      typedArg = try coerceLiteral(typedArg, to: expectedType)
-      let coerced = typedArg
-      if coerced.type != .never && coerced.type != expectedType {
-        throw SemanticError.typeMismatch(
-          expected: expectedType.description, got: coerced.type.description)
-      }
-      finalTypedArguments.append(coerced)
+      let typedArg = try inferArgumentExpression(argExpr, expectedType: expectedType)
+      finalTypedArguments.append(typedArg)
     }
     typedArguments = finalTypedArguments
 
@@ -4036,42 +4175,37 @@ extension TypeChecker {
         )
       }
 
-      // Check base type against first param
-      // 禁止对 rvalue 调用 self ref 方法
-      if let firstParam = params.first,
-         let (inner, mutable) = referenceTypeComponents(firstParam.type),
-         inner == base.type,
-         base.valueCategory == .rvalue {
-        let methodName = context.getName(method.defId) ?? "<unknown>"
-        let receiverKind = mutable ? "self mut ref" : "self ref"
-        throw SemanticError(.generic("Cannot call '\(receiverKind)' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
-      }
-      
+      let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?
       var finalBase = base
       if let firstParam = params.first {
-        if base.type != firstParam.type {
+        let prepared = try prepareReceiverBase(finalBase, expectedType: firstParam.type, methodName: methodName)
+        finalBase = prepared.base
+        materializedReceiver = prepared.binding
+        if finalBase.type != firstParam.type {
           // Allow passing mutable refs to readonly ref receivers.
-          let coercedBase = try coerceLiteral(base, to: firstParam.type)
+          let coercedBase = try coerceLiteral(finalBase, to: firstParam.type)
           if coercedBase.type == firstParam.type {
             finalBase = coercedBase
           }
           else
           // 尝试自动取引用：期望 T ref，实际是 T
-          if let implicitRef = try makeImplicitReference(base, expectedType: firstParam.type) {
+          if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
             finalBase = implicitRef
-          } else if let implicitDeref = makeImplicitDereference(base, expectedType: firstParam.type) {
+          } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
             // 尝试自动解引用：期望 T，实际是 T ref
             // Only safe for Copy types (otherwise this would implicitly move).
             finalBase = implicitDeref
-          } else if canWidenMutableReference(base, expectedType: firstParam.type) {
+          } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
             // mut ref → ref widening: pass through unchanged
           } else {
             throw SemanticError.typeMismatch(
               expected: firstParam.type.description,
-              got: base.type.description
+              got: finalBase.type.description
             )
           }
         }
+      } else {
+        materializedReceiver = nil
       }
 
       // Check if method has unresolved type parameters (method-level generics)
@@ -4256,7 +4390,8 @@ extension TypeChecker {
       let finalCallee: TypedExpressionNode = .methodReference(
         base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: methodType)
 
-      return .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
+      let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
+      return wrapReceiverMaterialization(materializedReceiver, body: call, type: finalReturns)
     }
     
     throw SemanticError.invalidOperation(
@@ -4339,29 +4474,28 @@ extension TypeChecker {
     }
     
     // Handle self parameter
+    let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?
     var finalBase = typedBase
     if let firstParam = params.first {
-      if typedBase.type != firstParam.type {
-        if typedBase.valueCategory == .rvalue,
-           let (inner, mutable) = referenceTypeComponents(firstParam.type),
-           inner == typedBase.type {
-          let methodName = context.getName(methodResult.methodSymbol.defId) ?? "<unknown>"
-          let receiverKind = mutable ? "self mut ref" : "self ref"
-          throw SemanticError(.generic("Cannot call '\(receiverKind)' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
-        }
-        if let implicitRef = try makeImplicitReference(typedBase, expectedType: firstParam.type) {
+      let prepared = try prepareReceiverBase(finalBase, expectedType: firstParam.type, methodName: methodName)
+      finalBase = prepared.base
+      materializedReceiver = prepared.binding
+      if finalBase.type != firstParam.type {
+        if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedBase, expectedType: firstParam.type) {
+        } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
-        } else if canWidenMutableReference(typedBase, expectedType: firstParam.type) {
+        } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
           // mut ref → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
-            got: typedBase.type.description
+            got: finalBase.type.description
           )
         }
       }
+    } else {
+      materializedReceiver = nil
     }
     
     // Type check arguments
@@ -4424,7 +4558,8 @@ extension TypeChecker {
       )
     }
     
-    return .call(callee: finalCallee, arguments: typedArguments, type: returns)
+    let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: returns)
+    return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
   }
 }
 
@@ -4618,13 +4753,7 @@ extension TypeChecker {
     // infer base
     let inferredBase = try inferTypedExpression(baseExpr)
 
-    // access member optimization: peel auto-deref to access ref directly
-    let typedBase: TypedExpressionNode
-    if case .derefExpression(let inner, _) = inferredBase {
-      typedBase = inner
-    } else {
-      typedBase = inferredBase
-    }
+    let typedBase = inferredBase
 
     var currentType: Type = typedBase.type
     var typedPath: [Symbol] = []
@@ -5200,7 +5329,7 @@ extension TypeChecker {
         } else {
           base = .memberPath(source: typedBase, path: typedPath)
         }
-        return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: expectedType)
+        return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
       }
     }
     
@@ -5327,13 +5456,6 @@ extension TypeChecker {
        ) {
       effectiveTypeArgs = inferred
     }
-
-    guard template.typeParameters.count == effectiveTypeArgs.count else {
-      throw SemanticError.typeMismatch(
-        expected: "\(template.typeParameters.count) generic arguments",
-        got: "\(effectiveTypeArgs.count)"
-      )
-    }
     
     try enforceGenericConstraints(typeParameters: template.typeParameters, args: effectiveTypeArgs)
     
@@ -5369,14 +5491,7 @@ extension TypeChecker {
           
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params) {
-            var typedArg = try inferTypedExpression(arg)
-            typedArg = try coerceLiteral(typedArg, to: param.type)
-            if typedArg.type != param.type {
-              throw SemanticError.typeMismatch(
-                expected: param.type.description,
-                got: typedArg.type.description
-              )
-            }
+            let typedArg = try inferArgumentExpression(arg, expectedType: param.type)
             typedArguments.append(typedArg)
           }
           
@@ -5454,14 +5569,7 @@ extension TypeChecker {
           
           var typedArguments: [TypedExpressionNode] = []
           for (arg, param) in zip(arguments, params) {
-            var typedArg = try inferTypedExpression(arg)
-            typedArg = try coerceLiteral(typedArg, to: param.type)
-            if typedArg.type != param.type {
-              throw SemanticError.typeMismatch(
-                expected: param.type.description,
-                got: typedArg.type.description
-              )
-            }
+            let typedArg = try inferArgumentExpression(arg, expectedType: param.type)
             typedArguments.append(typedArg)
           }
           
@@ -5673,14 +5781,7 @@ extension TypeChecker {
       
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
-        var typedArg = try inferTypedExpression(arg)
-        typedArg = try coerceLiteral(typedArg, to: param.type)
-        if typedArg.type != param.type {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
+        let typedArg = try inferArgumentExpression(arg, expectedType: param.type)
         typedArguments.append(typedArg)
       }
       
@@ -6381,31 +6482,29 @@ extension TypeChecker {
     }
 
     // Handle self parameter
+    let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?
     var finalBase = base
     if let firstParam = params.first {
-      if let (inner, mutable) = referenceTypeComponents(firstParam.type),
-         inner == base.type,
-         base.valueCategory == .rvalue {
-        // 禁止对 rvalue 调用 self ref 方法
-        let methodName = context.getName(method.defId) ?? "<unknown>"
-        let receiverKind = mutable ? "self mut ref" : "self ref"
-        throw SemanticError(.generic("Cannot call '\(receiverKind)' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"), span: currentSpan)
-      }
-
-      if base.type != firstParam.type {
-        if let implicitRef = try makeImplicitReference(base, expectedType: firstParam.type) {
+      let methodName = context.getName(method.defId) ?? "<unknown>"
+      let prepared = try prepareReceiverBase(finalBase, expectedType: firstParam.type, methodName: methodName)
+      finalBase = prepared.base
+      materializedReceiver = prepared.binding
+      if finalBase.type != firstParam.type {
+        if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(base, expectedType: firstParam.type) {
+        } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
-        } else if canWidenMutableReference(base, expectedType: firstParam.type) {
+        } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
           // mut ref → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
-            got: base.type.description
+            got: finalBase.type.description
           )
         }
       }
+    } else {
+      materializedReceiver = nil
     }
 
     var typedArguments: [TypedExpressionNode] = []
@@ -6432,7 +6531,8 @@ extension TypeChecker {
     let callee: TypedExpressionNode = .methodReference(
       base: finalBase, method: method, typeArgs: nil, methodTypeArgs: nil, type: method.type
     )
-    return .call(callee: callee, arguments: typedArguments, type: returns)
+    let call: TypedExpressionNode = .call(callee: callee, arguments: typedArguments, type: returns)
+    return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
   }
   
   /// Resolves an lvalue expression for assignment

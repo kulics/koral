@@ -1152,7 +1152,9 @@ public class TypeChecker {
   ) throws -> (TypedExpressionNode, Type) {
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType
-    defer { currentFunctionReturnType = previousReturnType }
+    defer {
+      currentFunctionReturnType = previousReturnType
+    }
 
     return try withNewScope {
       // Add parameters to new scope
@@ -1163,6 +1165,10 @@ public class TypeChecker {
       }
 
       var typedBody = try inferTypedExpression(body, expectedType: returnType)
+      if typedBody.type != returnType,
+         let implicitDeref = makeImplicitDereference(typedBody, expectedType: returnType) {
+        typedBody = implicitDeref
+      }
       typedBody = try coerceLiteral(typedBody, to: returnType)
       if typedBody.type != .never && typedBody.type != returnType {
         throw SemanticError.typeMismatch(
