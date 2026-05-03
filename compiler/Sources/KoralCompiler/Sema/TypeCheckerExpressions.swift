@@ -7052,7 +7052,7 @@ extension TypeChecker {
     }
     
     // 2. First check if the expression type itself is an iterator
-    //    (has a next(self ref) [T]Option method)
+    //    (has a next(self mut ref) [T]Option method)
     if let elementType = try? extractIteratorElementType(iterableType) {
       try enforceGenericTraitConformance(
         iterableType,
@@ -7116,7 +7116,7 @@ extension TypeChecker {
   }
 
   /// Extracts the element type T from an iterator type.
-  /// The iterator must have a next(self ref) [T]Option method.
+  /// The iterator must have a next(self mut ref) [T]Option method.
   private func extractIteratorElementType(_ iteratorType: Type) throws -> Type {
     // Look up the next method on the iterator type
     guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
