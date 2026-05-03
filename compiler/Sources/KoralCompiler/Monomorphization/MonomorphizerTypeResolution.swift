@@ -11,7 +11,48 @@ import Foundation
 extension Monomorphizer {
 
     internal func predeclareGivenMethodRemaps(in nodes: [TypedGlobalNode]) {}
-    
+
+    private func methodHasCompatibleRefLikeReceiver(_ methodType: Type, baseType: Type) -> Bool {
+        guard case .function(let params, _) = methodType,
+              let firstParam = params.first else {
+            return false
+        }
+        switch (firstParam.type, baseType) {
+        case (.reference(let lhs), .reference(let rhs)),
+             (.reference(let lhs), .mutableReference(let rhs)),
+             (.mutableReference(let lhs), .mutableReference(let rhs)),
+             (.weakReference(let lhs), .weakReference(let rhs)),
+             (.weakReference(let lhs), .mutableWeakReference(let rhs)),
+             (.mutableWeakReference(let lhs), .mutableWeakReference(let rhs)):
+            return lhs == rhs
+        default:
+            return false
+        }
+    }
+
+    private func shouldPreserveResolvedMethodReference(_ method: Symbol, baseType: Type) -> Bool {
+        let resolvedMethodType = resolveParameterizedType(method.type)
+        guard methodHasCompatibleRefLikeReceiver(resolvedMethodType, baseType: baseType) else {
+            return false
+        }
+        guard !context.containsGenericParameter(resolvedMethodType),
+              let dispatchInfo = receiverMethodDispatch[method.defId] else {
+            return false
+        }
+
+        let preservesRefWrapperDispatch: Bool
+        switch dispatchInfo.owner {
+        case .extensionTemplate(let ownerName)?:
+            preservesRefWrapperDispatch = ["Ref", "MutRef", "WeakRef", "MutWeakRef"].contains(ownerName)
+        case .concreteType(let typeName)?:
+            preservesRefWrapperDispatch = ["Ref", "MutRef", "WeakRef", "MutWeakRef"].contains(typeName)
+        default:
+            preservesRefWrapperDispatch = false
+        }
+
+        return preservesRefWrapperDispatch
+    }
+
     // MARK: - Type Node Resolution
     
     /// Resolves a TypeNode to a concrete Type using the given substitution map.
@@ -274,17 +315,17 @@ extension Monomorphizer {
             return .reference(inner: resolveParameterizedType(inner, visited: visited))
         case .mutableReference(let inner):
             return .mutableReference(inner: resolveParameterizedType(inner, visited: visited))
-            
+
         case .weakReference(let inner):
             return .weakReference(inner: resolveParameterizedType(inner, visited: visited))
         case .mutableWeakReference(let inner):
             return .mutableWeakReference(inner: resolveParameterizedType(inner, visited: visited))
-            
+
         case .pointer(let element):
             return .pointer(element: resolveParameterizedType(element, visited: visited))
         case .mutablePointer(let element):
             return .mutablePointer(element: resolveParameterizedType(element, visited: visited))
-            
+
         case .function(let params, let returns):
             let newParams = params.map { param in
                 Parameter(
@@ -292,9 +333,10 @@ extension Monomorphizer {
                     kind: param.kind
                 )
             }
+            let newReturns = resolveParameterizedType(returns, visited: visited)
             return .function(
                 parameters: newParams,
-                returns: resolveParameterizedType(returns, visited: visited)
+                returns: newReturns
             )
             
         case .structure(let defId):
@@ -522,7 +564,27 @@ extension Monomorphizer {
 // MARK: - Expression Type Resolution Extension
 
 extension Monomorphizer {
-    
+    private func methodLookupBaseType(for base: TypedExpressionNode) -> Type {
+        if case .variable = base {
+            return base.type
+        }
+        if case .referenceExpression(let inner, _) = base {
+            switch inner {
+            case .variable:
+                return base.type
+            default:
+                return inner.type
+            }
+        }
+        if case .reference(let inner) = base.type {
+            return inner
+        }
+        if case .mutableReference(let inner) = base.type {
+            return inner
+        }
+        return base.type
+    }
+
     /// Resolves all genericStruct/genericEnum types in an expression.
     internal func resolveTypesInExpression(_ expr: TypedExpressionNode) -> TypedExpressionNode {
         switch expr {
@@ -764,24 +826,25 @@ extension Monomorphizer {
             if case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, _) = newCallee,
                extractTraitObjectType(base.type) == nil,
                !context.containsGenericParameter(base.type) {
+                let lookupBaseType = methodLookupBaseType(for: base)
                 let expectedCallType = Type.function(
-                    parameters: [Parameter(type: base.type, kind: .byVal)]
+                    parameters: [Parameter(type: lookupBaseType, kind: .byVal)]
                         + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
                     returns: newType
                 )
                 if let concreteMethod = try? lookupConcreteMethodSymbol(
-                    on: base.type,
+                    on: lookupBaseType,
                     name: methodName,
                     methodTypeArgs: methodTypeArgs,
                     expectedMethodType: expectedCallType
                 ) {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                     newCallee = .methodReference(
-                        base: base,
+                        base: alignMethodReferenceBase(base, to: resolvedMethodType),
                         method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
                         typeArgs: nil,
                         methodTypeArgs: methodTypeArgs,
-                        type: newType
+                        type: resolvedMethodType
                     )
                 } else {
                     newCallee = .traitMethodPlaceholder(
@@ -888,39 +951,43 @@ extension Monomorphizer {
                     resolvedMethodTypeArgs.contains(where: { context.containsGenericParameter($0) })
                     ? []
                     : resolvedMethodTypeArgs
-                let expectedCallTypeWithReceiver = Type.function(
-                    parameters: [Parameter(type: base.type, kind: .byVal)]
-                        + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
-                let expectedCallTypeWithoutReceiver = Type.function(
-                    parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
-
-                let concreteMethod =
-                    (try? lookupConcreteMethodSymbol(
-                        on: base.type,
-                        method: method,
-                        methodTypeArgs: methodTypeArgsForLookup,
-                        expectedMethodType: expectedCallTypeWithReceiver
-                    ))
-                    ?? (try? lookupConcreteMethodSymbol(
-                        on: base.type,
-                        method: method,
-                        methodTypeArgs: methodTypeArgsForLookup,
-                        expectedMethodType: expectedCallTypeWithoutReceiver
-                    ))
-
-                if let concreteMethod {
-                    let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                    newCallee = .methodReference(
-                        base: base,
-                        method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
-                        typeArgs: typeArgs,
-                        methodTypeArgs: methodTypeArgsForLookup,
-                        type: newType
+                if !shouldPreserveResolvedMethodReference(method, baseType: base.type) {
+                    let expectedMethodType = resolveParameterizedType(method.type)
+                    let expectedCallTypeWithReceiver = Type.function(
+                        parameters: [Parameter(type: base.type, kind: .byVal)]
+                            + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                        returns: newType
                     )
+                    let expectedCallTypeWithoutReceiver = Type.function(
+                        parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                        returns: newType
+                    )
+
+                    let preferredExpectedTypes: [Type] =
+                        methodTypeArgsForLookup.isEmpty && context.containsGenericParameter(expectedMethodType)
+                        ? [expectedCallTypeWithReceiver, expectedMethodType, expectedCallTypeWithoutReceiver]
+                        : [expectedMethodType, expectedCallTypeWithReceiver, expectedCallTypeWithoutReceiver]
+
+                    let concreteMethod = preferredExpectedTypes.compactMap {
+                        try? lookupConcreteMethodSymbol(
+                            on: base.type,
+                            method: method,
+                            methodTypeArgs: methodTypeArgsForLookup,
+                            expectedMethodType: $0
+                        )
+                    }.first ?? nil
+
+                    if let concreteMethod {
+                        let resolvedConcreteMethodType = resolveParameterizedType(concreteMethod.type)
+                        let adjustedBase = alignMethodReferenceBase(base, to: resolvedConcreteMethodType)
+                        newCallee = .methodReference(
+                            base: adjustedBase,
+                            method: copySymbolWithNewDefId(concreteMethod, newType: resolvedConcreteMethodType),
+                            typeArgs: typeArgs,
+                            methodTypeArgs: methodTypeArgsForLookup,
+                            type: resolvedConcreteMethodType
+                        )
+                    }
                 }
             }
 
@@ -982,7 +1049,7 @@ extension Monomorphizer {
                 type: newType
             )
             
-        case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, let type):
+        case .methodReference(let base, let method, let typeArgs, let methodTypeArgs, _):
             let newBase = resolveTypesInExpression(base)
             var newMethod = copySymbolWithNewDefId(
                 method,
@@ -997,56 +1064,55 @@ extension Monomorphizer {
                 }
                 return []
             }()
-            
-            // Track the resolved return type (will be updated if we find a concrete method)
-            var resolvedReturnType = resolveParameterizedType(type)
+            var adjustedBase = newBase
+            var resolvedExpressionType = resolveParameterizedType(method.type)
             let methodTypeArgsToPass = effectiveMethodTypeArgs
 
             // Resolve method reference to a concrete symbol (DefId + specialized type)
-            if !context.containsGenericParameter(newBase.type) {
-                // Look up the concrete method on the resolved base type
-                // Pass method type args for generic methods
-                if let concreteMethod = try? lookupConcreteMethodSymbol(
-                    on: newBase.type,
-                    method: method,
-                    methodTypeArgs: methodTypeArgsToPass,
-                    expectedMethodType: resolveParameterizedType(type)
-                ) {
-                    // Resolve any parameterized types in the method type
-                    let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                    newMethod = copySymbolWithNewDefId(
-                        concreteMethod,
-                        newType: resolvedMethodType
-                    )
-                    // Extract the return type from the concrete method's function type
-                    if case .function(_, let returns) = resolvedMethodType {
-                        resolvedReturnType = returns
-                    }
+            if !context.containsGenericParameter(adjustedBase.type) {
+                let resolvedMethodType = resolveParameterizedType(method.type)
+                resolvedExpressionType = resolvedMethodType
+                if shouldPreserveResolvedMethodReference(method, baseType: adjustedBase.type) {
+                    newMethod = copySymbolWithNewDefId(method, newType: resolvedMethodType)
                 } else {
-                    if let logicalMethodName = receiverMethodDispatch[method.defId]?.methodName,
-                       let concreteMethod = lookupInstantiatedExtensionMethodSymbol(
-                        baseType: newBase.type,
-                        methodName: logicalMethodName,
-                        expectedMethodType: resolveParameterizedType(type)
-                       ) {
-                            let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                            newMethod = copySymbolWithNewDefId(
-                                concreteMethod,
-                                newType: resolvedMethodType
-                            )
-                            if case .function(_, let returns) = resolvedMethodType {
-                                resolvedReturnType = returns
+                    if let concreteMethod = try? lookupConcreteMethodSymbol(
+                        on: adjustedBase.type,
+                        method: method,
+                        methodTypeArgs: methodTypeArgsToPass,
+                        expectedMethodType: resolvedMethodType
+                    ) {
+                        let resolvedConcreteMethodType = resolveParameterizedType(concreteMethod.type)
+                        adjustedBase = alignMethodReferenceBase(adjustedBase, to: resolvedConcreteMethodType)
+                        newMethod = copySymbolWithNewDefId(
+                            concreteMethod,
+                            newType: resolvedConcreteMethodType
+                        )
+                        resolvedExpressionType = resolvedConcreteMethodType
+                    } else {
+                        if let logicalMethodName = receiverMethodDispatch[method.defId]?.methodName,
+                           let concreteMethod = lookupInstantiatedExtensionMethodSymbol(
+                            baseType: adjustedBase.type,
+                            methodName: logicalMethodName,
+                            expectedMethodType: resolvedMethodType
+                           ) {
+                                let resolvedConcreteMethodType = resolveParameterizedType(concreteMethod.type)
+                                adjustedBase = alignMethodReferenceBase(adjustedBase, to: resolvedConcreteMethodType)
+                                newMethod = copySymbolWithNewDefId(
+                                    concreteMethod,
+                                    newType: resolvedConcreteMethodType
+                                )
+                                resolvedExpressionType = resolvedConcreteMethodType
                             }
-                        }
+                    }
                 }
             }
             
             return .methodReference(
-                base: newBase,
+                base: adjustedBase,
                 method: newMethod,
                 typeArgs: resolvedTypeArgs,
                 methodTypeArgs: methodTypeArgsToPass,
-                type: resolvedReturnType
+                type: resolvedExpressionType
             )
             
         case .traitMethodPlaceholder(let traitName, let methodName, let base, let methodTypeArgs, let type):
@@ -1084,28 +1150,13 @@ extension Monomorphizer {
                     expectedMethodType: resolvedType
                 ) {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                    var resolvedReturnType = resolvedType
-                    if case .function(_, let returns) = resolvedMethodType {
-                        resolvedReturnType = returns
-                    }
-                    var adjustedBase = newBase
-                    if case .function(let params, _) = resolvedMethodType, let firstParam = params.first {
-                        if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
-                            adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
-                        } else if case .mutableReference(let inner) = firstParam.type, inner == adjustedBase.type {
-                            adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
-                        } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
-                            adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
-                        } else if case .mutableReference(let inner) = adjustedBase.type, inner == firstParam.type {
-                            adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
-                        }
-                    }
+                    let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
                     return .methodReference(
                         base: adjustedBase,
                         method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
                         typeArgs: nil,
                         methodTypeArgs: resolvedMethodTypeArgs,
-                        type: resolvedReturnType
+                        type: resolvedMethodType
                     )
                 } else {
                     // Try to instantiate the method first
@@ -1121,28 +1172,13 @@ extension Monomorphizer {
                         expectedMethodType: resolvedType
                     ) {
                         let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                        var resolvedReturnType = resolvedType
-                        if case .function(_, let returns) = resolvedMethodType {
-                            resolvedReturnType = returns
-                        }
-                        var adjustedBase = newBase
-                        if case .function(let params, _) = resolvedMethodType, let firstParam = params.first {
-                            if case .reference(let inner) = firstParam.type, inner == adjustedBase.type {
-                                adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
-                            } else if case .mutableReference(let inner) = firstParam.type, inner == adjustedBase.type {
-                                adjustedBase = .referenceExpression(expression: adjustedBase, type: firstParam.type)
-                            } else if case .reference(let inner) = adjustedBase.type, inner == firstParam.type {
-                                adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
-                            } else if case .mutableReference(let inner) = adjustedBase.type, inner == firstParam.type {
-                                adjustedBase = .derefExpression(expression: adjustedBase, type: inner)
-                            }
-                        }
+                        let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
                         return .methodReference(
                             base: adjustedBase,
                             method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
                             typeArgs: nil,
                             methodTypeArgs: resolvedMethodTypeArgs,
-                            type: resolvedReturnType
+                            type: resolvedMethodType
                         )
                     }
                 }

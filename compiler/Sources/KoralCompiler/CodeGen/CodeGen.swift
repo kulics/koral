@@ -2052,15 +2052,16 @@ public class CodeGen {
       return ""
 
     case .refCount(let val):
-      let valRes: String
+      let controlPath: String
       switch val.type {
-      case .reference, .mutableReference where isAddressableLValueExpr(val):
-        valRes = buildRefComponents(val).path
+      case .reference where isAddressableLValueExpr(val),
+           .mutableReference where isAddressableLValueExpr(val):
+        controlPath = buildRefComponents(val).control
       default:
-        valRes = generateExpressionSSA(val)
+        let valRes = generateExpressionSSA(val)
+        controlPath = "\(valRes).control"
       }
       let result = nextTempWithDecl(cType: "int")
-      let controlPath = "\(valRes).control"
       addIndent()
       buffer += "\(result) = 0;\n"
       addIndent()
@@ -2074,14 +2075,16 @@ public class CodeGen {
       return result
 
     case .refIsBorrow(let val):
-      let valRes: String
+      let controlPath: String
       switch val.type {
-      case .reference, .mutableReference where isAddressableLValueExpr(val):
-        valRes = buildRefComponents(val).path
+      case .reference where isAddressableLValueExpr(val),
+           .mutableReference where isAddressableLValueExpr(val):
+        controlPath = buildRefComponents(val).control
       default:
-        valRes = generateExpressionSSA(val)
+        let valRes = generateExpressionSSA(val)
+        controlPath = "\(valRes).control"
       }
-      let result = nextTempWithInit(cType: "int", initExpr: "(\(valRes).control == NULL)")
+      let result = nextTempWithInit(cType: "int", initExpr: "(\(controlPath) == NULL)")
       return result
 
     case .makeRef(let ptr, let owner, let resultType),

@@ -450,64 +450,6 @@ extension TypeChecker {
     return nil
   }
 
-  /// Materializes a temporary for a regular method call on an rvalue.
-  func materializeTemporaryForMethodCall(
-    base: TypedExpressionNode,
-    method: Symbol,
-    methodType: Type,
-    params: [Parameter],
-    returns: Type,
-    arguments: [ExpressionNode]
-  ) throws -> TypedExpressionNode {
-    // 1. 创建临时变量符号
-    let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
-    
-    // 2. 创建临时变量表达式（这是一个 lvalue）
-    let tempVar: TypedExpressionNode = .variable(identifier: tempSymbol)
-    
-    // 3. 创建引用表达式（对临时变量取引用）
-    let refType: Type = {
-      if let firstParam = params.first, case .mutableReference = firstParam.type {
-        return .mutableReference(inner: base.type)
-      }
-      return .reference(inner: base.type)
-    }()
-    let refExpr: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
-    
-    // 4. 创建方法引用
-    let finalCallee: TypedExpressionNode = .methodReference(
-      base: refExpr, method: method, typeArgs: nil, methodTypeArgs: nil, type: methodType)
-    
-    // 5. 处理方法参数
-    var typedArguments: [TypedExpressionNode] = []
-    for (arg, param) in zip(arguments, params.dropFirst()) {
-      // Pass expected type for implicit member expression support
-      var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-      typedArg = try coerceLiteral(typedArg, to: param.type)
-      if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
-        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
-      }
-      typedArguments.append(typedArg)
-    }
-    
-    // 6. 创建方法调用
-    let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: returns)
-    
-    // 7. 包装在 makeLetBlock 中
-    return .makeLetBlock(identifier: tempSymbol, value: base, body: call, type: returns)
-  }
-
   func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
     if let direct = try lookupConcreteMethodSymbolDirect(on: selfType, name: name) {
       return direct
@@ -973,97 +915,6 @@ extension TypeChecker {
     }
     
     throw SemanticError(.generic("Method '\(methodName)' not found in trait bounds of \(paramName)"), span: currentSpan)
-  }
-
-  /// Materializes a temporary for a generic method call on an rvalue.
-  func materializeTemporaryForGenericMethodCall(
-    base: TypedExpressionNode,
-    method: Symbol,
-    methodType: Type,
-    methodTypeArgs: [Type],
-    typeArgs: [Type]?,
-    params: [Parameter],
-    returns: Type,
-    arguments: [ExpressionNode],
-    traitName: String? = nil
-  ) throws -> TypedExpressionNode {
-    // Create a temporary variable for the rvalue
-    let tempSym = nextSynthSymbol(prefix: "temp_recv", type: base.type)
-    
-    // Create temporary variable expression (this is an lvalue)
-    let tempVar: TypedExpressionNode = .variable(identifier: tempSym)
-    
-    // Create reference expression (take reference of temporary)
-    let refType: Type = .reference(inner: base.type)
-    let tempRef: TypedExpressionNode = .referenceExpression(expression: tempVar, type: refType)
-    
-    // Create method reference or trait method placeholder with the temporary as base
-    let finalCallee: TypedExpressionNode
-    if let traitName = traitName {
-      let methodName = context.getName(method.defId) ?? "<unknown>"
-      finalCallee = .traitMethodPlaceholder(
-        traitName: traitName,
-        methodName: methodName,
-        base: tempRef,
-        methodTypeArgs: methodTypeArgs,
-        type: methodType
-      )
-    } else {
-      finalCallee = .methodReference(
-        base: tempRef,
-        method: method,
-        typeArgs: typeArgs,
-        methodTypeArgs: methodTypeArgs,
-        type: methodType
-      )
-    }
-    
-    // Type check arguments
-    var typedArguments: [TypedExpressionNode] = []
-    for (arg, param) in zip(arguments, params.dropFirst()) {
-      var typedArg: TypedExpressionNode
-      if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
-        typedArg = try inferLambdaExpression(
-          parameters: lambdaParams,
-          returnType: returnType,
-          body: body,
-          expectedType: param.type
-        )
-      } else {
-        typedArg = try inferTypedExpression(arg)
-      }
-      typedArg = try coerceLiteral(typedArg, to: param.type)
-      if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
-        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
-      }
-      typedArguments.append(typedArg)
-    }
-    
-    // Create the call expression
-    let callExpr: TypedExpressionNode = .call(
-      callee: finalCallee,
-      arguments: typedArguments,
-      type: returns
-    )
-    
-    // Wrap in makeLetBlock
-    return .makeLetBlock(
-      identifier: tempSym,
-      value: base,
-      body: callExpr,
-      type: returns
-    )
   }
 
   func resolveSubscriptUpdateMethod(
@@ -1552,6 +1403,20 @@ extension TypeChecker {
         throw SemanticError(.generic("spawn_thread: fourth argument must be UInt64"))
       }
       return .intrinsicCall(.spawnThread(outHandle: outHandle, outTid: outTid, closure: closure, stackSize: stackSize))
+
+    case "ref_count":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let val = try inferTypedExpression(arguments[0])
+      return .intrinsicCall(.refCount(val: val))
+
+    case "ref_is_borrow":
+      guard arguments.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
+      }
+      let val = try inferTypedExpression(arguments[0])
+      return .intrinsicCall(.refIsBorrow(val: val))
 
     default: return nil
     }

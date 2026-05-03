@@ -230,6 +230,10 @@ public indirect enum TypedExpressionNode {
     type: Type)
   case call(callee: TypedExpressionNode, arguments: [TypedExpressionNode], type: Type)
   case genericCall(functionName: String, typeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
+  /// Method reference prepared for call lowering.
+  /// - base: Receiver expression after sema receiver adjustment/materialization.
+  /// - method: Unbound method symbol whose function type still includes the receiver parameter.
+  /// - type: Must remain equal to `method.type`; bound callable conversion is not represented here.
   case methodReference(base: TypedExpressionNode, method: Symbol, typeArgs: [Type]?, methodTypeArgs: [Type]?, type: Type)
   /// Static method call on a type (e.g., `[Int]List.new()`, `Pair.new(1, 2)`)
   /// - baseType: The type on which the static method is called
