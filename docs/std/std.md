@@ -914,10 +914,6 @@ given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
     public iterator(self ref) [K, V]DictIterator
 }
 
-given[K Hash, V Any] [K, V]Dict [K, V]Index {
-    public ref_at(self ref, key K) V ref
-}
-
 given[T Deref] [T]List {
     public [K Hash]group_by(self ref, key [T, K]Func) [K, [T]List]Dict
 }
