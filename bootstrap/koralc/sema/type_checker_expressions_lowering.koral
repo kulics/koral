@@ -3,6 +3,81 @@ given TypeChecker {
         return self.adapt_expr_to_expected_type(receiver, expected_self_type)
     }
 
+    private adapt_receiver_to_expected_self_type_for_method(self, receiver TypedExpr, expected_self_type [Type]Option, method_name String) TypedExpr = {
+        when expected_self_type in {
+            .Some(expected_self) then when expected_self in {
+                .MutableReferenceType(inner) then {
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and not self.is_implicit_ref_candidate_shape(box(receiver))
+                    then {
+                        self.push_diagnostic_at_span(
+                            "Cannot call 'self mut ref' method '\(method_name)' on an rvalue; store the value in a 'let mut' variable first",
+                            self.typed_expr_span(box(receiver))
+                        )
+                        return make_typed_expr(TypedExprKind.RefExpr(box(receiver)), expected_self)
+                    }
+                },
+                _ then {},
+            },
+            .None() then {},
+        }
+        return self.adapt_expr_to_expected_type(receiver, expected_self_type)
+    }
+
+    private receiver_is_addressable_without_temp(self, receiver TypedExpr) Bool = {
+        return when receiver.expr_kind in {
+            .Variable(_) then true,
+            .MemberPath(_, _) then true,
+            .DerefExpr(inner_ref) then when inner_ref.expr_kind in {
+                .Variable(_) then true,
+                .MemberPath(_, _) then true,
+                .DerefExpr(_) then true,
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private receiver_needs_materialization(self, receiver TypedExpr, expected_self_type [Type]Option) Bool = {
+        return when expected_self_type in {
+            .Some(expected_self) then when expected_self in {
+                .ReferenceType(inner) then {
+                    yield self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and not self.receiver_is_addressable_without_temp(receiver)
+                },
+                _ then false,
+            },
+            .None() then false,
+        }
+    }
+
+    private make_receiver_temp_symbol(self, prefix String, t Type) Symbol ref = {
+        let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
+        let unique_name = "\(prefix)_\(def_id.id.to_string())"
+        return box(Symbol(def_id, t, SymbolKind.Variable(VariableKind.Value())))
+    }
+
+    private prepare_call_receiver(self, receiver TypedExpr, expected_self_type [Type]Option) [TypedExpr, [Symbol ref]Option]Pair = {
+        if self.receiver_needs_materialization(receiver, expected_self_type) then {
+            let temp_symbol = self.make_receiver_temp_symbol("__recv", receiver.expr_type)
+            let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+            return [TypedExpr, [Symbol ref]Option]Pair(temp_var, [Symbol ref]Option.Some(temp_symbol))
+        }
+        return [TypedExpr, [Symbol ref]Option]Pair(receiver, [Symbol ref]Option.None())
+    }
+
+    private wrap_receiver_materialized_call(self, temp_symbol_opt [Symbol ref]Option, original_receiver TypedExpr, call_expr TypedExpr) TypedExpr = {
+        return when temp_symbol_opt in {
+            .Some(temp_symbol) then {
+                let mut block_statements = [TypedStatement]List.new()
+                block_statements.push(TypedStatement.LetStmt(temp_symbol, box(original_receiver), unknown_span()))
+                block_statements.push(TypedStatement.YieldStmt(box(call_expr), unknown_span()))
+                yield make_typed_expr(TypedExprKind.Block(block_statements), call_expr.expr_type)
+            },
+            .None() then call_expr,
+        }
+    }
+
     private make_expr_temp_symbol(self, prefix String, t Type) Symbol ref = {
         let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
         let unique_name = "\(prefix)_\(def_id.id.to_string())"
@@ -171,7 +246,7 @@ given TypeChecker {
 
     private lower_receiver_method_call_expr(self, receiver TypedExpr, method_name String, args [TypedExpr ref]List) TypedExpr = {
         let expected_self_type = self.resolve_method_self_type(receiver.expr_type, method_name)
-        let adapted_receiver = self.adapt_receiver_to_expected_self_type(receiver, expected_self_type)
+        let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(receiver, expected_self_type, method_name)
         let normalized_receiver_type = when receiver.expr_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,

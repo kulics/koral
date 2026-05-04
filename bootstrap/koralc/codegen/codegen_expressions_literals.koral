@@ -87,6 +87,27 @@ given CodeGen {
             return inner_result
         }
 
+        let adapted_inner_result = when target_type in {
+            .TraitObject(_, _) then inner_result,
+            _ then when inner.expr_type in {
+                .ReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
+                .MutableReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
+                .WeakReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
+                .MutableWeakReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
+                _ then inner_result,
+            },
+        }
+        let source_type = when target_type in {
+            .TraitObject(_, _) then inner.expr_type,
+            _ then when inner.expr_type in {
+                .ReferenceType(inner_type) then inner_type.val,
+                .MutableReferenceType(inner_type) then inner_type.val,
+                .WeakReferenceType(inner_type) then inner_type.val,
+                .MutableWeakReferenceType(inner_type) then inner_type.val,
+                _ then inner.expr_type,
+            },
+        }
+
         when target_type in {
             .TraitObject(trait_name, _) then {
                 when inner.expr_type in {
@@ -159,7 +180,7 @@ given CodeGen {
             _ then {},
         }
 
-        let is_float_src = self.is_float_type(inner.expr_type)
+        let is_float_src = self.is_float_type(source_type)
         let is_int_dst = self.is_integer_type(target_type)
 
         // 浮点 -> 整数：运行时范围检查
@@ -167,7 +188,7 @@ given CodeGen {
             let min_macro = self.int_type_min_macro(target_type)
             let max_macro = self.int_type_max_macro(target_type)
 
-            let f_var = self.next_temp_with_init("double", "(double)\(inner_result)")
+            let f_var = self.next_temp_with_init("double", "(double)\(adapted_inner_result)")
 
             self.add_indent()
             self.buffer.push_string("if (!(\(f_var) >= (double)\(min_macro) && \(f_var) <= (double)\(max_macro))) {\n")
@@ -186,31 +207,31 @@ given CodeGen {
             .PointerType(_) then true,
             _ then false,
         }
-        let is_ptr_src = when inner.expr_type in {
+        let is_ptr_src = when source_type in {
             .PointerType(_) then true,
             _ then false,
         }
 
         if is_ptr_dst then {
-            when inner.expr_type in {
+            when source_type in {
                 .UIntType() then {
-                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(uintptr_t)\(inner_result)")
+                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(uintptr_t)\(adapted_inner_result)")
                 },
                 .IntType() then {
-                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(intptr_t)\(inner_result)")
+                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(intptr_t)\(adapted_inner_result)")
                 },
                 _ then {
-                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(inner_result)")
+                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(adapted_inner_result)")
                 },
             }
         }
 
         if is_ptr_src then {
-            return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(inner_result)")
+            return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(adapted_inner_result)")
         }
 
         // 默认标量转换
-        return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(inner_result)")
+        return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(adapted_inner_result)")
     }
 
 

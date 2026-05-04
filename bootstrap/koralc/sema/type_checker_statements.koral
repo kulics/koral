@@ -4,6 +4,21 @@
 // 类型替换（apply_subst_to_*）等方法。
 
 given TypeChecker {
+    private inferred_self_value_binding_type(self, expr TypedExpr) [Type]Option = {
+        return when expr.expr_kind in {
+            .Variable(symbol) then if self.context().symbol_name(symbol) == "self" then {
+                yield when expr.expr_type in {
+                    .ReferenceType(inner) then [Type]Option.Some(inner.val),
+                    .MutableReferenceType(inner) then [Type]Option.Some(inner.val),
+                    .WeakReferenceType(inner) then [Type]Option.Some(inner.val),
+                    .MutableWeakReferenceType(inner) then [Type]Option.Some(inner.val),
+                    _ then [Type]Option.None(),
+                }
+            } else [Type]Option.None(),
+            _ then [Type]Option.None(),
+        }
+    }
+
     private typed_statement_terminates_control_flow(self, stmt TypedStatement) Bool = {
         return when stmt in {
             .ReturnStmt(_, _) then true,
@@ -242,7 +257,13 @@ given TypeChecker {
                     .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, val_expected, scope),
                     _ then self.check_expr_scoped_ref(value, val_expected, scope),
                 }
-                let mut typed_val = self.adapt_expr_to_expected_type_at(raw_typed_val, val_expected, [SourceSpan]Option.Some(expr_span(value)))
+                let inferred_value_expected = if val_expected is .None() then self.inferred_self_value_binding_type(raw_typed_val)
+                    else [Type]Option.None()
+                let effective_value_expected = when val_expected in {
+                    .Some(_) then val_expected,
+                    .None() then inferred_value_expected,
+                }
+                let mut typed_val = self.adapt_expr_to_expected_type_at(raw_typed_val, effective_value_expected, [SourceSpan]Option.Some(expr_span(value)))
                 if val_expected is .Some(expected_t) then {
                     when expected_t in {
                         .ReferenceType(expected_inner_ref) then {
@@ -334,7 +355,10 @@ given TypeChecker {
                 }
                 let binding_type = when val_expected in {
                     .Some(t) then t,
-                    .None() then self.concretize_default_literal_type(typed_val.expr_type),
+                    .None() then when inferred_value_expected in {
+                        .Some(inferred_t) then inferred_t,
+                        .None() then self.concretize_default_literal_type(typed_val.expr_type),
+                    },
                 }
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(binding_type, mutable))
                 let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())

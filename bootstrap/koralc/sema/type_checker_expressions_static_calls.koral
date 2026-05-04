@@ -818,7 +818,9 @@ given TypeChecker {
         when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
                 let method_name = self.context().symbol_name(method)
-                let receiver_type = self.adapt_receiver_to_expected_self_type(base_ref.val, self.resolve_method_self_type(base_ref.expr_type, method_name)).expr_type
+                let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
+                let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
+                let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
                 when self.resolve_method_signature(receiver_type, method_name) in {
                     .Some(method) then {
                         method_param_types_for_inference = [Type]List.new()
@@ -839,7 +841,9 @@ given TypeChecker {
             },
             .MemberPath(base_ref, path) then if not path.is_empty() then {
                 let method_name = path[path.count() - 1]
-                let receiver_type = self.adapt_receiver_to_expected_self_type(base_ref.val, self.resolve_method_self_type(base_ref.expr_type, method_name)).expr_type
+                let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
+                let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
+                let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
                 when self.resolve_method_signature(receiver_type, method_name) in {
                     .Some(method) then {
                         method_param_types_for_inference = [Type]List.new()
@@ -865,7 +869,9 @@ given TypeChecker {
                 .MemberPath(base_expr, path, _) then if not path.is_empty() then {
                     let method_name = path[path.count() - 1]
                     let typed_base = self.check_child_expr_ref(base_expr, .None(), scope)
-                    let receiver_type = self.adapt_receiver_to_expected_self_type(box(typed_base), self.resolve_method_self_type(typed_base.expr_type, method_name)).expr_type
+                    let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, method_name)
+                    let prepared_base = self.prepare_call_receiver(typed_base, expected_self_type)
+                    let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
                     when self.resolve_method_signature(receiver_type, method_name) in {
                         .Some(method) then {
                             method_param_types_for_inference = [Type]List.new()
@@ -996,7 +1002,9 @@ given TypeChecker {
         let inferred_method_call_info = when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
                 let method_name = self.context().symbol_name(method)
-                let typed_base = self.adapt_receiver_to_expected_self_type(base_ref.val, self.resolve_method_self_type(base_ref.expr_type, method_name))
+                let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
+                let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
+                let typed_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 yield when self.resolve_method_signature(typed_base.expr_type, method_name) in {
                     .Some(sig) then {
                         let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, [Type]List.new(), expected)
@@ -1008,7 +1016,9 @@ given TypeChecker {
             },
             .MemberPath(base_ref, path) then if not path.is_empty() then {
                 let method_name = path[path.count() - 1]
-                let typed_base = self.adapt_receiver_to_expected_self_type(base_ref.val, self.resolve_method_self_type(base_ref.expr_type, method_name))
+                let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
+                let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
+                let typed_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 yield when self.resolve_method_signature(typed_base.expr_type, method_name) in {
                     .Some(sig) then {
                         let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, [Type]List.new(), expected)
@@ -1110,9 +1120,23 @@ given TypeChecker {
                         else [Type]Option.None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let adapted_base = self.adapt_receiver_to_expected_self_type(base, expected_self_type)
+                let prepared_base = self.prepare_call_receiver(base, expected_self_type)
+                let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 let inferred_method_type_args = if callee_method_type_args.is_empty() then method_type_args else callee_method_type_args
-                let method_ret_type = ret_type
+                let method_ret_type = when ret_type in {
+                    .Unknown() then when direct_method_signature_opt in {
+                        .Some(method_symbol) then when method_symbol.symbol_type in {
+                            .FunctionType(_, ret) then ret.val,
+                            _ then self.resolve_method_return_type(adapted_base.expr_type, method_name),
+                        },
+                        .None() then self.resolve_method_return_type(adapted_base.expr_type, method_name),
+                    },
+                    _ then ret_type,
+                }
+                let lowered_method_symbol = when direct_method_signature_opt in {
+                    .Some(method_symbol) then method_symbol,
+                    .None() then self.make_method_symbol(method_name, method_ret_type),
+                }
                 let mut structured_call = [TypedExpr]Option.None()
                 let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
                     or trait_constraint_opt is .Some(_)
@@ -1121,19 +1145,17 @@ given TypeChecker {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
-                            let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let mut static_args = [TypedExpr ref]List.new()
                             static_args.push(box(adapted_base))
                             for arg in typed_args then {
                                 static_args.push(arg)
                             }
-                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(method_symbol), [Type]List.new(), [Type]List.new(), static_args), method_ret_type))
+                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(lowered_method_symbol), [Type]List.new(), [Type]List.new(), static_args), method_ret_type))
                         },
                         .None() then {
-                            let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let callee = make_typed_expr(
-                                TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
-                                method_symbol.symbol_type,
+                                TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
+                                lowered_method_symbol.symbol_type,
                             )
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                         },
@@ -1142,19 +1164,18 @@ given TypeChecker {
                     when trait_constraint_opt in {
                         .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method_name, [Type]List.new())
-                            let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let trait_type = self.constrained_trait_object_type_for_static_call(adapted_base.expr_type, trait_name)
                             structured_call = if trait_dispatch_requires_object then {
                                 let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_type, self.trait_object_conversion_result_type(adapted_base.expr_type, trait_type))
                                 let callee = make_typed_expr(
-                                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), inferred_method_type_args, .None()),
-                                    method_symbol.symbol_type,
+                                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(lowered_method_symbol), inferred_method_type_args, .None()),
+                                    lowered_method_symbol.symbol_type,
                                 )
                                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                             } else {
                                 let callee = make_typed_expr(
-                                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
-                                    method_symbol.symbol_type,
+                                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
+                                    lowered_method_symbol.symbol_type,
                                 )
                                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                             }
@@ -1163,10 +1184,9 @@ given TypeChecker {
                             when normalized_base_type in {
                                 .TraitObject(_, _) then {},
                                 _ then {
-                                    let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                                     let callee = make_typed_expr(
-                                        TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
-                                        method_symbol.symbol_type,
+                                        TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
+                                        lowered_method_symbol.symbol_type,
                                     )
                                     structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                                 },
@@ -1174,7 +1194,10 @@ given TypeChecker {
                         },
                     }
                 }
-                yield structured_call
+                yield when structured_call in {
+                    .Some(call_expr) then [TypedExpr]Option.Some(self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)),
+                    .None() then [TypedExpr]Option.None(),
+                }
             },
             .MemberPath(base_ref, path) then if not path.is_empty() then {
                 let base = base_ref.val
@@ -1194,9 +1217,23 @@ given TypeChecker {
                         else [Type]Option.None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let adapted_base = self.adapt_receiver_to_expected_self_type(base, expected_self_type)
+                let prepared_base = self.prepare_call_receiver(base, expected_self_type)
+                let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 let inferred_method_type_args = [Type]List.new()
-                let method_ret_type = ret_type
+                let method_ret_type = when ret_type in {
+                    .Unknown() then when direct_method_signature_opt in {
+                        .Some(method_symbol) then when method_symbol.symbol_type in {
+                            .FunctionType(_, ret) then ret.val,
+                            _ then self.resolve_method_return_type(adapted_base.expr_type, method_name),
+                        },
+                        .None() then self.resolve_method_return_type(adapted_base.expr_type, method_name),
+                    },
+                    _ then ret_type,
+                }
+                let lowered_method_symbol = when direct_method_signature_opt in {
+                    .Some(method_symbol) then method_symbol,
+                    .None() then self.make_method_symbol(method_name, method_ret_type),
+                }
                 let mut structured_call = [TypedExpr]Option.None()
                 let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
                     or trait_constraint_opt is .Some(_)
@@ -1205,19 +1242,17 @@ given TypeChecker {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
-                            let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let mut static_args = [TypedExpr ref]List.new()
                             static_args.push(box(adapted_base))
                             for arg in typed_args then {
                                 static_args.push(arg)
                             }
-                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(method_symbol), [Type]List.new(), [Type]List.new(), static_args), method_ret_type))
+                            structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(lowered_method_symbol), [Type]List.new(), [Type]List.new(), static_args), method_ret_type))
                         },
                         .None() then {
-                            let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let callee = make_typed_expr(
-                                TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
-                                method_symbol.symbol_type,
+                                TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
+                                lowered_method_symbol.symbol_type,
                             )
                             structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                         },
@@ -1226,19 +1261,18 @@ given TypeChecker {
                     when trait_constraint_opt in {
                         .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(adapted_base.expr_type, method_name, [Type]List.new())
-                            let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                             let trait_type = self.constrained_trait_object_type_for_static_call(adapted_base.expr_type, trait_name)
                             structured_call = if trait_dispatch_requires_object then {
                                 let qualified_base = self.wrap_trait_object_conversion(adapted_base, trait_type, self.trait_object_conversion_result_type(adapted_base.expr_type, trait_type))
                                 let callee = make_typed_expr(
-                                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), inferred_method_type_args, .None()),
-                                    method_symbol.symbol_type,
+                                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(lowered_method_symbol), inferred_method_type_args, .None()),
+                                    lowered_method_symbol.symbol_type,
                                 )
                                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                             } else {
                                 let callee = make_typed_expr(
-                                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
-                                    method_symbol.symbol_type,
+                                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
+                                    lowered_method_symbol.symbol_type,
                                 )
                                 yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                             }
@@ -1247,10 +1281,9 @@ given TypeChecker {
                             when normalized_base_type in {
                                 .TraitObject(_, _) then {},
                                 _ then {
-                                    let method_symbol = self.make_method_symbol(method_name, method_ret_type)
                                     let callee = make_typed_expr(
-                                        TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
-                                        method_symbol.symbol_type,
+                                        TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
+                                        lowered_method_symbol.symbol_type,
                                     )
                                     structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
                                 },
@@ -1258,7 +1291,10 @@ given TypeChecker {
                         },
                     }
                 }
-                yield structured_call
+                yield when structured_call in {
+                    .Some(call_expr) then [TypedExpr]Option.Some(self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)),
+                    .None() then [TypedExpr]Option.None(),
+                }
             } else [TypedExpr]Option.None(),
             _ then when typed_callee.expr_kind in {
             .TraitMethodCall(receiver, trait_type, method, _, _, dispatch_callsite) then {
@@ -1267,10 +1303,12 @@ given TypeChecker {
                     .TraitObject(trait_name, _) then self.resolve_trait_method_self_type(trait_name, method_name, receiver.expr_type),
                     _ then [Type]Option.None(),
                 }
-                let adapted_receiver = self.adapt_receiver_to_expected_self_type(receiver.val, expected_self_type)
+                let prepared_receiver = self.prepare_call_receiver(receiver.val, expected_self_type)
+                let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(prepared_receiver.first, expected_self_type, method_name)
                 self.maybe_record_trait_method_instantiation(adapted_receiver.expr_type, method_name, [Type]List.new())
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
-                yield [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.TraitMethodCall(box(adapted_receiver), trait_type, box(method_symbol), typed_args, (Int)-1, dispatch_callsite), ret_type))
+                let call_expr = make_typed_expr(TypedExprKind.TraitMethodCall(box(adapted_receiver), trait_type, box(method_symbol), typed_args, (Int)-1, dispatch_callsite), ret_type)
+                yield [TypedExpr]Option.Some(self.wrap_receiver_materialized_call(prepared_receiver.second, receiver.val, call_expr))
             },
             _ then [TypedExpr]Option.None(),
             },
