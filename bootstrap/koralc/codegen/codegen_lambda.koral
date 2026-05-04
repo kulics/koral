@@ -403,18 +403,19 @@ given CodeGen {
             let needs_preserved_return = self.needs_drop(effective_body_type)
             let body_result_needs_move = self.is_registered_for_cleanup(body_result)
             let should_preserve_return = needs_preserved_return or body_result_needs_move
+            let adapted_body_result = self.adapt_expression_result_to_type(body, body_result, effective_body_type)
             if should_preserve_return then {
                 let return_c_type = self.c_type_name(effective_body_type)
                 let ret_var = self.next_temp()
                 self.push_indented_decl(return_c_type, ret_var)
-                let return_is_lvalue = self.is_lvalue_expr(body) and not body_result_needs_move
-                self.append_copy_or_move_assignment(effective_body_type, body_result, ret_var, return_is_lvalue)
+                let return_is_lvalue = adapted_body_result == body_result and self.is_lvalue_expr(body) and not body_result_needs_move
+                self.append_copy_or_move_assignment(effective_body_type, adapted_body_result, ret_var, return_is_lvalue)
                 self.pop_scope()
                 self.push_indented_return_value(ret_var)
                 return
             }
             self.pop_scope()
-            self.push_indented_return_value(body_result)
+            self.push_indented_return_value(adapted_body_result)
         } else {
             self.pop_scope()
         }

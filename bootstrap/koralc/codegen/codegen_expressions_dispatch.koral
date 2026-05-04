@@ -2,6 +2,59 @@
 //
 // 实现 CodeGen 的静态方法调用、泛型方法调用、限定方法调用、
 given CodeGen {
+    private push_static_method_lookup_alias(self, aliases [String]List, alias String) [String]List = {
+        let _ = self
+        if alias.is_empty() then {
+            return aliases
+        }
+        for existing in aliases then {
+            if existing == alias then {
+                return aliases
+            }
+        }
+        let mut updated = aliases
+        updated.push(alias)
+        return updated
+    }
+
+    private static_method_lookup_aliases(self, receiver_type Type) [String]List = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let mut aliases = [String]List.new()
+        aliases = self.push_static_method_lookup_alias(aliases, self.concrete_receiver_lookup_key(concrete_receiver_type))
+        aliases = self.push_static_method_lookup_alias(aliases, self.receiver_type_lookup_name_fallback(concrete_receiver_type))
+
+        when concrete_receiver_type in {
+            .GenericStruct(template_name, _) then {
+                aliases = self.push_static_method_lookup_alias(aliases, template_name)
+            },
+            .GenericEnum(template_name, _) then {
+                aliases = self.push_static_method_lookup_alias(aliases, template_name)
+            },
+            _ then {},
+        }
+
+        return aliases
+    }
+
+    private trait_dispatch_type_opt(self, receiver_type Type) [Type]Option = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        return when concrete_receiver_type in {
+            .TraitObject(_, _) then [Type]Option.Some(concrete_receiver_type),
+            .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped_type) then when mapped_type in {
+                    .TraitObject(_, _) then [Type]Option.Some(mapped_type),
+                    _ then [Type]Option.None(),
+                },
+                .None() then [Type]Option.None(),
+            },
+            .ReferenceType(inner_ref) then self.trait_dispatch_type_opt(inner_ref.val),
+            .MutableReferenceType(inner_ref) then self.trait_dispatch_type_opt(inner_ref.val),
+            .WeakReferenceType(inner_ref) then self.trait_dispatch_type_opt(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then self.trait_dispatch_type_opt(inner_ref.val),
+            _ then [Type]Option.None(),
+        }
+    }
+
     private requested_or_symbol_result_type(self, requested_result_type Type, symbol_type Type) Type = {
         return when requested_result_type in {
             .Unknown() then symbol_type,
@@ -42,17 +95,6 @@ given CodeGen {
         return self.context.get_name(method.def_id)
     }
 
-    // DEPRECATED: This function is a codegen-level fallback for to_ref lowering.
-    // The mono phase (try_lower_to_ref_method_call) should handle all to_ref calls.
-    // Once mono coverage is verified complete, this function and its call sites
-    // in codegen_expressions_dispatch.koral and codegen_vtable.koral can be removed.
-    private is_to_ref_method_name(self, method_name String) Bool = {
-        if method_name == "to_ref" then {
-            return true
-        }
-        return method_name.ends_with("_to_ref") or method_name.ends_with(".to_ref")
-    }
-
     private preferred_receiver_method_result_type(self, requested_result_type Type, symbol_type Type) Type = {
         if self.type_contains_generic(requested_result_type) and not self.type_contains_generic(symbol_type) then {
             return symbol_type
@@ -81,6 +123,11 @@ given CodeGen {
             },
             .None() then [Symbol]Option.None(),
         }
+    }
+
+    private require_bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, requested_result_type Type, error_context String) Symbol = {
+        return self.bound_concrete_method_symbol(def_id, receiver_type, requested_result_type)
+            or else panic("CodeGen dispatch error: unresolved concrete method symbol for \(error_context) (def #\(def_id.id))")
     }
 
     private method_signature_compatible_with_call(
@@ -198,6 +245,24 @@ given CodeGen {
         // Try template name for generic instantiations (e.g. "List" for "List_Std_String")
         // This matches Swift's dual lookup with [qualifiedName, plainName].
         when concrete_receiver_type in {
+            .GenericStruct(template_name, _) then {
+                if template_name <> receiver_key then {
+                    let template_key = "\(template_name).\(method_name)"
+                    when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                        .Some(found_def_id) then { return [DefId]Option.Some(found_def_id) },
+                        .None() then {},
+                    }
+                }
+            },
+            .GenericEnum(template_name, _) then {
+                if template_name <> receiver_key then {
+                    let template_key = "\(template_name).\(method_name)"
+                    when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                        .Some(found_def_id) then { return [DefId]Option.Some(found_def_id) },
+                        .None() then {},
+                    }
+                }
+            },
             .StructureType(def_id) then {
                 when self.context.get_template_name(def_id) in {
                     .Some(template_name) then {
@@ -226,8 +291,6 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .ReferenceType(inner_ref) then { return self.lookup_receiver_method_def_id(inner_ref.val, method_name) },
-            .MutableReferenceType(inner_ref) then { return self.lookup_receiver_method_def_id(inner_ref.val, method_name) },
             _ then {},
         }
         return [DefId]Option.None()
@@ -253,8 +316,17 @@ given CodeGen {
     }
 
     private lookup_static_method_symbol(self, receiver_type Type, method_name String, requested_result_type Type) [Symbol]Option = {
-        return when self.lookup_receiver_method_def_id(receiver_type, method_name) in {
-            .Some(def_id) then self.bound_concrete_method_symbol(def_id, receiver_type, requested_result_type),
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        for alias in self.static_method_lookup_aliases(concrete_receiver_type) then {
+            when self.program.lookup_static_method(alias, method_name) in {
+                .Some(def_id) then {
+                    return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type)
+                },
+                .None() then {},
+            }
+        }
+        return when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
+            .Some(def_id) then self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type),
             .None() then [Symbol]Option.None(),
         }
     }
@@ -336,6 +408,9 @@ given CodeGen {
 
         if resolved_symbol_opt is .None() then {
             resolved_symbol_opt = self.lookup_static_method_symbol(concrete_receiver_type, logical_method_name, method.symbol_type)
+        }
+        if resolved_symbol_opt is .None() then {
+            resolved_symbol_opt = self.lookup_receiver_method_by_signature(concrete_receiver_type, logical_method_name, args, method.symbol_type)
         }
         if resolved_symbol_opt is .None() then {
             resolved_symbol_opt = self.lookup_receiver_method(concrete_receiver_type, logical_method_name)
@@ -474,53 +549,6 @@ given CodeGen {
             },
             _ then base,
         }
-        if self.is_to_ref_method_name(method_name) and args.is_empty() then {
-            let upgrade_result_type = when base.expr_type in {
-                .WeakReferenceType(inner) then {
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.ReferenceType(inner)))
-                    yield Type.GenericEnum("Option", option_args)
-                },
-                .MutableWeakReferenceType(inner) then {
-                    let mut option_args = [Type ref]List.new()
-                    option_args.push(box(Type.MutableReferenceType(inner)))
-                    yield Type.GenericEnum("Option", option_args)
-                },
-                _ then when lookup_base_type in {
-                    .WeakReferenceType(inner) then {
-                        let mut option_args = [Type ref]List.new()
-                        option_args.push(box(Type.ReferenceType(inner)))
-                        yield Type.GenericEnum("Option", option_args)
-                    },
-                    .MutableWeakReferenceType(inner) then {
-                        let mut option_args = [Type ref]List.new()
-                        option_args.push(box(Type.MutableReferenceType(inner)))
-                        yield Type.GenericEnum("Option", option_args)
-                    },
-                    _ then effective_result_type,
-                },
-            }
-            when base.expr_type in {
-                .WeakReferenceType(_) then {
-                    return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeRef(base, upgrade_result_type))
-                },
-                .MutableWeakReferenceType(_) then {
-                    return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeMutRef(base, upgrade_result_type))
-                },
-                _ then {
-                    when lookup_base_type in {
-                        .WeakReferenceType(_) then {
-                            return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeRef(base, upgrade_result_type))
-                        },
-                        .MutableWeakReferenceType(_) then {
-                            return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeMutRef(base, upgrade_result_type))
-                        },
-                        _ then {},
-                    }
-                },
-            }
-        }
-
         let base_declared_type = self.concretize_codegen_type(base.expr_type)
         when base_declared_type in {
             .TraitObject(trait_name, trait_type_args) then {
@@ -540,6 +568,13 @@ given CodeGen {
             return self.generate_trait_method_call_typed(base, cast_trait_type, method_name, args, effective_result_type)
         }
 
+        when self.trait_dispatch_type_opt(base_declared_type) in {
+            .Some(trait_type) then {
+                return self.generate_trait_method_call_typed(base, trait_type, method_name, args, effective_result_type)
+            },
+            .None() then {},
+        }
+
         when base_type in {
             .TraitObject(trait_name, trait_type_args) then {
                 return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
@@ -553,7 +588,6 @@ given CodeGen {
         // metadata lookup picking a stale specialization of a generic method.
         when self.method_owner_type(method.def_id) in {
             .Some(owner_type) then {
-                let owner_key = self.concrete_receiver_lookup_key(owner_type)
                 let base_key = self.concrete_receiver_lookup_key(base_type)
                 let signature_receiver_matches = when self.context.get_function_param_type(method.def_id, (UInt)0) in {
                     .Some(receiver_param_type) then {
@@ -563,7 +597,8 @@ given CodeGen {
                     .None() then false,
                 }
                 let direct_signature_matches_call = self.method_signature_compatible_with_call(method.def_id, base_type, args, effective_result_type)
-                if owner_key == base_key and signature_receiver_matches and direct_signature_matches_call then {
+                let _ = owner_type
+                if signature_receiver_matches and direct_signature_matches_call then {
                     method_opt = self.bound_concrete_method_symbol(method.def_id, base_type, effective_result_type)
                 }
             },
@@ -667,49 +702,11 @@ given CodeGen {
         let method_name = self.context.symbol_name(method)
         let base_type = self.concretize_codegen_type(base.expr_type)
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
-        if self.is_to_ref_method_name(method_name) and args.is_empty() then {
-            when base.expr_type in {
-                .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                    .TraitObject(_, _) then {
-                        return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeRef(base, effective_result_type))
-                    },
-                    _ then {},
-                },
-                .MutableWeakReferenceType(inner_ref) then when inner_ref.val in {
-                    .TraitObject(_, _) then {
-                        return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeMutRef(base, effective_result_type))
-                    },
-                    _ then {},
-                },
-                _ then {},
-            }
-            when base.expr_kind in {
-                .TraitObjectConversion(inner, _, _) then {
-                    when inner.expr_type in {
-                        .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeRef(inner, effective_result_type))
-                            },
-                            _ then {},
-                        },
-                        .MutableWeakReferenceType(inner_ref) then when inner_ref.val in {
-                            .TraitObject(_, _) then {
-                                return self.generate_intrinsic_call_ssa(TypedIntrinsic.UpgradeMutRef(inner, effective_result_type))
-                            },
-                            _ then {},
-                        },
-                        _ then {},
-                    }
-                },
-                _ then {},
-            }
-        }
-
         when base.expr_kind in {
             .Variable(sym) then {
                 if sym.kind is .TypeSymbol() then {
                     if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
-                        let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type) or else Symbol(actual_def_id, effective_result_type, SymbolKind.Function())
+                        let actual_symbol = self.require_bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type, "qualified static dispatch \(trait_name).\(method_name)")
                         return self.generate_function_call(box(actual_symbol), args, actual_symbol.symbol_type)
                     }
                     return self.generate_static_method_call(base_type, method, args, effective_result_type)
@@ -745,7 +742,7 @@ given CodeGen {
                     .None() then {},
                 }
                 if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
-                    let actual_symbol = self.bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type) or else Symbol(actual_def_id, effective_result_type, SymbolKind.Function())
+                    let actual_symbol = self.require_bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type, "qualified receiver dispatch \(trait_name).\(method_name)")
                     return self.generate_receiver_method_call(base, base_type, box(actual_symbol), args, actual_symbol.symbol_type)
                 }
             }
@@ -768,6 +765,21 @@ given CodeGen {
     /// 优先使用单态化阶段导出的 metadata 表。
     lookup_receiver_method(self, receiver_type Type, method_name String) [Symbol]Option = {
         let base_type = receiver_type
+        when receiver_type in {
+            .ReferenceType(inner_ref) then {
+                let inner_symbol = self.lookup_receiver_method(inner_ref.val, method_name)
+                if inner_symbol is .Some(_) then {
+                    return inner_symbol
+                }
+            },
+            .MutableReferenceType(inner_ref) then {
+                let inner_symbol = self.lookup_receiver_method(inner_ref.val, method_name)
+                if inner_symbol is .Some(_) then {
+                    return inner_symbol
+                }
+            },
+            _ then {},
+        }
         if self.lookup_receiver_method_via_metadata(base_type, method_name, Type.Unknown()) is .Some(symbol) then {
             return [Symbol]Option.Some(symbol)
         }

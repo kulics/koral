@@ -270,19 +270,56 @@ given CodeGen {
         }
     }
 
-    private adapt_expression_result_to_type(self, expr TypedExpr ref, expr_value String, target_type Type) String = {
-        if self.codegen_types_equal(expr.expr_type, target_type) then {
-            return expr_value
+    private adapt_expression_result_to_type(self mut ref, expr TypedExpr ref, expr_value String, target_type Type) String = {
+        let target_is_ref = target_type is .ReferenceType(_)
+            or target_type is .MutableReferenceType(_)
+            or target_type is .WeakReferenceType(_)
+            or target_type is .MutableWeakReferenceType(_)
+
+        let mut source_type = expr.expr_type
+        let mut source_value = expr_value
+        if not target_is_ref then {
+            when expr.expr_type in {
+                .ReferenceType(inner_ref) then {
+                    let inner_type = inner_ref.val
+                    let deref_value = self.deref_access_expr(expr_value, expr.expr_type, inner_type)
+                    source_value = self.materialize_deref_value(deref_value, inner_type)
+                    source_type = inner_type
+                },
+                .MutableReferenceType(inner_ref) then {
+                    let inner_type = inner_ref.val
+                    let deref_value = self.deref_access_expr(expr_value, expr.expr_type, inner_type)
+                    source_value = self.materialize_deref_value(deref_value, inner_type)
+                    source_type = inner_type
+                },
+                .WeakReferenceType(inner_ref) then {
+                    let inner_type = inner_ref.val
+                    let deref_value = self.deref_access_expr(expr_value, expr.expr_type, inner_type)
+                    source_value = self.materialize_deref_value(deref_value, inner_type)
+                    source_type = inner_type
+                },
+                .MutableWeakReferenceType(inner_ref) then {
+                    let inner_type = inner_ref.val
+                    let deref_value = self.deref_access_expr(expr_value, expr.expr_type, inner_type)
+                    source_value = self.materialize_deref_value(deref_value, inner_type)
+                    source_type = inner_type
+                },
+                _ then {},
+            }
+        }
+
+        if self.codegen_types_equal(source_type, target_type) then {
+            return source_value
         }
 
         let target_c_type = self.c_type_name(target_type)
-        let source_is_scalar = self.is_integer_type(expr.expr_type) or self.is_float_type(expr.expr_type) or expr.expr_type is .BoolType()
+        let source_is_scalar = self.is_integer_type(source_type) or self.is_float_type(source_type) or source_type is .BoolType()
         let target_is_scalar = self.is_integer_type(target_type) or self.is_float_type(target_type) or target_type is .BoolType()
         if source_is_scalar and target_is_scalar then {
-            return "(\(target_c_type))\(expr_value)"
+            return "(\(target_c_type))\(source_value)"
         }
 
-        return expr_value
+        return source_value
     }
 
     private struct_layout_compatible(self, actual_type Type, expected_type Type) Bool = {
@@ -407,12 +444,12 @@ given CodeGen {
         when value_type in {
             .ReferenceType(_) then {
                 self.add_indent()
-                self.buffer.push_string("__koral_retain(\(value).control);\n")
+                self.buffer.push_string("__koral_retain((\(value)).control);\n")
                 return value
             },
             .MutableReferenceType(_) then {
                 self.add_indent()
-                self.buffer.push_string("__koral_retain(\(value).control);\n")
+                self.buffer.push_string("__koral_retain((\(value)).control);\n")
                 return value
             },
             _ then {},
@@ -1403,7 +1440,8 @@ given CodeGen {
             //
             // Requirements: 5.14
             .IfExpr(cond_ref, then_ref, else_opt) then {
-                let cond_result = self.generate_expression_ssa(cond_ref)
+                let raw_cond_result = self.generate_expression_ssa(cond_ref)
+                let cond_result = self.adapt_expression_result_to_type(cond_ref, raw_cond_result, Type.BoolType())
                 let final_if_expr_type = expr.expr_type
 
                 yield if self.type_is_void_or_never(final_if_expr_type) then {

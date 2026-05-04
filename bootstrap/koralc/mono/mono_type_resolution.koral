@@ -1698,13 +1698,22 @@ public let resolve_types_in_expression(mono Monomorphizer ref, expr TypedExpr re
                         .Some(lowered_expr) then { return lowered_expr },
                         .None() then {},
                     }
-                    let bound_method = try_bind_generic_method_call(
+                    let expected_method_type = resolve_parameterized_type(mono, new_callee.expr_type)
+                    let rebound_method = bind_receiver_method_symbol(
                         mono,
                         effective_receiver_type,
                         method,
-                        new_args,
-                        resolved_call_type,
-                    ).val
+                        [Type]Option.Some(expected_method_type),
+                    )
+                    let bound_method = if rebound_method.def_id.id == method.def_id.id then {
+                        yield try_bind_generic_method_call(
+                            mono,
+                            effective_receiver_type,
+                            method,
+                            new_args,
+                            resolved_call_type,
+                        ).val
+                    } else rebound_method
                     let adapted_base = adapt_receiver_expr_for_method(mono, resolved_base, bound_method)
                     let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, bound_method)
                     let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(
@@ -3369,9 +3378,9 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             yield box(TypedExprKind.MemberPath(resolve_types_in_expression(mono, base), path))
         },
         .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
-            let new_base = resolve_types_in_expression(mono, base)
-            let new_receiver_type = resolve_parameterized_type(mono, receiver_type)
-            let new_method = resolve_symbol_type(mono, method)
+            let mut new_base = resolve_types_in_expression(mono, base)
+            let mut new_receiver_type = resolve_parameterized_type(mono, receiver_type)
+            let mut new_method = resolve_symbol_type(mono, method)
             let mut new_type_args = [Type]List.new()
             for type_arg in type_args then {
                 new_type_args.push(resolve_parameterized_type(mono, type_arg))
@@ -3379,6 +3388,13 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
             let mut new_method_type_args = [Type]List.new()
             for method_type_arg in method_type_args then {
                 new_method_type_args.push(resolve_parameterized_type(mono, method_type_arg))
+            }
+            let binding_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
+            if not has_generic_parameter(binding_receiver_type) then {
+                let rebound_method = bind_receiver_method_symbol(mono, binding_receiver_type, new_method, [Type]Option.Some(resolve_parameterized_type(mono, expr.expr_type)))
+                new_method = resolve_symbol_type(mono, rebound_method)
+                new_base = align_method_reference_base_for_bound_method(mono, new_base, new_method)
+                new_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
             }
             yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, new_method_type_args, dispatch_callsite))
         },

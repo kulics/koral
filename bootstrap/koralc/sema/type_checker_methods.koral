@@ -686,6 +686,9 @@ given TypeChecker {
         return when receiver_param_type in {
             .MutableReferenceType(_) then when normalized_base_type in {
                 .MutableReferenceType(_) then normalized_base_type,
+                .ReferenceType(actual_inner) then {
+                    yield if self.same_expr_type(actual_inner.val, inner_type) then normalized_base_type else Type.MutableReferenceType(box(inner_type))
+                },
                 _ then Type.MutableReferenceType(box(inner_type)),
             },
             .ReferenceType(_) then when normalized_base_type in {
@@ -1198,10 +1201,6 @@ given TypeChecker {
 
     protected resolve_method_self_type(self, base_type Type, method_name String) [Type]Option = {
         let normalized_base_type = self.normalize_method_receiver_type(base_type)
-        when self.resolve_modifier_extension_template_signature(normalized_base_type, method_name) in {
-            .Some(method_symbol) then { return self.resolve_bound_method_self_type(normalized_base_type, method_symbol) },
-            .None() then {},
-        }
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
@@ -1260,6 +1259,11 @@ given TypeChecker {
             .None() then {},
         }
 
+        when self.resolve_modifier_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(method_symbol) then { return self.resolve_bound_method_self_type(normalized_base_type, method_symbol) },
+            .None() then {},
+        }
+
         return [Type]Option.None()
     }
 
@@ -1281,10 +1285,6 @@ given TypeChecker {
     // 会根据 receiver_type 推断泛型绑定并应用到参数类型上。
     protected resolve_method_param_types(self, base_type Type, method_name String) [Type]List = {
         let normalized_base_type = self.normalize_method_receiver_type(base_type)
-        when self.resolve_modifier_extension_template_signature(normalized_base_type, method_name) in {
-            .Some(method_symbol) then { return self.resolve_signature_param_types(self.concrete_receiver_for_method(normalized_base_type, method_symbol), method_symbol) },
-            .None() then {},
-        }
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
@@ -1340,6 +1340,10 @@ given TypeChecker {
             .Some(method) then {
                 return self.resolve_signature_param_types(self.concrete_receiver_for_method(normalized_base_type, method), method)
             },
+            .None() then {},
+        }
+        when self.resolve_modifier_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(method_symbol) then { return self.resolve_signature_param_types(self.concrete_receiver_for_method(normalized_base_type, method_symbol), method_symbol) },
             .None() then {},
         }
         return [Type]List.new()
@@ -1672,10 +1676,6 @@ given TypeChecker {
 
     protected resolve_method_signature(self, base_type Type, method_name String) [Symbol]Option = {
         let normalized_base_type = self.normalize_method_receiver_type(base_type)
-        when self.resolve_modifier_extension_template_signature(normalized_base_type, method_name) in {
-            .Some(method_symbol) then { return [Symbol]Option.Some(method_symbol) },
-            .None() then {},
-        }
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
@@ -1752,7 +1752,17 @@ given TypeChecker {
             .None() then {},
         }
 
-        return self.resolve_conformance_method_signature(inner_type, method_name)
+        when self.resolve_conformance_method_signature(inner_type, method_name) in {
+            .Some(method) then { return [Symbol]Option.Some(method) },
+            .None() then {},
+        }
+
+        when self.resolve_modifier_extension_template_signature(normalized_base_type, method_name) in {
+            .Some(method_symbol) then { return [Symbol]Option.Some(method_symbol) },
+            .None() then {},
+        }
+
+        return [Symbol]Option.None()
     }
 
     protected resolve_method_param_types_with_method_type_args(self, base_type Type, method_name String, method_type_args [Type]List) [Type]List = {
@@ -2025,6 +2035,15 @@ given TypeChecker {
                 return self.resolve_method_return_type(base.expr_type, path[path.count() - 1])
             },
             .MethodReference(base, _, method, _, _, _) then {
+                when method.symbol_type in {
+                    .FunctionType(_, ret) then {
+                        return ret.val
+                    },
+                    _ then {},
+                }
+                if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
+                    return return_type
+                }
                 return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method))
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
@@ -2044,10 +2063,19 @@ given TypeChecker {
                 return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method))
             },
             .StaticMethodCall(receiver_type, _, method, _, _, _) then {
-                if method.symbol_type is .Unknown() then {
-                    return self.resolve_method_return_type(receiver_type, self.context().symbol_name(method))
+                when method.symbol_type in {
+                    .FunctionType(_, ret) then {
+                        return ret.val
+                    },
+                    .Unknown() then {},
+                    _ then {
+                        return method.symbol_type
+                    },
                 }
-                return method.symbol_type
+                if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
+                    return return_type
+                }
+                return self.resolve_method_return_type(receiver_type, self.context().symbol_name(method))
             },
             .GenericInstantiation(_, _) then {
                 return callee.expr_type
@@ -2065,6 +2093,15 @@ given TypeChecker {
                         }
                     },
                     .Error(_) then {},
+                }
+                when method.symbol_type in {
+                    .FunctionType(_, ret) then {
+                        return ret.val
+                    },
+                    _ then {},
+                }
+                if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
+                    return return_type
                 }
                 return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method))
             },
