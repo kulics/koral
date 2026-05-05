@@ -29,7 +29,6 @@ given CodeGen {
             .LetStmt(symbol, value_ref, _) then {
                 let value = value_ref
                 let temp_marker = self.current_scope_temp_marker()
-                let mut value_result = self.generate_expression_ssa(value)
 
                 // void/never 类型的值不能赋给变量
                 if not self.type_is_void_or_never(value.expr_type) then {
@@ -41,6 +40,28 @@ given CodeGen {
                         _ then symbol.symbol_type,
                     }
                     let c_type = self.c_type_name(finalized_type)
+                    let mut value_result = if when symbol.kind in {
+                            .Variable(variable_kind) then variable_kind is .SubscriptBaseBorrowAlias(),
+                            _ then false,
+                        }
+                    then {
+                        yield when value.expr_kind in {
+                            .RefExpr(inner_ref) then if self.is_addressable_lvalue_expr(inner_ref) then {
+                                let components = self.build_ref_components(inner_ref)
+                                let borrow_ref = self.next_temp_with_decl(c_type)
+                                self.add_indent()
+                                self.buffer.push_string("\(borrow_ref).ptr = &\(components.first);\n")
+                                self.add_indent()
+                                self.buffer.push_string("\(borrow_ref).control = \(components.second);\n")
+                                self.add_indent()
+                                self.buffer.push_string("__koral_retain(\(borrow_ref).control);\n")
+                                yield borrow_ref
+                            } else self.generate_expression_ssa(value),
+                            _ then self.generate_expression_ssa(value),
+                        }
+                    } else {
+                        yield self.generate_expression_ssa(value)
+                    }
 
                     when finalized_type in {
                         .ReferenceType(expected_inner_ref) then {
@@ -94,6 +115,7 @@ given CodeGen {
                         vars.push(user_entry)
                     }
                 } else {
+                    let _ = self.generate_expression_ssa(value)
                     // void/never 类型：清理表达式求值期间产生的临时值
                     self.cleanup_temporaries_in_current_scope(temp_marker)
                 }
@@ -320,7 +342,7 @@ given CodeGen {
     is_addressable_lvalue_expr(self, expr TypedExpr ref) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
-            .MemberPath(_, _) then true,
+            .MemberPath(base_ref, _) then self.is_addressable_lvalue_expr(base_ref),
             .DerefExpr(_) then true,
             _ then false,
         }

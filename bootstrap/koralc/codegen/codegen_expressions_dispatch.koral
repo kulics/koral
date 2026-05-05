@@ -112,6 +112,16 @@ given CodeGen {
         }
     }
 
+    private is_raw_trait_method(self, trait_name String, method_name String) Bool = {
+        let raw_members = self.get_ordered_raw_trait_members(trait_name)
+        for member in raw_members then {
+            if member.name == method_name then {
+                return true
+            }
+        }
+        return false
+    }
+
     private concrete_callable_symbol(self, def_id DefId, requested_result_type Type) [Symbol]Option = {
         return when self.c_identifier_opt(def_id) in {
             .Some(c_name) then {
@@ -208,6 +218,34 @@ given CodeGen {
         let concrete_actual = self.concretize_codegen_type(actual_type)
         if self.codegen_types_equal(concrete_expected, concrete_actual) then {
             return true
+        }
+
+        when concrete_expected in {
+            .FunctionType(expected_params, expected_return_type) then when concrete_actual in {
+                .FunctionType(actual_params, actual_return_type) then {
+                    let expected_param_types = param_entry_types(expected_params)
+                    let actual_param_types = param_entry_types(actual_params)
+                    if expected_param_types.count() <> actual_param_types.count() then {
+                        return false
+                    }
+                    let mut param_index UInt = 0
+                    while param_index < expected_param_types.count() then {
+                        if not self.codegen_types_equal(
+                            self.concretize_codegen_type(expected_param_types[param_index].val),
+                            self.concretize_codegen_type(actual_param_types[param_index].val)
+                        ) then {
+                            return false
+                        }
+                        param_index += 1
+                    }
+                    return self.codegen_types_equal(
+                        self.concretize_codegen_type(expected_return_type.val),
+                        self.concretize_codegen_type(actual_return_type.val)
+                    )
+                },
+                _ then {},
+            },
+            _ then {},
         }
 
         let expected_c_type = self.c_type_name(concrete_expected)
@@ -356,11 +394,64 @@ given CodeGen {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
             .Some(def_id) then {
+                if not self.receiver_method_matches_lookup(def_id, concrete_receiver_type) then {
+                    return [Symbol]Option.None()
+                }
                 return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type)
             },
             .None() then {},
         }
         return [Symbol]Option.None()
+    }
+
+    private receiver_method_matches_lookup(self, def_id DefId, receiver_type Type) Bool = {
+        if self.program.semantic_receiver_method_dispatch().get(def_id.id) is .Some(_) then {
+            return true
+        }
+
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let concrete_receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        when self.method_owner_type(def_id) in {
+            .Some(owner_type) then {
+                let concrete_owner_type = self.concretize_codegen_type(owner_type)
+                if self.concrete_receiver_lookup_key(concrete_owner_type) == concrete_receiver_key then when self.context.get_function_type(def_id) in {
+                    .Some(function_type) then {
+                        if self.function_type_param_count(function_type) > (UInt)0 then {
+                            return true
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+        let receiver_base_type = when concrete_receiver_type in {
+            .ReferenceType(inner_ref) then inner_ref.val,
+            .MutableReferenceType(inner_ref) then inner_ref.val,
+            .WeakReferenceType(inner_ref) then inner_ref.val,
+            .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+            _ then concrete_receiver_type,
+        }
+        let receiver_base_key = self.concrete_receiver_lookup_key(receiver_base_type)
+
+        return when self.context.get_function_type(def_id) in {
+            .Some(function_type) then {
+                if self.function_type_param_count(function_type) == (UInt)0 then {
+                    return false
+                }
+                let receiver_param_type = self.function_type_param_type(function_type, (UInt)0) or else Type.Unknown()
+                let concrete_param_type = self.concretize_codegen_type(receiver_param_type)
+                let param_base_type = when concrete_param_type in {
+                    .ReferenceType(inner_ref) then inner_ref.val,
+                    .MutableReferenceType(inner_ref) then inner_ref.val,
+                    .WeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+                    _ then concrete_param_type,
+                }
+                yield self.concrete_receiver_lookup_key(param_base_type) == receiver_base_key
+            },
+            .None() then false,
+        }
     }
 
     private lookup_receiver_method_by_signature(
@@ -371,15 +462,13 @@ given CodeGen {
         requested_result_type Type,
     ) [Symbol]Option = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
         for entry in self.program.concrete_callable_index().iterator() then {
             let def_id = DefId(entry.first)
             let concrete = entry.second
             if concrete.logical_name <> method_name then {
                 continue
             }
-            let owner_type = concrete.owner_type or else { continue }
-            if self.concrete_receiver_lookup_key(owner_type) <> receiver_key then {
+            if not self.receiver_method_matches_lookup(def_id, concrete_receiver_type) then {
                 continue
             }
             if not self.method_signature_compatible_with_call(def_id, concrete_receiver_type, args, requested_result_type) then {
@@ -394,12 +483,12 @@ given CodeGen {
     }
 
 
-    public generate_static_method_call(self mut ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_static_method_call(self mut ref, receiver_type Type, method_name String, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
-        let logical_method_name = self.context.symbol_name(method)
-        let owner_matches_receiver = if method.def_id.id > 0 then when self.method_owner_type(method.def_id) in {
-                .Some(owner_type) then self.concrete_receiver_lookup_key(owner_type) == self.concrete_receiver_lookup_key(concrete_receiver_type),
-                .None() then false,
+        let logical_method_name = if not method_name.is_empty() then method_name else self.context.symbol_name(method)
+        let owner_matches_receiver = if method.def_id.id > 0 then when self.context.get_function_param_type(method.def_id, (UInt)0) in {
+            .Some(receiver_param_type) then self.receiver_param_type_matches_call_receiver(receiver_param_type, concrete_receiver_type),
+            .None() then false,
             } else false
 
         let mut resolved_symbol_opt = if owner_matches_receiver then {
@@ -588,21 +677,35 @@ given CodeGen {
         // metadata lookup picking a stale specialization of a generic method.
         when self.method_owner_type(method.def_id) in {
             .Some(owner_type) then {
-                let base_key = self.concrete_receiver_lookup_key(base_type)
                 let signature_receiver_matches = when self.context.get_function_param_type(method.def_id, (UInt)0) in {
                     .Some(receiver_param_type) then {
-                        let declared_receiver_key = self.concrete_receiver_lookup_key(receiver_param_type)
-                            yield declared_receiver_key == base_key
+                        yield self.receiver_param_type_matches_call_receiver(receiver_param_type, base_type)
                     },
                     .None() then false,
                 }
                 let direct_signature_matches_call = self.method_signature_compatible_with_call(method.def_id, base_type, args, effective_result_type)
                 let _ = owner_type
-                if signature_receiver_matches and direct_signature_matches_call then {
+                if signature_receiver_matches
+                    and direct_signature_matches_call
+                    and self.program.lookup_concrete_callable(method.def_id) is .Some(_)
+                then {
                     method_opt = self.bound_concrete_method_symbol(method.def_id, base_type, effective_result_type)
                 }
             },
             .None() then {},
+        }
+        if method_opt is .None() then {
+            when self.direct_callable_symbol(method) in {
+                .Some(direct_symbol) then {
+                    if self.method_signature_compatible_with_call(direct_symbol.def_id, base_type, args, effective_result_type) then {
+                        method_opt = when self.bound_concrete_method_symbol(direct_symbol.def_id, base_type, effective_result_type) in {
+                            .Some(bound_symbol) then [Symbol]Option.Some(bound_symbol),
+                            .None() then [Symbol]Option.Some(direct_symbol),
+                        }
+                    }
+                },
+                .None() then {},
+            }
         }
         if method_opt is .None() then {
             if self.try_generate_receiver_dispatch_call(direct_dispatch_base, base_type, args, result_type, dispatch_callsite) is .Some(dispatch_call) then {
@@ -618,11 +721,6 @@ given CodeGen {
         if method_opt is .Some(method_symbol) then {
             let effective_result_type = self.preferred_receiver_method_result_type(result_type, method_symbol.symbol_type)
             return self.generate_receiver_method_call(direct_dispatch_base, lookup_base_type, box(method_symbol), args, effective_result_type)
-        }
-
-        if self.lookup_static_method_symbol(lookup_base_type, method_name, effective_result_type) is .Some(static_symbol) then {
-            let effective_static_result_type = self.requested_or_symbol_result_type(result_type, static_symbol.symbol_type)
-            return self.generate_receiver_method_call(direct_dispatch_base, lookup_base_type, box(static_symbol), args, effective_static_result_type)
         }
         let receiver_key = self.concrete_receiver_lookup_key(lookup_base_type)
         panic("CodeGen dispatch error: unresolved receiver method '\(method_name)' for receiver '\(receiver_key)'")
@@ -709,7 +807,7 @@ given CodeGen {
                         let actual_symbol = self.require_bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type, "qualified static dispatch \(trait_name).\(method_name)")
                         return self.generate_function_call(box(actual_symbol), args, actual_symbol.symbol_type)
                     }
-                    return self.generate_static_method_call(base_type, method, args, effective_result_type)
+                    return self.generate_static_method_call(base_type, method_name, method, args, effective_result_type)
                 }
             },
             _ then {},
@@ -732,6 +830,10 @@ given CodeGen {
                 all_args.push(arg)
             }
             if include_base_arg then {
+                if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
+                    let actual_symbol = self.require_bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type, "qualified receiver dispatch \(trait_name).\(method_name)")
+                    return self.generate_receiver_method_call(base, base_type, box(actual_symbol), args, actual_symbol.symbol_type)
+                }
                 if self.lookup_receiver_method(base_type, method_name) is .Some(concrete_method) then {
                     return self.generate_receiver_method_call(base, base_type, box(concrete_method), args, effective_result_type)
                 }
@@ -740,10 +842,6 @@ given CodeGen {
                         return self.generate_receiver_method_call(base, base_type, box(concrete_method), args, effective_result_type)
                     },
                     .None() then {},
-                }
-                if self.lookup_trait_method_def_id(base_type, trait_name, method_name) is .Some(actual_def_id) then {
-                    let actual_symbol = self.require_bound_concrete_method_symbol(actual_def_id, base_type, effective_result_type, "qualified receiver dispatch \(trait_name).\(method_name)")
-                    return self.generate_receiver_method_call(base, base_type, box(actual_symbol), args, actual_symbol.symbol_type)
                 }
             }
             let direct_symbol = when self.direct_callable_symbol(method) in {
@@ -756,6 +854,38 @@ given CodeGen {
             return dispatch_call
         }
 
+        if not self.is_raw_trait_method(trait_name, method_name) then {
+            let concrete_base = when base.expr_kind in {
+                .TraitObjectConversion(inner, _, _) then inner,
+                _ then base,
+            }
+            let concrete_base_type = self.concretize_codegen_type(concrete_base.expr_type)
+            if self.lookup_trait_method_def_id(concrete_base_type, trait_name, method_name) is .Some(actual_def_id) then {
+                let actual_symbol = self.require_bound_concrete_method_symbol(actual_def_id, concrete_base_type, effective_result_type, "qualified helper dispatch \(trait_name).\(method_name)")
+                return self.generate_receiver_method_call(concrete_base, concrete_base_type, box(actual_symbol), args, actual_symbol.symbol_type)
+            }
+            if self.lookup_receiver_method(concrete_base_type, method_name) is .Some(concrete_method) then {
+                return self.generate_receiver_method_call(concrete_base, concrete_base_type, box(concrete_method), args, effective_result_type)
+            }
+            when self.lookup_receiver_method_by_signature(concrete_base_type, method_name, args, effective_result_type) in {
+                .Some(concrete_method) then {
+                    return self.generate_receiver_method_call(concrete_base, concrete_base_type, box(concrete_method), args, effective_result_type)
+                },
+                .None() then {},
+            }
+
+            let mut all_args = [TypedExpr ref]List.new()
+            all_args.push(concrete_base)
+            for arg in args then {
+                all_args.push(arg)
+            }
+            let direct_symbol = when self.direct_callable_symbol(method) in {
+                .Some(symbol) then symbol,
+                .None() then method.val,
+            }
+            return self.generate_function_call(box(direct_symbol), all_args, effective_result_type)
+        }
+
         return self.generate_trait_method_call_typed(base, trait_type, method_name, args, effective_result_type)
     }
     // ── 方法查找辅助方法 ──────────────────────────────────────────────────────
@@ -765,21 +895,6 @@ given CodeGen {
     /// 优先使用单态化阶段导出的 metadata 表。
     lookup_receiver_method(self, receiver_type Type, method_name String) [Symbol]Option = {
         let base_type = receiver_type
-        when receiver_type in {
-            .ReferenceType(inner_ref) then {
-                let inner_symbol = self.lookup_receiver_method(inner_ref.val, method_name)
-                if inner_symbol is .Some(_) then {
-                    return inner_symbol
-                }
-            },
-            .MutableReferenceType(inner_ref) then {
-                let inner_symbol = self.lookup_receiver_method(inner_ref.val, method_name)
-                if inner_symbol is .Some(_) then {
-                    return inner_symbol
-                }
-            },
-            _ then {},
-        }
         if self.lookup_receiver_method_via_metadata(base_type, method_name, Type.Unknown()) is .Some(symbol) then {
             return [Symbol]Option.Some(symbol)
         }

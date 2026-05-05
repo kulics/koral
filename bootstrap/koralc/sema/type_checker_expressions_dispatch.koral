@@ -738,6 +738,7 @@ given TypeChecker {
             },
             .GenericMethodCall(base, method_type_args, method_name, args, _) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                let trait_constraint_opt = self.find_trait_constraint_for_method(initial_typed_base.expr_type, method_name)
                 let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let mut resolved_method_type_args = [Type]List.new()
@@ -800,6 +801,11 @@ given TypeChecker {
                     .TraitObject(_, _) then false,
                     _ then not expected_self_needs_receiver_dispatch and not self.is_unresolved_expr_type(typed_base.expr_type),
                 }
+                let trait_dispatch_requires_object = when typed_base.expr_type in {
+                    .GenericParameter(_) then true,
+                    .TraitObject(_, _) then true,
+                    _ then false,
+                }
                 let static_receiver_is_type_symbol = when typed_base.expr_kind in {
                     .Variable(sym) then sym.kind is .TypeSymbol(),
                     _ then false,
@@ -811,10 +817,28 @@ given TypeChecker {
                     }
                     yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, self.context().symbol_name(method_symbol), box(method_symbol), [Type]List.new(), [Type]List.new(), static_args), final_ret_type)
                 } else {
-                    let callee = make_typed_expr(
-                        TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
-                        method_symbol.symbol_type,
-                    )
+                    let callee = when trait_constraint_opt in {
+                        .Some(trait_name) then if trait_dispatch_requires_object then {
+                            self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
+                            let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
+                            let qualified_base = if typed_base.expr_type is .TraitObject(_, _)
+                                then typed_base
+                                else self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type))
+                            yield make_typed_expr(
+                                TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
+                                method_symbol.symbol_type,
+                            )
+                        } else {
+                            yield make_typed_expr(
+                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
+                                method_symbol.symbol_type,
+                            )
+                        },
+                        .None() then make_typed_expr(
+                            TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
+                            method_symbol.symbol_type,
+                        ),
+                    }
                     yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), final_ret_type)
                 }
             },

@@ -265,6 +265,18 @@ given EscapeContext {
         }
     }
 
+    public parameter_escapes(self, callee_def_id DefId, param_index UInt) Bool = {
+        if callee_def_id.id == 0 then {
+            return true
+        }
+        return when self.global_summaries.get(callee_def_id.id) in {
+            .Some(summary) then if param_index < summary.parameter_states.count()
+                then parameter_escape_state_is_escape(summary.parameter_states[param_index])
+                else true,
+            .None() then true,
+        }
+    }
+
     /// 重置上下文（用于新函数）
     public reset(self mut ref, ret_type [Type]Option) Void = {
         self.variable_scopes.clear()
@@ -448,7 +460,8 @@ given EscapeContext {
                                         .Some(context) then context.symbol_name(method),
                                         .None() then "",
                                     }
-                                    yield resolve_escape_method_def_id(program, self.compiler_context, method.def_id, receiver_type, method_name)
+                                    let lookup_receiver_type = if base.expr_type is .Unknown() then receiver_type else base.expr_type
+                                    yield resolve_escape_method_def_id(program, self.compiler_context, method.def_id, lookup_receiver_type, method_name)
                                 },
                                 .None() then def_id_option(method.def_id),
                             }
@@ -1138,13 +1151,16 @@ private let resolve_escape_method_def_id(
     receiver_type Type,
     method_name String,
 ) [DefId]Option = {
-    if method_def_id.id > 0 then {
+    if method_def_id.id > 0 and program.lookup_concrete_callable(method_def_id) is .Some(_) then {
         return [DefId]Option.Some(method_def_id)
     }
     return when context_opt in {
         .Some(context) then {
             let type_name = mono_type_simple_name(context, receiver_type)
-            yield program.lookup_static_method(type_name, method_name)
+            yield when program.lookup_static_method(type_name, method_name) in {
+                .Some(resolved_def_id) then [DefId]Option.Some(resolved_def_id),
+                .None() then [DefId]Option.None(),
+            }
         },
         .None() then [DefId]Option.None(),
     }
@@ -1456,12 +1472,13 @@ private let extract_escape_calls_from_expr(
         },
         .Call(callee, args) then {
             let callee_def_id_opt = when callee.expr_kind in {
-                .MethodReference(_, receiver_type, method, _, _, _) then {
+                .MethodReference(base, receiver_type, method, _, _, _) then {
                     let method_name = when context_opt in {
                         .Some(context) then context.symbol_name(method),
                         .None() then "",
                     }
-                    yield resolve_escape_method_def_id(program, context_opt, method.def_id, receiver_type, method_name)
+                    let lookup_receiver_type = if base.expr_type is .Unknown() then receiver_type else base.expr_type
+                    yield resolve_escape_method_def_id(program, context_opt, method.def_id, lookup_receiver_type, method_name)
                 },
                 .TraitMethodPlaceholder(_, trait_type, method, _, _) then {
                     let method_name = when context_opt in {
