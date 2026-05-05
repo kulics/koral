@@ -680,6 +680,12 @@ given CodeGen {
     }
 
     private is_object_safe_trait_callable(self, params [TypedParam]List, return_type Type) Bool = {
+        if not params.is_empty() then {
+            let receiver = params[(UInt)0]
+            if receiver.name == "self" and not self.is_object_safe_trait_receiver(receiver.param_type) then {
+                return false
+            }
+        }
         let mut is_first = true
         for p in params then {
             if not is_first and self.is_trait_object_surface_type(p.param_type) then {
@@ -688,6 +694,14 @@ given CodeGen {
             is_first = false
         }
         return not self.is_trait_object_surface_type(return_type)
+    }
+
+    private is_object_safe_trait_receiver(self, t Type) Bool = {
+        return when t in {
+            .ReferenceType(inner) then inner.val is .TraitObject(_, _),
+            .MutableReferenceType(inner) then inner.val is .TraitObject(_, _),
+            _ then false,
+        }
     }
 
     private should_emit_given_decl_methods(self, target_type Type) Bool = {

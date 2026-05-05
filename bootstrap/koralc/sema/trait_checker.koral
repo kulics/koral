@@ -100,6 +100,12 @@ given TraitRegistry {
         let mut is_safe = true
         for entry in methods then {
             let m = entry.second
+            if not m.params.is_empty() then {
+                let receiver = m.params[(UInt)0]
+                if receiver.name == "self" and not self.is_object_safe_receiver_type(receiver.param_type) then {
+                    is_safe = false
+                }
+            }
             // 检查返回值是否使用 Self（receiver 之外不允许）
             if self.type_uses_self(m.return_type) then {
                 is_safe = false
@@ -118,6 +124,14 @@ given TraitRegistry {
         }
         self.object_safety_cache.insert(trait_name, is_safe)
         return [Bool]Result.Ok(is_safe)
+    }
+
+    private is_object_safe_receiver_type(self, t Type) Bool = {
+        return when t in {
+            .ReferenceType(inner) then inner.val is .GenericParameter("Self"),
+            .MutableReferenceType(inner) then inner.val is .GenericParameter("Self"),
+            _ then false,
+        }
     }
 
     private type_uses_self(self, t Type) Bool = {

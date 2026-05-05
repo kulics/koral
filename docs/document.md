@@ -1048,10 +1048,10 @@ Trait methods can use named parameters. Implementations must match the trait dec
 
 ```koral
 trait Drawable {
-    draw(self, at_x: Int, at_y: Int) Void
+    draw(self ref, at_x: Int, at_y: Int) Void
 }
 given MyType Drawable {
-    draw(self, at_x: Int, at_y: Int) Void = todo()  // must match
+    draw(self ref, at_x: Int, at_y: Int) Void = todo()  // must match
 }
 ```
 
@@ -1313,7 +1313,7 @@ A Trait defines a set of method signatures that any implementing type must provi
 
 ```koral
 trait Printable {
-    to_string(self) String
+    to_string(self ref) String
 }
 ```
 
@@ -1474,60 +1474,85 @@ The most commonly used core traits are:
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
 - `[T]Iterator`: iteration protocol (`next(self mut ref) [T]Option`).
-- `Error`: error message interface (`message(self) String`).
+- `Error`: error message interface (`message(self ref) String`).
 
 Operators are lowered to trait methods internally (for example `+` to `Add`, and indexing to `Index`/`MutIndex`).
 
 ### Trait Objects
 
-Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `TraitName ref` syntax, you can erase any type that implements a Trait into a uniform reference type.
+Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `TraitName ref` or `TraitName mut ref` syntax, you can erase any type that implements a Trait into a uniform reference type.
 
 #### Basic Syntax
 
 Trait-object construction follows these rules:
 
-- The target type is written as `TraitName ref`.
+- The target type is written as `TraitName ref` or `TraitName mut ref`.
 - The source value must implement the trait and be converted in a context expecting that trait-object type.
 - `box(...)` is the standard way to provide an owned value for this conversion.
 
 ```koral
 trait Drawable {
-    draw(self) String
+    draw(self ref) String
+    reset(self mut ref) Void
 }
 
-type Circle(radius Int)
-type Square(side Int)
+type Circle(mut radius Int)
+type Square(mut side Int)
 
-given Circle Drawable { public draw(self) String = "Drawing circle" }
-given Square Drawable { public draw(self) String = "Drawing square" }
+given Circle Drawable {
+    public draw(self ref) String = "Drawing circle"
+    public reset(self mut ref) Void = {
+        self.radius = 0
+    }
+}
+given Square Drawable {
+    public draw(self ref) String = "Drawing square"
+    public reset(self mut ref) Void = {
+        self.side = 0
+    }
+}
 
-// Create a trait object
+// Create trait objects
 let shape Drawable ref = box(Circle(10))
+let mutable_shape Drawable mut ref = box(Square(4))
 
 // Call methods through the trait object (dynamic dispatch)
 shape.draw()  // "Drawing circle"
+mutable_shape.reset()
+mutable_shape.draw()
 ```
+
+Dispatch through trait objects respects reference mutability:
+
+- `TraitName ref` can call only requirements declared with `self ref`.
+- `TraitName mut ref` can call both `self mut ref` and `self ref` requirements.
+- `TraitName ref` cannot call `self mut ref` requirements.
 
 #### Object Safety
 
 Only Traits that satisfy the following conditions can be used as trait objects:
 
 - Methods must not have generic parameters
-- `Self` must not appear in method parameters or return types (except as the receiver `self`)
+- The receiver, if present, must be `self ref` or `self mut ref`
+- `Self` must not appear in method parameters or return types (except within that receiver)
 
 ```koral
 // Object-safe — can be used as a trait object
 trait Error {
-    message(self) String
+    message(self ref) String
 }
 
 // Not object-safe — cannot be used as a trait object
 trait Eq {
     equals(self, other Self) Bool  // Self appears in parameters
 }
+
+trait Resettable {
+    reset(self) Void  // by-value self is not object-safe
+}
 ```
 
-Trait objects (`TraitName ref`) do not support direct `.val`; use trait methods through dynamic dispatch.
+Trait objects (`TraitName ref`, `TraitName mut ref`) do not support direct `.val`; use trait methods through dynamic dispatch.
 
 ## Generics
 

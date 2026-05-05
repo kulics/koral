@@ -4163,16 +4163,20 @@ extension TypeChecker {
 
       // Check if this is a trait object method call (dynamic dispatch).
       // The base type is a reference to a trait object — handle before auto-ref/deref.
-      if case .reference(let inner) = base.type,
-         case .traitObject(let traitName, _) = inner {
-        return try inferTraitObjectMethodCall(
-          base: base,
-          traitName: traitName,
-          methodName: methodName,
-          params: params,
-          returns: returns,
-          arguments: arguments
-        )
+      switch base.type {
+      case .reference(let inner), .mutableReference(let inner):
+        if case .traitObject(let traitName, _) = inner {
+          return try inferTraitObjectMethodCall(
+            base: base,
+            traitName: traitName,
+            methodName: methodName,
+            params: params,
+            returns: returns,
+            arguments: arguments
+          )
+        }
+      default:
+        break
       }
 
       let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?

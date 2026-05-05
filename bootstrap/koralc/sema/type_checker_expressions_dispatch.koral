@@ -1,4 +1,22 @@
 given TypeChecker {
+    private dispatches_via_trait_object(self, receiver_type Type) Bool = {
+        return when receiver_type in {
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner) then self.dispatches_via_trait_object(inner.val),
+            .MutableReferenceType(inner) then self.dispatches_via_trait_object(inner.val),
+            _ then false,
+        }
+    }
+
+    private trait_object_dispatch_type(self, receiver_type Type) [Type]Option = {
+        return when receiver_type in {
+            .TraitObject(_, _) then [Type]Option.Some(receiver_type),
+            .ReferenceType(inner) then self.trait_object_dispatch_type(inner.val),
+            .MutableReferenceType(inner) then self.trait_object_dispatch_type(inner.val),
+            _ then [Type]Option.None(),
+        }
+    }
+
     private constrained_trait_object_type_for_dispatch(self, receiver_type Type, trait_name String) Type = {
         let normalized = receiver_type
         return when normalized in {
@@ -801,11 +819,8 @@ given TypeChecker {
                     .TraitObject(_, _) then false,
                     _ then not expected_self_needs_receiver_dispatch and not self.is_unresolved_expr_type(typed_base.expr_type),
                 }
-                let trait_dispatch_requires_object = when typed_base.expr_type in {
-                    .GenericParameter(_) then true,
-                    .TraitObject(_, _) then true,
-                    _ then false,
-                }
+                let trait_dispatch_requires_object = typed_base.expr_type is .GenericParameter(_)
+                    or self.dispatches_via_trait_object(typed_base.expr_type)
                 let static_receiver_is_type_symbol = when typed_base.expr_kind in {
                     .Variable(sym) then sym.kind is .TypeSymbol(),
                     _ then false,
@@ -821,7 +836,7 @@ given TypeChecker {
                         .Some(trait_name) then if trait_dispatch_requires_object then {
                             self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
                             let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
-                            let qualified_base = if typed_base.expr_type is .TraitObject(_, _)
+                            let qualified_base = if self.dispatches_via_trait_object(typed_base.expr_type)
                                 then typed_base
                                 else self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type))
                             yield make_typed_expr(
@@ -834,21 +849,24 @@ given TypeChecker {
                                 method_symbol.symbol_type,
                             )
                         },
-                        .None() then make_typed_expr(
-                            TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
-                            method_symbol.symbol_type,
-                        ),
+                        .None() then when self.trait_object_dispatch_type(typed_base.expr_type) in {
+                            .Some(trait_type) then make_typed_expr(
+                                TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
+                                method_symbol.symbol_type,
+                            ),
+                            .None() then make_typed_expr(
+                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
+                                method_symbol.symbol_type,
+                            ),
+                        },
                     }
                     yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), final_ret_type)
                 }
             },
             .QualifiedMethodCall(base, trait_name, method_name, args, _) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
-                let trait_dispatch_requires_object = when initial_typed_base.expr_type in {
-                    .TraitObject(_, _) then true,
-                    .GenericParameter(_) then true,
-                    _ then false,
-                }
+                let trait_dispatch_requires_object = self.dispatches_via_trait_object(initial_typed_base.expr_type)
+                    or initial_typed_base.expr_type is .GenericParameter(_)
                 let expected_self_type = if trait_dispatch_requires_object
                     then self.resolve_trait_method_self_type(trait_name, method_name, initial_typed_base.expr_type)
                     else [Type]Option.None()
@@ -879,11 +897,8 @@ given TypeChecker {
             },
             .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, _) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
-                let trait_dispatch_requires_object = when initial_typed_base.expr_type in {
-                    .TraitObject(_, _) then true,
-                    .GenericParameter(_) then true,
-                    _ then false,
-                }
+                let trait_dispatch_requires_object = self.dispatches_via_trait_object(initial_typed_base.expr_type)
+                    or initial_typed_base.expr_type is .GenericParameter(_)
                 let expected_self_type = if trait_dispatch_requires_object
                     then self.resolve_trait_method_self_type(trait_name, method_name, initial_typed_base.expr_type)
                     else [Type]Option.None()

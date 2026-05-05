@@ -375,6 +375,8 @@ For new traits, prefer the narrowest receiver that matches the semantic contract
 - observation traits should usually use `self ref`
 - mutation traits should use `self mut ref`
 - consuming traits should use `self`
+- traits intended for trait objects should keep requirement receivers on `self ref` / `self mut ref` only
+- `Trait ref` can call only `self ref` requirements, while `Trait mut ref` can call both `self mut ref` and `self ref`
 
 Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
 

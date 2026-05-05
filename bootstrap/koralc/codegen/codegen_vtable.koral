@@ -1688,6 +1688,16 @@ given CodeGen {
         return self.generate_trait_object_conversion_typed(inner_expr, self.trait_object_type_from_name(trait_name), concrete_type)
     }
 
+    private load_trait_object_from_ref_storage(self mut ref, inner_expr TypedExpr ref) String = {
+        let inner_result = self.generate_expression_ssa(inner_expr)
+        let result = self.next_temp_with_decl("struct __koral_TraitRef")
+        self.add_indent()
+        self.buffer.push_string("\(result) = *(struct __koral_TraitRef*)\(inner_result).ptr;\n")
+        self.add_indent()
+        self.buffer.push_string("__koral_retain(\(result).control);\n")
+        return result
+    }
+
     public generate_trait_object_conversion_typed(self mut ref, inner_expr TypedExpr ref, trait_type Type, concrete_type Type) String = {
         let trait_name = self.trait_name_of_trait_type(trait_type)
         when concrete_type in {
@@ -1698,6 +1708,14 @@ given CodeGen {
                 when inner_ref.val in {
                     .TraitObject(_, _) then {
                         return self.generate_cast_expr(trait_type, inner_expr)
+                    },
+                    _ then {},
+                }
+            },
+            .MutableReferenceType(inner_ref) then {
+                when inner_ref.val in {
+                    .TraitObject(_, _) then {
+                        return self.load_trait_object_from_ref_storage(inner_expr)
                     },
                     _ then {},
                 }

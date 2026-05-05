@@ -1,4 +1,22 @@
 given TypeChecker {
+    private dispatches_via_trait_object_for_static_call(self, receiver_type Type) Bool = {
+        return when receiver_type in {
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(inner.val),
+            .MutableReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(inner.val),
+            _ then false,
+        }
+    }
+
+    private trait_object_type_for_static_call(self, receiver_type Type) [Type]Option = {
+        return when receiver_type in {
+            .TraitObject(_, _) then [Type]Option.Some(receiver_type),
+            .ReferenceType(inner) then self.trait_object_type_for_static_call(inner.val),
+            .MutableReferenceType(inner) then self.trait_object_type_for_static_call(inner.val),
+            _ then [Type]Option.None(),
+        }
+    }
+
     private check_static_call_arg_ref(self, arg Expr ref, callee_def_id DefId, arg_index UInt, scope Scope) TypedExpr = {
         let param_type = self.context().signature_param_type_or_unknown(callee_def_id, arg_index)
         return when param_type in {
@@ -1109,11 +1127,8 @@ given TypeChecker {
                 let normalized_base_type = base_type
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
                 let direct_method_signature_opt = self.resolve_method_signature(base_type, method_name)
-                let trait_dispatch_requires_object = when normalized_base_type in {
-                    .TraitObject(_, _) then true,
-                    .GenericParameter(_) then true,
-                    _ then false,
-                }
+                let trait_dispatch_requires_object = self.dispatches_via_trait_object_for_static_call(normalized_base_type)
+                    or normalized_base_type is .GenericParameter(_)
                 let expected_self_type = when trait_constraint_opt in {
                     .Some(trait_name) then if trait_dispatch_requires_object
                         then [Type]Option.Some(self.constrained_trait_object_type_for_static_call(base_type, trait_name))
@@ -1181,9 +1196,15 @@ given TypeChecker {
                             }
                         },
                         .None() then {
-                            when normalized_base_type in {
-                                .TraitObject(_, _) then {},
-                                _ then {
+                            when self.trait_object_type_for_static_call(normalized_base_type) in {
+                                .Some(trait_type) then {
+                                    let callee = make_typed_expr(
+                                        TypedExprKind.TraitMethodPlaceholder(box(adapted_base), trait_type, box(lowered_method_symbol), inferred_method_type_args, .None()),
+                                        lowered_method_symbol.symbol_type,
+                                    )
+                                    structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
+                                },
+                                .None() then if not self.dispatches_via_trait_object_for_static_call(normalized_base_type) then {
                                     let callee = make_typed_expr(
                                         TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
                                         lowered_method_symbol.symbol_type,
@@ -1206,11 +1227,8 @@ given TypeChecker {
                 let normalized_base_type = base_type
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
                 let direct_method_signature_opt = self.resolve_method_signature(base_type, method_name)
-                let trait_dispatch_requires_object = when normalized_base_type in {
-                    .TraitObject(_, _) then true,
-                    .GenericParameter(_) then true,
-                    _ then false,
-                }
+                let trait_dispatch_requires_object = self.dispatches_via_trait_object_for_static_call(normalized_base_type)
+                    or normalized_base_type is .GenericParameter(_)
                 let expected_self_type = when trait_constraint_opt in {
                     .Some(trait_name) then if trait_dispatch_requires_object
                         then [Type]Option.Some(self.constrained_trait_object_type_for_static_call(base_type, trait_name))
@@ -1278,9 +1296,15 @@ given TypeChecker {
                             }
                         },
                         .None() then {
-                            when normalized_base_type in {
-                                .TraitObject(_, _) then {},
-                                _ then {
+                            when self.trait_object_type_for_static_call(normalized_base_type) in {
+                                .Some(trait_type) then {
+                                    let callee = make_typed_expr(
+                                        TypedExprKind.TraitMethodPlaceholder(box(adapted_base), trait_type, box(lowered_method_symbol), inferred_method_type_args, .None()),
+                                        lowered_method_symbol.symbol_type,
+                                    )
+                                    structured_call = [TypedExpr]Option.Some(make_typed_expr(TypedExprKind.Call(box(callee), typed_args), method_ret_type))
+                                },
+                                .None() then if not self.dispatches_via_trait_object_for_static_call(normalized_base_type) then {
                                     let callee = make_typed_expr(
                                         TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(lowered_method_symbol), [Type]List.new(), inferred_method_type_args, .None()),
                                         lowered_method_symbol.symbol_type,
