@@ -34,14 +34,13 @@ given TypeChecker {
         return self.check_block_in_scope(statements, expected, block_scope)
     }
 
-    private make_assignment_temp_symbol(self, prefix String, t Type) Symbol ref = {
+    private make_assignment_temp_symbol(self, prefix String, t Type, variable_kind VariableKind) Symbol ref = {
         let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable())
-        let unique_name = "\(prefix)_\(def_id.id.to_string())"
-        return box(Symbol(def_id, t, SymbolKind.Variable(VariableKind.Value())))
+        return box(Symbol(def_id, t, SymbolKind.Variable(variable_kind)))
     }
 
-    private push_assignment_temp_decl(self, prefix String, value TypedExpr, statements [TypedStatement]List mut ref) Symbol ref = {
-        let sym = self.make_assignment_temp_symbol(prefix, value.expr_type)
+    private push_assignment_temp_decl(self, prefix String, value TypedExpr, variable_kind VariableKind, statements [TypedStatement]List mut ref) Symbol ref = {
+        let sym = self.make_assignment_temp_symbol(prefix, value.expr_type, variable_kind)
         statements.push(TypedStatement.LetStmt(sym, box(value), unknown_span()))
         return sym
     }
@@ -152,10 +151,10 @@ given TypeChecker {
         let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
 
         let mut block_statements = [TypedStatement]List.new()
-        let base_symbol = self.push_assignment_temp_decl("__sub_base", adapted_base, block_statements.ref)
+        let base_symbol = self.push_assignment_temp_decl("__sub_base", adapted_base, VariableKind.SubscriptBaseBorrowAlias(), block_statements.ref)
         let mut arg_symbols = [Symbol ref]List.new()
         for typed_arg in typed_args then {
-            arg_symbols.push(self.push_assignment_temp_decl("__sub_idx", typed_arg.val, block_statements.ref))
+            arg_symbols.push(self.push_assignment_temp_decl("__sub_idx", typed_arg.val, VariableKind.Value(), block_statements.ref))
         }
 
         let base_var = make_typed_expr(TypedExprKind.Variable(base_symbol), base_symbol.symbol_type)
@@ -167,9 +166,9 @@ given TypeChecker {
         let lowered_value = when op in {
             .Some(compound_op) then {
                 let read_expr = self.lower_subscript_read_expr(base_var, arg_vars, typed_target.expr_type)
-                let old_symbol = self.push_assignment_temp_decl("__sub_old", read_expr, block_statements.ref)
+                let old_symbol = self.push_assignment_temp_decl("__sub_old", read_expr, VariableKind.Value(), block_statements.ref)
                 let typed_rhs = self.check_expr_scoped_ref(value, .Some(expected_value_type), scope)
-                let rhs_symbol = self.push_assignment_temp_decl("__sub_rhs", typed_rhs, block_statements.ref)
+                let rhs_symbol = self.push_assignment_temp_decl("__sub_rhs", typed_rhs, VariableKind.Value(), block_statements.ref)
                 let lhs_var = make_typed_expr(TypedExprKind.Variable(old_symbol), old_symbol.symbol_type)
                 let rhs_var = make_typed_expr(TypedExprKind.Variable(rhs_symbol), rhs_symbol.symbol_type)
                 yield when compound_op in {
@@ -188,7 +187,7 @@ given TypeChecker {
             .None() then self.check_expr_scoped_ref(value, .Some(expected_value_type), scope),
         }
 
-        let value_symbol = self.push_assignment_temp_decl("__sub_val", lowered_value, block_statements.ref)
+        let value_symbol = self.push_assignment_temp_decl("__sub_val", lowered_value, VariableKind.Value(), block_statements.ref)
         let value_var = make_typed_expr(TypedExprKind.Variable(value_symbol), value_symbol.symbol_type)
 
         let call_callee = make_typed_expr(

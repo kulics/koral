@@ -292,6 +292,36 @@ public let lookup_extension_template_checked_body(
     template GenericExtensionMethodTemplate mut ref,
 ) [TypedExpr ref]Option = template.checked_body
 
+private let concrete_extension_def_id_is_materialized(mono Monomorphizer ref, def_id DefId) Bool = {
+    for node in mono.storage.generated_nodes then {
+        when node in {
+            .FunctionDecl(_, _, _, _, _, _, id) then {
+                if id.def_id.id == def_id.id then { return true }
+            },
+            .IntrinsicFunctionDecl(_, _, _, _, _, id) then {
+                if id.def_id.id == def_id.id then { return true }
+            },
+            .GivenDecl(_, members, _) then {
+                for member in members then {
+                    if member.def_id.id == def_id.id and member.body is .Some(_) then { return true }
+                }
+            },
+            .GivenTraitDecl(_, _, _, members, _) then {
+                for member in members then {
+                    if member.def_id.id == def_id.id and member.body is .Some(_) then { return true }
+                }
+            },
+            .IntrinsicGivenDecl(_, members, _) then {
+                for member in members then {
+                    if member.def_id.id == def_id.id then { return true }
+                }
+            },
+            _ then {},
+        }
+    }
+    return false
+}
+
 private let resolve_trait_placeholder_name(
     mono Monomorphizer ref,
     candidate String,
@@ -906,13 +936,13 @@ public let instantiate_extension_method_from_entry(
         .None() then {},
     }
     // b. Check extension_method_def_ids cache.
-    //    Trust the cache directly (matching Swift's approach which does not
-    //    scan generatedNodes for stale intrinsics).
     when mono.storage.extension_method_def_ids.get(lookup_key) in {
         .Some(existing_def_id) then {
-            // Already instantiated — return the cached symbol.
-            let existing_type = Type.FunctionType(types_to_param_entries([Type ref]List.new()), box(Type.Unknown()))
-            return Symbol(existing_def_id, existing_type, SymbolKind.Function())
+            if concrete_extension_def_id_is_materialized(mono, existing_def_id) then {
+                // Already instantiated — return the cached symbol.
+                let existing_type = Type.FunctionType(types_to_param_entries([Type ref]List.new()), box(Type.Unknown()))
+                return Symbol(existing_def_id, existing_type, SymbolKind.Function())
+            }
         },
         .None() then {},
     }
@@ -1468,6 +1498,7 @@ public let instantiate_trait_vtable_methods(
     let normalized_actual = normalize_trait_conformance_actual_type(mono, parameterized_concrete_type)
     let mut concrete_template_name = stable_type_key(parameterized_concrete_type)
     let mut extension_type_args = [Type ref]List.new()
+    let mut instantiated_any = false
 
     when normalized_actual in {
         .GenericStruct(template_name, args) then {
@@ -1507,10 +1538,88 @@ public let instantiate_trait_vtable_methods(
             extension_type_args.push(box(inner.val))
         },
         .StructureType(def_id) then {
-            concrete_template_name = mono.storage.context.get_name(def_id) or else concrete_template_name
+            when mono.storage.context.get_name(def_id) in {
+                .Some(layout_name) then {
+                    when mono.storage.context.get_template_name(def_id) in {
+                        .Some(template_name) then {
+                            concrete_template_name = template_name
+                            when mono.storage.context.get_type_arguments(def_id) in {
+                                .Some(actual_args) then {
+                                    for arg in actual_args then {
+                                        extension_type_args.push(box(arg))
+                                    }
+                                },
+                                .None() then {
+                                    when mono.storage.layout_to_template_info.get(layout_name) in {
+                                        .Some(info) then {
+                                            for arg in info.args then {
+                                                extension_type_args.push(box(arg.val))
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                },
+                            }
+                        },
+                        .None() then {
+                            when mono.storage.layout_to_template_info.get(layout_name) in {
+                                .Some(info) then {
+                                    concrete_template_name = info.base_name
+                                    for arg in info.args then {
+                                        extension_type_args.push(box(arg.val))
+                                    }
+                                },
+                                .None() then {
+                                    concrete_template_name = layout_name
+                                },
+                            }
+                        },
+                    }
+                },
+                .None() then {},
+            }
         },
         .EnumType(def_id) then {
-            concrete_template_name = mono.storage.context.get_name(def_id) or else concrete_template_name
+            when mono.storage.context.get_name(def_id) in {
+                .Some(layout_name) then {
+                    when mono.storage.context.get_template_name(def_id) in {
+                        .Some(template_name) then {
+                            concrete_template_name = template_name
+                            when mono.storage.context.get_type_arguments(def_id) in {
+                                .Some(actual_args) then {
+                                    for arg in actual_args then {
+                                        extension_type_args.push(box(arg))
+                                    }
+                                },
+                                .None() then {
+                                    when mono.storage.layout_to_template_info.get(layout_name) in {
+                                        .Some(info) then {
+                                            for arg in info.args then {
+                                                extension_type_args.push(box(arg.val))
+                                            }
+                                        },
+                                        .None() then {},
+                                    }
+                                },
+                            }
+                        },
+                        .None() then {
+                            when mono.storage.layout_to_template_info.get(layout_name) in {
+                                .Some(info) then {
+                                    concrete_template_name = info.base_name
+                                    for arg in info.args then {
+                                        extension_type_args.push(box(arg.val))
+                                    }
+                                },
+                                .None() then {
+                                    concrete_template_name = layout_name
+                                },
+                            }
+                        },
+                    }
+                },
+                .None() then {},
+            }
         },
         _ then {},
     }
@@ -1578,9 +1687,22 @@ public let instantiate_trait_vtable_methods(
                     extension_type_args,
                     [Type ref]List.new(),
                 )
+                instantiated_any = true
             }
         }
         .None() then {},
+    }
+
+    if not instantiated_any then {
+        when parameterized_concrete_type in {
+            .ReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .MutableReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .WeakReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .MutableWeakReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .PointerType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .MutablePointerType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            _ then {},
+        }
     }
 }
 

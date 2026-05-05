@@ -10,6 +10,17 @@
 // Requirements: 5.16, 5.19, 5.20
 
 given CodeGen {
+    private resolved_member_path_callee_type(self, base_ref TypedExpr ref, path [String]List, fallback Type) Type = {
+        let mut current_type = base_ref.expr_type
+        for segment in path then {
+            current_type = self.lookup_field_type(current_type, segment)
+        }
+        return when current_type in {
+            .Unknown() then fallback,
+            _ then current_type,
+        }
+    }
+
     private direct_construction_target_type(self mut ref, callee TypedExpr ref, result_type Type) [Type]Option = {
         if not callee.expr_kind is .GenericInstantiation(_, _) then {
             return [Type]Option.None()
@@ -291,7 +302,7 @@ given CodeGen {
                 .Some(symbol) then symbol,
                 .None() then self.make_codegen_method_symbol(method_name, static_result_type),
             }
-            return [String]Option.Some(self.generate_static_method_call(concrete_static_receiver_type, box(method_symbol), args, static_result_type))
+            return [String]Option.Some(self.generate_static_method_call(concrete_static_receiver_type, method_name, box(method_symbol), args, static_result_type))
         }
 
         let effective_base_type = self.concretize_codegen_type(base.expr_type)
@@ -330,6 +341,20 @@ given CodeGen {
         when callee.expr_kind in {
             .Variable(symbol) then {
                 return self.try_generate_variable_call(callee, symbol, args, result_type) or else self.generate_expression_ssa(callee)
+            },
+            _ then {},
+        }
+
+        when callee.expr_kind in {
+            .MemberPath(base_ref, path) then {
+                let callee_type = self.resolved_member_path_callee_type(base_ref, path, callee.expr_type)
+                when callee_type in {
+                    .FunctionType(func_params, return_type_ref) then {
+                        let closure_result = self.generate_expression_ssa(callee)
+                        return self.generate_closure_call(closure_result, param_entry_types(func_params), return_type_ref.val, args)
+                    },
+                    _ then {},
+                }
             },
             _ then {},
         }
@@ -515,6 +540,24 @@ given CodeGen {
             },
             .None() then [Type]Option.None(),
         }
+        let summary_callee_def_id = if args.count() > 0 then when concrete_receiver_type_opt in {
+                .Some(concrete_receiver_type) then {
+                    let mut remaining_args = [TypedExpr ref]List.new()
+                    let mut remaining_arg_index UInt = (UInt)1
+                    while remaining_arg_index < args.count() then {
+                        remaining_args.push(args[remaining_arg_index])
+                        remaining_arg_index += (UInt)1
+                    }
+                    yield when self.lookup_receiver_method_by_signature(concrete_receiver_type, symbol_name, remaining_args, result_type) in {
+                        .Some(concrete_method) then concrete_method.def_id,
+                        .None() then when self.lookup_receiver_method(concrete_receiver_type, symbol_name) in {
+                            .Some(concrete_method) then concrete_method.def_id,
+                            .None() then symbol.def_id,
+                        },
+                    }
+                },
+                .None() then symbol.def_id,
+            } else symbol.def_id
         let mut effective_result_type = when result_type in {
             .Unknown() then {
                 yield when function_type_opt in {
@@ -595,7 +638,7 @@ given CodeGen {
                     .Some(function_type) then self.function_type_param_type(function_type, arg_index),
                     .None() then [Type]Option.None(),
                 }
-                prepared_arg = [String]Option.Some(self.prepare_call_argument(arg, typed_expected_type_opt))
+                prepared_arg = [String]Option.Some(self.prepare_call_argument_for_parameter(arg, typed_expected_type_opt, summary_callee_def_id, arg_index))
             }
             prepared_args.push(prepared_arg.unwrap())
             arg_index = arg_index + (UInt)1

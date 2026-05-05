@@ -441,19 +441,6 @@ given CodeGen {
         if not self.needs_drop(value_type) then {
             return value
         }
-        when value_type in {
-            .ReferenceType(_) then {
-                self.add_indent()
-                self.buffer.push_string("__koral_retain((\(value)).control);\n")
-                return value
-            },
-            .MutableReferenceType(_) then {
-                self.add_indent()
-                self.buffer.push_string("__koral_retain((\(value)).control);\n")
-                return value
-            },
-            _ then {},
-        }
         let c_type = self.c_type_name(value_type)
         let copy_result = self.next_temp_with_decl(c_type)
         self.append_copy_assignment(value_type, value, copy_result)
@@ -648,6 +635,76 @@ given CodeGen {
     }
 
     public prepare_call_argument(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
+        when self.try_prepare_ref_call_argument(arg, expected_type_opt, false) in {
+            .Some(prepared_arg) then {
+                return prepared_arg
+            },
+            .None() then {},
+        }
+
+        return self.prepare_call_argument_fallback(arg, expected_type_opt)
+    }
+
+    public prepare_call_argument_for_parameter(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option, callee_def_id DefId, param_index UInt) String = {
+        let allow_nonescaping_alias = not self.escape_context.parameter_escapes(callee_def_id, param_index)
+        when self.try_prepare_ref_call_argument(arg, expected_type_opt, allow_nonescaping_alias) in {
+            .Some(prepared_arg) then {
+                return prepared_arg
+            },
+            .None() then {},
+        }
+
+        return self.prepare_call_argument_fallback(arg, expected_type_opt)
+    }
+
+    private try_prepare_ref_call_argument(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option, allow_nonescaping_alias Bool) [String]Option = {
+        let effective_expected_type_opt = when expected_type_opt in {
+            .Some(_) then expected_type_opt,
+            .None() then if allow_nonescaping_alias then when arg.expr_type in {
+                    .ReferenceType(_) then [Type]Option.Some(arg.expr_type),
+                    .MutableReferenceType(_) then [Type]Option.Some(arg.expr_type),
+                    .WeakReferenceType(_) then [Type]Option.Some(arg.expr_type),
+                    .MutableWeakReferenceType(_) then [Type]Option.Some(arg.expr_type),
+                    _ then [Type]Option.None(),
+                } else [Type]Option.None(),
+        }
+
+        when effective_expected_type_opt in {
+            .Some(expected_type) then when arg.expr_kind in {
+                .RefExpr(inner_ref) then {
+                    let expects_ref_like = when expected_type in {
+                        .ReferenceType(_) then true,
+                        .MutableReferenceType(_) then true,
+                        .WeakReferenceType(_) then true,
+                        .MutableWeakReferenceType(_) then true,
+                        _ then false,
+                    }
+                    let expected_is_mut_borrow = expected_type is .MutableReferenceType(_) or expected_type is .MutableWeakReferenceType(_)
+                    let should_borrow_alias = self.is_subscript_borrow_alias_expr(inner_ref) or allow_nonescaping_alias or expected_is_mut_borrow
+                    if expects_ref_like and should_borrow_alias and self.is_addressable_lvalue_expr(inner_ref) then {
+                        let components = self.build_ref_components(inner_ref)
+                        let ref_type = if self.is_unresolved_codegen_type(arg.expr_type) and not self.is_unresolved_codegen_type(expected_type)
+                            then expected_type
+                            else arg.expr_type
+                        let ref_result = self.next_temp_with_decl(self.c_type_name(ref_type))
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).ptr = &\(components.first);\n")
+                        self.add_indent()
+                        self.buffer.push_string("\(ref_result).control = \(components.second);\n")
+                        self.add_indent()
+                        self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
+                        return [String]Option.Some(ref_result)
+                    }
+                },
+                _ then {},
+            },
+            .None() then {},
+        }
+
+        return [String]Option.None()
+    }
+
+    private prepare_call_argument_fallback(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
         let lowered_arg = self.lowered_call_argument(arg, expected_type_opt)
         let is_lvalue = self.is_lvalue_expr(lowered_arg)
         let arg_type = lowered_arg.expr_type
@@ -670,6 +727,20 @@ given CodeGen {
             .None() then {},
         }
         return self.finish_prepared_call_argument(result, arg_value, effective_arg_type, is_lvalue, copied_source)
+    }
+
+    private is_subscript_borrow_alias_expr(self, expr TypedExpr ref) Bool = {
+        yield when expr.expr_kind in {
+            .Variable(symbol) then when symbol.kind in {
+                .Variable(variable_kind) then variable_kind is .SubscriptBaseBorrowAlias(),
+                _ then false,
+            },
+            .MemberPath(base, _) then self.is_subscript_borrow_alias_expr(base),
+            .RefExpr(inner) then self.is_subscript_borrow_alias_expr(inner),
+            .DerefExpr(inner) then self.is_subscript_borrow_alias_expr(inner),
+            .PtrExpr(inner) then self.is_subscript_borrow_alias_expr(inner),
+            _ then false,
+        }
     }
 
     private adapt_call_argument_to_expected_type(self mut ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
@@ -1624,8 +1695,8 @@ given CodeGen {
             },
             // ── StaticMethodCall ──────────────────────────────────────────────
             // Requirements: 5.31
-            .StaticMethodCall(receiver_type, _, method, _, _, args) then {
-                yield self.generate_static_method_call(receiver_type, method, args, expr.expr_type)
+            .StaticMethodCall(receiver_type, method_name, method, _, _, args) then {
+                yield self.generate_static_method_call(receiver_type, method_name, method, args, expr.expr_type)
             },
 
             .TraitMethodPlaceholder(_, _, _, _, _) then {
@@ -1635,8 +1706,8 @@ given CodeGen {
             .TraitObjectConversion(inner_ref, trait_type, concrete_type) then {
                 yield self.generate_trait_object_conversion_typed(inner_ref, trait_type, concrete_type)
             },
-            .TraitMethodCall(receiver_ref, trait_type, method, args, _, _) then {
-                yield self.generate_trait_method_call_typed(receiver_ref, trait_type, self.context.symbol_name(method), args, expr.expr_type)
+            .TraitMethodCall(receiver_ref, trait_type, method, args, method_index, _) then {
+                yield self.generate_trait_method_call_indexed_typed(receiver_ref, trait_type, self.context.symbol_name(method), args, expr.expr_type, method_index)
             },
 
             // ── WhenExpr ──────────────────────────────────────────────────────
