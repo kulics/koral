@@ -258,6 +258,12 @@ extension TypeChecker {
         reasons.append("method '\(name)' has generic type parameters")
       }
 
+      if let receiver = method.parameters.first, receiver.name == "self",
+         !isObjectSafeReceiverType(receiver.type)
+      {
+        reasons.append("method '\(name)' receiver must be 'self ref' or 'self mut ref'")
+      }
+
       // Rule 2: Self must not appear in parameter types (except receiver) or return type
       for (i, param) in method.parameters.enumerated() {
         if i == 0 && param.name == "self" { continue }
@@ -304,6 +310,17 @@ extension TypeChecker {
       return false
     case .moduleQualifiedGeneric(_, _, let args):
       return args.contains { containsSelfType($0) }
+    }
+  }
+
+  private func isObjectSafeReceiverType(_ node: TypeNode) -> Bool {
+    switch node {
+    case .reference(.inferredSelf, _):
+      return true
+    case .reference(.identifier(let name), _):
+      return name == "Self"
+    default:
+      return false
     }
   }
 

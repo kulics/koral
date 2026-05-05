@@ -1282,6 +1282,33 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let methodIndex = try vtableMethodIndex(traitName: traitName, methodName: methodName)
 
+    let materializedReceiver: (symbol: Symbol, value: TypedExpressionNode)?
+    var finalBase = base
+    if let firstParam = params.first {
+      let prepared = try prepareReceiverBase(finalBase, expectedType: firstParam.type, methodName: methodName)
+      finalBase = prepared.base
+      materializedReceiver = prepared.binding
+      if finalBase.type != firstParam.type {
+        let coercedBase = try coerceLiteral(finalBase, to: firstParam.type)
+        if coercedBase.type == firstParam.type {
+          finalBase = coercedBase
+        } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
+          finalBase = implicitRef
+        } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
+          finalBase = implicitDeref
+        } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
+          // mut ref -> ref widening
+        } else {
+          throw SemanticError.typeMismatch(
+            expected: firstParam.type.description,
+            got: finalBase.type.description
+          )
+        }
+      }
+    } else {
+      materializedReceiver = nil
+    }
+
     // Type-check arguments (skip self parameter)
     var typedArguments: [TypedExpressionNode] = []
     for (arg, param) in zip(arguments, params.dropFirst()) {
@@ -1304,14 +1331,15 @@ extension TypeChecker {
       typedArguments.append(typedArg)
     }
 
-    return .traitMethodCall(
-      receiver: base,
+    let call: TypedExpressionNode = .traitMethodCall(
+      receiver: finalBase,
       traitName: traitName,
       methodName: methodName,
       methodIndex: methodIndex,
       arguments: typedArguments,
       type: returns
     )
+    return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
   }
 
   func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws

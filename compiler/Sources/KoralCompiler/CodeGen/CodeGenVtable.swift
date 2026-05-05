@@ -440,11 +440,13 @@ extension CodeGen {
           firstParam.name == "self" else {
       return false
     }
-    // If the self parameter's type is a reference, it's `self ref`
-    if case .reference = firstParam.type {
+    // Reference receivers (`self ref` / `self mut ref`) are object-safe dispatch targets.
+    switch firstParam.type {
+    case .reference:
       return false
+    default:
+      return true
     }
-    return true
   }
   
   /// Returns the C identifier for a concrete type, used in function names like `std_String`.

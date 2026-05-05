@@ -119,13 +119,13 @@ let [T Ord]max(a T, b T) T = if a > b then a else b
 
 ```koral
 trait Greet {
-    greet(self) String
+    greet(self ref) String
 }
 
 type Bot(name String)
 
 given Bot Greet {
-    greet(self) String = "beep boop, I'm " + self.name
+    greet(self ref) String = "beep boop, I'm " + self.name
 }
 
 let g Greet ref = box(Bot("K-9"))  // trait object
@@ -191,7 +191,7 @@ let result = list.iterator()
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
 - Generic trait declarations use prefix generic syntax: `trait [T Any]Iterator { ... }`
 - Implementations via `given` blocks
-- Trait objects for runtime polymorphism: `Greet ref`
+- Trait objects for runtime polymorphism: `Greet ref`, `Greet mut ref`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Mul`, `Div`, `Index`, etc.)
 
 ### Functions and Lambdas
@@ -227,6 +227,7 @@ Reference creation rules:
 - This receiver-only rule does **not** make `expr.ref` on rvalues legal.
 - `self mut ref` still requires a writable lvalue receiver; rvalues are rejected.
 - Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
+- Trait objects follow the same mutability split as ordinary refs: `Trait ref` can call only `self ref` requirements, while `Trait mut ref` can call both `self mut ref` and `self ref` requirements.
 - `T ref` is read-only: `.val` read only. `T mut ref` supports `.val` read and `.val = expr` assignment.
 - `T ptr` is read-only: `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
 - Use `box(expr)` for owned heap references from literals/temporaries — returns `T mut ref`.
