@@ -326,554 +326,554 @@ intrinsic given UInt64 {
     public wrapping_shr(self, other UInt32) UInt64
 }
 
-given Int Zero {
+given Int as Zero {
     public zero() Int
 }
 
-given Int One {
+given Int as One {
     public one() Int
 }
 
-given Int [Int]Add {
+given Int as [Int]Add {
     public add(self, other Int) Int
 }
 
-given Int [Int]Sub {
+given Int as [Int]Sub {
     public sub(self, other Int) Int
 }
 
-given Int Neg {
+given Int as Neg {
     public neg(self) Int
 }
 
-given Int [Int]Mul {
+given Int as [Int]Mul {
     public mul(self, other Int) Int
 }
 
-given Int [Int]Div {
+given Int as [Int]Div {
     public div(self, other Int) Int
 }
 
-given Int [Int]Rem {
+given Int as [Int]Rem {
     public rem(self, other Int) Int
 }
 
-given Int8 Zero {
+given Int8 as Zero {
     public zero() Int8
 }
 
-given Int8 One {
+given Int8 as One {
     public one() Int8
 }
 
-given Int8 [Int8]Add {
+given Int8 as [Int8]Add {
     public add(self, other Int8) Int8
 }
 
-given Int8 [Int8]Sub {
+given Int8 as [Int8]Sub {
     public sub(self, other Int8) Int8
 }
 
-given Int8 Neg {
+given Int8 as Neg {
     public neg(self) Int8
 }
 
-given Int8 [Int8]Mul {
+given Int8 as [Int8]Mul {
     public mul(self, other Int8) Int8
 }
 
-given Int8 [Int8]Div {
+given Int8 as [Int8]Div {
     public div(self, other Int8) Int8
 }
 
-given Int8 [Int8]Rem {
+given Int8 as [Int8]Rem {
     public rem(self, other Int8) Int8
 }
 
-given Int16 Zero {
+given Int16 as Zero {
     public zero() Int16
 }
 
-given Int16 One {
+given Int16 as One {
     public one() Int16
 }
 
-given Int16 [Int16]Add {
+given Int16 as [Int16]Add {
     public add(self, other Int16) Int16
 }
 
-given Int16 [Int16]Sub {
+given Int16 as [Int16]Sub {
     public sub(self, other Int16) Int16
 }
 
-given Int16 Neg {
+given Int16 as Neg {
     public neg(self) Int16
 }
 
-given Int16 [Int16]Mul {
+given Int16 as [Int16]Mul {
     public mul(self, other Int16) Int16
 }
 
-given Int16 [Int16]Div {
+given Int16 as [Int16]Div {
     public div(self, other Int16) Int16
 }
 
-given Int16 [Int16]Rem {
+given Int16 as [Int16]Rem {
     public rem(self, other Int16) Int16
 }
 
-given Int32 Zero {
+given Int32 as Zero {
     public zero() Int32
 }
 
-given Int32 One {
+given Int32 as One {
     public one() Int32
 }
 
-given Int32 [Int32]Add {
+given Int32 as [Int32]Add {
     public add(self, other Int32) Int32
 }
 
-given Int32 [Int32]Sub {
+given Int32 as [Int32]Sub {
     public sub(self, other Int32) Int32
 }
 
-given Int32 Neg {
+given Int32 as Neg {
     public neg(self) Int32
 }
 
-given Int32 [Int32]Mul {
+given Int32 as [Int32]Mul {
     public mul(self, other Int32) Int32
 }
 
-given Int32 [Int32]Div {
+given Int32 as [Int32]Div {
     public div(self, other Int32) Int32
 }
 
-given Int32 [Int32]Rem {
+given Int32 as [Int32]Rem {
     public rem(self, other Int32) Int32
 }
 
-given Int64 Zero {
+given Int64 as Zero {
     public zero() Int64
 }
 
-given Int64 One {
+given Int64 as One {
     public one() Int64
 }
 
-given Int64 [Int64]Add {
+given Int64 as [Int64]Add {
     public add(self, other Int64) Int64
 }
 
-given Int64 [Int64]Sub {
+given Int64 as [Int64]Sub {
     public sub(self, other Int64) Int64
 }
 
-given Int64 Neg {
+given Int64 as Neg {
     public neg(self) Int64
 }
 
-given Int64 [Int64]Mul {
+given Int64 as [Int64]Mul {
     public mul(self, other Int64) Int64
 }
 
-given Int64 [Int64]Div {
+given Int64 as [Int64]Div {
     public div(self, other Int64) Int64
 }
 
-given Int64 [Int64]Rem {
+given Int64 as [Int64]Rem {
     public rem(self, other Int64) Int64
 }
 
-given UInt Zero {
+given UInt as Zero {
     public zero() UInt
 }
 
-given UInt One {
+given UInt as One {
     public one() UInt
 }
 
-given UInt [UInt]Add {
+given UInt as [UInt]Add {
     public add(self, other UInt) UInt
 }
 
-given UInt [UInt]Sub {
+given UInt as [UInt]Sub {
     public sub(self, other UInt) UInt
 }
 
-given UInt [UInt]Mul {
+given UInt as [UInt]Mul {
     public mul(self, other UInt) UInt
 }
 
-given UInt [UInt]Div {
+given UInt as [UInt]Div {
     public div(self, other UInt) UInt
 }
 
-given UInt [UInt]Rem {
+given UInt as [UInt]Rem {
     public rem(self, other UInt) UInt
 }
 
-given UInt8 Zero {
+given UInt8 as Zero {
     public zero() UInt8
 }
 
-given UInt8 One {
+given UInt8 as One {
     public one() UInt8
 }
 
-given UInt8 [UInt8]Add {
+given UInt8 as [UInt8]Add {
     public add(self, other UInt8) UInt8
 }
 
-given UInt8 [UInt8]Sub {
+given UInt8 as [UInt8]Sub {
     public sub(self, other UInt8) UInt8
 }
 
-given UInt8 [UInt8]Mul {
+given UInt8 as [UInt8]Mul {
     public mul(self, other UInt8) UInt8
 }
 
-given UInt8 [UInt8]Div {
+given UInt8 as [UInt8]Div {
     public div(self, other UInt8) UInt8
 }
 
-given UInt8 [UInt8]Rem {
+given UInt8 as [UInt8]Rem {
     public rem(self, other UInt8) UInt8
 }
 
-given UInt16 Zero {
+given UInt16 as Zero {
     public zero() UInt16
 }
 
-given UInt16 One {
+given UInt16 as One {
     public one() UInt16
 }
 
-given UInt16 [UInt16]Add {
+given UInt16 as [UInt16]Add {
     public add(self, other UInt16) UInt16
 }
 
-given UInt16 [UInt16]Sub {
+given UInt16 as [UInt16]Sub {
     public sub(self, other UInt16) UInt16
 }
 
-given UInt16 [UInt16]Mul {
+given UInt16 as [UInt16]Mul {
     public mul(self, other UInt16) UInt16
 }
 
-given UInt16 [UInt16]Div {
+given UInt16 as [UInt16]Div {
     public div(self, other UInt16) UInt16
 }
 
-given UInt16 [UInt16]Rem {
+given UInt16 as [UInt16]Rem {
     public rem(self, other UInt16) UInt16
 }
 
-given UInt32 Zero {
+given UInt32 as Zero {
     public zero() UInt32
 }
 
-given UInt32 One {
+given UInt32 as One {
     public one() UInt32
 }
 
-given UInt32 [UInt32]Add {
+given UInt32 as [UInt32]Add {
     public add(self, other UInt32) UInt32
 }
 
-given UInt32 [UInt32]Sub {
+given UInt32 as [UInt32]Sub {
     public sub(self, other UInt32) UInt32
 }
 
-given UInt32 [UInt32]Mul {
+given UInt32 as [UInt32]Mul {
     public mul(self, other UInt32) UInt32
 }
 
-given UInt32 [UInt32]Div {
+given UInt32 as [UInt32]Div {
     public div(self, other UInt32) UInt32
 }
 
-given UInt32 [UInt32]Rem {
+given UInt32 as [UInt32]Rem {
     public rem(self, other UInt32) UInt32
 }
 
-given UInt64 Zero {
+given UInt64 as Zero {
     public zero() UInt64
 }
 
-given UInt64 One {
+given UInt64 as One {
     public one() UInt64
 }
 
-given UInt64 [UInt64]Add {
+given UInt64 as [UInt64]Add {
     public add(self, other UInt64) UInt64
 }
 
-given UInt64 [UInt64]Sub {
+given UInt64 as [UInt64]Sub {
     public sub(self, other UInt64) UInt64
 }
 
-given UInt64 [UInt64]Mul {
+given UInt64 as [UInt64]Mul {
     public mul(self, other UInt64) UInt64
 }
 
-given UInt64 [UInt64]Div {
+given UInt64 as [UInt64]Div {
     public div(self, other UInt64) UInt64
 }
 
-given UInt64 [UInt64]Rem {
+given UInt64 as [UInt64]Rem {
     public rem(self, other UInt64) UInt64
 }
 
-given Float32 Zero {
+given Float32 as Zero {
     public zero() Float32
 }
 
-given Float32 One {
+given Float32 as One {
     public one() Float32
 }
 
-given Float32 [Float32]Add {
+given Float32 as [Float32]Add {
     public add(self, other Float32) Float32
 }
 
-given Float32 [Float32]Sub {
+given Float32 as [Float32]Sub {
     public sub(self, other Float32) Float32
 }
 
-given Float32 Neg {
+given Float32 as Neg {
     public neg(self) Float32
 }
 
-given Float32 [Float32]Mul {
+given Float32 as [Float32]Mul {
     public mul(self, other Float32) Float32
 }
 
-given Float32 [Float32]Div {
+given Float32 as [Float32]Div {
     public div(self, other Float32) Float32
 }
 
-given Float64 Zero {
+given Float64 as Zero {
     public zero() Float64
 }
 
-given Float64 One {
+given Float64 as One {
     public one() Float64
 }
 
-given Float64 [Float64]Add {
+given Float64 as [Float64]Add {
     public add(self, other Float64) Float64
 }
 
-given Float64 [Float64]Sub {
+given Float64 as [Float64]Sub {
     public sub(self, other Float64) Float64
 }
 
-given Float64 Neg {
+given Float64 as Neg {
     public neg(self) Float64
 }
 
-given Float64 [Float64]Mul {
+given Float64 as [Float64]Mul {
     public mul(self, other Float64) Float64
 }
 
-given Float64 [Float64]Div {
+given Float64 as [Float64]Div {
     public div(self, other Float64) Float64
 }
 
-given String [String]Add {
+given String as [String]Add {
     public add(self, other String) String
 }
 
-given[T Deref] [T]List [[T]List]Add {
+given[T Deref] [T]List as [[T]List]Add {
     public add(self, other Self) Self
 }
 
-given Duration Zero {
+given Duration as Zero {
     public zero() Duration
 }
 
-given Duration [Duration]Add {
+given Duration as [Duration]Add {
     public add(self, other Duration) Duration
 }
 
-given Duration [Duration]Sub {
+given Duration as [Duration]Sub {
     public sub(self, other Duration) Duration
 }
 
-given Duration Neg {
+given Duration as Neg {
     public neg(self) Duration
 }
 
-given Duration [Int]Mul {
+given Duration as [Int]Mul {
     public mul(self, k Int) Duration
 }
 
-given Duration [Int]Div {
+given Duration as [Int]Div {
     public div(self, k Int) Duration
 }
 
-given Bool Eq {
+given Bool as Eq {
     public equals(self, other Bool) Bool
 }
 
-given Bool Ord {
+given Bool as Ord {
     public compare(self, other Bool) Int
 }
 
-given Int Eq {
+given Int as Eq {
     public equals(self, other Int) Bool
 }
 
-given Int Ord {
+given Int as Ord {
     public compare(self, other Int) Int
 }
 
-given Int Bounded {
+given Int as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given Int8 Eq {
+given Int8 as Eq {
     public equals(self, other Int8) Bool
 }
 
-given Int8 Ord {
+given Int8 as Ord {
     public compare(self, other Int8) Int
 }
 
-given Int8 Bounded {
+given Int8 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given Int16 Eq {
+given Int16 as Eq {
     public equals(self, other Int16) Bool
 }
 
-given Int16 Ord {
+given Int16 as Ord {
     public compare(self, other Int16) Int
 }
 
-given Int16 Bounded {
+given Int16 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given Int32 Eq {
+given Int32 as Eq {
     public equals(self, other Int32) Bool
 }
 
-given Int32 Ord {
+given Int32 as Ord {
     public compare(self, other Int32) Int
 }
 
-given Int32 Bounded {
+given Int32 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given Int64 Eq {
+given Int64 as Eq {
     public equals(self, other Int64) Bool
 }
 
-given Int64 Ord {
+given Int64 as Ord {
     public compare(self, other Int64) Int
 }
 
-given Int64 Bounded {
+given Int64 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given UInt Eq {
+given UInt as Eq {
     public equals(self, other UInt) Bool
 }
 
-given UInt Ord {
+given UInt as Ord {
     public compare(self, other UInt) Int
 }
 
-given UInt Bounded {
+given UInt as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given UInt8 Eq {
+given UInt8 as Eq {
     public equals(self, other UInt8) Bool
 }
 
-given UInt8 Ord {
+given UInt8 as Ord {
     public compare(self, other UInt8) Int
 }
 
-given UInt8 Bounded {
+given UInt8 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given UInt16 Eq {
+given UInt16 as Eq {
     public equals(self, other UInt16) Bool
 }
 
-given UInt16 Ord {
+given UInt16 as Ord {
     public compare(self, other UInt16) Int
 }
 
-given UInt16 Bounded {
+given UInt16 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given UInt32 Eq {
+given UInt32 as Eq {
     public equals(self, other UInt32) Bool
 }
 
-given UInt32 Ord {
+given UInt32 as Ord {
     public compare(self, other UInt32) Int
 }
 
-given UInt32 Bounded {
+given UInt32 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given UInt64 Eq {
+given UInt64 as Eq {
     public equals(self, other UInt64) Bool
 }
 
-given UInt64 Ord {
+given UInt64 as Ord {
     public compare(self, other UInt64) Int
 }
 
-given UInt64 Bounded {
+given UInt64 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given Float32 Eq {
+given Float32 as Eq {
     public equals(self, other Float32) Bool
 }
 
-given Float32 Ord {
+given Float32 as Ord {
     public compare(self, other Float32) Int
 }
 
-given Float32 Bounded {
+given Float32 as Bounded {
     public max_value() Self
     public min_value() Self
 }
 
-given Float64 Eq {
+given Float64 as Eq {
     public equals(self, other Float64) Bool
 }
 
-given Float64 Ord {
+given Float64 as Ord {
     public compare(self, other Float64) Int
 }
 
-given Float64 Bounded {
+given Float64 as Bounded {
     public max_value() Self
     public min_value() Self
 }
@@ -893,15 +893,15 @@ given[K Hash, V Any] [K, V]Dict {
     public retain(self mut ref, predicate [K, V, Bool]Func) Void
 }
 
-given[K Hash, V Any] [K, V]DictIterator [[K, V]Pair]Iterator {
+given[K Hash, V Any] [K, V]DictIterator as [[K, V]Pair]Iterator {
     public next(self mut ref) [[K, V]Pair]Option
 }
 
-given[K Hash, V Any] [K, V]DictKeysIterator [K]Iterator {
+given[K Hash, V Any] [K, V]DictKeysIterator as [K]Iterator {
     public next(self mut ref) [K]Option
 }
 
-given[K Hash, V Any] [K, V]DictValuesIterator [V]Iterator {
+given[K Hash, V Any] [K, V]DictValuesIterator as [V]Iterator {
     public next(self mut ref) [V]Option
 }
 
@@ -910,7 +910,7 @@ given[K Hash, V Any] [K, V]Dict {
     public values(self ref) [K, V]DictValuesIterator
 }
 
-given[K Hash, V Any] [K, V]Dict [[K, V]Pair, [K, V]DictIterator]Iterable {
+given[K Hash, V Any] [K, V]Dict as [[K, V]Pair, [K, V]DictIterator]Iterable {
     public iterator(self ref) [K, V]DictIterator
 }
 
@@ -929,67 +929,67 @@ given Duration {
     public ratio(self, other Duration) Float64
 }
 
-given Duration Eq {
+given Duration as Eq {
     public equals(self, other Duration) Bool
 }
 
-given Duration Ord {
+given Duration as Ord {
     public compare(self, other Duration) Int
 }
 
-given[T Any, R [T]Iterator] [T, R]FilterIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]FilterIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, U Any, R [T]Iterator] [T, U, R]MapIterator [U]Iterator {
+given[T Any, U Any, R [T]Iterator] [T, U, R]MapIterator as [U]Iterator {
     public next(self mut ref) [U]Option
 }
 
-given[T Any, U Any, R [T]Iterator] [T, U, R]FilterMapIterator [U]Iterator {
+given[T Any, U Any, R [T]Iterator] [T, U, R]FilterMapIterator as [U]Iterator {
     public next(self mut ref) [U]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]TakeIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]TakeIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]SkipIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]SkipIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]StepIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]StepIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]EnumerateIterator [[UInt, T]Pair]Iterator {
+given[T Any, R [T]Iterator] [T, R]EnumerateIterator as [[UInt, T]Pair]Iterator {
     public next(self mut ref) [[UInt, T]Pair]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]InspectIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]InspectIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]IntersperseIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]IntersperseIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]TakeWhileIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]TakeWhileIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R [T]Iterator] [T, R]SkipWhileIterator [T]Iterator {
+given[T Any, R [T]Iterator] [T, R]SkipWhileIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Any, R1 [T]Iterator, R2 [T]Iterator] [T, R1, R2]ChainIterator [T]Iterator {
+given[T Any, R1 [T]Iterator, R2 [T]Iterator] [T, R1, R2]ChainIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipIterator [[A, B]Pair]Iterator {
+given[A Any, B Any, R1 [A]Iterator, R2 [B]Iterator] [A, B, R1, R2]ZipIterator as [[A, B]Pair]Iterator {
     public next(self mut ref) [[A, B]Pair]Option
 }
 
-given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapIterator [U]Iterator {
+given[T Any, U Any, R [T]Iterator, InnerR [U]Iterator] [T, U, R, InnerR]FlatMapIterator as [U]Iterator {
     public next(self mut ref) [U]Option
 }
 
@@ -1085,7 +1085,7 @@ given[T Deref] [T]List {
     public [K Ord]binary_search_by(self ref, key [T, K]Func, target K) [UInt, Bool]Pair
 }
 
-given[T Eq and Deref] [T]List Eq {
+given[T Eq and Deref] [T]List as Eq {
     public equals(self, other [T]List) Bool
 }
 
@@ -1094,19 +1094,19 @@ given[T Eq and Deref] [T]List {
     public dedup(self mut ref) Void
 }
 
-given[T Deref] [T]ListIterator [T]Iterator {
+given[T Deref] [T]ListIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Deref] [T]List [T, [T]ListIterator]Iterable {
+given[T Deref] [T]List as [T, [T]ListIterator]Iterable {
     public iterator(self ref) [T]ListIterator
 }
 
-given[T Deref] [T]List [UInt, T]Index {
+given[T Deref] [T]List as [UInt, T]Index {
     public ref_at(self ref, key UInt) T ref
 }
 
-given[T Deref] [T]List [UInt, T]MutIndex {
+given[T Deref] [T]List as [UInt, T]MutIndex {
     public mut_ref_at(self mut ref, key UInt) T mut ref
 }
 
@@ -1125,7 +1125,7 @@ given[T Any] [T]Option {
     public filter(self, predicate [T, Bool]Func) [T]Option
 }
 
-given[T Eq] [T]Option Eq {
+given[T Eq] [T]Option as Eq {
     public equals(self, other [T]Option) Bool
 }
 
@@ -1342,61 +1342,61 @@ given[T Ord] [T]Range {
     public is_empty(self ref) Bool
 }
 
-given Int Step {
+given Int as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int8 Step {
+given Int8 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int16 Step {
+given Int16 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int32 Step {
+given Int32 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given Int64 Step {
+given Int64 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt Step {
+given UInt as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt8 Step {
+given UInt8 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt16 Step {
+given UInt16 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt32 Step {
+given UInt32 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given UInt64 Step {
+given UInt64 as Step {
     public succ(self) [Self]Option
     public pred(self) [Self]Option
 }
 
-given[T Step] [T]RangeIterator [T]Iterator {
+given[T Step] [T]RangeIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Step] [T]Range [T, [T]RangeIterator]Iterable {
+given[T Step] [T]Range as [T, [T]RangeIterator]Iterable {
     public iterator(self ref) [T]RangeIterator
 }
 
@@ -1433,15 +1433,15 @@ given Rune {
     public is_identifier_continue(self) Bool
 }
 
-given Rune Eq {
+given Rune as Eq {
     public equals(self, other Rune) Bool
 }
 
-given Rune Ord {
+given Rune as Ord {
     public compare(self, other Rune) Int
 }
 
-given Rune ToString {
+given Rune as ToString {
     public to_string(self ref) String
 }
 
@@ -1464,11 +1464,11 @@ given[T Hash] [T]Set {
     public symmetric_difference(self ref, other [T]Set) [T]Set
 }
 
-given[T Hash] [T]Set [T, [T]SetIterator]Iterable {
+given[T Hash] [T]Set as [T, [T]SetIterator]Iterable {
     public iterator(self ref) [T]SetIterator
 }
 
-given[T Hash] [T]SetIterator [T]Iterator {
+given[T Hash] [T]SetIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
@@ -1525,107 +1525,107 @@ given String {
     public push_rune(self mut ref, rune Rune) Void
 }
 
-given String Eq {
+given String as Eq {
     public equals(self, other String) Bool
 }
 
-given String Ord {
+given String as Ord {
     public compare(self, other String) Int
 }
 
-given String Hash {
+given String as Hash {
     public hash(self) UInt
 }
 
-given String [UInt, UInt8]Index {
+given String as [UInt, UInt8]Index {
     public ref_at(self ref, key UInt) UInt8 ref
 }
 
-given StringSplitAsciiWhitespaceIterator [String]Iterator {
+given StringSplitAsciiWhitespaceIterator as [String]Iterator {
     public next(self mut ref) [String]Option
 }
 
-given StringSplitIterator [String]Iterator {
+given StringSplitIterator as [String]Iterator {
     public next(self mut ref) [String]Option
 }
 
-given StringLinesIterator [String]Iterator {
+given StringLinesIterator as [String]Iterator {
     public next(self mut ref) [String]Option
 }
 
-given StringRunesIterator [Rune]Iterator {
+given StringRunesIterator as [Rune]Iterator {
     public next(self mut ref) [Rune]Option
 }
 
-given StringBytesIterator [UInt8]Iterator {
+given StringBytesIterator as [UInt8]Iterator {
     public next(self mut ref) [UInt8]Option
 }
 
-given String ToString {
+given String as ToString {
     public to_string(self ref) String
 }
 
-given Bool ToString {
+given Bool as ToString {
     public to_string(self ref) String
 }
 
-given Int ToString {
+given Int as ToString {
     public to_string(self ref) String
 }
 
-given Int8 ToString {
+given Int8 as ToString {
     public to_string(self ref) String
 }
 
-given Int16 ToString {
+given Int16 as ToString {
     public to_string(self ref) String
 }
 
-given Int32 ToString {
+given Int32 as ToString {
     public to_string(self ref) String
 }
 
-given Int64 ToString {
+given Int64 as ToString {
     public to_string(self ref) String
 }
 
-given UInt ToString {
+given UInt as ToString {
     public to_string(self ref) String
 }
 
-given UInt8 ToString {
+given UInt8 as ToString {
     public to_string(self ref) String
 }
 
-given UInt16 ToString {
+given UInt16 as ToString {
     public to_string(self ref) String
 }
 
-given UInt32 ToString {
+given UInt32 as ToString {
     public to_string(self ref) String
 }
 
-given UInt64 ToString {
+given UInt64 as ToString {
     public to_string(self ref) String
 }
 
-given Float32 ToString {
+given Float32 as ToString {
     public to_string(self ref) String
 }
 
-given Float64 ToString {
+given Float64 as ToString {
     public to_string(self ref) String
 }
 
-given[T ToString, U ToString] [T, U]Pair ToString {
+given[T ToString, U ToString] [T, U]Pair as ToString {
     public to_string(self ref) String
 }
 
-given[T ToString] [T]Option ToString {
+given[T ToString] [T]Option as ToString {
     public to_string(self ref) String
 }
 
-given[T ToString and Deref] [T]List ToString {
+given[T ToString and Deref] [T]List as ToString {
     public to_string(self ref) String
 }
 
@@ -1637,15 +1637,15 @@ given[T ToString and Deref] [T]List {
     public join_to_string(self, seperator String) String
 }
 
-given[K ToString and Hash, V ToString] [K, V]Dict ToString {
+given[K ToString and Hash, V ToString] [K, V]Dict as ToString {
     public to_string(self ref) String
 }
 
-given[T ToString and Hash] [T]Set ToString {
+given[T ToString and Hash] [T]Set as ToString {
     public to_string(self ref) String
 }
 
-given Duration ToString {
+given Duration as ToString {
     public to_string(self ref) String
 }
 
@@ -1653,111 +1653,111 @@ given Hash {
     public combine_hash(self, value UInt) UInt
 }
 
-given String Error {
+given String as Error {
     public message(self ref) String
 }
 
-given Bool Hash {
+given Bool as Hash {
     public hash(self) UInt
 }
 
-given UInt Hash {
+given UInt as Hash {
     public hash(self) UInt
 }
 
-given UInt8 Hash {
+given UInt8 as Hash {
     public hash(self) UInt
 }
 
-given UInt16 Hash {
+given UInt16 as Hash {
     public hash(self) UInt
 }
 
-given UInt32 Hash {
+given UInt32 as Hash {
     public hash(self) UInt
 }
 
-given UInt64 Hash {
+given UInt64 as Hash {
     public hash(self) UInt
 }
 
-given Int Hash {
+given Int as Hash {
     public hash(self) UInt
 }
 
-given Int8 Hash {
+given Int8 as Hash {
     public hash(self) UInt
 }
 
-given Int16 Hash {
+given Int16 as Hash {
     public hash(self) UInt
 }
 
-given Int32 Hash {
+given Int32 as Hash {
     public hash(self) UInt
 }
 
-given Int64 Hash {
+given Int64 as Hash {
     public hash(self) UInt
 }
 
-given[T Any] T ptr Eq {
+given[T Any] T ptr as Eq {
     public equals(self, other T ptr) Bool
 }
 
-given[T Any] T ptr Hash {
+given[T Any] T ptr as Hash {
     public hash(self) UInt
 }
 
-given[T Any] T mut ptr Eq {
+given[T Any] T mut ptr as Eq {
     public equals(self, other T mut ptr) Bool
 }
 
-given[T Any] T mut ptr Hash {
+given[T Any] T mut ptr as Hash {
     public hash(self) UInt
 }
 
-given[T Eq and Deref] T ref Eq {
+given[T Eq and Deref] T ref as Eq {
     public equals(self, other T ref) Bool
 }
 
-given[T Eq and Deref] T mut ref Eq {
+given[T Eq and Deref] T mut ref as Eq {
     public equals(self, other T mut ref) Bool
 }
 
-given[T Hash and Deref] T ref Hash {
+given[T Hash and Deref] T ref as Hash {
     public hash(self) UInt
 }
 
-given[T Hash and Deref] T mut ref Hash {
+given[T Hash and Deref] T mut ref as Hash {
     public hash(self) UInt
 }
 
-given[T Ord and Deref] T ref Ord {
+given[T Ord and Deref] T ref as Ord {
     public compare(self, other T ref) Int
 }
 
-given[T Ord and Deref] T mut ref Ord {
+given[T Ord and Deref] T mut ref as Ord {
     public compare(self, other T mut ref) Int
 }
 
-given[T ToString and Deref] T ref ToString {
+given[T ToString and Deref] T ref as ToString {
     public to_string(self ref) String
 }
 
-given[T ToString and Deref] T mut ref ToString {
+given[T ToString and Deref] T mut ref as ToString {
     public to_string(self ref) String
 }
 
-given[T Eq, U Eq] [T, U]Pair Eq {
+given[T Eq, U Eq] [T, U]Pair as Eq {
     public equals(self, other [T, U]Pair) Bool
 }
 
-given[T Hash, U Hash] [T, U]Pair Hash {
+given[T Hash, U Hash] [T, U]Pair as Hash {
     public hash(self) UInt
 }
 
-given[T Ord, U Ord] [T, U]Pair Ord {
+given[T Ord, U Ord] [T, U]Pair as Ord {
     public compare(self, other [T, U]Pair) Int
 }
 

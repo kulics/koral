@@ -74,7 +74,7 @@ given CommandOutput {
     public code(self ref) [Int]Option
 }
 
-given CommandOutput ToString {
+given CommandOutput as ToString {
     public to_string(self ref) String
 }
 
@@ -84,7 +84,7 @@ given ExitStatus {
     public signal(self ref) [Int]Option
 }
 
-given ExitStatus ToString {
+given ExitStatus as ToString {
     public to_string(self ref) String
 }
 
@@ -92,7 +92,7 @@ given StdinPipe {
     public fd(self ref) Int
 }
 
-given StdinPipe Writer {
+given StdinPipe as Writer {
     public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self ref) [Void]Result
 }
@@ -101,7 +101,7 @@ given StdoutPipe {
     public fd(self ref) Int
 }
 
-given StdoutPipe Reader {
+given StdoutPipe as Reader {
     public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
@@ -109,7 +109,7 @@ given StderrPipe {
     public fd(self ref) Int
 }
 
-given StderrPipe Reader {
+given StderrPipe as Reader {
     public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
@@ -123,7 +123,7 @@ given Process {
     public take_stderr_pipe(self ref) [StderrPipe]Option
 }
 
-given IoRedirect ToString {
+given IoRedirect as ToString {
     public to_string(self ref) String
 }
 ```

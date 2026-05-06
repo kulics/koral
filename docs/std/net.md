@@ -54,15 +54,15 @@ given Ipv4Addr {
     public is_private(self ref) Bool
 }
 
-given Ipv4Addr Eq {
+given Ipv4Addr as Eq {
     public equals(self, other Ipv4Addr) Bool
 }
 
-given Ipv4Addr ToString {
+given Ipv4Addr as ToString {
     public to_string(self ref) String
 }
 
-given Ipv4Addr Parseable {
+given Ipv4Addr as Parseable {
     public parse(s String) [Self]Result
 }
 
@@ -76,15 +76,15 @@ given Ipv6Addr {
     public is_multicast(self ref) Bool
 }
 
-given Ipv6Addr Eq {
+given Ipv6Addr as Eq {
     public equals(self, other Ipv6Addr) Bool
 }
 
-given Ipv6Addr ToString {
+given Ipv6Addr as ToString {
     public to_string(self ref) String
 }
 
-given Ipv6Addr Parseable {
+given Ipv6Addr as Parseable {
     public parse(s String) [Self]Result
 }
 
@@ -96,23 +96,23 @@ given IpAddr {
     public is_ipv6(self ref) Bool
 }
 
-given IpAddr Eq {
+given IpAddr as Eq {
     public equals(self, other IpAddr) Bool
 }
 
-given IpAddr ToString {
+given IpAddr as ToString {
     public to_string(self ref) String
 }
 
-given IpAddr Parseable {
+given IpAddr as Parseable {
     public parse(s String) [Self]Result
 }
 
-given String IntoSocketAddr {
+given String as IntoSocketAddr {
     public into_socket_addr(self) [SocketAddr]Result
 }
 
-given SocketAddr IntoSocketAddr {
+given SocketAddr as IntoSocketAddr {
     public into_socket_addr(self) [SocketAddr]Result
 }
 
@@ -128,15 +128,15 @@ given SocketAddr {
     public from_sockaddr_bytes(buf [UInt8]List) [SocketAddr]Result
 }
 
-given SocketAddr ToString {
+given SocketAddr as ToString {
     public to_string(self ref) String
 }
 
-given SocketAddr Parseable {
+given SocketAddr as Parseable {
     public parse(s String) [Self]Result
 }
 
-given SocketAddr Eq {
+given SocketAddr as Eq {
     public equals(self, other SocketAddr) Bool
 }
 
@@ -161,11 +161,11 @@ given TcpSocket {
     public write_timeout(self ref) [[Duration]Option]Result
 }
 
-given TcpSocket Reader {
+given TcpSocket as Reader {
     public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
-given TcpSocket Writer {
+given TcpSocket as Writer {
     public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self ref) [Void]Result
 }

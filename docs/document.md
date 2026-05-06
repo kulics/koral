@@ -1050,7 +1050,7 @@ Trait methods can use named parameters. Implementations must match the trait dec
 trait Drawable {
     draw(self ref, at_x: Int, at_y: Int) Void
 }
-given MyType Drawable {
+given MyType as Drawable {
     draw(self ref, at_x: Int, at_y: Int) Void = todo()  // must match
 }
 ```
@@ -1335,7 +1335,7 @@ trait MyTrait Eq and Hash {
 
 ### Implementing Trait (Given)
 
-Use a `given Type Trait { ... }` impl block to implement a Trait for a specific type:
+Use a `given Type as Trait { ... }` impl block to implement a Trait for a specific type:
 
 ```koral
 trait Eq {
@@ -1348,17 +1348,17 @@ trait Ord Eq {
 
 type Point(x Int, y Int)
 
-given Point Eq {
+given Point as Eq {
     equals(self, other Point) Bool = self.x == other.x and self.y == other.y
 }
 
-given Point Ord {
+given Point as Ord {
     compare(self, other Point) Int = self.x - other.x
 }
 ```
 
 Notes:
-- `given Type Trait` is the explicit conformance entry point.
+- `given Type as Trait` is the explicit conformance entry point.
 - Parent/child traits are implemented level-by-level: implementing `Ord` does not implicitly implement `Eq`.
 
 ### Trait Tool Methods (`given Trait`)
@@ -1384,7 +1384,7 @@ given Eq {
 
 type Num(x Int)
 
-given Num Eq {
+given Num as Eq {
     equals(self, other Num) Bool = self.x == other.x
 }
 
@@ -1444,7 +1444,7 @@ Boundary anchoring rules:
 
 - `given Trait { ... }` is allowed only within the trait's root module subtree.
 - `given Type { ... }` is allowed only within the type's root module subtree.
-- `given Type Trait { ... }` follows orphan rules: either the type or the trait must be local to the current root module.
+- `given Type as Trait { ... }` follows orphan rules: either the type or the trait must be local to the current root module.
 - Cross-crate injection is not allowed.
 
 ### Extension Methods
@@ -1499,13 +1499,13 @@ trait Drawable {
 type Circle(mut radius Int)
 type Square(mut side Int)
 
-given Circle Drawable {
+given Circle as Drawable {
     public draw(self ref) String = "Drawing circle"
     public reset(self mut ref) Void = {
         self.radius = 0
     }
 }
-given Square Drawable {
+given Square as Drawable {
     public draw(self ref) String = "Drawing square"
     public reset(self mut ref) Void = {
         self.side = 0

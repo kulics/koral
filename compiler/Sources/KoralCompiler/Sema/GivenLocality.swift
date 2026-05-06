@@ -87,7 +87,7 @@ extension TypeChecker {
     guard typeIsLocal || traitIsLocal else {
       throw SemanticError(
         .generic(
-          "Cannot declare 'given \(selfType) \(traitName)' in module '\(formatModulePath(currentModulePath))': declaration must be in type module '\(formatModulePath(typeOwner.modulePath))' or trait module '\(formatModulePath(traitOwner.modulePath))'"
+          "Cannot declare 'given \(selfType) as \(traitName)' in module '\(formatModulePath(currentModulePath))': declaration must be in type module '\(formatModulePath(typeOwner.modulePath))' or trait module '\(formatModulePath(traitOwner.modulePath))'"
         ),
         span: span
       )

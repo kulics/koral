@@ -28,11 +28,11 @@ public type JsonValue {
 
 ## Given Implementations
 ```koral
-given JsonError Error {
+given JsonError as Error {
     public message(self ref) String
 }
 
-given JsonError ToString {
+given JsonError as ToString {
     public to_string(self ref) String
 }
 
@@ -53,15 +53,15 @@ given JsonValue {
     public to_string_pretty(self ref) String
 }
 
-given JsonValue Eq {
+given JsonValue as Eq {
     public equals(self, other JsonValue) Bool
 }
 
-given JsonValue Parseable {
+given JsonValue as Parseable {
     public parse(s String) [Self]Result
 }
 
-given JsonValue ToString {
+given JsonValue as ToString {
     public to_string(self ref) String
 }
 ```
