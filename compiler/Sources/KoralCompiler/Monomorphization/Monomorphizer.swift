@@ -95,7 +95,7 @@ public class Monomorphizer {
     internal var extensionMethods: [String: [String: ConcreteMethodEntry]] = [:]
 
     /// Inherent given method names indexed by receiver type stableKey.
-    /// Used to detect name conflicts with `given Type Trait` methods and
+    /// Used to detect name conflicts with `given Type as Trait` methods and
     /// disambiguate specialized emitted symbols only when necessary.
     internal var inherentGivenMethodNamesByTypeKey: [String: Set<String>] = [:]
 

@@ -240,6 +240,8 @@ public type CstDecl {
         kw Token,
         generic_params [CstGenericParams ref]Option,
         target CstType ref,
+        as_kw [Token]Option,
+        trait_type [CstType ref]Option,
         lbrace Token,
         members [CstItem ref]List,
         rbrace Token
@@ -297,6 +299,7 @@ public type CstParser(
 )
 
 given CstParser {
+
     public new(tokens [Token]List) CstParser = CstParser(tokens, 0)
 
     // ========================================================================
@@ -2511,6 +2514,19 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
 
+        let mut as_kw = [Token]Option.None()
+        let mut trait_type = [CstType ref]Option.None()
+        if self.check(.KwAs()) then {
+            as_kw = when self.expect(.KwAs(), "'as'") in {
+                .Ok(t) then .Some(t),
+                .Error(e) then { return .Error(e) },
+            }
+            trait_type = when self.parse_type_node() in {
+                .Ok(t) then .Some(box(t)),
+                .Error(e) then { return .Error(e) },
+            }
+        }
+
         let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -2523,7 +2539,7 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        return .Ok(.Given(vis, mods, kw, gp, box(target), lb, members, rb))
+        return .Ok(.Given(vis, mods, kw, gp, box(target), as_kw, trait_type, lb, members, rb))
     }
 
     // ========================================================================

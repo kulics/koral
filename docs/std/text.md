@@ -40,147 +40,147 @@ public type RegexSplitIterator
 
 ## Given Implementations
 ```koral
-given Int Formattable {
+given Int as Formattable {
     public format(self, spec String) String
 }
 
-given Int8 Formattable {
+given Int8 as Formattable {
     public format(self, spec String) String
 }
 
-given Int16 Formattable {
+given Int16 as Formattable {
     public format(self, spec String) String
 }
 
-given Int32 Formattable {
+given Int32 as Formattable {
     public format(self, spec String) String
 }
 
-given Int64 Formattable {
+given Int64 as Formattable {
     public format(self, spec String) String
 }
 
-given UInt Formattable {
+given UInt as Formattable {
     public format(self, spec String) String
 }
 
-given UInt8 Formattable {
+given UInt8 as Formattable {
     public format(self, spec String) String
 }
 
-given UInt16 Formattable {
+given UInt16 as Formattable {
     public format(self, spec String) String
 }
 
-given UInt32 Formattable {
+given UInt32 as Formattable {
     public format(self, spec String) String
 }
 
-given UInt64 Formattable {
+given UInt64 as Formattable {
     public format(self, spec String) String
 }
 
-given Float64 Formattable {
+given Float64 as Formattable {
     public format(self, spec String) String
 }
 
-given Float32 Formattable {
+given Float32 as Formattable {
     public format(self, spec String) String
 }
 
-given String Formattable {
+given String as Formattable {
     public format(self, spec String) String
 }
 
-given Int Parseable {
+given Int as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Int RadixParseable {
+given Int as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given Int8 Parseable {
+given Int8 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Int8 RadixParseable {
+given Int8 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given Int16 Parseable {
+given Int16 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Int16 RadixParseable {
+given Int16 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given Int32 Parseable {
+given Int32 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Int32 RadixParseable {
+given Int32 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given Int64 Parseable {
+given Int64 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Int64 RadixParseable {
+given Int64 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given UInt Parseable {
+given UInt as Parseable {
     public parse(s String) [Self]Result
 }
 
-given UInt RadixParseable {
+given UInt as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given UInt8 Parseable {
+given UInt8 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given UInt8 RadixParseable {
+given UInt8 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given UInt16 Parseable {
+given UInt16 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given UInt16 RadixParseable {
+given UInt16 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given UInt32 Parseable {
+given UInt32 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given UInt32 RadixParseable {
+given UInt32 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given UInt64 Parseable {
+given UInt64 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given UInt64 RadixParseable {
+given UInt64 as RadixParseable {
     public parse_radix(s String, radix UInt) [Self]Result
 }
 
-given Float64 Parseable {
+given Float64 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Float32 Parseable {
+given Float32 as Parseable {
     public parse(s String) [Self]Result
 }
 
-given Rune Parseable {
+given Rune as Parseable {
     public parse(s String) [Self]Result
 }
 
@@ -238,15 +238,15 @@ given Captures {
     public group_end(self ref, index UInt) [UInt]Option
 }
 
-given MatchIterator [Match]Iterator {
+given MatchIterator as [Match]Iterator {
     public next(self mut ref) [Match]Option
 }
 
-given CapturesIterator [Captures]Iterator {
+given CapturesIterator as [Captures]Iterator {
     public next(self mut ref) [Captures]Option
 }
 
-given RegexSplitIterator [String]Iterator {
+given RegexSplitIterator as [String]Iterator {
     public next(self mut ref) [String]Option
 }
 ```

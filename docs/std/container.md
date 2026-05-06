@@ -52,19 +52,19 @@ given[T Eq and Deref] [T]Deque {
     public contains(self ref, value T) Bool
 }
 
-given[T Deref] [T]Deque [T, [T]DequeIterator]Iterable {
+given[T Deref] [T]Deque as [T, [T]DequeIterator]Iterable {
     public iterator(self ref) [T]DequeIterator
 }
 
-given[T Deref] [T]DequeIterator [T]Iterator {
+given[T Deref] [T]DequeIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
-given[T Deref] [T]Deque [UInt, T]Index {
+given[T Deref] [T]Deque as [UInt, T]Index {
     public ref_at(self ref, key UInt) T ref
 }
 
-given[T Deref] [T]Deque [UInt, T]MutIndex {
+given[T Deref] [T]Deque as [UInt, T]MutIndex {
     public mut_ref_at(self mut ref, key UInt) T mut ref
 }
 
@@ -79,11 +79,11 @@ given[T Ord and Deref] [T]PriorityQueue {
     public peek(self ref) [T]Option
 }
 
-given[T Ord and Deref] [T]PriorityQueue [T, [T]PriorityQueueIterator]Iterable {
+given[T Ord and Deref] [T]PriorityQueue as [T, [T]PriorityQueueIterator]Iterable {
     public iterator(self ref) [T]PriorityQueueIterator
 }
 
-given[T Ord and Deref] [T]PriorityQueueIterator [T]Iterator {
+given[T Ord and Deref] [T]PriorityQueueIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
@@ -98,11 +98,11 @@ given[T Deref] [T]Queue {
     public peek(self ref) [T]Option
 }
 
-given[T Deref] [T]Queue [T, [T]QueueIterator]Iterable {
+given[T Deref] [T]Queue as [T, [T]QueueIterator]Iterable {
     public iterator(self ref) [T]QueueIterator
 }
 
-given[T Deref] [T]QueueIterator [T]Iterator {
+given[T Deref] [T]QueueIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 
@@ -117,11 +117,11 @@ given[T Deref] [T]Stack {
     public peek(self ref) [T]Option
 }
 
-given[T Deref] [T]Stack [T, [T]StackIterator]Iterable {
+given[T Deref] [T]Stack as [T, [T]StackIterator]Iterable {
     public iterator(self ref) [T]StackIterator
 }
 
-given[T Deref] [T]StackIterator [T]Iterator {
+given[T Deref] [T]StackIterator as [T]Iterator {
     public next(self mut ref) [T]Option
 }
 ```

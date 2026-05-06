@@ -48,7 +48,7 @@ given AtomicBool {
     public compare_exchange(self ref, expected: Bool, desired: Bool) Bool
 }
 
-given AtomicBool ToString {
+given AtomicBool as ToString {
     public to_string(self ref) String
 }
 
@@ -62,7 +62,7 @@ given AtomicInt {
     public fetch_sub(self ref, delta Int) Int
 }
 
-given AtomicInt ToString {
+given AtomicInt as ToString {
     public to_string(self ref) String
 }
 
@@ -76,7 +76,7 @@ given AtomicUInt {
     public fetch_sub(self ref, delta UInt) UInt
 }
 
-given AtomicUInt ToString {
+given AtomicUInt as ToString {
     public to_string(self ref) String
 }
 

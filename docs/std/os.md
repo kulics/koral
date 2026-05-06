@@ -139,15 +139,15 @@ given DirEntry {
     public info(self ref) [FileInfo]Result
 }
 
-given DirEntry ToString {
+given DirEntry as ToString {
     public to_string(self ref) String
 }
 
-given DirIterator [DirEntry]Iterator {
+given DirIterator as [DirEntry]Iterator {
     public next(self mut ref) [DirEntry]Option
 }
 
-given WalkDirIterator [DirEntry]Iterator {
+given WalkDirIterator as [DirEntry]Iterator {
     public next(self mut ref) [DirEntry]Option
 }
 
@@ -163,16 +163,16 @@ given File {
     public unlock(self ref) [Void]Result
 }
 
-given File Reader {
+given File as Reader {
     public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
-given File Writer {
+given File as Writer {
     public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self ref) [Void]Result
 }
 
-given File Seeker {
+given File as Seeker {
     public seek(self ref, pos Io.SeekOrigin) [UInt64]Result
 }
 
@@ -182,7 +182,7 @@ given FileType {
     public is_symlink(self ref) Bool
 }
 
-given FileType ToString {
+given FileType as ToString {
     public to_string(self ref) String
 }
 
@@ -203,7 +203,7 @@ given Permission {
     public executable() Permission
 }
 
-given Permission ToString {
+given Permission as ToString {
     public to_string(self ref) String
 }
 
@@ -219,19 +219,19 @@ given FileInfo {
     public is_symlink(self ref) Bool
 }
 
-given FileInfo ToString {
+given FileInfo as ToString {
     public to_string(self ref) String
 }
 
-given Permission Eq {
+given Permission as Eq {
     public equals(self, other Permission) Bool
 }
 
-given String IntoPath {
+given String as IntoPath {
     public into_path(self) Path
 }
 
-given Path IntoPath {
+given Path as IntoPath {
     public into_path(self) Path
 }
 
@@ -252,15 +252,15 @@ given Path {
     public [T IntoPath]relative_to(self ref, base T) [Path]Result
 }
 
-given Path Eq {
+given Path as Eq {
     public equals(self, other Path) Bool
 }
 
-given Path Hash {
+given Path as Hash {
     public hash(self) UInt
 }
 
-given Path ToString {
+given Path as ToString {
     public to_string(self ref) String
 }
 ```

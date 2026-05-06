@@ -232,7 +232,7 @@ public indirect enum GlobalNode {
   case givenDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     methods: [MethodDeclaration], span: SourceSpan)
-  // given [T] Type Trait { ... }
+  // given [T] Type as Trait { ... }
   case givenTraitDeclaration(
     typeParams: [TypeParameterDecl] = [], type: TypeNode,
     trait: TypeNode,

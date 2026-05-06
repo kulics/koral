@@ -37,11 +37,11 @@ given ClockTime {
     public nanosecond(self) Int
 }
 
-given ClockTime [Duration]Add {
+given ClockTime as [Duration]Add {
     public add(self, v Duration) ClockTime
 }
 
-given ClockTime [Duration]Sub {
+given ClockTime as [Duration]Sub {
     public sub(self, v Duration) ClockTime
 }
 
@@ -49,19 +49,19 @@ given ClockTime {
     public duration_to(self, other ClockTime) Duration
 }
 
-given ClockTime Eq {
+given ClockTime as Eq {
     public equals(self, other ClockTime) Bool
 }
 
-given ClockTime Ord {
+given ClockTime as Ord {
     public compare(self, other ClockTime) Int
 }
 
-given ClockTime ToString {
+given ClockTime as ToString {
     public to_string(self ref) String
 }
 
-given ClockTime Parseable {
+given ClockTime as Parseable {
     public parse(s String) [ClockTime]Result
 }
 
@@ -87,19 +87,19 @@ given Date {
     public add_years(self, years Int) Date
 }
 
-given Date Eq {
+given Date as Eq {
     public equals(self, other Date) Bool
 }
 
-given Date Ord {
+given Date as Ord {
     public compare(self, other Date) Int
 }
 
-given Date ToString {
+given Date as ToString {
     public to_string(self ref) String
 }
 
-given Date Parseable {
+given Date as Parseable {
     public parse(s String) [Date]Result
 }
 
@@ -140,11 +140,11 @@ given DateTime {
     public elapsed(self ref) Duration
 }
 
-given DateTime [Duration]Add {
+given DateTime as [Duration]Add {
     public add(self, v Duration) DateTime
 }
 
-given DateTime [Duration]Sub {
+given DateTime as [Duration]Sub {
     public sub(self, v Duration) DateTime
 }
 
@@ -152,19 +152,19 @@ given DateTime {
     public duration_to(self ref, other DateTime) Duration
 }
 
-given DateTime Eq {
+given DateTime as Eq {
     public equals(self, other DateTime) Bool
 }
 
-given DateTime Ord {
+given DateTime as Ord {
     public compare(self, other DateTime) Int
 }
 
-given DateTime ToString {
+given DateTime as ToString {
     public to_string(self ref) String
 }
 
-given DateTime Parseable {
+given DateTime as Parseable {
     public parse(s String) [DateTime]Result
 }
 
@@ -173,11 +173,11 @@ given MonoTime {
     public elapsed(self) Duration
 }
 
-given MonoTime [Duration]Add {
+given MonoTime as [Duration]Add {
     public add(self, v Duration) MonoTime
 }
 
-given MonoTime [Duration]Sub {
+given MonoTime as [Duration]Sub {
     public sub(self, v Duration) MonoTime
 }
 
@@ -185,11 +185,11 @@ given MonoTime {
     public duration_to(self, other MonoTime) Duration
 }
 
-given MonoTime Eq {
+given MonoTime as Eq {
     public equals(self, other MonoTime) Bool
 }
 
-given MonoTime Ord {
+given MonoTime as Ord {
     public compare(self, other MonoTime) Int
 }
 
@@ -200,7 +200,7 @@ given TimeZone {
     public from_name(name String) [TimeZone]Result
 }
 
-given TimeZone Eq {
+given TimeZone as Eq {
     public equals(self, other TimeZone) Bool
 }
 ```

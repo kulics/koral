@@ -55,11 +55,11 @@ given[R Reader] [R]BufReader {
     public skip(self ref, n UInt) [UInt]Result
 }
 
-given[R Reader] [R]BufReader Reader {
+given[R Reader] [R]BufReader as Reader {
     public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
-given[R Reader and Seeker] [R]BufReader Seeker {
+given[R Reader and Seeker] [R]BufReader as Seeker {
     public seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 
@@ -72,12 +72,12 @@ given[W Writer] [W]BufWriter {
     public write_rune(self ref, r Rune) [Void]Result
 }
 
-given[W Writer] [W]BufWriter Writer {
+given[W Writer] [W]BufWriter as Writer {
     public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self ref) [Void]Result
 }
 
-given[W Writer and Seeker] [W]BufWriter Seeker {
+given[W Writer and Seeker] [W]BufWriter as Seeker {
     public seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 
@@ -88,20 +88,20 @@ given ByteBuffer {
     public from_bytes(bytes [UInt8]List) ByteBuffer
 }
 
-given ByteBuffer Reader {
+given ByteBuffer as Reader {
     public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
 }
 
-given ByteBuffer Writer {
+given ByteBuffer as Writer {
     public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
     public flush(self ref) [Void]Result
 }
 
-given ByteBuffer Seeker {
+given ByteBuffer as Seeker {
     public seek(self ref, pos SeekOrigin) [UInt64]Result
 }
 
-given IoError Error {
+given IoError as Error {
     public message(self ref) String
 }
 

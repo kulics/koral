@@ -399,7 +399,8 @@ extension Parser {
     }
 
     var trait: TypeNode? = nil
-    if currentToken !== .leftBrace {
+    if currentToken === .asKeyword {
+      try match(.asKeyword)
       trait = try parseType()
     }
     try match(.leftBrace)
