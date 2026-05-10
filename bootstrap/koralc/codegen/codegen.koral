@@ -30,6 +30,18 @@ public type LoopContext(
     scope_index UInt,
 )
 
+public type CodegenYieldTarget(
+    result_var String,
+    result_type Type,
+    end_label String,
+    base_scope_index UInt,
+)
+
+public type DeferredExpr(
+    expr TypedExpr ref,
+    pattern_binding_aliases [String, String]Dict,
+)
+
 // ── TypeDeclaration ───────────────────────────────────────────────────────────
 
 /// 类型声明的轻量包装，用于依赖排序后的类型定义生成
@@ -76,7 +88,7 @@ public type CodeGen(
     mut local_c_identifier_overrides [UInt, String]Dict,
     // 内存管理
     mut lifetime_scope_stack [[[String, Type]Pair]List mut ref]List,
-    mut defer_scope_stack [[TypedExpr ref]List mut ref]List,
+    mut defer_scope_stack [[DeferredExpr]List mut ref]List,
 
     // 用户定义的 drop 函数：TypeName -> C 函数名
     mut user_defined_drops [String, String]Dict,
@@ -86,6 +98,7 @@ public type CodeGen(
 
     // 循环上下文
     mut loop_stack [LoopContext]List,
+    mut yield_target_stack [CodegenYieldTarget]List,
 
     // 逃逸分析
     mut escape_context EscapeContext,
@@ -146,7 +159,7 @@ given CodeGen {
             // lifetime_scope_stack
             [[[String, Type]Pair]List mut ref]List.new(),
             // defer_scope_stack
-            [[TypedExpr ref]List mut ref]List.new(),
+            [[DeferredExpr]List mut ref]List.new(),
             // user_defined_drops
             [String, String]Dict.new(),
             // program_scan
@@ -158,6 +171,8 @@ given CodeGen {
             ),
             // loop_stack
             [LoopContext]List.new(),
+            // yield_target_stack
+            [CodegenYieldTarget]List.new(),
             // escape_context
             EscapeContext.new(),
             // pattern_binding_aliases

@@ -525,9 +525,11 @@ given CodeGen {
         let mut concrete_receiver_type_opt = [Type]Option.None()
         if args.count() > 0 then {
             let has_method_owner = self.method_owner_type(symbol.def_id) is .Some(_)
-            let has_concrete_callable = self.program.lookup_concrete_callable(symbol.def_id) is .Some(_)
             let signature_omits_self = raw_param_count < args.count()
-            if has_method_owner or has_concrete_callable or signature_omits_self then {
+            // Do not classify plain top-level functions as receiver methods just
+            // because they are concrete callables. That incorrectly treats the first
+            // argument as a borrowed receiver and bypasses ref escape lowering.
+            if has_method_owner or signature_omits_self then {
                 concrete_receiver_type_opt = [Type]Option.Some(self.concretize_codegen_type(args[(UInt)0].val.expr_type))
             }
         }
@@ -607,19 +609,21 @@ given CodeGen {
             let mut prepared_arg = [String]Option.None()
             when function_type_opt in {
                 .Some(function_type) then {
-                    if arg_index == (UInt)0 then {
-                        when self.function_type_param_type(function_type, (UInt)0) in {
-                            .Some(receiver_param_type) then {
-                                let should_prepare_as_receiver = self.receiver_param_type_matches_call_receiver(receiver_param_type, arg.expr_type)
-                                    or (concrete_receiver_type_opt is .Some(_) and self.expected_is_any_ref(receiver_param_type))
-                                if should_prepare_as_receiver then {
-                                    let concrete_receiver_type = self.concretize_codegen_type(arg.expr_type)
-                                    let remaining_arg_count = if args.count() > (UInt)0 then args.count() - (UInt)1 else (UInt)0
-                                    prepared_arg = [String]Option.Some(self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count))
-                                }
-                            },
-                            .None() then {},
-                        }
+                    if arg_index == (UInt)0 then when concrete_receiver_type_opt in {
+                        .Some(concrete_receiver_type) then {
+                            when self.function_type_param_type(function_type, (UInt)0) in {
+                                .Some(receiver_param_type) then {
+                                    let should_prepare_as_receiver = self.receiver_param_type_matches_call_receiver(receiver_param_type, arg.expr_type)
+                                        or self.expected_is_any_ref(receiver_param_type)
+                                    if should_prepare_as_receiver then {
+                                        let remaining_arg_count = if args.count() > (UInt)0 then args.count() - (UInt)1 else (UInt)0
+                                        prepared_arg = [String]Option.Some(self.prepare_receiver_method_argument_expr(arg, concrete_receiver_type, symbol, remaining_arg_count))
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .None() then {},
                     }
                 },
                 .None() then {},

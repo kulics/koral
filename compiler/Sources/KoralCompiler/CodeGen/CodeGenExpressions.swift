@@ -331,40 +331,54 @@ extension CodeGen {
   // MARK: - Block Scope Generation
   
   func generateBlockScope(
-    _ statements: [TypedStatementNode]
+    _ statements: [TypedStatementNode],
+    type blockType: Type
   ) -> String {
+    let parentScopeIndex = max(0, lifetimeScopeStack.count - 1)
     pushScope()
-    // Process all statements, handling yield specially
-    var result = ""
-    for stmt in statements {
-      if case .yield(let value) = stmt {
-        // yield expression becomes the block's value
-        let temp = generateExpressionSSA(value)
-        if value.type != .void && value.type != .never {
-          let cType = cTypeName(value.type)
-          let resultVar = nextTempWithDecl(cType: cType)
-          if needsDrop(value.type) && isCleanupRegisteredValue(temp) {
-            // The yielded variable is cleanup-registered (e.g. a parameter or local).
-            // Move it instead of copying to avoid unnecessary copy+drop.
+    let hasResult = blockType != .void && blockType != .never
+    let resultVar: String = hasResult ? nextTempWithDecl(cType: cTypeName(blockType)) : ""
+    let yieldTarget: CodegenYieldTarget? = hasResult ? CodegenYieldTarget(
+      id: YieldTargetId(rawValue: -1),
+      resultVar: resultVar,
+      resultType: blockType,
+      endLabel: "\(nextTemp())_yield_end",
+      baseScopeIndex: parentScopeIndex
+    ) : nil
+
+    if let yieldTarget {
+      yieldTargetStack.append(yieldTarget)
+    }
+
+    for (index, stmt) in statements.enumerated() {
+      if hasResult, index == statements.count - 1, case .expression(let expr) = stmt {
+        let temp = generateExpressionSSA(expr)
+        if expr.type != .never {
+          if needsDrop(expr.type) && isCleanupRegisteredValue(temp) {
             unregisterVariable(temp)
             addIndent()
             appendToBuffer("\(resultVar) = \(temp);\n")
-          } else if value.valueCategory == .lvalue {
-            // Returning an lvalue from a block:
-            // - Copy types must be copied, because scope cleanup will drop the original.
-            appendCopyAssignment(for: value.type, source: temp, dest: resultVar, indent: indent)
+          } else if expr.valueCategory == .lvalue {
+            appendCopyAssignment(for: expr.type, source: temp, dest: resultVar, indent: indent)
           } else {
             addIndent()
             appendToBuffer("\(resultVar) = \(temp);\n")
           }
-          result = resultVar
         }
       } else {
         generateStatement(stmt)
       }
     }
+
+    if yieldTarget != nil {
+      _ = yieldTargetStack.popLast()
+    }
     popScope()
-    return result
+    if let yieldTarget {
+      addIndent()
+      appendToBuffer("\(yieldTarget.endLabel):;\n")
+    }
+    return resultVar
   }
   
   // MARK: - Function Call Generation

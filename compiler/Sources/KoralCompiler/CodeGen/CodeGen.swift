@@ -85,6 +85,15 @@ public class CodeGen {
   }
   var loopStack: [LoopContext] = []
 
+  struct CodegenYieldTarget {
+    let id: YieldTargetId
+    let resultVar: String
+    let resultType: Type
+    let endLabel: String
+    let baseScopeIndex: Int
+  }
+  var yieldTargetStack: [CodegenYieldTarget] = []
+
   public init(
     ast: MonomorphizedProgram,
     context: CompilerContext,
@@ -1337,8 +1346,8 @@ public class CodeGen {
       let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
       return result
 
-    case .blockExpression(let statements, _):
-      return generateBlockScope(statements)
+    case .blockExpression(let statements, let type):
+      return generateBlockScope(statements, type: type)
 
     case .arithmeticExpression(let left, let op, let right, let type):
       let leftResult = generateExpressionSSA(left)
@@ -1412,27 +1421,41 @@ public class CodeGen {
 
         addIndent()
         buffer += "if (\(conditionVar)) {\n"
+        let targetLabel = "\(nextTemp())_yield_end"
+        let target = CodegenYieldTarget(
+          id: YieldTargetId(rawValue: -1),
+          resultVar: resultVar,
+          resultType: type,
+          endLabel: targetLabel,
+          baseScopeIndex: max(0, lifetimeScopeStack.count - 1)
+        )
         withIndent {
           pushScope()
+          yieldTargetStack.append(target)
           let thenResult = generateExpressionSSA(thenBranch)
-          if type != .never && thenBranch.type != .never {
+          if type != .never && thenBranch.type != .never && thenBranch.type != .void {
               emitCopyOrMove(type: type, source: thenResult, dest: resultVar, isLvalue: thenBranch.valueCategory == .lvalue)
           }
+          _ = yieldTargetStack.popLast()
           popScope()
         }
         addIndent()
         buffer += "} else {\n"
         withIndent {
           pushScope()
+          yieldTargetStack.append(target)
           let elseResult = generateExpressionSSA(elseBranch)
-          if type != .never && elseBranch.type != .never {
+          if type != .never && elseBranch.type != .never && elseBranch.type != .void {
               emitCopyOrMove(type: type, source: elseResult, dest: resultVar, isLvalue: elseBranch.valueCategory == .lvalue)
           }
+          _ = yieldTargetStack.popLast()
           popScope()
         }
 
         addIndent()
         buffer += "}\n"
+        addIndent()
+        buffer += "\(targetLabel):;\n"
         return resultVar
       }
 
@@ -1533,32 +1556,6 @@ public class CodeGen {
     case .whenExpression(let subject, let cases, let type):
       return generateWhenExpression(subject, cases, type)
 
-    case .whileExpression(let condition, let body, _):
-      let labelPrefix = nextTemp()
-      let startLabel = "\(labelPrefix)_start"
-      let endLabel = "\(labelPrefix)_end"
-      addIndent()
-      buffer += "\(startLabel): {\n"
-      withIndent {
-        let conditionVar = generateExpressionSSA(condition)
-        addIndent()
-        buffer += "if (!\(conditionVar)) { goto \(endLabel); }\n"
-        pushScope()
-        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
-        _ = generateExpressionSSA(body)
-        loopStack.removeLast()
-        popScope()
-        addIndent()
-        buffer += "goto \(startLabel);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-      addIndent()
-      buffer += "\(endLabel): {\n"
-      addIndent()
-      buffer += "}\n"
-      return ""
-      
     case .ifPatternExpression(let subject, let pattern, _, let thenBranch, let elseBranch, let type):
       // Push a dedicated scope for the subject so its lifetime is self-contained.
       // return/break/continue will clean it up via emitCleanup since it's on the stack.
@@ -1640,11 +1637,20 @@ public class CodeGen {
           addIndent()
           buffer += "\(cTypeName(type)) \(resultVar);\n"
         }
+        let targetLabel = "\(nextTemp())_yield_end"
+        let yieldTarget = CodegenYieldTarget(
+          id: YieldTargetId(rawValue: -1),
+          resultVar: resultVar,
+          resultType: type,
+          endLabel: targetLabel,
+          baseScopeIndex: max(0, lifetimeScopeStack.count - 1)
+        )
 
         addIndent()
         buffer += "if (\(condition)) {\n"
         withIndent {
           pushScope()
+          yieldTargetStack.append(yieldTarget)
           for b in bindingCode {
             addIndent()
             buffer += b
@@ -1653,124 +1659,35 @@ public class CodeGen {
             registerVariable(name, varType)
           }
           let thenResult = generateExpressionSSA(thenBranch)
-          if type != .never && thenBranch.type != .never {
+          if type != .never && thenBranch.type != .never && thenBranch.type != .void {
             emitCopyOrMove(type: type, source: thenResult, dest: resultVar, isLvalue: thenBranch.valueCategory == .lvalue)
           }
+          _ = yieldTargetStack.popLast()
           popScope()
         }
         addIndent()
         buffer += "} else {\n"
         withIndent {
           pushScope()
+          yieldTargetStack.append(yieldTarget)
           let elseResult = generateExpressionSSA(elseBranch)
-          if type != .never && elseBranch.type != .never {
+          if type != .never && elseBranch.type != .never && elseBranch.type != .void {
             emitCopyOrMove(type: type, source: elseResult, dest: resultVar, isLvalue: elseBranch.valueCategory == .lvalue)
           }
+          _ = yieldTargetStack.popLast()
           popScope()
         }
 
         addIndent()
         buffer += "}\n"
+        addIndent()
+        buffer += "\(targetLabel):;\n"
         patternBindingAliases = savedAliases
         // Pop the subject scope — drops the subject right after the if-pattern.
         popScope()
         return resultVar
       }
       
-    case .whilePatternExpression(let subject, let pattern, _, let body, _):
-      let labelPrefix = nextTemp()
-      let startLabel = "\(labelPrefix)_start"
-      let endLabel = "\(labelPrefix)_end"
-      
-      addIndent()
-      buffer += "\(startLabel): {\n"
-      withIndent {
-        // Borrow semantics: subject is evaluated each iteration but not deep-copied.
-        // Pattern bindings are aliases into the subject's fields.
-        
-        // Push a scope for the subject so break/continue/return will drop it.
-        let subjectScopeIndex = lifetimeScopeStack.count
-        pushScope()
-        
-        let subjectVarSSA = generateExpressionSSA(subject)
-        
-        if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-          registerVariable(subjectVarSSA, subject.type)
-        }
-        
-        var subjectVar = subjectVarSSA
-        var subjectType = subject.type
-        switch subject.type {
-        case .reference(let inner),
-             .mutableReference(let inner),
-             .weakReference(let inner),
-             .mutableWeakReference(let inner):
-          let innerCType = cTypeName(inner)
-          let derefPtr = nextTemp() + "_deref"
-          addIndent()
-          buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
-          subjectVar = "(*\(derefPtr))"
-          subjectType = inner
-        default:
-          break
-        }
-        
-        let savedAliases = patternBindingAliases
-        
-        // Generate pattern matching condition and bindings
-        let (prelude, preludeVars, condition, bindingCode, vars) = 
-            generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
-        
-        // Output prelude
-        for p in prelude {
-          addIndent()
-          buffer += p
-        }
-        for (name, varType) in preludeVars {
-          registerVariable(name, varType)
-        }
-        
-        // When pattern doesn't match, drop subject and exit loop
-        addIndent()
-        buffer += "if (!(\(condition))) {\n"
-        withIndent {
-          emitCleanupForScope(at: subjectScopeIndex)
-          addIndent()
-          buffer += "goto \(endLabel);\n"
-        }
-        addIndent()
-        buffer += "}\n"
-        
-        pushScope()
-        // Generate bindings
-        for b in bindingCode {
-          addIndent()
-          buffer += b
-        }
-        // Register bound variables in scope
-        for (name, varType) in vars {
-          registerVariable(name, varType)
-        }
-        
-        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: subjectScopeIndex))
-        _ = generateExpressionSSA(body)
-        loopStack.removeLast()
-        popScope()
-        // Drop subject at end of each iteration
-        emitCleanupForScope(at: subjectScopeIndex)
-        popScopeWithoutCleanup()
-        patternBindingAliases = savedAliases
-        addIndent()
-        buffer += "goto \(startLabel);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-      addIndent()
-      buffer += "\(endLabel): {\n"
-      addIndent()
-      buffer += "}\n"
-      return ""
-
     case .andExpression(let left, let right, _):
       let result = nextTempWithDecl(cType: "_Bool")
       let leftResult = generateExpressionSSA(left)
@@ -2493,6 +2410,78 @@ public class CodeGen {
       }
       cleanupTemporariesInCurrentScope(marker: marker)
 
+    case .ifStatement(let condition, let thenBranch, let elseBranch):
+      let conditionVar = generateExpressionSSA(condition)
+      addIndent()
+      buffer += "if (\(conditionVar)) {\n"
+      withIndent {
+        pushScope()
+        _ = generateExpressionSSA(thenBranch)
+        popScope()
+      }
+      if let elseBranch {
+        addIndent()
+        buffer += "} else {\n"
+        withIndent {
+          pushScope()
+          _ = generateExpressionSSA(elseBranch)
+          popScope()
+        }
+      }
+      addIndent()
+      buffer += "}\n"
+
+    case .ifPatternStatement(let subject, let pattern, let bindings, let thenBranch, let elseBranch):
+      let lowered = TypedExpressionNode.ifPatternExpression(
+        subject: subject,
+        pattern: pattern,
+        bindings: bindings,
+        thenBranch: thenBranch,
+        elseBranch: elseBranch,
+        type: thenBranch.type == .never && elseBranch?.type == .never ? .never : .void
+      )
+      let marker = currentScopeTempMarker()
+      _ = generateExpressionSSA(lowered)
+      cleanupTemporariesInCurrentScope(marker: marker)
+
+    case .whileStatement(let condition, let body):
+      let labelPrefix = nextTemp()
+      let startLabel = "\(labelPrefix)_start"
+      let endLabel = "\(labelPrefix)_end"
+      addIndent()
+      buffer += "\(startLabel): {\n"
+      withIndent {
+        let conditionVar = generateExpressionSSA(condition)
+        addIndent()
+        buffer += "if (!\(conditionVar)) { goto \(endLabel); }\n"
+        pushScope()
+        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
+        _ = generateExpressionSSA(body)
+        loopStack.removeLast()
+        popScope()
+        addIndent()
+        buffer += "goto \(startLabel);\n"
+      }
+      addIndent()
+      buffer += "}\n"
+      addIndent()
+      buffer += "\(endLabel): {\n"
+      addIndent()
+      buffer += "}\n"
+
+    case .whilePatternStatement(let subject, let pattern, _, let body):
+      emitWhilePatternLoop(subject: subject, pattern: pattern, body: body)
+
+    case .whenStatement(let subject, let cases):
+      let lowered = TypedExpressionNode.whenExpression(
+        subject: subject,
+        cases: cases.map { TypedMatchCase(pattern: $0.pattern, body: $0.body) },
+        type: .void
+      )
+      let marker = currentScopeTempMarker()
+      _ = generateExpressionSSA(lowered)
+      cleanupTemporariesInCurrentScope(marker: marker)
+
     case .return(let value):
       if let value = value {
         if value.type == .never {
@@ -2558,9 +2547,26 @@ public class CodeGen {
       // Code generation is deferred to scope exit points (popScope, emitCleanup, etc.).
       deferScopeStack[deferScopeStack.count - 1].append(expression)
 
-    case .yield:
-      // yield code generation will be handled at block expression level (task 7.1)
-      break
+    case .yield(_, let value):
+      guard let targetCtx = yieldTargetStack.last else {
+        fatalError("yield used without an active codegen target")
+      }
+      let valueResult = generateExpressionSSA(value)
+      let cleanupStart = min(targetCtx.baseScopeIndex + 1, max(0, lifetimeScopeStack.count - 1))
+      if needsDrop(value.type) && isCleanupRegisteredValue(valueResult) {
+        unregisterVariable(valueResult)
+      }
+      emitCopyOrMove(
+        type: targetCtx.resultType,
+        source: valueResult,
+        dest: targetCtx.resultVar,
+        isLvalue: value.valueCategory == .lvalue
+      )
+      if lifetimeScopeStack.count - 1 >= cleanupStart {
+        emitCleanup(fromScopeIndex: cleanupStart)
+      }
+      addIndent()
+      buffer += "goto \(targetCtx.endLabel);\n"
     }
   }
 
@@ -2932,7 +2938,8 @@ public class CodeGen {
     resultType: Type,
     resultVar: String,
     endLabel: String,
-    savedAliases: [String: String]
+    savedAliases: [String: String],
+    yieldTarget: CodegenYieldTarget?
   ) {
     addIndent()
     buffer += "switch (\(plan.switchExpr)) {\n"
@@ -2953,6 +2960,9 @@ public class CodeGen {
         buffer += "{\n"
         withIndent {
           pushScope()
+          if let yieldTarget {
+            yieldTargetStack.append(yieldTarget)
+          }
 
           let (prelude, preludeVars, _, bindings, vars) =
             generatePatternConditionAndBindings(branch.matchCase.pattern, subjectVar, subjectType)
@@ -2970,6 +2980,9 @@ public class CodeGen {
             )
           }
 
+          if yieldTarget != nil {
+            _ = yieldTargetStack.popLast()
+          }
           popScope()
           addIndent()
           buffer += "goto \(endLabel);\n"
@@ -2978,6 +2991,95 @@ public class CodeGen {
         buffer += "}\n"
       }
     }
+    addIndent()
+    buffer += "}\n"
+  }
+
+  private func emitWhilePatternLoop(
+    subject: TypedExpressionNode,
+    pattern: TypedPattern,
+    body: TypedExpressionNode
+  ) {
+    let labelPrefix = nextTemp()
+    let startLabel = "\(labelPrefix)_start"
+    let endLabel = "\(labelPrefix)_end"
+
+    addIndent()
+    buffer += "\(startLabel): {\n"
+    withIndent {
+      // Borrow semantics: subject is evaluated each iteration but not deep-copied.
+      // Pattern bindings are aliases into the subject's fields.
+      let subjectScopeIndex = lifetimeScopeStack.count
+      pushScope()
+
+      let subjectVarSSA = generateExpressionSSA(subject)
+
+      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
+        registerVariable(subjectVarSSA, subject.type)
+      }
+
+      var subjectVar = subjectVarSSA
+      var subjectType = subject.type
+      switch subject.type {
+      case .reference(let inner),
+           .mutableReference(let inner),
+           .weakReference(let inner),
+           .mutableWeakReference(let inner):
+        let innerCType = cTypeName(inner)
+        let derefPtr = nextTemp() + "_deref"
+        addIndent()
+        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
+        subjectVar = "(*\(derefPtr))"
+        subjectType = inner
+      default:
+        break
+      }
+
+      let savedAliases = patternBindingAliases
+      let (prelude, preludeVars, condition, bindingCode, vars) =
+        generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
+
+      for p in prelude {
+        addIndent()
+        buffer += p
+      }
+      for (name, varType) in preludeVars {
+        registerVariable(name, varType)
+      }
+
+      addIndent()
+      buffer += "if (!(\(condition))) {\n"
+      withIndent {
+        emitCleanupForScope(at: subjectScopeIndex)
+        addIndent()
+        buffer += "goto \(endLabel);\n"
+      }
+      addIndent()
+      buffer += "}\n"
+
+      pushScope()
+      for b in bindingCode {
+        addIndent()
+        buffer += b
+      }
+      for (name, varType) in vars {
+        registerVariable(name, varType)
+      }
+
+      loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: subjectScopeIndex))
+      _ = generateExpressionSSA(body)
+      loopStack.removeLast()
+      popScope()
+      emitCleanupForScope(at: subjectScopeIndex)
+      popScopeWithoutCleanup()
+      patternBindingAliases = savedAliases
+      addIndent()
+      buffer += "goto \(startLabel);\n"
+    }
+    addIndent()
+    buffer += "}\n"
+    addIndent()
+    buffer += "\(endLabel): {\n"
     addIndent()
     buffer += "}\n"
   }
@@ -3021,6 +3123,15 @@ public class CodeGen {
     }
     
     let endLabel = "match_end_\(nextTemp())"
+    let yieldTarget: CodegenYieldTarget? = (type != .void && type != .never)
+      ? CodegenYieldTarget(
+          id: YieldTargetId(rawValue: -1),
+          resultVar: resultVar,
+          resultType: type,
+          endLabel: endLabel,
+          baseScopeIndex: max(0, lifetimeScopeStack.count - 1)
+        )
+      : nil
     let savedAliases = patternBindingAliases
 
     if let switchPlan = buildWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType) {
@@ -3031,7 +3142,8 @@ public class CodeGen {
         resultType: type,
         resultVar: resultVar,
         endLabel: endLabel,
-        savedAliases: savedAliases
+        savedAliases: savedAliases,
+        yieldTarget: yieldTarget
       )
 
       patternBindingAliases = savedAliases
@@ -3050,6 +3162,9 @@ public class CodeGen {
          withIndent {
          let caseScopeIndex = lifetimeScopeStack.count
          pushScope()
+         if let yieldTarget {
+           yieldTargetStack.append(yieldTarget)
+         }
 
          let (prelude, preludeVars, condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType)
 
@@ -3077,11 +3192,14 @@ public class CodeGen {
            }
                  
            let bodyResult = generateExpressionSSA(c.body)
-           if type != .void && type != .never && c.body.type != .never {
+           if type != .void && type != .never && c.body.type != .never && c.body.type != .void {
              emitCopyOrMove(type: type, source: bodyResult, dest: resultVar, isLvalue: c.body.valueCategory == .lvalue)
            }
 
            // Cleanup bindings, then cleanup prelude temps (outer case scope), then jump out.
+           if yieldTarget != nil {
+             _ = yieldTargetStack.popLast()
+           }
            popScope()
            emitCleanupForScope(at: caseScopeIndex)
            addIndent()

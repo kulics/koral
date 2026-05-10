@@ -174,11 +174,12 @@ let result = list.iterator()
 ### Control Flow
 
 - `if / then / else` expressions (with pattern matching via `is`)
-- `while` loops (with pattern matching via `is`)
-- `for` loops over any `Iterable`
+- `while` statements (with pattern matching via `is`)
+- `for` statements over any `Iterable`
 - `when` expressions for exhaustive pattern matching
 - `finally` for deterministic cleanup
-- `break`, `continue`, `return`, `yield`
+- `break`, `continue`, `return`
+- `yield` inside `if` / `when` branch bodies for branch values and early branch exit
 
 ### Pattern Matching
 

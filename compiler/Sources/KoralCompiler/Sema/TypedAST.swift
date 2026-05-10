@@ -157,6 +157,10 @@ public struct TypedMethodDeclaration {
   public let body: TypedExpressionNode
   public let returnType: Type
 }
+public struct TypedStatementMatchCase {
+  public let pattern: TypedPattern
+  public let body: TypedExpressionNode
+}
 public indirect enum TypedStatementNode {
   case variableDeclaration(identifier: Symbol, value: TypedExpressionNode, mutable: Bool)
   /// Pair variable declaration: `let (a, b) = expr`
@@ -168,11 +172,28 @@ public indirect enum TypedStatementNode {
   case assignment(
     target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
   case expression(TypedExpressionNode)
+  case ifStatement(
+    condition: TypedExpressionNode,
+    thenBranch: TypedExpressionNode,
+    elseBranch: TypedExpressionNode?)
+  case ifPatternStatement(
+    subject: TypedExpressionNode,
+    pattern: TypedPattern,
+    bindings: [(String, Bool, Type)],
+    thenBranch: TypedExpressionNode,
+    elseBranch: TypedExpressionNode?)
+  case whileStatement(condition: TypedExpressionNode, body: TypedExpressionNode)
+  case whilePatternStatement(
+    subject: TypedExpressionNode,
+    pattern: TypedPattern,
+    bindings: [(String, Bool, Type)],
+    body: TypedExpressionNode)
+  case whenStatement(subject: TypedExpressionNode, cases: [TypedStatementMatchCase])
   case `return`(value: TypedExpressionNode?)
   case `break`
   case `continue`
   case finally(expression: TypedExpressionNode)
-  case yield(value: TypedExpressionNode)
+  case yield(target: YieldTargetId, value: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision
@@ -243,19 +264,6 @@ public indirect enum TypedExpressionNode {
   /// - arguments: Method arguments
   /// - type: Return type
   case staticMethodCall(baseType: Type, methodName: String, typeArgs: [Type], methodTypeArgs: [Type], arguments: [TypedExpressionNode], type: Type)
-  case whileExpression(condition: TypedExpressionNode, body: TypedExpressionNode, type: Type)
-  /// Loop pattern matching expression (while expr is pattern then body)
-  /// - subject: The expression being matched against in each iteration
-  /// - pattern: The pattern to match
-  /// - bindings: Variable bindings introduced by the pattern (name, isMutable, type)
-  /// - body: Expression to evaluate when pattern matches
-  /// - type: The result type of the expression (always Void)
-  case whilePatternExpression(
-    subject: TypedExpressionNode,
-    pattern: TypedPattern,
-    bindings: [(String, Bool, Type)],
-    body: TypedExpressionNode,
-    type: Type)
   case typeConstruction(identifier: Symbol, typeArgs: [Type]?, arguments: [TypedExpressionNode], type: Type)
   case memberPath(source: TypedExpressionNode, path: [Symbol])
   case enumConstruction(type: Type, caseName: String, arguments: [TypedExpressionNode])
@@ -463,8 +471,6 @@ extension TypedExpressionNode {
       .genericCall(_, _, _, let type),
       .methodReference(_, _, _, _, let type),
       .staticMethodCall(_, _, _, _, _, let type),
-      .whileExpression(_, _, let type),
-      .whilePatternExpression(_, _, _, _, let type),
       .typeConstruction(_, _, _, let type),
       .enumConstruction(let type, _, _):
       return type
@@ -526,12 +532,9 @@ extension TypedExpressionNode {
   static func makeLetBlock(
     identifier: Symbol, value: TypedExpressionNode, body: TypedExpressionNode, type: Type
   ) -> TypedExpressionNode {
-    let bodyStmt: TypedStatementNode = (type == .void || type == .never)
-      ? .expression(body)
-      : .yield(value: body)
     return .blockExpression(statements: [
       .variableDeclaration(identifier: identifier, value: value, mutable: identifier.isMutable()),
-      bodyStmt,
+      .expression(body),
     ], type: type)
   }
 }

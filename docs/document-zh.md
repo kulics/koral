@@ -219,19 +219,19 @@ a = 2  // 合法
 块表达式规则：
 
 - 块中可以包含零条或多条语句。
-- 块只有通过末尾的 `yield` 语句才会产生值。
-- 若块中没有 `yield`，且没有控制转移终结，则该块类型为 `Void`。
+- 普通块表达式的默认类型是 `Void`。
+- `return`、`break`、`continue` 可以让块提前结束，因此对应块类型会变成 `Never`。
+- `yield` 不是块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
-- `yield` 必须是其所在块中的最后一条语句。
 
-通过块表达式可以组合一系列操作，比如多步初始化某个复杂的值。
+通过块表达式可以组合一系列语句。
 
 ```koral
 let a Void = {}
-let b Int = {
+let main() Void = {
     let c = 7
     let d = c + 14
-    yield (c + 3) * 5 + d / 3  // 使用 yield 显式指定块的值
+    println(((c + 3) * 5 + d / 3).to_string())
 }
 ```
 
@@ -728,6 +728,19 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 let main() = if 1 == 1 then println("yes")
 ```
 
+当 `if` 分支 body 是块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `yield`；这也提供了分支内的 early exit：
+
+```koral
+let label = if score >= 90 then {
+    if score == 100 then yield "perfect"
+    yield "A"
+} else {
+    yield "other"
+}
+```
+
+如果在分支 body 里再写语句形态的嵌套 `if` / `when`，其中的 `yield` 仍然指向当前外层分支表达式；而嵌套的 `if` / `when` 表达式会拥有各自独立的 `yield` 目标。
+
 ### if is 模式匹配
 
 `if` 还支持 `is` 模式匹配语法，可以在条件判断的同时解构值：
@@ -760,9 +773,9 @@ if foo() is .A(x) and bar(x) is .B(y) and y > 0 then {
 
 循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。
 
-### while 表达式
+### while 语句
 
-在 Koral 中循环结构使用 `while` 语法表示，`while` 后面紧跟判断条件，在条件为 `true` 时执行后面表达式，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。`while` 也是一个表达式。
+在 Koral 中循环结构使用 `while` 语法表示，`while` 后面紧跟判断条件，在条件为 `true` 时执行后面的语句 body，然后重新回到判断条件处进行判断进入下一轮循环，在条件为 `false` 结束循环。`while` 只能作为语句使用。
 
 ```koral
 let mut i = 0
@@ -812,7 +825,7 @@ while true then {
 
 `for` 循环用于遍历任何实现了迭代器接口的对象（如列表、Dict、Set、范围等）。
 
-每次迭代，迭代器产生的下一个值会尝试匹配 `pattern`，如果匹配成功，则执行 `then` 后面的表达式。
+每次迭代，迭代器产生的下一个值会尝试匹配 `pattern`，如果匹配成功，则执行 `then` 后面的语句 body。`for` 只能作为语句使用。
 
 ```koral
 let nums [Int]List = [10, 20, 30]
@@ -876,7 +889,7 @@ finally {
 
 #### 限制
 
-- `finally` 表达式内部不允许使用 `return`、`break`、`continue`。
+- `finally` 表达式内部不允许使用 `return`、`break`、`continue`、`yield`。
 - `finally` 表达式内部不允许嵌套 `finally`。
 - `finally` 不是异常栈展开机制；在 `panic/abort/exit` 等 `Never` 终止路径上不保证执行。
 - 以上限制不穿透 Lambda 边界——Lambda 内部拥有独立的作用域。
@@ -895,6 +908,22 @@ let result = when x in {
     1 then "one",
     2 then "two",
     _ then "other",
+}
+```
+
+和 `if` 一样，`when` 的分支如果写成块，这个块本身仍然默认是 `Void`。要给外层 `when` 表达式产值，需要在分支 body 中使用 `yield`，并且可以在分支内部提前退出：
+
+```koral
+let label = when score in {
+    100 then {
+        println("bonus")
+        yield "perfect"
+    },
+    >= 90 then {
+        if has_curve(score) then yield "A+"
+        yield "A"
+    },
+    _ then { yield "other" },
 }
 ```
 
@@ -1925,4 +1954,3 @@ foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
 public intrinsic type Int
 public intrinsic let [T Any]ref_count(r T ref) Int
 ```
-

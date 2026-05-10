@@ -425,13 +425,6 @@ private let substitute_expr_kind(
             yield box(TypedExprKind.IfExpr(new_cond, new_then, new_else))
         },
 
-        // WhileExpr: substitute condition and body.
-        .WhileExpr(condition, body) then {
-            let new_cond = substitute_types_in_expression(mono, condition, substitution)
-            let new_body = substitute_types_in_expression(mono, body, substitution)
-            yield box(TypedExprKind.WhileExpr(new_cond, new_body))
-        },
-
         // WhenExpr: substitute subject and all arms.
         .WhenExpr(subject, arms) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
@@ -1115,6 +1108,34 @@ public let substitute_statement(
         .ExprStmt(expr, span) then {
             let new_expr = substitute_types_in_expression(mono, expr, substitution)
             yield TypedStatement.ExprStmt(new_expr, span)
+        },
+        .IfStmt(condition, then_branch, else_branch, span) then {
+            let new_else = when else_branch in {
+                .Some(expr) then [TypedExpr ref]Option.Some(substitute_types_in_expression(mono, expr, substitution)),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedStatement.IfStmt(
+                substitute_types_in_expression(mono, condition, substitution),
+                substitute_types_in_expression(mono, then_branch, substitution),
+                new_else,
+                span
+            )
+        },
+
+        .WhileStmt(condition, body, span) then {
+            let new_condition = substitute_types_in_expression(mono, condition, substitution)
+            let new_body = substitute_types_in_expression(mono, body, substitution)
+            yield TypedStatement.WhileStmt(new_condition, new_body, span)
+        },
+        .WhenStmt(subject, arms, span) then {
+            let new_subject = substitute_types_in_expression(mono, subject, substitution)
+            let mut new_arms = [TypedWhenArm]List.new()
+            for arm in arms then {
+                let new_body = substitute_types_in_expression(mono, arm.body, substitution)
+                let new_arm_type = mono.substitute_type_impl(arm.arm_type, substitution)
+                new_arms.push(TypedWhenArm(arm.pattern, new_body, new_arm_type))
+            }
+            yield TypedStatement.WhenStmt(new_subject, new_arms, span)
         },
 
         // ReturnStmt: substitute optional return value.

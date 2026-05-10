@@ -15,6 +15,20 @@
 // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
 
 given CodeGen {
+    private generate_statement_body_expr(self mut ref, expr TypedExpr ref) Void = {
+        when expr.expr_kind in {
+            .Block(statements) then {
+                for stmt in statements then {
+                    self.generate_statement(stmt)
+                }
+            },
+            _ then {
+                let result = self.generate_expression_ssa(expr)
+                self.drop_expression_result_if_needed(expr.expr_type, result)
+            },
+        }
+    }
+
     /// 生成语句的 C 代码
     ///
     /// 主入口，根据语句类型分发到对应的处理逻辑。
@@ -228,6 +242,74 @@ given CodeGen {
                 self.cleanup_temporaries_in_current_scope(temp_marker)
             },
 
+            .IfStmt(condition_ref, then_ref, else_opt, _) then {
+                let raw_cond_result = self.generate_expression_ssa(condition_ref)
+                let cond_result = self.adapt_expression_result_to_type(condition_ref, raw_cond_result, Type.BoolType())
+                self.push_indented_if_open(cond_result)
+                self.with_indent(() -> {
+                    self.push_scope()
+                    let temp_marker = self.current_scope_temp_marker()
+                    self.generate_statement_body_expr(then_ref)
+                    self.cleanup_temporaries_in_current_scope(temp_marker)
+                    self.pop_scope()
+                })
+                when else_opt in {
+                    .Some(else_ref) then {
+                        self.push_indented_string("} else {\n")
+                        self.with_indent(() -> {
+                            self.push_scope()
+                            let temp_marker = self.current_scope_temp_marker()
+                            self.generate_statement_body_expr(else_ref)
+                            self.cleanup_temporaries_in_current_scope(temp_marker)
+                            self.pop_scope()
+                        })
+                    },
+                    .None() then {},
+                }
+                self.push_indented_string("}\n")
+            },
+
+            .WhileStmt(condition_ref, body_ref, _) then {
+                let label_prefix = self.next_temp()
+                let start_label = "\(label_prefix)_start"
+                let end_label = "\(label_prefix)_end"
+
+                self.push_indented_label_block_open(start_label)
+                self.with_indent(() -> {
+                    self.push_scope()
+                    let cond_scope_index = self.lifetime_scope_stack.count() - 1
+                    let cond_result = self.generate_expression_ssa(condition_ref)
+                    self.push_indented_if_open("!\(cond_result)")
+                    self.with_indent(() -> {
+                        self.emit_cleanup_for_scope(cond_scope_index)
+                        self.push_indented_goto(end_label)
+                    })
+                    self.push_indented_string("}\n")
+                    self.emit_cleanup_for_scope(cond_scope_index)
+                    self.pop_scope_without_cleanup()
+                    self.push_scope()
+                    let scope_index = self.lifetime_scope_stack.count() - 1
+                    self.loop_stack.push(LoopContext(start_label, end_label, scope_index))
+                    let temp_marker = self.current_scope_temp_marker()
+                    self.generate_statement_body_expr(body_ref)
+                    self.cleanup_temporaries_in_current_scope(temp_marker)
+                    self.loop_stack.pop()
+                    self.pop_scope()
+                    self.push_indented_goto(start_label)
+                })
+                self.push_indented_string("}\n")
+                self.push_indented_label_block_open(end_label)
+                self.push_indented_string("}\n")
+            },
+
+            .WhenStmt(subject_ref, arms, _) then {
+                let when_expr = make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), Type.VoidType())
+                let temp_marker = self.current_scope_temp_marker()
+                let result = self.generate_expression_ssa(box(when_expr))
+                self.drop_expression_result_if_needed(when_expr.expr_type, result)
+                self.cleanup_temporaries_in_current_scope(temp_marker)
+            },
+
             // ── ReturnStmt ────────────────────────────────────────────────────
             // 先执行从当前作用域到函数作用域的所有清理（finally + drop），再生成 return
             //
@@ -310,16 +392,34 @@ given CodeGen {
                 let defer_count = self.defer_scope_stack.count()
                 if defer_count > 0 then {
                     let top = self.defer_scope_stack[defer_count - 1]
-                    top.push(expr_ref)
+                    top.push(DeferredExpr(expr_ref, self.pattern_binding_aliases))
                 }
             },
 
             // ── YieldStmt ─────────────────────────────────────────────────────
-            // yield 由 generate_block_scope 在块表达式层面处理，此处为 no-op
+            // 将当前分支值写入活动 yield target，并跳转到目标结束标签
             //
             // Requirements: 6.9
-            .YieldStmt(_, _) then {
-                // yield 在 generate_block_scope 中处理，不在 generate_statement 中处理
+            .YieldStmt(expr_ref, _) then {
+                if not self.yield_target_stack.is_empty() then {
+                    let target = self.yield_target_stack[self.yield_target_stack.count() - (UInt)1]
+                    let value_result = self.generate_expression_ssa(expr_ref)
+                    if self.needs_drop(expr_ref.expr_type)
+                        and not value_result.is_empty()
+                        and self.is_registered_for_cleanup(value_result)
+                    then {
+                        self.unregister_variable(value_result)
+                    }
+                    let adapted_value = self.adapt_expression_result_to_type(expr_ref, value_result, target.result_type)
+                    self.assign_expr_result(expr_ref, adapted_value, target.result_type, target.result_var)
+                    let cleanup_start = if self.lifetime_scope_stack.count() > target.base_scope_index + (UInt)1
+                        then target.base_scope_index + (UInt)1
+                        else self.lifetime_scope_stack.count() - (UInt)1
+                    if not self.lifetime_scope_stack.is_empty() and self.lifetime_scope_stack.count() - (UInt)1 >= cleanup_start then {
+                        self.emit_cleanup(cleanup_start)
+                    }
+                    self.push_indented_goto(target.end_label)
+                }
             },
         }
     }
@@ -328,12 +428,7 @@ given CodeGen {
 
     /// 判断表达式是否应按 lvalue 执行 copy/move。
     is_lvalue_expr(self, expr TypedExpr ref) Bool = {
-        return when expr.expr_kind in {
-            .Variable(_) then true,
-            .MemberPath(base_ref, _) then self.is_lvalue_expr(base_ref),
-            .DerefExpr(_) then true,
-            _ then false,
-        }
+        return typed_expr_value_category(expr) is .LValue()
     }
 
     /// 判断表达式是否是可取地址的真实 lvalue。

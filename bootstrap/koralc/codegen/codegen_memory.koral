@@ -24,7 +24,7 @@ given CodeGen {
     /// Requirements: 7.2
     public push_scope(self mut ref) Void = {
         self.lifetime_scope_stack.push(box([[String, Type]Pair]List.new()))
-        self.defer_scope_stack.push(box([TypedExpr ref]List.new()))
+        self.defer_scope_stack.push(box([DeferredExpr]List.new()))
         self.escape_context.enter_scope()
     }
 
@@ -50,14 +50,17 @@ given CodeGen {
         // 1. 执行 defer（finally）表达式，LIFO 顺序
         when self.defer_scope_stack.pop() in {
             .Some(defers) then {
-                // defers 是 [TypedExpr ref]List，按 LIFO（逆序）执行
+                // defers 是 [DeferredExpr]List，按 LIFO（逆序）执行
                 let count = defers.count()
                 let mut i = count
                 while i > 0 then {
                     i -= 1
-                    let defer_expr_ref = defers[i]
-                    let result = self.generate_expression_ssa(defer_expr_ref)
-                    self.drop_expression_result_if_needed(defer_expr_ref.expr_type, result)
+                    let deferred = defers[i]
+                    let saved_aliases = self.pattern_binding_aliases
+                    self.pattern_binding_aliases = deferred.pattern_binding_aliases
+                    let result = self.generate_expression_ssa(deferred.expr)
+                    self.drop_expression_result_if_needed(deferred.expr.expr_type, result)
+                    self.pattern_binding_aliases = saved_aliases
                 }
             },
             .None() then {},
@@ -525,9 +528,12 @@ given CodeGen {
             let mut i = count
             while i > 0 then {
                 i -= 1
-                let defer_expr_ref = defers[i]
-                let result = self.generate_expression_ssa(defer_expr_ref)
-                self.drop_expression_result_if_needed(defer_expr_ref.expr_type, result)
+                let deferred = defers[i]
+                let saved_aliases = self.pattern_binding_aliases
+                self.pattern_binding_aliases = deferred.pattern_binding_aliases
+                let result = self.generate_expression_ssa(deferred.expr)
+                self.drop_expression_result_if_needed(deferred.expr.expr_type, result)
+                self.pattern_binding_aliases = saved_aliases
             }
         }
 

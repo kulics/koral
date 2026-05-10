@@ -153,10 +153,6 @@ given CodeGen {
                     .None() then {},
                 }
             },
-            .WhileExpr(cond_ref, body_ref) then {
-                self.collect_captured_in_expr(cond_ref, param_names, seen_ids, captured)
-                self.collect_captured_in_expr(body_ref, param_names, seen_ids, captured)
-            },
             .Call(callee_ref, args) then {
                 self.collect_captured_in_expr(callee_ref, param_names, seen_ids, captured)
                 for arg in args then {
@@ -303,6 +299,26 @@ given CodeGen {
             .ExprStmt(expr_ref, _) then {
                 self.collect_captured_in_expr(expr_ref, param_names, seen_ids, captured)
             },
+            .IfStmt(condition_ref, then_ref, else_opt, _) then {
+                self.collect_captured_in_expr(condition_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(then_ref, param_names, seen_ids, captured)
+                when else_opt in {
+                    .Some(else_ref) then self.collect_captured_in_expr(else_ref, param_names, seen_ids, captured),
+                    .None() then {},
+                }
+            },
+            .WhileStmt(condition_ref, body_ref, _) then {
+                self.collect_captured_in_expr(condition_ref, param_names, seen_ids, captured)
+                self.collect_captured_in_expr(body_ref, param_names, seen_ids, captured)
+            },
+            .WhenStmt(subject_ref, arms, _) then {
+                self.collect_captured_in_expr(subject_ref, param_names, seen_ids, captured)
+                for arm in arms then {
+                    let mut arm_local_names = param_names
+                    self.collect_pattern_binding_names(arm.pattern, arm_local_names)
+                    self.collect_captured_in_expr(arm.body, arm_local_names, seen_ids, captured)
+                }
+            },
             .ReturnStmt(value_opt, _) then {
                 when value_opt in {
                     .Some(value_ref) then {
@@ -350,6 +366,43 @@ given CodeGen {
             .None() then {},
         }
         return name
+    }
+
+    private capture_moves_trivial_drop_struct(self, symbol_type Type) Bool = {
+        let def_id_opt = when symbol_type in {
+            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            .GenericStruct(template, _) then self.find_type_def_id_by_layout_or_template(symbol_type, template),
+            _ then [DefId]Option.None(),
+        }
+        return when def_id_opt in {
+            .Some(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if self.needs_drop(field.field_type) then {
+                            return false
+                        }
+                    }
+                    yield true
+                },
+                .None() then false,
+            },
+            .None() then false,
+        }
+    }
+
+    private capture_moves_owned_value(self mut ref, symbol Symbol, current_expr String) Bool = {
+        if not self.needs_drop(symbol.symbol_type) then {
+            return false
+        }
+        let has_user_defined_drop = self.user_defined_drops.get(self.user_defined_drop_type_key(symbol.symbol_type)) is .Some(_)
+        if not has_user_defined_drop then {
+            return false
+        }
+        return when symbol.symbol_type in {
+            .StructureType(_) then self.is_registered_for_cleanup(current_expr) and self.capture_moves_trivial_drop_struct(symbol.symbol_type),
+            .GenericStruct(_, _) then self.is_registered_for_cleanup(current_expr) and self.capture_moves_trivial_drop_struct(symbol.symbol_type),
+            _ then false,
+        }
     }
 
     // ── Lambda 函数体生成 ─────────────────────────────────────────────────────
@@ -479,7 +532,11 @@ given CodeGen {
                         }
                     },
                 }
-                self.append_copy_assignment(sym.symbol_type, current_expr, "\(env_var)->\(raw_name)")
+                if self.capture_moves_owned_value(sym, current_expr) then {
+                    self.append_copy_or_move_assignment(sym.symbol_type, current_expr, "\(env_var)->\(raw_name)", false)
+                } else {
+                    self.append_copy_assignment(sym.symbol_type, current_expr, "\(env_var)->\(raw_name)")
+                }
             }
 
             // 创建 Closure struct
@@ -527,7 +584,7 @@ given CodeGen {
         self.indent = "  "
         self.lambda_functions = box(String.new())
         self.lifetime_scope_stack = [[[String, Type]Pair]List mut ref]List.new()
-        self.defer_scope_stack = [[TypedExpr ref]List mut ref]List.new()
+        self.defer_scope_stack = [[DeferredExpr]List mut ref]List.new()
         self.loop_stack = [LoopContext]List.new()
         self.current_function_type_prefix = [String]Option.None()
         self.current_function_c_name = [String]Option.Some(name)
@@ -598,7 +655,7 @@ given CodeGen {
         self.indent = "  "
         self.lambda_functions = box(String.new())
         self.lifetime_scope_stack = [[[String, Type]Pair]List mut ref]List.new()
-        self.defer_scope_stack = [[TypedExpr ref]List mut ref]List.new()
+        self.defer_scope_stack = [[DeferredExpr]List mut ref]List.new()
         self.loop_stack = [LoopContext]List.new()
         self.current_function_type_prefix = [String]Option.None()
         self.current_function_c_name = [String]Option.Some(name)

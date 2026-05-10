@@ -10,6 +10,36 @@
 using Std.Os.*
 
 given TypeChecker {
+    private report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointee Type, member String) Void = {
+        if resolved is not .Unknown() or has_pointer_method then {
+            return
+        }
+        when pointee in {
+            .StructureType(def_id) then {
+                if self.context().is_foreign_struct(def_id) then {
+                    let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "foreign struct '\(type_name)' has no field '\(member)'"
+                        )
+                    )
+                }
+            },
+            .GenericStruct(_, _) then {},
+            _ then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "cannot access member '\(member)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
+                    )
+                )
+            },
+        }
+    }
+
     private expr_contains_or_return(self, expr Expr ref) Bool = {
         let _ = self
         return when expr in {
@@ -141,12 +171,18 @@ given TypeChecker {
     private check_expr_global_ref(self, expr Expr ref, expected [Type]Option) TypedExpr = {
         let prev_in_function = self.storage.in_function
         let prev_current_function_return_type = self.storage.current_function_return_type
+        let prev_inferred_function_return_type = self.storage.inferred_function_return_type
+        let prev_is_inferring_function_return_type = self.storage.is_inferring_function_return_type
         let prev_in_loop = self.storage.in_loop
         let prev_in_finally = self.storage.in_finally
+        let prev_yield_targets = self.storage.yield_targets
         self.storage.in_function = false
         self.storage.current_function_return_type = [Type]Option.None()
+        self.storage.inferred_function_return_type = [Type]Option.None()
+        self.storage.is_inferring_function_return_type = false
         self.storage.in_loop = false
         self.storage.in_finally = false
+        self.storage.yield_targets = [YieldTarget mut ref]List.new()
         let mut scope = Scope.new_root()
         let typed = if self.expr_contains_or_return(expr) then {
             self.push_diagnostic_at_span("'or return' can only be used inside a function", expr_span(expr))
@@ -160,8 +196,11 @@ given TypeChecker {
         }
         self.storage.in_function = prev_in_function
         self.storage.current_function_return_type = prev_current_function_return_type
+        self.storage.inferred_function_return_type = prev_inferred_function_return_type
+        self.storage.is_inferring_function_return_type = prev_is_inferring_function_return_type
         self.storage.in_loop = prev_in_loop
         self.storage.in_finally = prev_in_finally
+        self.storage.yield_targets = prev_yield_targets
         return typed
     }
 
@@ -445,32 +484,7 @@ given TypeChecker {
                 let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
                 let has_pointer_method = self.resolve_method_signature(typed_base.expr_type, member) is .Some(_)
-                if resolved is .Unknown() and not has_pointer_method then {
-                    when pointee in {
-                        .StructureType(def_id) then {
-                            if self.context().is_foreign_struct(def_id) then {
-                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
-                                self.storage.diagnostics.push(
-                                    make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "foreign struct '\(type_name)' has no field '\(member)'"
-                                    )
-                                )
-                            }
-                        },
-                        .GenericStruct(_, _) then {},
-                        _ then {
-                            self.storage.diagnostics.push(
-                                make_diagnostic(
-                                    DiagnosticStage.Semantic(),
-                                    self.storage.file_path,
-                                    "cannot access member '\(member)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
-                                )
-                            )
-                        },
-                    }
-                }
+                self.report_pointer_member_access_issue_if_needed(resolved, has_pointer_method, pointee, member)
                 yield resolved
             },
             .MutableReferenceType(inner) then self.resolve_member_type(inner.val, member),
@@ -660,24 +674,22 @@ given TypeChecker {
             _ then base_type,
         }
 
-        let direct_method_exists = {
-            let type_key = self.context().type_display_name(normalized)
-            let direct_type_hit = self.lookup_method_signature(type_key, method_name) is .Some(_)
-            let template_hit = when normalized in {
-                .GenericStruct(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
-                .GenericEnum(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
-                .StructureType(def_id) then when self.context().get_template_name(def_id) in {
-                    .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
-                    .None() then false,
-                },
-                .EnumType(def_id) then when self.context().get_template_name(def_id) in {
-                    .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
-                    .None() then false,
-                },
-                _ then false,
-            }
-            yield direct_type_hit or template_hit
+        let type_key = self.context().type_display_name(normalized)
+        let direct_type_hit = self.lookup_method_signature(type_key, method_name) is .Some(_)
+        let template_hit = when normalized in {
+            .GenericStruct(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
+            .GenericEnum(template, _) then self.lookup_method_signature(template, method_name) is .Some(_),
+            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
+                .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
+                .None() then false,
+            },
+            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
+                .Some(template) then self.lookup_method_signature(template, method_name) is .Some(_),
+                .None() then false,
+            },
+            _ then false,
         }
+        let direct_method_exists = direct_type_hit or template_hit
 
         return when normalized in {
             .TraitObject(trait_name, _) then [String]Option.Some(trait_name),
@@ -974,24 +986,20 @@ given TypeChecker {
                         },
                         _ then {},
                     }
-                    let ref_expr = {
-                        let mut lowered = expr
-                        let should_defer_generic_deref_receiver_ref = when expr.expr_type in {
-                            .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
-                                .Some(constraints) then constraints.contains("Deref"),
-                                .None() then false,
-                            },
-                            _ then false,
-                        }
-                        when expr.expr_type in {
-                            .ReferenceType(_) then {},
-                            _ then {
-                                if not should_defer_generic_deref_receiver_ref and self.can_take_implicit_ref_receiver(expr_ref) and self.can_convert_to_trait_object(expr.expr_type, trait_name) then {
-                                    lowered = make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(box(expr.expr_type)))
-                                }
-                            },
-                        }
-                        yield lowered
+                    let should_defer_generic_deref_receiver_ref = when expr.expr_type in {
+                        .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
+                            .Some(constraints) then constraints.contains("Deref"),
+                            .None() then false,
+                        },
+                        _ then false,
+                    }
+                    let ref_expr = when expr.expr_type in {
+                        .ReferenceType(_) then expr,
+                        _ then if not should_defer_generic_deref_receiver_ref
+                            and self.can_take_implicit_ref_receiver(expr_ref)
+                            and self.can_convert_to_trait_object(expr.expr_type, trait_name)
+                        then make_typed_expr(TypedExprKind.RefExpr(expr_ref), Type.ReferenceType(box(expr.expr_type)))
+                        else expr,
                     }
                     let can_cast = when ref_expr.expr_type in {
                         .ReferenceType(inner) then self.can_convert_to_trait_object(inner.val, trait_name),

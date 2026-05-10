@@ -69,7 +69,14 @@ extension TypeChecker {
       // This prevents `return` inside lambda from being checked against
       // outer function return types.
       let savedFunctionReturnType = currentFunctionReturnType
+      let savedInferredFunctionReturnType = inferredFunctionReturnType
+      let savedIsInferringFunctionReturnType = isInferringFunctionReturnType
       defer { currentFunctionReturnType = savedFunctionReturnType }
+      defer { inferredFunctionReturnType = savedInferredFunctionReturnType }
+      defer { isInferringFunctionReturnType = savedIsInferringFunctionReturnType }
+      let savedYieldTargets = yieldTargets
+      defer { yieldTargets = savedYieldTargets }
+      yieldTargets = []
 
       // Lambda has its own scope, so reset insideFinally flag.
       // This allows return/break/continue/finally inside a lambda that
@@ -79,10 +86,38 @@ extension TypeChecker {
       defer { insideFinally = savedInsideFinally }
 
       let resolvedExplicitReturnType = try returnType.map { try resolveTypeNode($0) }
-      let lambdaReturnTypeForBodyCheck: Type = resolvedExplicitReturnType ?? expectedReturnType ?? .void
-      currentFunctionReturnType = lambdaReturnTypeForBodyCheck
+      let inferReturnTypeFromBlockReturns =
+        resolvedExplicitReturnType == nil &&
+        expectedReturnType == nil &&
+        {
+          if case .blockExpression = body {
+            return true
+          }
+          return false
+        }()
 
-      let typedBody = try inferTypedExpression(body)
+      if inferReturnTypeFromBlockReturns {
+        currentFunctionReturnType = nil
+        inferredFunctionReturnType = nil
+        isInferringFunctionReturnType = true
+      } else {
+        let lambdaReturnTypeForBodyCheck: Type = resolvedExplicitReturnType ?? expectedReturnType ?? .void
+        currentFunctionReturnType = lambdaReturnTypeForBodyCheck
+        inferredFunctionReturnType = nil
+        isInferringFunctionReturnType = false
+      }
+
+      let bodyUsage: ExpressionUsage
+      let bodyExpectedType: Type?
+      if case .blockExpression = body {
+        bodyUsage = .statement
+        bodyExpectedType = nil
+      } else {
+        bodyUsage = .value
+        bodyExpectedType = resolvedExplicitReturnType ?? expectedReturnType
+      }
+
+      let typedBody = try inferTypedExpression(body, expectedType: bodyExpectedType, usage: bodyUsage)
       
       // Determine return type
       let actualReturnType: Type
@@ -105,8 +140,12 @@ extension TypeChecker {
           }
         }
       } else {
-        // Infer return type from body
-        actualReturnType = typedBody.type
+        if inferReturnTypeFromBlockReturns {
+          actualReturnType = inferredFunctionReturnType ?? .void
+        } else {
+          // Infer return type from body
+          actualReturnType = typedBody.type
+        }
       }
       
       // Build function type

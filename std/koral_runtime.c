@@ -2424,7 +2424,7 @@ int32_t __koral_spawn(
 
     memset(&pi, 0, sizeof(pi));
     BOOL ok = CreateProcessA(
-        NULL, cmdline, NULL, NULL, TRUE,
+        (LPCSTR)program, cmdline, NULL, NULL, TRUE,
         env_block ? CREATE_UNICODE_ENVIRONMENT : 0,
         env_block, work_dir, &si, &pi
     );

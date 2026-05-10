@@ -712,26 +712,6 @@ extension Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
             
-        case .whileExpression(let condition, let body, let type):
-            return .whileExpression(
-                condition: substituteTypesInExpression(condition, substitution: substitution),
-                body: substituteTypesInExpression(body, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
-            )
-            
-        case .whilePatternExpression(let subject, let pattern, let bindings, let body, let type):
-            let newBindings = bindings.map { (name, mutable, bindType) in
-                (name, mutable, substituteType(bindType, substitution: substitution))
-            }
-            return .whilePatternExpression(
-                subject: substituteTypesInExpression(subject, substitution: substitution),
-                pattern: substituteTypesInPattern(pattern, substitution: substitution),
-                bindings: newBindings,
-                body: substituteTypesInExpression(body, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
-            )
-
-            
         case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
             let substitutedType = substituteType(identifier.type, substitution: substitution)
             
@@ -932,6 +912,47 @@ extension Monomorphizer {
             
         case .expression(let expr):
             return .expression(substituteTypesInExpression(expr, substitution: substitution))
+
+        case .ifStatement(let condition, let thenBranch, let elseBranch):
+            return .ifStatement(
+                condition: substituteTypesInExpression(condition, substitution: substitution),
+                thenBranch: substituteTypesInExpression(thenBranch, substitution: substitution),
+                elseBranch: elseBranch.map { substituteTypesInExpression($0, substitution: substitution) }
+            )
+
+        case .ifPatternStatement(let subject, let pattern, let bindings, let thenBranch, let elseBranch):
+            return .ifPatternStatement(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                pattern: substituteTypesInPattern(pattern, substitution: substitution),
+                bindings: bindings.map { ($0.0, $0.1, substituteType($0.2, substitution: substitution)) },
+                thenBranch: substituteTypesInExpression(thenBranch, substitution: substitution),
+                elseBranch: elseBranch.map { substituteTypesInExpression($0, substitution: substitution) }
+            )
+
+        case .whileStatement(let condition, let body):
+            return .whileStatement(
+                condition: substituteTypesInExpression(condition, substitution: substitution),
+                body: substituteTypesInExpression(body, substitution: substitution)
+            )
+
+        case .whilePatternStatement(let subject, let pattern, let bindings, let body):
+            return .whilePatternStatement(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                pattern: substituteTypesInPattern(pattern, substitution: substitution),
+                bindings: bindings.map { ($0.0, $0.1, substituteType($0.2, substitution: substitution)) },
+                body: substituteTypesInExpression(body, substitution: substitution)
+            )
+
+        case .whenStatement(let subject, let cases):
+            return .whenStatement(
+                subject: substituteTypesInExpression(subject, substitution: substitution),
+                cases: cases.map {
+                    TypedStatementMatchCase(
+                        pattern: substituteTypesInPattern($0.pattern, substitution: substitution),
+                        body: substituteTypesInExpression($0.body, substitution: substitution)
+                    )
+                }
+            )
             
         case .return(let value):
             return .return(value: value.map { substituteTypesInExpression($0, substitution: substitution) })
@@ -945,8 +966,8 @@ extension Monomorphizer {
         case .finally(let expression):
             return .finally(expression: substituteTypesInExpression(expression, substitution: substitution))
 
-        case .yield(let value):
-            return .yield(value: substituteTypesInExpression(value, substitution: substitution))
+        case .yield(let target, let value):
+            return .yield(target: target, value: substituteTypesInExpression(value, substitution: substitution))
         }
     }
     

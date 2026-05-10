@@ -205,17 +205,17 @@ In Koral, `{}` represents a block expression.
 Block rules:
 
 - A block contains zero or more statements.
-- A block yields a value only through a final `yield` statement.
-- If a block has no `yield` and no control-transfer terminator, its type is `Void`.
+- A plain block's default type is `Void`.
+- `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
+- `yield` is not a block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
-- `yield` must be the last statement of the block in which it appears.
 
 ```koral
 let a Void = {}
-let b Int = {
+let main() Void = {
     let c = 7
     let d = c + 14
-    yield (c + 3) * 5 + d / 3  // Explicit yield specifies the block's value
+    println(((c + 3) * 5 + d / 3).to_string())
 }
 ```
 
@@ -692,6 +692,19 @@ When we don't need to handle the `else` branch, we can omit it, in which case it
 let main() = if 1 == 1 then println("yes")
 ```
 
+When an `if` branch body is a block, that block still defaults to `Void`. Use `yield` to produce the value of the enclosing `if` expression and to exit that branch body early:
+
+```koral
+let label = if score >= 90 then {
+    if score == 100 then yield "perfect"
+    yield "A"
+} else {
+    yield "other"
+}
+```
+
+`yield` inside a statement-form nested `if` / `when` still targets the enclosing branch expression. A nested `if` / `when` expression creates its own yield target.
+
 ### if is Pattern Matching
 
 `if` also supports `is` pattern matching syntax, allowing you to destructure values in conditions:
@@ -722,9 +735,9 @@ Rules for condition composition:
 
 ## Loop Structure
 
-### while Expression
+### while Statement
 
-In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following expression is executed, then it returns to the condition for the next iteration. `while` is also an expression.
+In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is statement-only.
 
 ```koral
 let mut i = 0
@@ -774,7 +787,7 @@ while true then {
 
 The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
-In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the expression following `then` is executed.
+In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is statement-only.
 
 ```koral
 let nums [Int]List = [10, 20, 30]
@@ -838,7 +851,7 @@ finally {
 
 #### Restrictions
 
-- `return`, `break`, and `continue` are not allowed inside a `finally` expression.
+- `return`, `break`, `continue`, and `yield` are not allowed inside a `finally` expression.
 - Nested `finally` is not allowed inside a `finally` expression.
 - `finally` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
 - These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
@@ -857,6 +870,22 @@ let result = when x in {
     1 then "one",
     2 then "two",
     _ then "other",
+}
+```
+
+Like `if`, a block branch in `when` still defaults to `Void`. Use `yield` to produce the enclosing `when` expression's value and to support early exit inside the branch body:
+
+```koral
+let label = when score in {
+    100 then {
+        println("bonus")
+        yield "perfect"
+    },
+    >= 90 then {
+        if has_curve(score) then yield "A+"
+        yield "A"
+    },
+    _ then { yield "other" },
 }
 ```
 
@@ -1888,5 +1917,4 @@ The `intrinsic` keyword declares types and functions built into the compiler:
 public intrinsic type Int
 public intrinsic let [T Any]ref_count(r T ref) Int
 ```
-
 

@@ -383,36 +383,62 @@ given CodeGen {
     ///
     /// Requirements: 5.12
     public generate_block_scope(self mut ref, statements [TypedStatement]List, block_type Type) String = {
+        let parent_scope_index = if self.lifetime_scope_stack.is_empty()
+            then (UInt)0
+            else self.lifetime_scope_stack.count() - (UInt)1
         self.push_scope()
+        let has_result = not self.type_is_void_or_never(block_type)
         let mut result = String.new()
+        let yield_target_opt = if has_result then {
+            let c_type = self.c_type_name(block_type)
+            let result_var = self.next_temp_with_decl(c_type)
+            yield [CodegenYieldTarget]Option.Some(
+                CodegenYieldTarget(
+                    result_var,
+                    block_type,
+                    "\(self.next_temp())_yield_end",
+                    parent_scope_index,
+                )
+            )
+        } else [CodegenYieldTarget]Option.None()
+        when yield_target_opt in {
+            .Some(target) then self.yield_target_stack.push(target),
+            .None() then {},
+        }
         let mut stmt_index UInt = 0
         for stmt in statements then {
             when stmt in {
-                .YieldStmt(yield_expr_ref, _) then {
-                    let yield_expr_raw = yield_expr_ref
-                    let yield_expr = when yield_expr_raw.expr_type in {
-                        .Unknown() then {
-                            yield when block_type in {
-                                .Unknown() then box(yield_expr_raw.val),
-                                _ then box(make_typed_expr_ref(yield_expr_raw.expr_kind, block_type)),
-                            }
-                        },
-                        _ then box(yield_expr_raw.val),
-                    }
-                    let temp = self.generate_expression_ssa(yield_expr)
-                    if not self.type_is_void_or_never(yield_expr.expr_type) then {
-                        let result_type = when block_type in {
-                            .Unknown() then yield_expr.expr_type,
-                            _ then block_type,
+                .YieldStmt(_, _) then self.generate_statement(stmt),
+                .IfStmt(condition_ref, then_ref, else_opt, _) then {
+                    let is_final_statement = stmt_index + (UInt)1 == statements.count()
+                    if is_final_statement and not self.type_is_void_or_never(block_type) then {
+                        let if_expr = make_typed_expr(TypedExprKind.IfExpr(condition_ref, then_ref, else_opt), block_type)
+                        let temp = self.generate_expression_ssa(box(if_expr))
+                        when yield_target_opt in {
+                            .Some(target) then {
+                                let adapted_temp = self.adapt_expression_result_to_type(box(if_expr), temp, block_type)
+                                self.assign_expr_result(box(if_expr), adapted_temp, block_type, target.result_var)
+                            },
+                            .None() then {},
                         }
-                        let c_type = self.c_type_name(result_type)
-                        let result_var = self.next_temp_with_decl(c_type)
-                        let adapted_temp = self.adapt_expression_result_to_type(yield_expr, temp, result_type)
-                        self.assign_expr_result(yield_expr, adapted_temp, result_type, result_var)
-                        // The block result escapes the local scope and is consumed by the
-                        // enclosing expression, so do not clean it up at block scope exit.
-                        self.unregister_variable(result_var)
-                        result = result_var
+                    } else {
+                        self.generate_statement(stmt)
+                    }
+                },
+                .WhenStmt(subject_ref, arms, _) then {
+                    let is_final_statement = stmt_index + (UInt)1 == statements.count()
+                    if is_final_statement and not self.type_is_void_or_never(block_type) then {
+                        let when_expr = make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), block_type)
+                        let temp = self.generate_expression_ssa(box(when_expr))
+                        when yield_target_opt in {
+                            .Some(target) then {
+                                let adapted_temp = self.adapt_expression_result_to_type(box(when_expr), temp, block_type)
+                                self.assign_expr_result(box(when_expr), adapted_temp, block_type, target.result_var)
+                            },
+                            .None() then {},
+                        }
+                    } else {
+                        self.generate_statement(stmt)
                     }
                 },
                 _ then {
@@ -421,7 +447,18 @@ given CodeGen {
             }
             stmt_index += 1
         }
+        when yield_target_opt in {
+            .Some(target) then {
+                let _ = self.yield_target_stack.pop()
+                result = target.result_var
+            },
+            .None() then {},
+        }
         self.pop_scope()
+        when yield_target_opt in {
+            .Some(target) then self.push_indented_string("\(target.end_label):;\n"),
+            .None() then {},
+        }
         return result
     }
 
@@ -434,16 +471,8 @@ given CodeGen {
     /// Requirements: 5.17
     public generate_member_path(self mut ref, source TypedExpr ref, path [String]List) String = {
         let source_result = self.generate_expression_ssa(source)
-        let should_materialize_base = not self.is_lvalue_expr(source) and self.needs_drop(source.expr_type)
-        let mut materialized_base = String.new()
+        let should_drop_rvalue_source = not self.is_lvalue_expr(source) and self.needs_drop(source.expr_type) and not source_result.is_empty()
         let mut access = source_result
-        if should_materialize_base then {
-            let source_c_type = self.c_type_name(source.expr_type)
-            materialized_base = self.next_temp_with_decl(source_c_type)
-            self.add_indent()
-            self.buffer.push_string("\(materialized_base) = \(source_result);\n")
-            access = materialized_base
-        }
         let mut cur_type = source.expr_type
 
         for member_name_raw in path then {
@@ -483,8 +512,12 @@ given CodeGen {
         }
 
         let result = self.load_member_value(access, cur_type)
-        if should_materialize_base then {
-            self.append_drop_statement(source.expr_type, materialized_base)
+        if should_drop_rvalue_source then {
+            if self.is_registered_for_cleanup(source_result) then {
+                self.unregister_variable(source_result)
+            }
+            self.add_indent()
+            self.append_drop_statement(source.expr_type, source_result)
         }
         return result
     }

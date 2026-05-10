@@ -16,14 +16,23 @@
 // Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11
 
 given CodeGen {
-    private emit_if_value_branch(self mut ref, branch TypedExpr ref, final_type Type, result_var String) Void = {
+    private emit_if_value_branch(
+        self mut ref,
+        branch TypedExpr ref,
+        final_type Type,
+        result_var String,
+        end_label String,
+        base_scope_index UInt,
+    ) Void = {
         self.with_indent(() -> {
             self.push_scope()
+            self.yield_target_stack.push(CodegenYieldTarget(result_var, final_type, end_label, base_scope_index))
             let branch_result = self.generate_expression_ssa(branch)
             if not self.type_is_never(branch.expr_type) then {
                 let adapted_branch_result = self.adapt_expression_result_to_type(branch, branch_result, final_type)
                 self.assign_expr_result(branch, adapted_branch_result, final_type, result_var)
             }
+            let _ = self.yield_target_stack.pop()
             self.pop_scope()
         })
     }
@@ -730,7 +739,7 @@ given CodeGen {
     }
 
     private is_subscript_borrow_alias_expr(self, expr TypedExpr ref) Bool = {
-        yield when expr.expr_kind in {
+        return when expr.expr_kind in {
             .Variable(symbol) then when symbol.kind in {
                 .Variable(variable_kind) then variable_kind is .SubscriptBaseBorrowAlias(),
                 _ then false,
@@ -1540,58 +1549,28 @@ given CodeGen {
                     // 非 void：声明结果变量，两个分支各自赋值
                     let c_type = self.c_type_name(final_if_expr_type)
                     let result_var = self.next_temp()
+                    let end_label = "\(self.next_temp())_yield_end"
+                    let base_scope_index = if self.lifetime_scope_stack.is_empty()
+                        then (UInt)0
+                        else self.lifetime_scope_stack.count() - (UInt)1
                     if not self.type_is_never(final_if_expr_type) then {
                         self.push_indented_decl(c_type, result_var)
                     }
                     self.push_indented_if_open(cond_result)
-                    self.emit_if_value_branch(then_ref, final_if_expr_type, result_var)
+                    self.emit_if_value_branch(then_ref, final_if_expr_type, result_var, end_label, base_scope_index)
                     when else_opt in {
                         .Some(else_ref) then {
                             self.push_indented_string("} else {\n")
-                            self.emit_if_value_branch(else_ref, final_if_expr_type, result_var)
+                            self.emit_if_value_branch(else_ref, final_if_expr_type, result_var, end_label, base_scope_index)
                         },
                         .None() then {},
                     }
                     self.push_indented_string("}\n")
+                    self.push_indented_string("\(end_label):;\n")
                     yield result_var
                 }
             },
 
-            // ── WhileExpr ─────────────────────────────────────────────────────
-            // 使用 goto 标签生成循环结构
-            //
-            // Requirements: 5.15
-            .WhileExpr(cond_ref, body_ref) then {
-                let label_prefix = self.next_temp()
-                let start_label = "\(label_prefix)_start"
-                let end_label = "\(label_prefix)_end"
-
-                self.push_indented_label_block_open(start_label)
-                self.with_indent(() -> {
-                    self.push_scope()
-                    let cond_scope_index = self.lifetime_scope_stack.count() - 1
-                    let cond_result = self.generate_expression_ssa(cond_ref)
-                    self.push_indented_if_open("!\(cond_result)")
-                    self.with_indent(() -> {
-                        self.emit_cleanup_for_scope(cond_scope_index)
-                        self.push_indented_goto(end_label)
-                    })
-                    self.push_indented_string("}\n")
-                    self.emit_cleanup_for_scope(cond_scope_index)
-                    self.pop_scope_without_cleanup()
-                    self.push_scope()
-                    let scope_index = self.lifetime_scope_stack.count() - 1
-                    self.loop_stack.push(LoopContext(start_label, end_label, scope_index))
-                    self.generate_expression_ssa(body_ref)
-                    self.loop_stack.pop()
-                    self.pop_scope()
-                    self.push_indented_goto(start_label)
-                })
-                self.push_indented_string("}\n")
-                self.push_indented_label_block_open(end_label)
-                self.push_indented_string("}\n")
-                yield ""
-            },
             // ── RefExpr ───────────────────────────────────────────────────────
             // Requirements: 5.19
             .RefExpr(inner_ref) then {
@@ -1640,7 +1619,7 @@ given CodeGen {
             // Requirements: 5.20
             .DerefExpr(inner_ref) then {
                 let c_type = self.c_type_name(expr.expr_type)
-                let treat_as_lvalue = self.is_addressable_lvalue_expr(inner_ref)
+                let treat_as_lvalue = self.is_lvalue_expr(expr)
                 yield if treat_as_lvalue then {
                     yield self.next_temp_with_init(c_type, self.build_ref_components_path(expr))
                 } else {
