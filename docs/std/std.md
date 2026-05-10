@@ -882,12 +882,15 @@ given[K Hash, V Any] [K, V]Dict {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
-    public insert(self mut ref, key K, value V) [V]Option
+    public insert(self mut ref, key K, value V) Void
+    public try_insert(self mut ref, key K, value V) Bool
     public insert_dict(self mut ref, other [K, V]Dict) Void
     public get(self ref, key K) [V]Option
     public get_or_insert(self mut ref, key K, value V) V
     public contains_key(self ref, key K) Bool
-    public remove(self mut ref, key K) [V]Option
+    public remove(self mut ref, key K) Void
+    public try_remove(self mut ref, key K) Bool
+    public take(self mut ref, key K) [V]Option
     public is_empty(self ref) Bool
     public clear(self mut ref) Void
     public retain(self mut ref, predicate [K, V, Bool]Func) Void
@@ -1066,7 +1069,8 @@ given[T Deref] [T]List {
     public insert_list_at(self mut ref, index UInt, other [T]List) Void
     public insert_sublist_at(self mut ref, index UInt, other [T]List, range [UInt]Range) Void
     public insert_at(self mut ref, index UInt, value T) Void
-    public remove_at(self mut ref, index UInt) T
+    public remove_at(self mut ref, index UInt) Void
+    public take_at(self mut ref, index UInt) T
     public get(self ref, index UInt) [T]Option
     public first(self ref) [T]Option
     public last(self ref) [T]Option
@@ -1449,10 +1453,12 @@ given[T Hash] [T]Set {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
-    public insert(self mut ref, value T) Bool
+    public insert(self mut ref, value T) Void
+    public try_insert(self mut ref, value T) Bool
     public insert_set(self mut ref, other [T]Set) Void
     public contains(self ref, value T) Bool
-    public remove(self mut ref, value T) Bool
+    public remove(self mut ref, value T) Void
+    public try_remove(self mut ref, value T) Bool
     public is_empty(self ref) Bool
     public is_subset_of(self ref, other [T]Set) Bool
     public is_superset_of(self ref, other [T]Set) Bool
