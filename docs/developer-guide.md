@@ -224,7 +224,7 @@ Common `self mut ref` cases:
 
 - container updates such as `push`, `insert`, `remove`, `clear`
 - stateful cursor updates on direct value types
-- mutation APIs returning removed values, such as `pop` or `remove_at`
+- mutation APIs returning removed values, such as `pop` or `take_at`
 
 Use `self` only when consuming the receiver is part of the API contract.
 
