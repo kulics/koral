@@ -11,26 +11,26 @@ This page lists the public API of module `Std.Container` (declaration-only synta
 
 ## Types
 ```koral
-public type [T Any]Deque
+public type Deque[T Any]
 
-public type [T Any]DequeIterator
+public type DequeIterator[T Any]
 
-public type [T Ord]PriorityQueue
+public type PriorityQueue[T Ord]
 
-public type [T Ord]PriorityQueueIterator
+public type PriorityQueueIterator[T Ord]
 
-public type [T Any]Queue
+public type Queue[T Any]
 
-public type [T Any]QueueIterator
+public type QueueIterator[T Any]
 
-public type [T Any]Stack
+public type Stack[T Any]
 
-public type [T Any]StackIterator
+public type StackIterator[T Any]
 ```
 
 ## Given Implementations
 ```koral
-given[T Deref] [T]Deque {
+given[T Deref] Deque[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
@@ -38,90 +38,90 @@ given[T Deref] [T]Deque {
     public is_empty(self ref) Bool
     public push_back(self mut ref, value T) Void
     public push_front(self mut ref, value T) Void
-    public pop_front(self mut ref) [T]Option
-    public pop_back(self mut ref) [T]Option
-    public first(self ref) [T]Option
-    public last(self ref) [T]Option
-    public get(self ref, index UInt) [T]Option
+    public pop_front(self mut ref) Option[T]
+    public pop_back(self mut ref) Option[T]
+    public first(self ref) Option[T]
+    public last(self ref) Option[T]
+    public get(self ref, index UInt) Option[T]
     public clear(self mut ref) Void
     public reverse(self mut ref) Void
-    public retain(self mut ref, predicate [T, Bool]Func) Void
+    public retain(self mut ref, predicate Func[T, Bool]) Void
 }
 
-given[T Eq and Deref] [T]Deque {
+given[T Eq and Deref] Deque[T] {
     public contains(self ref, value T) Bool
 }
 
-given[T Deref] [T]Deque as [T, [T]DequeIterator]Iterable {
-    public iterator(self ref) [T]DequeIterator
+given[T Deref] Deque[T] as Iterable[T, DequeIterator[T]] {
+    public iterator(self ref) DequeIterator[T]
 }
 
-given[T Deref] [T]DequeIterator as [T]Iterator {
-    public next(self mut ref) [T]Option
+given[T Deref] DequeIterator[T] as Iterator[T] {
+    public next(self mut ref) Option[T]
 }
 
-given[T Deref] [T]Deque as [UInt, T]Index {
-    public ref_at(self ref, key UInt) T ref
+given[T Deref] Deque[T] as Index[UInt, T] {
+    public ref_at(self ref, key UInt) ref T
 }
 
-given[T Deref] [T]Deque as [UInt, T]MutIndex {
-    public mut_ref_at(self mut ref, key UInt) T mut ref
+given[T Deref] Deque[T] as MutIndex[UInt, T] {
+    public mut_ref_at(self mut ref, key UInt) mut ref T
 }
 
-given[T Ord and Deref] [T]PriorityQueue {
+given[T Ord and Deref] PriorityQueue[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
     public is_empty(self ref) Bool
     public clear(self mut ref) Void
     public push(self mut ref, value T) Void
-    public pop(self mut ref) [T]Option
-    public peek(self ref) [T]Option
+    public pop(self mut ref) Option[T]
+    public peek(self ref) Option[T]
 }
 
-given[T Ord and Deref] [T]PriorityQueue as [T, [T]PriorityQueueIterator]Iterable {
-    public iterator(self ref) [T]PriorityQueueIterator
+given[T Ord and Deref] PriorityQueue[T] as Iterable[T, PriorityQueueIterator[T]] {
+    public iterator(self ref) PriorityQueueIterator[T]
 }
 
-given[T Ord and Deref] [T]PriorityQueueIterator as [T]Iterator {
-    public next(self mut ref) [T]Option
+given[T Ord and Deref] PriorityQueueIterator[T] as Iterator[T] {
+    public next(self mut ref) Option[T]
 }
 
-given[T Deref] [T]Queue {
+given[T Deref] Queue[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
     public is_empty(self ref) Bool
     public clear(self mut ref) Void
     public push(self mut ref, value T) Void
-    public pop(self mut ref) [T]Option
-    public peek(self ref) [T]Option
+    public pop(self mut ref) Option[T]
+    public peek(self ref) Option[T]
 }
 
-given[T Deref] [T]Queue as [T, [T]QueueIterator]Iterable {
-    public iterator(self ref) [T]QueueIterator
+given[T Deref] Queue[T] as Iterable[T, QueueIterator[T]] {
+    public iterator(self ref) QueueIterator[T]
 }
 
-given[T Deref] [T]QueueIterator as [T]Iterator {
-    public next(self mut ref) [T]Option
+given[T Deref] QueueIterator[T] as Iterator[T] {
+    public next(self mut ref) Option[T]
 }
 
-given[T Deref] [T]Stack {
+given[T Deref] Stack[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
     public is_empty(self ref) Bool
     public clear(self mut ref) Void
     public push(self mut ref, value T) Void
-    public pop(self mut ref) [T]Option
-    public peek(self ref) [T]Option
+    public pop(self mut ref) Option[T]
+    public peek(self ref) Option[T]
 }
 
-given[T Deref] [T]Stack as [T, [T]StackIterator]Iterable {
-    public iterator(self ref) [T]StackIterator
+given[T Deref] Stack[T] as Iterable[T, StackIterator[T]] {
+    public iterator(self ref) StackIterator[T]
 }
 
-given[T Deref] [T]StackIterator as [T]Iterator {
-    public next(self mut ref) [T]Option
+given[T Deref] StackIterator[T] as Iterator[T] {
+    public next(self mut ref) Option[T]
 }
 ```

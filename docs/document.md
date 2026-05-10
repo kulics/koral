@@ -82,7 +82,7 @@ let e = 2
 Every executable program needs an entry point. In Koral, this entry point is the `main` function. A typical `main` function declaration is as follows.
 
 ```koral
-let main() = {}
+let main() Void = {}
 ```
 
 Here we declare a function named `main`. The right side of `=` is the function body, `{}` represents an empty block expression, returning `Void`.
@@ -94,7 +94,7 @@ The `main` function can also accept parameters (command line arguments) and retu
 The standard library provides the `println` function to print a line of text to the standard output.
 
 ```koral
-let main() = println("Hello, world!")
+let main() Void = println("Hello, world!")
 ```
 
 Now try to execute this program, and we can see `Hello, world!` displayed on the console.
@@ -159,15 +159,15 @@ The compiler moves fields directly from the Pair value into the target variables
 
 #### Reference Creation Rules (`.ref` / `box`)
 
-Koral uses `ref` and `mut ref` as managed reference types. `T ref` is a read-only reference, while `T mut ref` is a mutable reference that supports `.val = expr` assignment:
+Koral uses `ref` and `mut ref` as managed reference types. `ref T` is a read-only reference, while `mut ref T` is a mutable reference that supports `.val = expr` assignment:
 
 - `x.ref` creates a managed reference from an existing lvalue. The result type depends on the source's mutability:
-  - `let mut` binding → `.ref` produces `T mut ref`
-  - `let` (immutable) binding → `.ref` produces `T ref`
-  - Mutable path (e.g. `mut ref`'s `mut` field) → `.ref` produces `T mut ref`
-- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+  - `let mut` binding → `.ref` produces `mut ref T`
+  - `let` (immutable) binding → `.ref` produces `ref T`
+  - Mutable path (e.g. `mut ref`'s `mut` field) → `.ref` produces `mut ref T`
+- `mut ref T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected.
-- To create a managed reference from a temporary/literal, use `box(expr)`, which returns `T mut ref`.
+- To create a managed reference from a temporary/literal, use `box(expr)`, which returns `mut ref T`.
 
 Receiver adjustment for methods and subscripts has one extra rule:
 
@@ -178,12 +178,12 @@ Receiver adjustment for methods and subscripts has one extra rule:
 
 ```koral
 let mut x = 10
-let rx Int mut ref = x.ref   // let mut → T mut ref
+let rx mut ref Int = x.ref   // let mut → mut ref T
 
 let y = 10
-let ry Int ref = y.ref       // let → T ref
+let ry ref Int = y.ref       // let → ref T
 
-let owned Int mut ref = box(42) // box() returns T mut ref
+let owned mut ref Int = box(42) // box() returns mut ref T
 
 // let rz = 42.ref           // error: rvalue cannot be borrowed
 ```
@@ -313,13 +313,13 @@ Negative durations keep unary-minus semantics (for example `-5s` is parsed as un
 
 ### Type Casting
 
-Different numeric types require explicit conversion using `(Type)expr` syntax:
+Different numeric types require explicit conversion using `expr(Type)` syntax:
 
 ```koral
 let a Int = 42
-let b Float64 = (Float64)a    // Int -> Float64
-let c Int32 = (Int32)a        // Int -> Int32
-let d UInt8 = (UInt8)255      // Int -> UInt8
+let b Float64 = a(Float64)    // Int -> Float64
+let c Int32 = a(Int32)        // Int -> Int32
+let d UInt8 = 255(UInt8)      // Int -> UInt8
 ```
 
 ### Strings
@@ -413,7 +413,7 @@ s.split(",")                 // Split by separator
 s.lines()                    // Split by lines
 
 // Join a list of strings
-list.join_to_string(", ")   // Join [String]List with separator
+list.join_to_string(", ")   // Join List[String] with separator
 ```
 
 ### Rune Literals
@@ -433,20 +433,20 @@ Rune literal typing rules:
 
 ### Collection Literals
 
-Koral supports collection literals for the three built-in collection types: `[T]List`, `[T]Set`, and `[K, V]Dict`.
+Koral supports collection literals for the three built-in collection types: `List[T]`, `Set[T]`, and `Dict[K, V]`.
 
 ```koral
-let a = [1, 2, 3]                    // inferred as [Int]List
-let b [Int]Set = [1, 2, 3]           // inferred as [Int]Set from context
-let c = ["x": 1, "y": 2]          // inferred as [String, Int]Dict
-let empty [Int]List = []             // empty literal requires type context
+let a = [1, 2, 3]                    // inferred as List[Int]
+let b Set[Int] = [1, 2, 3]           // inferred as Set[Int] from context
+let c = ["x": 1, "y": 2]             // inferred as Dict[String, Int]
+let empty List[Int] = []             // empty literal requires type context
 ```
 
 Rules:
 
-- `[e1, e2, ...]` is a collection literal. Without type context, it is inferred as `[T]List`.
-- In `[T]Set` context, the same syntax is inferred as Set.
-- `[k1: v1, k2: v2, ...]` is a dict literal and is inferred as `[K, V]Dict`.
+- `[e1, e2, ...]` is a collection literal. Without type context, it is inferred as `List[T]`.
+- In `Set[T]` context, the same syntax is inferred as Set.
+- `[k1: v1, k2: v2, ...]` is a dict literal and is inferred as `Dict[K, V]`.
 - `[]` cannot be inferred without type context and must be annotated.
 - Trailing commas are allowed for both collection and dict literals.
 - Collection literals only target built-in `List` / `Set` / `Dict`, not third-party container types.
@@ -455,50 +455,50 @@ Rules:
 
 Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Koral distinguishes between read-only and mutable references:
 
-- `T ref` — read-only reference. Supports `.val` read but NOT `.val = expr` assignment.
-- `T mut ref` — mutable reference. Supports both `.val` read and `.val = expr` assignment.
-- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+- `ref T` — read-only reference. Supports `.val` read but NOT `.val = expr` assignment.
+- `mut ref T` — mutable reference. Supports both `.val` read and `.val = expr` assignment.
+- `mut ref T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 
 Use the `.ref` postfix expression to create a reference. The result type depends on the source's mutability:
 
 ```koral
 let mut n = 42
-let a = n.ref            // let mut → T mut ref
+let a = n.ref            // let mut → mut ref T
 let b = a.val            // Dereference, gets 42
 a.val = 100              // Deref assignment (mut ref supports .val = expr)
 println(ref_count(a))    // Reference count
 
 let m = 42
-let c = m.ref            // let → T ref (read-only)
+let c = m.ref            // let → ref T (read-only)
 let d = c.val            // Dereference read, gets 42
 // c.val = 100           // Error: ref does not support .val assignment
 ```
 
-`ref` and `mut ref` denote managed reference types. `x.ref` forms one from an lvalue, with the result mutability determined by the source. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. `box(expr)` returns `T mut ref` by intentionally producing an escaping managed reference.
+`ref` and `mut ref` denote managed reference types. `x.ref` forms one from an lvalue, with the result mutability determined by the source. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. `box(expr)` returns `mut ref T` by intentionally producing an escaping managed reference.
 
 Pointer types follow the same read-only / mutable distinction:
 
-- `T ptr` — read-only pointer. Supports `.val` read but NOT `.val` assignment or `p[i]` assignment.
-- `T mut ptr` — mutable pointer. Supports `.val` read, `.val = expr` assignment, `p[i]` read, and `p[i] = expr` assignment.
-- `T mut ptr` implicitly converts to `T ptr`. The reverse is not allowed.
+- `ptr T` — read-only pointer. Supports `.val` read but NOT `.val` assignment or `p[i]` assignment.
+- `mut ptr T` — mutable pointer. Supports `.val` read, `.val = expr` assignment, `p[i]` read, and `p[i] = expr` assignment.
+- `mut ptr T` implicitly converts to `ptr T`. The reverse is not allowed.
 
 #### Weak References
 
-Weak references don't increase the reference count, used to break reference cycles. Like `ref`/`mut ref`, weak references also distinguish mutability: `T weakref` (read-only) and `T mut weakref` (mutable).
+Weak references don't increase the reference count, used to break reference cycles. Like `ref`/`mut ref`, weak references also distinguish mutability: `weakref T` (read-only) and `mut weakref T` (mutable).
 
 Use the `.weakref` postfix expression to create a weak reference from a ref type, and the `.to_ref()` method to attempt upgrading a weak reference back to a strong reference (returns an `Option` type).
 
 ```koral
-let strong Int mut ref = box(42)
+let strong mut ref Int = box(42)
 
-// Mutable path: mut ref → mut weakref → [T mut ref]Option
-let weak = strong.weakref              // T mut ref → T mut weakref
-let upgraded = weak.to_ref()           // T mut weakref → [T mut ref]Option
+// Mutable path: mut ref → mut weakref → Option[mut ref T]
+let weak = strong.weakref              // mut ref T → mut weakref T
+let upgraded = weak.to_ref()           // mut weakref T → Option[mut ref T]
 
-// Read-only path: ref → weakref → [T ref]Option
-let ro Int ref = strong                // implicit widening
-let ro_weak = ro.weakref               // T ref → T weakref
-let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
+// Read-only path: ref → weakref → Option[ref T]
+let ro ref Int = strong                // implicit widening
+let ro_weak = ro.weakref               // ref T → weakref T
+let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 ```
 
 ### Memory Management
@@ -506,7 +506,7 @@ let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` and `mut ref` are Koral's managed reference types. `T ref` is read-only, `T mut ref` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `T mut ref`). Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self mut ref` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` and `mut ref` are Koral's managed reference types. `ref T` is read-only, `mut ref T` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `mut ref T`). Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self mut ref` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -617,15 +617,15 @@ Koral provides three special operators for working with `Option` and `Result` ty
 In `and then` and `or else` expressions, the keyword `it` refers to the unwrapped value: for `and then`, `it` is the inner `Some` or `Ok` value; for `or else` on a `Result`, `it` is the `Error` value.
 
 ```koral
-let opt = [Int]Option.Some(42)
+let opt = Option[Int].Some(42)
 let val = opt or else 0           // 42 (because opt is Some)
 
-let none = [Int]Option.None()
+let none = Option[Int].None()
 let val2 = none or else 0         // 0 (because none is None)
 
 let mapped = opt and then it * 2   // Some(84)
 
-let load_port(path String) [Int]Result = {
+let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return
     parse_int(text)
 }
@@ -646,7 +646,7 @@ It must be used inside a function whose return kind matches the propagated value
 Operator precedence from high to low:
 
 1. Postfix: calls `()`, subscripts `[]`, member access `.`, storage modifiers `.ref/.ptr/.val`, qualified/generic method suffixes
-2. Prefix: unary `-`, `~`, type cast `(Type)expr`
+2. Prefix: unary `-`, `~`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
@@ -670,13 +670,13 @@ Selection structures are used to judge given conditions and control the flow of 
 In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed.
 
 ```koral
-let main() = if 1 == 1 then println("yes") else println("no")
+let main() Void = if 1 == 1 then println("yes") else println("no")
 ```
 
 `if` is also an expression. The `then` and `else` branches must be followed by expressions.
 
 ```koral
-let main() = println(if 1 == 1 then "yes" else "no")
+let main() Void = println(if 1 == 1 then "yes" else "no")
 ```
 
 Since `if` itself is also an expression, `else` can naturally be followed by another `if` expression for chained conditions.
@@ -689,7 +689,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 When we don't need to handle the `else` branch, we can omit it, in which case its value is `Void`.
 
 ```koral
-let main() = if 1 == 1 then println("yes")
+let main() Void = if 1 == 1 then println("yes")
 ```
 
 When an `if` branch body is a block, that block still defaults to `Void`. Use `yield` to produce the value of the enclosing `if` expression and to exit that branch body early:
@@ -710,7 +710,7 @@ let label = if score >= 90 then {
 `if` also supports `is` pattern matching syntax, allowing you to destructure values in conditions:
 
 ```koral
-let opt = [Int]Option.Some(42)
+let opt = Option[Int].Some(42)
 if opt is .Some(v) then {
     println(v)  // 42
 } else {
@@ -790,7 +790,7 @@ The `for` loop is used to traverse any object that implements the iterator inter
 In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is statement-only.
 
 ```koral
-let nums [Int]List = [10, 20, 30]
+let nums List[Int] = [10, 20, 30]
 for x in nums then {
     println(x)
 }
@@ -809,7 +809,7 @@ When execution takes a `Never` termination path (for example `panic()`, `abort()
 `finally` is followed by an expression whose return value is discarded.
 
 ```koral
-let main() = {
+let main() Void = {
     println("start")
     finally println("cleanup")
     println("work")
@@ -820,7 +820,7 @@ let main() = {
 Multiple `finally` statements in the same scope execute in reverse declaration order (LIFO):
 
 ```koral
-let main() = {
+let main() Void = {
     finally println("first")
     finally println("second")
     finally println("third")
@@ -953,8 +953,8 @@ when p in {
 }
 
 // Generic struct destructuring
-type [T Any]Box(val T)
-let b = [Int]Box(42)
+type Box[T Any](val T)
+let b = Box[Int](42)
 when b in {
     Box(v) then println(v),  // 42
 }
@@ -969,7 +969,7 @@ The `is` operator checks whether a value matches a pattern, and the result is al
 When used in conditional expressions such as `if` or `while`, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings.
 
 ```koral
-let opt = [Int]Option.Some(42)
+let opt = Option[Int].Some(42)
 let has_value = opt is .Some(_)
 let is_empty = opt is not .Some(_)
 
@@ -994,14 +994,14 @@ Functions are independent blocks of code used to complete specific tasks.
 
 ### Definition
 
-Functions are defined using the `let` keyword. The function name is followed by `()` indicating the parameters, and the return type follows the parentheses. The return type can be omitted when the context is clear.
+Functions are defined using the `let` keyword. The function name is followed by `()` indicating the parameters, and the return type follows the parentheses. Named functions and methods must spell out the return type explicitly.
 
 The right side of `=` must declare an expression, and the value of this expression is the return value of the function.
 
 ```koral
 let f1() Int = 1
 let f2(a Int) Int = a + 1
-let f3(a Int) = a + 1     // Return type inferred
+let f3(a Int) Int = a + 1
 ```
 
 ### Calling
@@ -1018,14 +1018,14 @@ let b = f2(1)
 Parameters are data that the function can receive during execution. Use `ParameterName Type` to declare parameters.
 
 ```koral
-let add(x Int, y Int) = x + y
+let add(x Int, y Int) Int = x + y
 let a = add(1, 2) // a == 3
 ```
 
 Mutable parameters use the `mut` keyword:
 
 ```koral
-let increment(mut x Int) = { x += 1; return x }
+let increment(mut x Int) Int = { x += 1; return x }
 ```
 
 #### Named Parameters
@@ -1044,7 +1044,7 @@ let create_rect(x Int, y Int, width: Int, height: Int) Rect = todo()
 create_rect(10, 20, width: 100, height: 200)
 
 // All named parameters
-let connect(host: String, port: Int) = todo()
+let connect(host: String, port: Int) Void = todo()
 connect(host: "localhost", port: 8080)
 ```
 
@@ -1087,7 +1087,7 @@ given MyType as Drawable {
 Function types (`Func`) do not carry named parameter labels, and lambda parameters always use positional syntax:
 
 ```koral
-let f [String, Int, Void]Func = (host String, port Int) -> {
+let f Func[String, Int, Void] = (host String, port Int) -> {
     connect(host: host, port: port)
 }
 f("localhost", 8080)
@@ -1097,22 +1097,22 @@ Foreign declarations (`foreign let`, `foreign type`) do not support named parame
 
 ### Function Types
 
-In Koral, functions are also a type. Function types are declared using `[T1, T2, ..., R]Func` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
+In Koral, functions are also a type. Function types are declared using `Func[T1, T2, ..., R]` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
 
 ```koral
-let sqrt(x Int) = x * x          // [Int, Int]Func
-let f [Int, Int]Func = sqrt
+let sqrt(x Int) Int = x * x          // Func[Int, Int]
+let f Func[Int, Int] = sqrt
 let a = f(2)                      // a == 4
 ```
 
 We can also define function type parameters or return values:
 
 ```koral
-let hello() = println("Hello, world!")
-let run(f [Void]Func) = f()
-let toRun() = run
+let hello() Void = println("Hello, world!")
+let run(f Func[Void]) Void = f()
+let toRun() Func[Func[Void], Void] = run
 
-let main() = toRun()(hello)
+let main() Void = toRun()(hello)
 ```
 
 ### Lambda Expressions
@@ -1120,15 +1120,15 @@ let main() = toRun()(hello)
 Lambda expressions are very similar to function definitions, except that `=` is replaced by `->`, and there is no function name or `let` keyword.
 
 ```koral
-let f1(x Int) Int = x + 1            // [Int, Int]Func
-let f2 = (x Int) Int -> x + 1        // [Int, Int]Func
+let f1(x Int) Int = x + 1            // Func[Int, Int]
+let f2 = (x Int) Int -> x + 1        // Func[Int, Int]
 let a = f1(1) + f2(1)                // a == 4
 ```
 
 When the type of lambda can be inferred from context, parameter types and return type can be omitted:
 
 ```koral
-let f [Int, Int]Func = (x) -> x + 1
+let f Func[Int, Int] = (x) -> x + 1
 ```
 
 Lambda supports multiple forms:
@@ -1147,7 +1147,7 @@ Lambda supports multiple forms:
 Lambda expressions can capture variables from their surrounding scope. This is called a closure.
 
 ```koral
-let make_adder(base Int) [Int, Int]Func = {
+let make_adder(base Int) Func[Int, Int] = {
     return (x) -> base + x
 }
 
@@ -1172,7 +1172,7 @@ let g = () -> y + 1  // Error: cannot capture mutable variable 'y'
 Closures enable currying:
 
 ```koral
-let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y
+let add Func[Int, Func[Int, Int]] = (x) -> (y) -> x + y
 
 let add10 = add(10)
 let result = add10(32)  // result == 42
@@ -1211,7 +1211,7 @@ Use `.` syntax to access member variables:
 ```koral
 type Point(x Int, y Int)
 
-let main() = {
+let main() Void = {
     let a = Point(64, 128)
     println(a.x)  // 64
     println(a.y)  // 128
@@ -1225,7 +1225,7 @@ Member variables are read-only by default. Use the `mut` keyword to mark mutable
 ```koral
 type Point(mut x Int, mut y Int)
 
-let main() = {
+let main() Void = {
     let a = Point(64, 128)
     a.x = 2  // ok, because x is mut
     a.y = 0  // ok, because y is mut
@@ -1270,27 +1270,27 @@ Rules:
 - If the compiler cannot infer the expected type, the expression is rejected.
 
 ```koral
-// Enum construction — omit the [Int]Option prefix
-let a [Int]Option = .Some(42)
-let b [Int]Option = .None()
+// Enum construction — omit the Option[Int] prefix
+let a Option[Int] = .Some(42)
+let b Option[Int] = .None()
 
 // In function arguments
-let process(opt [Int]Option) Void = when opt in {
+let process(opt Option[Int]) Void = when opt in {
     .Some(v) then println(v.to_string()),
-    .None then println("none"),
+    .None() then println("none"),
 }
 process(.Some(10))
 
 // In assignments
-let mut x [Int]Option = .None()
+let mut x Option[Int] = .None()
 x = .Some(100)
 
 // In conditional expression branches
-let c [Int]Option = if true then .Some(1) else .None()
+let c Option[Int] = if true then .Some(1) else .None()
 
-// Static method calls — omit the [Int]List prefix
-let list [Int]List = .new()
-let list2 [Int]List = .with_capacity(10)
+// Static method calls — omit the List[Int] prefix
+let list List[Int] = .new()
+let list2 List[Int] = .with_capacity(10)
 ```
 
 ### Type Alias
@@ -1300,7 +1300,7 @@ Type aliases allow you to define a new name for an existing type, improving code
 ```koral
 type Meters = Int
 type Coord = Point
-type IntList = [Int]List
+type IntList = List[Int]
 ```
 
 Type aliases are fully eliminated at compile time — an alias is completely equivalent to its target type:
@@ -1328,7 +1328,7 @@ private type InternalId = Int  // File-scoped only
 ```
 
 Restrictions:
-- Type aliases do not support generic parameters (e.g., `type [T]Alias = [T]List` is invalid), but the target type can be a generic instantiation (e.g., `type IntList = [Int]List`).
+- Type aliases do not support generic parameters (e.g., `type Alias[T] = List[T]` is invalid), but the target type can be a generic instantiation (e.g., `type IntList = List[Int]`).
 - Circular references are not allowed (e.g., `type A = A`).
 - Type alias names must start with an uppercase letter.
 
@@ -1425,16 +1425,16 @@ println(a.not_equals(b))
 Constrained tool block example:
 
 ```koral
-trait [T Any]Iterator {
-    next(self mut ref) [T]Option
+trait Iterator[T Any] {
+    next(self mut ref) Option[T]
 }
 
-given [T Ord] [T]Iterator {
-    max(self) [T]Option = ...
-    min(self) [T]Option = ...
+given[T Ord] Iterator[T] {
+    max(self) Option[T] = ...
+    min(self) Option[T] = ...
 }
 
-// For types implementing [Int]Iterator, max/min are available
+// For types implementing Iterator[Int], max/min are available
 ```
 
 Dispatch rules:
@@ -1453,9 +1453,9 @@ Tool methods are available in:
 When multiple candidates conflict, use explicit qualified calls:
 
 - Instance method: `object.(TraitName)method(...)`
-- Static method: `T.(TraitName)method(...)`
-- Generic instance method: `object.(TraitName)[TypeArgs...]method(...)`
-- Generic static method: `T.(TraitName)[TypeArgs...]method(...)`
+- Static method: `Type.(TraitName)method(value, ...)`
+- Generic instance method: `object.(TraitName)method[TypeArgs...](...)`
+- Generic static method: `Type.(TraitName)method[TypeArgs...](value, ...)`
 
 For generic methods, the trait qualifier must appear before method type arguments.
 
@@ -1483,8 +1483,8 @@ The `given` block can also be used to directly add methods to types:
 ```koral
 given Point {
     public distance(self) Float64 = {
-        let dx = (Float64)self.x
-        let dy = (Float64)self.y
+        let dx = self.x(Float64)
+        let dy = self.y(Float64)
         return dx + dy // ...
     }
     
@@ -1502,20 +1502,20 @@ The most commonly used core traits are:
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
-- `[T]Iterator`: iteration protocol (`next(self mut ref) [T]Option`).
+- `Iterator[T]`: iteration protocol (`next(self mut ref) Option[T]`).
 - `Error`: error message interface (`message(self ref) String`).
 
 Operators are lowered to trait methods internally (for example `+` to `Add`, and indexing to `Index`/`MutIndex`).
 
 ### Trait Objects
 
-Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `TraitName ref` or `TraitName mut ref` syntax, you can erase any type that implements a Trait into a uniform reference type.
+Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `ref TraitName` or `mut ref TraitName` syntax, you can erase any type that implements a Trait into a uniform reference type.
 
 #### Basic Syntax
 
 Trait-object construction follows these rules:
 
-- The target type is written as `TraitName ref` or `TraitName mut ref`.
+- The target type is written as `ref TraitName` or `mut ref TraitName`.
 - The source value must implement the trait and be converted in a context expecting that trait-object type.
 - `box(...)` is the standard way to provide an owned value for this conversion.
 
@@ -1542,8 +1542,8 @@ given Square as Drawable {
 }
 
 // Create trait objects
-let shape Drawable ref = box(Circle(10))
-let mutable_shape Drawable mut ref = box(Square(4))
+let shape ref Drawable = box(Circle(10))
+let mutable_shape mut ref Drawable = box(Square(4))
 
 // Call methods through the trait object (dynamic dispatch)
 shape.draw()  // "Drawing circle"
@@ -1553,9 +1553,9 @@ mutable_shape.draw()
 
 Dispatch through trait objects respects reference mutability:
 
-- `TraitName ref` can call only requirements declared with `self ref`.
-- `TraitName mut ref` can call both `self mut ref` and `self ref` requirements.
-- `TraitName ref` cannot call `self mut ref` requirements.
+- `ref TraitName` can call only requirements declared with `self ref`.
+- `mut ref TraitName` can call both `self mut ref` and `self ref` requirements.
+- `ref TraitName` cannot call `self mut ref` requirements.
 
 #### Object Safety
 
@@ -1581,7 +1581,7 @@ trait Resettable {
 }
 ```
 
-Trait objects (`TraitName ref`, `TraitName mut ref`) do not support direct `.val`; use trait methods through dynamic dispatch.
+Trait objects (`ref TraitName`, `mut ref TraitName`) do not support direct `.val`; use trait methods through dynamic dispatch.
 
 ## Generics
 
@@ -1589,24 +1589,24 @@ Generics allow you to write code that applies to multiple types, improving code 
 
 ### Generic Data Types
 
-Generic data types use `[T Constraint]` syntax before the identifier to define generic parameters:
+Generic data types use `TypeName[T Constraint]` syntax to define generic parameters:
 
 ```koral
-type [T1 Any, T2 Any]Pair(left T1, right T2)
+type Pair[T1 Any, T2 Any](left T1, right T2)
 ```
 
 When constructing generic data types, pass actual types in the generic parameter position:
 
 ```koral
-let a1 = [Int, Int]Pair(1, 2)
-let a2 = [Bool, String]Pair(true, "hello")
+let a1 = Pair[Int, Int](1, 2)
+let a2 = Pair[Bool, String](true, "hello")
 ```
 
 When the context type is clear, generic type parameters can be omitted:
 
 ```koral
-let a1 = Pair(1, 2)           // Inferred as [Int, Int]Pair
-let a2 = Pair(true, "hello")  // Inferred as [Bool, String]Pair
+let a1 = Pair(1, 2)           // Inferred as Pair[Int, Int]
+let a2 = Pair(true, "hello")  // Inferred as Pair[Bool, String]
 ```
 
 Pair also supports a literal form:
@@ -1618,10 +1618,10 @@ let p2 = (true, "hello")     // Equivalent to Pair(true, "hello")
 
 ### Generic Functions
 
-Generic functions use the same syntax before the function name:
+Generic functions write type parameters after the function name:
 
 ```koral
-let [T Any]identity(x T) T = x
+let identity[T Any](x T) T = x
 
 println(identity(42))       // 42
 println(identity("hello"))  // hello
@@ -1632,20 +1632,20 @@ println(identity("hello"))  // hello
 Generic parameters can specify Trait constraints to limit acceptable types:
 
 ```koral
-let [T Ord]max_val(a T, b T) T = if a > b then a else b
-let [T Eq]contains(list [T]List, value T) Bool = list.contains(value)
+let max_val[T Ord](a T, b T) T = if a > b then a else b
+let contains[T Eq](list List[T], value T) Bool = list.contains(value)
 ```
 
 Multiple constraints are connected with `and`:
 
 ```koral
-let [T ToString and Hash]describe(value T) String = value.to_string()
+let describe[T ToString and Hash](value T) String = value.to_string()
 ```
 
-Constraints can also use generic trait forms (for example `[T]Iterator`):
+Constraints can also use generic trait forms (for example `Iterator[T]`):
 
 ```koral
-let [I [Int]Iterator]consume(iter I) Void = {}
+let consume[I Iterator[Int]](iter I) Void = {}
 ```
 
 ### Generic Methods
@@ -1653,8 +1653,8 @@ let [I [Int]Iterator]consume(iter I) Void = {}
 `given` blocks can also define generic methods:
 
 ```koral
-given [T Any] [T]Option {
-    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(it)
+given[T Any] Option[T] {
+    public map[U Any](self, f Func[T, U]) Option[U] = self and then f(it)
 }
 ```
 
@@ -1664,27 +1664,27 @@ Use these as the minimal everyday building blocks:
 
 ```koral
 // List
-let nums [Int]List = [1, 2, 3]
+let nums List[Int] = [1, 2, 3]
 
 // Dict
-let scores [String, Int]Dict = ["alice": 10, "bob": 8]
+let scores Dict[String, Int] = ["alice": 10, "bob": 8]
 
 // Set
-let tags [String]Set = ["koral", "lang"]
+let tags Set[String] = ["koral", "lang"]
 
 // Option + or else / and then
-let port = [Int]Option.Some(8080) or else 80
-let doubled = [Int]Option.Some(21) and then it * 2
+let port = Option[Int].Some(8080) or else 80
+let doubled = Option[Int].Some(21) and then it * 2
 
 // or return
-let read_number(path String) [Int]Result = {
+let read_number(path String) Result[Int] = {
     let text = read_text_file(path) or return
     parse_int(text)
 }
 
-// Result (error side is Error ref)
-let ok = [Int]Result.Ok(42)
-let err = [Int]Result.Error(box("failed"))
+// Result (error side is ref Error)
+let ok = Result[Int].Ok(42)
+let err = Result[Int].Error(box("failed"))
 ```
 
 For complete API reference, see docs under `docs/std/`.
@@ -1781,7 +1781,7 @@ Notes:
     - uppercase identifier -> alias starts uppercase
     - lowercase identifier -> alias starts lowercase
 
-#### Explicitly Qualified Types (`module.Type` / `module.[T]Type`)
+#### Explicitly Qualified Types (`module.Type` / `module.Type[T]`)
 
 You can explicitly qualify a type with a module prefix in type positions:
 
@@ -1789,7 +1789,7 @@ You can explicitly qualify a type with a module prefix in type positions:
 public using "models" as Models
 
 let user Models.User = Models.User("Alice")
-let boxes Models.[Int]Box = [Int]Box.new()
+let boxes Models.Box[Int] = Models.Box[Int].new()
 ```
 
 Legality rules:
@@ -1797,7 +1797,7 @@ Legality rules:
 1. `module` must resolve to an imported module symbol.
 2. `Type` must belong to that module (ownership check).
 3. The type must be visible from the current module (private types are not accessible).
-4. For `module.[T]Type`, generic argument count and constraints are validated after ownership check.
+4. For `module.Type[T]`, generic argument count and constraints are validated after ownership check.
 
 Error model (normalized):
 
@@ -1915,6 +1915,5 @@ The `intrinsic` keyword declares types and functions built into the compiler:
 
 ```koral
 public intrinsic type Int
-public intrinsic let [T Any]ref_count(r T ref) Int
+public intrinsic let ref_count[T Any](r ref T) Int
 ```
-

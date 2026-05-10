@@ -9,7 +9,7 @@
 // FFI Declarations
 // ============================================================================
 
-foreign let __koral_normalize_path(path UInt8 ptr, buf UInt8 ptr, size UInt) Int
+foreign let __koral_normalize_path(path ptr UInt8, buf ptr UInt8, size UInt) Int
 foreign let __koral_path_separator() UInt8
 foreign let __koral_path_list_separator() UInt8
 
@@ -59,7 +59,7 @@ given Path {
     }
 
     /// 拼接路径组件，返回新 Path
-    public [T IntoPath]join(self ref, path T) Path = {
+    public join[T IntoPath](self ref, path T) Path = {
         let p = path.into_path()
         if self._path.is_empty() then {
             return p
@@ -185,16 +185,16 @@ given Path {
     /// 规范化路径（解析 . 和 .. 组件）
     public normalize(self ref) Path = {
         let buf_size = self._path.count() + 1
-        let buf = [UInt8]alloc_memory(buf_size)
+        let buf = alloc_memory[UInt8](buf_size)
         finally dealloc_memory(buf)
         let len = __koral_normalize_path(self._path.storage.data, buf, buf_size)
-        let result = String.from_utf8_ptr_unchecked(buf, (UInt)len)
+        let result = String.from_utf8_ptr_unchecked(buf, len(UInt))
         return Path(result)
     }
 
     /// 将路径拆分为组件列表
-    public components(self ref) [String]List = {
-        let mut parts = [String]List.new()
+    public components(self ref) List[String] = {
+        let mut parts = List[String].new()
         let normalized = self._path.replace_all("\\", with: "/")
         for part in normalized.split("/") then {
             if not part.is_empty() then {
@@ -240,20 +240,20 @@ given Path {
     }
 
     /// 计算相对于 base 的相对路径
-    public [T IntoPath]relative_to(self ref, base T) [Path]Result = {
+    public relative_to[T IntoPath](self ref, base T) Result[Path] = {
         let b = base.into_path()
         if self._path.is_empty() then {
-            return [Path]Result.Error(box("target path is empty"))
+            return Result[Path].Error(box("target path is empty"))
         }
         if b._path.is_empty() then {
-            return [Path]Result.Error(box("base path is empty"))
+            return Result[Path].Error(box("base path is empty"))
         }
 
         let norm_self = self.normalize()
         let norm_base = b.normalize()
 
         if norm_self._path == norm_base._path then {
-            return [Path]Result.Ok(Path("."))
+            return Result[Path].Ok(Path("."))
         }
 
         let self_parts = norm_self.components()
@@ -288,9 +288,9 @@ given Path {
         }
 
         if result.is_empty() then {
-            return [Path]Result.Ok(Path("."))
+            return Result[Path].Ok(Path("."))
         } else {
-            return [Path]Result.Ok(Path(result))
+            return Result[Path].Ok(Path(result))
         }
     }
 }
@@ -322,8 +322,8 @@ public let path_list_separator() String = {
 
 /// Split a normalized path (using "/" separator) into a list of components.
 /// Filters out empty parts from consecutive separators.
-private let split_path_components(path String) [String]List = {
-    let mut parts = [String]List.new()
+private let split_path_components(path String) List[String] = {
+    let mut parts = List[String].new()
     let normalized = path.replace_all("\\", with: "/")
     for part in normalized.split("/") then {
         if not part.is_empty() then {

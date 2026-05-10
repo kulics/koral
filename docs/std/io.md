@@ -9,24 +9,24 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 public trait Writer {
-    write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    flush(self ref) [Void]Result
+    write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
+    flush(self ref) Result[Void]
 }
 
 public trait Seeker {
-    seek(self ref, pos SeekOrigin) [UInt64]Result
+    seek(self ref, pos SeekOrigin) Result[UInt64]
 }
 ```
 
 ## Types
 ```koral
-public type [R Reader]BufReader
+public type BufReader[R Reader]
 
-public type [W Writer]BufWriter
+public type BufWriter[W Writer]
 
 public type ByteBuffer
 
@@ -45,60 +45,60 @@ public type SeekOrigin {
 
 ## Given Implementations
 ```koral
-given[R Reader] [R]BufReader {
-    public new(r R) [R]BufReader
-    public with_capacity(cap UInt, r R) [R]BufReader
-    public read_byte(self ref) [[UInt8]Option]Result
-    public read_rune(self ref) [[Rune]Option]Result
-    public read_until(self ref, delim UInt8, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
-    public read_line(self ref) [[String]Option]Result
-    public skip(self ref, n UInt) [UInt]Result
+given[R Reader] BufReader[R] {
+    public new(r R) BufReader[R]
+    public with_capacity(cap UInt, r R) BufReader[R]
+    public read_byte(self ref) Result[Option[UInt8]]
+    public read_rune(self ref) Result[Option[Rune]]
+    public read_until(self ref, delim UInt8, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read_line(self ref) Result[Option[String]]
+    public skip(self ref, n UInt) Result[UInt]
 }
 
-given[R Reader] [R]BufReader as Reader {
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+given[R Reader] BufReader[R] as Reader {
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
 }
 
-given[R Reader and Seeker] [R]BufReader as Seeker {
-    public seek(self ref, pos SeekOrigin) [UInt64]Result
+given[R Reader and Seeker] BufReader[R] as Seeker {
+    public seek(self ref, pos SeekOrigin) Result[UInt64]
 }
 
-given[W Writer] [W]BufWriter {
-    public new(w W) [W]BufWriter
-    public with_capacity(cap UInt, w W) [W]BufWriter
-    public write_byte(self ref, b UInt8) [Void]Result
-    public write_string(self ref, s String) [Void]Result
-    public write_line(self ref, s String) [Void]Result
-    public write_rune(self ref, r Rune) [Void]Result
+given[W Writer] BufWriter[W] {
+    public new(w W) BufWriter[W]
+    public with_capacity(cap UInt, w W) BufWriter[W]
+    public write_byte(self ref, b UInt8) Result[Void]
+    public write_string(self ref, s String) Result[Void]
+    public write_line(self ref, s String) Result[Void]
+    public write_rune(self ref, r Rune) Result[Void]
 }
 
-given[W Writer] [W]BufWriter as Writer {
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self ref) [Void]Result
+given[W Writer] BufWriter[W] as Writer {
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(self ref) Result[Void]
 }
 
-given[W Writer and Seeker] [W]BufWriter as Seeker {
-    public seek(self ref, pos SeekOrigin) [UInt64]Result
+given[W Writer and Seeker] BufWriter[W] as Seeker {
+    public seek(self ref, pos SeekOrigin) Result[UInt64]
 }
 
 given ByteBuffer {
     public new() ByteBuffer
     public with_capacity(cap UInt) ByteBuffer
     public from_string(s String) ByteBuffer
-    public from_bytes(bytes [UInt8]List) ByteBuffer
+    public from_bytes(bytes List[UInt8]) ByteBuffer
 }
 
 given ByteBuffer as Reader {
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given ByteBuffer as Writer {
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self ref) [Void]Result
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(self ref) Result[Void]
 }
 
 given ByteBuffer as Seeker {
-    public seek(self ref, pos SeekOrigin) [UInt64]Result
+    public seek(self ref, pos SeekOrigin) Result[UInt64]
 }
 
 given IoError as Error {
@@ -106,11 +106,11 @@ given IoError as Error {
 }
 
 given Reader {
-    public read_all(self ref) [[UInt8]List]Result
-    public [W Writer]copy_all_to(self, dst W) [UInt]Result
+    public read_all(self ref) Result[List[UInt8]]
+    public copy_all_to[W Writer](self, dst W) Result[UInt]
 }
 
 given Writer {
-    public write_all(self ref, from: [UInt8]List, range [UInt]Range) [Void]Result
+    public write_all(self ref, from: List[UInt8], range Range[UInt]) Result[Void]
 }
 ```

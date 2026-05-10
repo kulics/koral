@@ -21,29 +21,29 @@ given ClockTime {
 
     /// Creates a ClockTime from hour, minute, second.
     /// Returns Error if any field is out of range.
-    public new(hour: Int, minute: Int, second: Int) [ClockTime]Result =
+    public new(hour: Int, minute: Int, second: Int) Result[ClockTime] =
         ClockTime.new_full(hour: hour, minute: minute, second: second, nanosecond: 0)
 
     /// Creates a ClockTime from hour, minute, second, nanoseconds.
     /// Returns Error if any field is out of range.
-    public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) [ClockTime]Result = {
+    public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) Result[ClockTime] = {
         if hour < 0 or hour > 23 then {
-            return [ClockTime]Result.Error(box("invalid time: hour out of range"))
+            return Result[ClockTime].Error(box("invalid time: hour out of range"))
         }
         if minute < 0 or minute > 59 then {
-            return [ClockTime]Result.Error(box("invalid time: minute out of range"))
+            return Result[ClockTime].Error(box("invalid time: minute out of range"))
         }
         if second < 0 or second > 59 then {
-            return [ClockTime]Result.Error(box("invalid time: second out of range"))
+            return Result[ClockTime].Error(box("invalid time: second out of range"))
         }
         if nanosecond < 0 or nanosecond > 999_999_999 then {
-            return [ClockTime]Result.Error(box("invalid time: nanoseconds out of range"))
+            return Result[ClockTime].Error(box("invalid time: nanoseconds out of range"))
         }
-        let mut total = (Int64)hour * (Int64)3_600_000_000_000
-        total = total + (Int64)minute * (Int64)60_000_000_000
-        total = total + (Int64)second * (Int64)1_000_000_000
-        total = total + (Int64)nanosecond
-        return [ClockTime]Result.Ok(ClockTime(total))
+        let mut total = hour(Int64) * 3_600_000_000_000(Int64)
+        total = total + minute(Int64) * 60_000_000_000(Int64)
+        total = total + second(Int64) * 1_000_000_000(Int64)
+        total = total + nanosecond(Int64)
+        return Result[ClockTime].Ok(ClockTime(total))
     }
 
     /// Returns midnight (00:00:00).
@@ -57,16 +57,16 @@ given ClockTime {
 given ClockTime {
 
     /// Returns the hour (0-23).
-    public hour(self) Int = (Int)(self.nanos_since_midnight / ((Int64)3_600 * (Int64)1_000_000_000))
+    public hour(self) Int = (self.nanos_since_midnight / (3_600(Int64) * 1_000_000_000(Int64)))(Int)
 
     /// Returns the minute (0-59).
-    public minute(self) Int = (Int)((self.nanos_since_midnight % ((Int64)3_600 * (Int64)1_000_000_000)) / ((Int64)60 * (Int64)1_000_000_000))
+    public minute(self) Int = ((self.nanos_since_midnight % (3_600(Int64) * 1_000_000_000(Int64))) / (60(Int64) * 1_000_000_000(Int64)))(Int)
 
     /// Returns the second (0-59).
-    public second(self) Int = (Int)((self.nanos_since_midnight % ((Int64)60 * (Int64)1_000_000_000)) / (Int64)1_000_000_000)
+    public second(self) Int = ((self.nanos_since_midnight % (60(Int64) * 1_000_000_000(Int64))) / 1_000_000_000(Int64))(Int)
 
     /// Returns the nanosecond (0-999_999_999).
-    public nanosecond(self) Int = (Int)(self.nanos_since_midnight % (Int64)1_000_000_000)
+    public nanosecond(self) Int = (self.nanos_since_midnight % 1_000_000_000(Int64))(Int)
 }
 
 // ============================================================================
@@ -74,25 +74,25 @@ given ClockTime {
 // ============================================================================
 
 let wrap_time_nanos(n Int64) Int64 = {
-    let day Int64 = (Int64)86_400 * (Int64)1_000_000_000
+    let day Int64 = 86_400(Int64) * 1_000_000_000(Int64)
     let r = n % day
     return if r < 0 then r + day else r
 }
 
-given ClockTime as [Duration]Add {
+given ClockTime as Add[Duration] {
 
     /// [Duration]Add: add — ClockTime + Duration. Wraps around at midnight.
     public add(self, v Duration) ClockTime = {
-        let delta = v.secs * (Int64)1_000_000_000 + v.nanos
+        let delta = v.secs * 1_000_000_000(Int64) + v.nanos
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight + delta))
     }
 }
 
-given ClockTime as [Duration]Sub {
+given ClockTime as Sub[Duration] {
 
     /// [Duration]Sub: sub — ClockTime - Duration. Wraps around at midnight.
     public sub(self, v Duration) ClockTime = {
-        let delta = v.secs * (Int64)1_000_000_000 + v.nanos
+        let delta = v.secs * 1_000_000_000(Int64) + v.nanos
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight - delta))
     }
 }
@@ -102,8 +102,8 @@ given ClockTime {
     /// Computes the Duration from self to other (returns other - self, wraps forward).
     public duration_to(self, other ClockTime) Duration = {
         let diff = wrap_time_nanos(other.nanos_since_midnight - self.nanos_since_midnight)
-        let secs = diff / (Int64)1_000_000_000
-        let nanos = diff % (Int64)1_000_000_000
+        let secs = diff / 1_000_000_000(Int64)
+        let nanos = diff % 1_000_000_000(Int64)
         return Duration(secs, nanos)
     }
 }
@@ -162,31 +162,31 @@ given ClockTime as ToString {
 given ClockTime as Parseable {
 
     /// Parses an ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
-    public parse(s String) [ClockTime]Result = {
-        let len = (Int)s.count()
+    public parse(s String) Result[ClockTime] = {
+        let len = s.count()(Int)
         if len < 8 then {
-            return [ClockTime]Result.Error(box("invalid time: expected HH:MM:SS"))
+            return Result[ClockTime].Error(box("invalid time: expected HH:MM:SS"))
         }
         let hr = parse_digits(s, 0, 2)
-        if hr.value < 0 then { return [ClockTime]Result.Error(box("invalid time: expected 2-digit hour")) }
-        if s[2] <> (UInt8)58 then { return [ClockTime]Result.Error(box("invalid time: expected ':' after hour")) }
+        if hr.value < 0 then { return Result[ClockTime].Error(box("invalid time: expected 2-digit hour")) }
+        if s[2] <> 58(UInt8) then { return Result[ClockTime].Error(box("invalid time: expected ':' after hour")) }
         let mi = parse_digits(s, 3, 2)
-        if mi.value < 0 then { return [ClockTime]Result.Error(box("invalid time: expected 2-digit minute")) }
-        if s[5] <> (UInt8)58 then { return [ClockTime]Result.Error(box("invalid time: expected ':' after minute")) }
+        if mi.value < 0 then { return Result[ClockTime].Error(box("invalid time: expected 2-digit minute")) }
+        if s[5] <> 58(UInt8) then { return Result[ClockTime].Error(box("invalid time: expected ':' after minute")) }
         let se = parse_digits(s, 6, 2)
-        if se.value < 0 then { return [ClockTime]Result.Error(box("invalid time: expected 2-digit second")) }
+        if se.value < 0 then { return Result[ClockTime].Error(box("invalid time: expected 2-digit second")) }
 
         let mut pos = 8
         let mut nanos = 0
-        if pos < len and s[(UInt)pos] == (UInt8)46 then {
+        if pos < len and s[pos(UInt)] == 46(UInt8) then {
             pos = pos + 1
             let frac = parse_frac_digits(s, pos)
-            if frac.value < 0 then { return [ClockTime]Result.Error(box("invalid time: invalid fractional seconds")) }
+            if frac.value < 0 then { return Result[ClockTime].Error(box("invalid time: invalid fractional seconds")) }
             nanos = frac.value
             pos = frac.pos
         }
         if pos <> len then {
-            return [ClockTime]Result.Error(box("invalid time: unexpected trailing characters"))
+            return Result[ClockTime].Error(box("invalid time: unexpected trailing characters"))
         }
         return ClockTime.new_full(hour: hr.value, minute: mi.value, second: se.value, nanosecond: nanos)
     }

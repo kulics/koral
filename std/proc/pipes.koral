@@ -13,10 +13,10 @@ using Super.Io.*
 // ============================================================================
 
 /// Read from a pipe file descriptor (POSIX read wrapper)
-foreign let __koral_pipe_read(fd Int32, buf UInt8 ptr, count UInt) Int64
+foreign let __koral_pipe_read(fd Int32, buf ptr UInt8, count UInt) Int64
 
 /// Write to a pipe file descriptor (POSIX write wrapper)
-foreign let __koral_pipe_write(fd Int32, buf UInt8 ptr, count UInt) Int64
+foreign let __koral_pipe_write(fd Int32, buf ptr UInt8, count UInt) Int64
 
 /// Close a pipe file descriptor (POSIX close wrapper)
 foreign let __koral_pipe_close(fd Int32) Int32
@@ -56,34 +56,34 @@ given PipeStorage as Drop {
 
 /// Child process stdin pipe (implements Writer trait).
 /// Closing the pipe via drop sends EOF to the child process.
-public type StdinPipe(protected storage PipeStorage ref)
+public type StdinPipe(protected storage ref PipeStorage)
 
 given StdinPipe {
 
     /// Returns the underlying OS file descriptor.
-    public fd(self ref) Int = (Int)self.storage.fd
+    public fd(self ref) Int = self.storage.fd(Int)
 }
 
 given StdinPipe as Writer {
 
     /// Write data to the child process stdin.
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = from.slice_spec(range)
         let start = span.start()
         let end = span.end()
         if end <= start then {
-            return [UInt]Result.Ok(0)
+            return Result[UInt].Ok(0)
         }
         let data_ptr = from.borrow_ptr() + start
         let n = __koral_pipe_write(self.storage.fd, data_ptr, span.len())
         if n < 0 then {
-            return [UInt]Result.Error(box(last_error_message()))
+            return Result[UInt].Error(box(last_error_message()))
         }
-        return [UInt]Result.Ok((UInt)n)
+        return Result[UInt].Ok(n(UInt))
     }
 
     /// Flush is a no-op for pipes (data is already in kernel buffer).
-    public flush(self ref) [Void]Result = [Void]Result.Ok({})
+    public flush(self ref) Result[Void] = Result[Void].Ok({})
 }
 
 // ============================================================================
@@ -91,30 +91,30 @@ given StdinPipe as Writer {
 // ============================================================================
 
 /// Child process stdout pipe (implements Reader trait).
-public type StdoutPipe(protected storage PipeStorage ref)
+public type StdoutPipe(protected storage ref PipeStorage)
 
 given StdoutPipe {
 
     /// Returns the underlying OS file descriptor.
-    public fd(self ref) Int = (Int)self.storage.fd
+    public fd(self ref) Int = self.storage.fd(Int)
 }
 
 given StdoutPipe as Reader {
 
     /// Read data from the child process stdout.
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = into.slice_spec(range)
         let start = span.start()
         let end = span.end()
         if end <= start then {
-            return [UInt]Result.Ok(0)
+            return Result[UInt].Ok(0)
         }
         let data_ptr = into.borrow_mut_ptr() + start
         let n = __koral_pipe_read(self.storage.fd, data_ptr, span.len())
         if n < 0 then {
-            return [UInt]Result.Error(box(last_error_message()))
+            return Result[UInt].Error(box(last_error_message()))
         }
-        return [UInt]Result.Ok((UInt)n)
+        return Result[UInt].Ok(n(UInt))
     }
 }
 
@@ -123,29 +123,29 @@ given StdoutPipe as Reader {
 // ============================================================================
 
 /// Child process stderr pipe (implements Reader trait).
-public type StderrPipe(protected storage PipeStorage ref)
+public type StderrPipe(protected storage ref PipeStorage)
 
 given StderrPipe {
 
     /// Returns the underlying OS file descriptor.
-    public fd(self ref) Int = (Int)self.storage.fd
+    public fd(self ref) Int = self.storage.fd(Int)
 }
 
 given StderrPipe as Reader {
 
     /// Read data from the child process stderr.
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = into.slice_spec(range)
         let start = span.start()
         let end = span.end()
         if end <= start then {
-            return [UInt]Result.Ok(0)
+            return Result[UInt].Ok(0)
         }
         let data_ptr = into.borrow_mut_ptr() + start
         let n = __koral_pipe_read(self.storage.fd, data_ptr, span.len())
         if n < 0 then {
-            return [UInt]Result.Error(box(last_error_message()))
+            return Result[UInt].Error(box(last_error_message()))
         }
-        return [UInt]Result.Ok((UInt)n)
+        return Result[UInt].Ok(n(UInt))
     }
 }

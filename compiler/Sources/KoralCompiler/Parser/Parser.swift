@@ -296,14 +296,59 @@ public class Parser {
 
   // MARK: - Utility Methods
 
+  enum IdentifierStyle {
+    case value
+    case type
+    case underscoreOnly
+    case invalid
+  }
+
+  func isASCIIUppercase(_ char: Character) -> Bool {
+    guard char.unicodeScalars.count == 1, let scalar = char.unicodeScalars.first else {
+      return false
+    }
+    return scalar.value >= 65 && scalar.value <= 90
+  }
+
+  func isASCIILowercase(_ char: Character) -> Bool {
+    guard char.unicodeScalars.count == 1, let scalar = char.unicodeScalars.first else {
+      return false
+    }
+    return scalar.value >= 97 && scalar.value <= 122
+  }
+
+  func identifierStyle(of name: String) -> IdentifierStyle {
+    guard !name.isEmpty else { return .invalid }
+    for char in name {
+      if char == "_" { continue }
+      if isASCIILowercase(char) { return .value }
+      if isASCIIUppercase(char) { return .type }
+      return .invalid
+    }
+    return .underscoreOnly
+  }
+
+  func canStartTypeSyntax() -> Bool {
+    switch currentToken {
+    case .selfTypeKeyword, .leftBracket, .refKeyword, .ptrKeyword, .weakrefKeyword, .mutKeyword:
+      return true
+    case .identifier:
+      return true
+    default:
+      return false
+    }
+  }
+
   func isValidVariableName(_ name: String) -> Bool {
-    guard let first = name.first else { return false }
-    // Allow names starting with lowercase letter or underscore
-    return first.isLowercase || first == "_"
+    switch identifierStyle(of: name) {
+    case .value, .underscoreOnly:
+      return true
+    case .type, .invalid:
+      return false
+    }
   }
 
   func isValidTypeName(_ name: String) -> Bool {
-    guard let first = name.first else { return false }
-    return first.isUppercase
+    identifierStyle(of: name) == .type
   }
 }

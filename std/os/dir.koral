@@ -14,23 +14,23 @@ foreign type CDirHandle {}
 foreign type CDirEntry {}
 
 // Directory I/O
-foreign let __koral_opendir(path UInt8 ptr) CDirHandle ptr
-foreign let __koral_readdir(dir CDirHandle ptr) CDirEntry ptr
-foreign let __koral_closedir(dir CDirHandle ptr) Int32
-foreign let __koral_dirent_name(entry CDirEntry ptr) UInt8 ptr
-foreign let __koral_dirent_type(entry CDirEntry ptr) Int32
+foreign let __koral_opendir(path ptr UInt8) ptr CDirHandle
+foreign let __koral_readdir(dir ptr CDirHandle) ptr CDirEntry
+foreign let __koral_closedir(dir ptr CDirHandle) Int32
+foreign let __koral_dirent_name(entry ptr CDirEntry) ptr UInt8
+foreign let __koral_dirent_type(entry ptr CDirEntry) Int32
 
 // Directory manipulation
-foreign let __koral_mkdir(path UInt8 ptr, mode UInt32) Int32
-foreign let __koral_rmdir(path UInt8 ptr) Int32
-foreign let __koral_mkdtemp(template UInt8 ptr) UInt8 ptr
+foreign let __koral_mkdir(path ptr UInt8, mode UInt32) Int32
+foreign let __koral_rmdir(path ptr UInt8) Int32
+foreign let __koral_mkdtemp(template ptr UInt8) ptr UInt8
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
 /// Convert a dirent type code to FileType
-private let dir_entry_type(entry CDirEntry ptr) FileType = {
+private let dir_entry_type(entry ptr CDirEntry) FileType = {
     let t = __koral_dirent_type(entry)
     when t in {
         0 then {
@@ -76,7 +76,7 @@ given DirEntry {
     public is_symlink(self ref) Bool = self._file_type.is_symlink()
 
     /// Get full file metadata (triggers stat system call)
-    public info(self ref) [FileInfo]Result = file_info(self._path)
+    public info(self ref) Result[FileInfo] = file_info(self._path)
 
 }
 
@@ -93,7 +93,7 @@ given DirEntry as ToString {
     }
 }
 
-private type DirIteratorStorage(handle CDirHandle ptr, base Path)
+private type DirIteratorStorage(handle ptr CDirHandle, base Path)
 
 given DirIteratorStorage as Drop {
 
@@ -101,24 +101,24 @@ given DirIteratorStorage as Drop {
         if ref_is_borrow(self) then {
             return
         }
-        if self.handle <> [CDirHandle]null_ptr() then {
+        if self.handle <> null_ptr[CDirHandle]() then {
             __koral_closedir(self.handle)
         }
     }
 }
 
-public type DirIterator(protected storage DirIteratorStorage mut ref)
+public type DirIterator(protected storage mut ref DirIteratorStorage)
 
-private type WalkDirStorage(mut stack [DirIterator]List)
+private type WalkDirStorage(mut stack List[DirIterator])
 
-public type WalkDirIterator(protected mut storage WalkDirStorage mut ref)
+public type WalkDirIterator(protected mut storage mut ref WalkDirStorage)
 
-given DirIterator as [DirEntry]Iterator {
+given DirIterator as Iterator[DirEntry] {
 
-    public next(self mut ref) [DirEntry]Option = {
+    public next(self mut ref) Option[DirEntry] = {
         let entry = __koral_readdir(self.storage.handle)
-        if entry == [CDirEntry]null_ptr() then {
-            return [DirEntry]Option.None()
+        if entry == null_ptr[CDirEntry]() then {
+            return Option[DirEntry].None()
         }
 
         let name = String.from_cstring_unchecked(__koral_dirent_name(entry))
@@ -128,17 +128,17 @@ given DirIterator as [DirEntry]Iterator {
 
         let full_path = self.storage.base.join(name)
         let ft = dir_entry_type(entry)
-        return [DirEntry]Option.Some(DirEntry(name, full_path, ft))
+        return Option[DirEntry].Some(DirEntry(name, full_path, ft))
     }
 }
 
-given WalkDirIterator as [DirEntry]Iterator {
+given WalkDirIterator as Iterator[DirEntry] {
 
-    public next(self mut ref) [DirEntry]Option = {
+    public next(self mut ref) Option[DirEntry] = {
         while true then {
             let top_opt = self.storage.stack.pop()
             if top_opt is .None then {
-                return [DirEntry]Option.None()
+                return Option[DirEntry].None()
             }
 
             let mut top = top_opt.unwrap()
@@ -153,7 +153,7 @@ given WalkDirIterator as [DirEntry]Iterator {
                             .Error(_) then {},
                         }
                     }
-                    return [DirEntry]Option.Some(entry)
+                    return Option[DirEntry].Some(entry)
                 },
                 .None then {
                     // Current iterator is exhausted. Not pushing it back ensures
@@ -162,7 +162,7 @@ given WalkDirIterator as [DirEntry]Iterator {
                 },
             }
         }
-        return [DirEntry]Option.None()
+        return Option[DirEntry].None()
     }
 }
 
@@ -172,19 +172,19 @@ given WalkDirIterator as [DirEntry]Iterator {
 // ============================================================================
 
 /// Create single directory (parent must exist)
-public let [T IntoPath]create_dir(path T) [Void]Result = {
+public let create_dir[T IntoPath](path T) Result[Void] = {
     let s = path.into_path().to_string()
     return if __koral_mkdir(s.storage.data, 493) == 0 then
-        [Void]Result.Ok({})
+        Result[Void].Ok({})
     else
-        [Void]Result.Error(box(last_error_message()))
+        Result[Void].Error(box(last_error_message()))
 }
 
 /// Create directory recursively (creates all missing parent directories)
-public let [T IntoPath]create_dir_all(path T) [Void]Result = {
+public let create_dir_all[T IntoPath](path T) Result[Void] = {
     let mut normalized = path.into_path().to_string().replace_all("\\", with: "/")
     if normalized.is_empty() then {
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     // Keep root and drive-root forms intact while trimming trailing separators.
@@ -196,7 +196,7 @@ public let [T IntoPath]create_dir_all(path T) [Void]Result = {
 
     let target = normalized.into_path()
     if path_exist(target) then {
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     let mut current = String.new()
@@ -252,30 +252,30 @@ public let [T IntoPath]create_dir_all(path T) [Void]Result = {
             if __koral_mkdir(current.storage.data, 493) <> 0 then {
                 // Another process/thread may have created the directory concurrently.
                 if not path_exist(current_path) then {
-                    return [Void]Result.Error(box(last_error_message()))
+                    return Result[Void].Error(box(last_error_message()))
                 }
             }
         }
     }
 
-    return [Void]Result.Ok({})
+    return Result[Void].Ok({})
 }
 
 /// Remove empty directory
-public let [T IntoPath]remove_dir(path T) [Void]Result = {
+public let remove_dir[T IntoPath](path T) Result[Void] = {
     let s = path.into_path().to_string()
     return if __koral_rmdir(s.storage.data) == 0 then
-        [Void]Result.Ok({})
+        Result[Void].Ok({})
     else
-        [Void]Result.Error(box(last_error_message()))
+        Result[Void].Error(box(last_error_message()))
 }
 
 /// Remove directory recursively (removes all contents first)
-public let [T IntoPath]remove_dir_all(path T) [Void]Result = {
+public let remove_dir_all[T IntoPath](path T) Result[Void] = {
     let p = path.into_path()
-    let mut dirs = [Path]List.new()
+    let mut dirs = List[Path].new()
     let mut entries = walk_dir(p) or else {
-        return [Void]Result.Error(it)
+        return Result[Void].Error(it)
     }
 
     while entries.next() is .Some(entry) then {
@@ -284,14 +284,14 @@ public let [T IntoPath]remove_dir_all(path T) [Void]Result = {
             dirs.push(full_path)
         } else {
             if __koral_remove(full_path.to_string().storage.data) <> 0 then {
-                return [Void]Result.Error(box(last_error_message()))
+                return Result[Void].Error(box(last_error_message()))
             }
         }
     }
 
     while dirs.pop() is .Some(dir_path) then {
         if __koral_rmdir(dir_path.to_string().storage.data) <> 0 then {
-            return [Void]Result.Error(box(last_error_message()))
+            return Result[Void].Error(box(last_error_message()))
         }
     }
 
@@ -301,27 +301,27 @@ public let [T IntoPath]remove_dir_all(path T) [Void]Result = {
 
 /// Open a directory iterator.
 /// Handle is released in iterator drop logic.
-public let [T IntoPath]read_dir(path T) [DirIterator]Result = {
+public let read_dir[T IntoPath](path T) Result[DirIterator] = {
     let p = path.into_path()
     let s = p.to_string()
     let dir = __koral_opendir(s.storage.data)
-    if dir == [CDirHandle]null_ptr() then {
-        return [DirIterator]Result.Error(box(last_error_message()))
+    if dir == null_ptr[CDirHandle]() then {
+        return Result[DirIterator].Error(box(last_error_message()))
     }
 
-    return [DirIterator]Result.Ok(DirIterator(box(DirIteratorStorage(dir, p))))
+    return Result[DirIterator].Ok(DirIterator(box(DirIteratorStorage(dir, p))))
 }
 
 /// Recursively walk a directory tree (depth-first).
 /// Returned entries include both files and directories under `path`.
 /// The root path itself is not yielded.
-public let [T IntoPath]walk_dir(path T) [WalkDirIterator]Result = {
-    let mut stack = [DirIterator]List.new()
+public let walk_dir[T IntoPath](path T) Result[WalkDirIterator] = {
+    let mut stack = List[DirIterator].new()
     let root_iter = read_dir(path) or else {
-        return [WalkDirIterator]Result.Error(it)
+        return Result[WalkDirIterator].Error(it)
     }
     stack.push(root_iter)
-    return [WalkDirIterator]Result.Ok(WalkDirIterator(box(WalkDirStorage(stack))))
+    return Result[WalkDirIterator].Ok(WalkDirIterator(box(WalkDirStorage(stack))))
 }
 
 
@@ -332,7 +332,7 @@ public let [T IntoPath]walk_dir(path T) [WalkDirIterator]Result = {
 /// Create a temporary directory.
 /// When dir is empty path, uses the system temp directory.
 /// Returns the full path of the created temporary directory.
-public let [T IntoPath]create_temp_dir(dir T, prefix: String) [Path]Result = {
+public let create_temp_dir[T IntoPath](dir T, prefix: String) Result[Path] = {
     let dir_path = dir.into_path()
     let base = if dir_path.is_empty() then temp_dir() else dir_path
     let base_str = base.to_string()
@@ -345,8 +345,8 @@ public let [T IntoPath]create_temp_dir(dir T, prefix: String) [Path]Result = {
     template.push_string("XXXXXX")
     // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
     let result = __koral_mkdtemp(template.storage.data)
-    if result == [UInt8]null_ptr() then {
-        return [Path]Result.Error(box(last_error_message()))
+    if result == null_ptr[UInt8]() then {
+        return Result[Path].Error(box(last_error_message()))
     }
-    return [Path]Result.Ok(String.from_cstring_unchecked(result).into_path())
+    return Result[Path].Ok(String.from_cstring_unchecked(result).into_path())
 }

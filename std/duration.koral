@@ -12,9 +12,9 @@ given Duration {
 
     /// 从秒和纳秒构造 Duration。
     /// 要求 nanoseconds >= 0，且会归一化到 [0, 1_000_000_000) 区间。
-    public new(seconds: Int64, nanoseconds: Int64) [Duration]Result = {
+    public new(seconds: Int64, nanoseconds: Int64) Result[Duration] = {
         if nanoseconds < 0 then {
-            return [Duration]Result.Error(box("Duration.new: nanoseconds must be >= 0"))
+            return Result[Duration].Error(box("Duration.new: nanoseconds must be >= 0"))
         }
 
         let mut out_secs = seconds
@@ -24,13 +24,13 @@ given Duration {
             let extra_secs = out_nanos / 1_000_000_000
             let new_secs = out_secs + extra_secs
             if extra_secs > 0 and new_secs < out_secs then {
-                return [Duration]Result.Error(box("Duration.new: seconds overflow"))
+                return Result[Duration].Error(box("Duration.new: seconds overflow"))
             }
             out_secs = new_secs
             out_nanos = out_nanos % 1_000_000_000
         }
 
-        return [Duration]Result.Ok(Duration(out_secs, out_nanos))
+        return Result[Duration].Ok(Duration(out_secs, out_nanos))
     }
 
     // ============ 转换方法 ============
@@ -61,8 +61,8 @@ given Duration {
 
     /// 比率（Duration / Duration -> Float64）
     public ratio(self, other Duration) Float64 = {
-        let a Float64 = (Float64)self.as_nanoseconds()
-        let b Float64 = (Float64)other.as_nanoseconds()
+        let a Float64 = self.as_nanoseconds()(Float64)
+        let b Float64 = other.as_nanoseconds()(Float64)
         return a / b
     }
 }
@@ -103,7 +103,7 @@ foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
 
 // FFI 函数声明
 // Runtime 提供 __koral_nanosleep，避免与系统 nanosleep 冲突
-foreign let __koral_nanosleep(req KoralTimespec ptr, rem KoralTimespec ptr) Int32
+foreign let __koral_nanosleep(req ptr KoralTimespec, rem ptr KoralTimespec) Int32
 
 /// 休眠指定时间
 public let sleep(d Duration) Void = {
@@ -120,5 +120,5 @@ public let sleep(d Duration) Void = {
     }
 
     let ts = KoralTimespec(secs, nanos)
-    let _ = __koral_nanosleep(ts.ptr, [KoralTimespec]null_ptr())
+    let _ = __koral_nanosleep(ts.ptr, null_ptr[KoralTimespec]())
 }

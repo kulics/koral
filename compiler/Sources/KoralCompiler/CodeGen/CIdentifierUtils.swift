@@ -5,6 +5,13 @@
 
 import Foundation
 
+private func isASCIIUppercaseLetter(_ char: Character) -> Bool {
+    guard char.unicodeScalars.count == 1, let scalar = char.unicodeScalars.first else {
+        return false
+    }
+    return scalar.value >= 65 && scalar.value <= 90
+}
+
 // MARK: - C Keyword Set
 
 /// C 语言关键字集合，包含 C89/C99/C11/C23 标准关键字和常见扩展
@@ -64,7 +71,7 @@ public func escapeCKeyword(_ name: String) -> String {
         let secondIndex = name.index(after: name.startIndex)
         if secondIndex < name.endIndex {
             let secondChar = name[secondIndex]
-            if secondChar.isUppercase || secondChar == "_" {
+            if isASCIIUppercaseLetter(secondChar) || secondChar == "_" {
                 return cEscapePrefix + name
             }
         }

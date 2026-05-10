@@ -59,18 +59,18 @@
 // Let Declarations (Variables and Functions)
 // ============================================================================
 
-<let-decl> ::= "let" <generic-params>? <identifier> <function-signature> "=" <expression> ";"?
+<let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"?
              | "let" "mut"? <identifier> <type-annotation>? "=" <expression> ";"?
-             | "let" <generic-params>? <identifier> <function-signature> ";"?  // intrinsic function
+             | "let" <identifier> <generic-params>? <function-signature> ";"?  // intrinsic function
 // 说明：出现 mut 时必须是变量声明（不可接函数参数列表）
 
 <foreign-let-decl> ::= "let" "mut"? <identifier> <type-annotation> ";"?
-                     | "let" <identifier> <function-signature> <type-annotation>? ";"?
+                     | "let" <identifier> "(" <func-param-list>? ")" <type-annotation> ";"?
 // 说明：
 // 1) foreign 变量声明必须有类型（支持 mut）
 // 2) foreign 函数不允许函数体，不支持泛型
 
-<function-signature> ::= "(" <func-param-list>? ")" <type-annotation>?
+<function-signature> ::= "(" <func-param-list>? ")" <type-annotation>
 <func-param-list> ::= <func-param> ("," <func-param>)* ","?
 <func-param> ::= "mut"? <identifier> ":" <type-annotation>    // named parameter
                | "mut"? <identifier> <type-annotation>          // positional parameter
@@ -89,10 +89,10 @@
 // Type Declarations
 // ============================================================================
 
-<type-decl> ::= "type" <generic-params>? <type-identifier> <type-body>
-              | "type" <generic-params>? <type-identifier>            // intrinsic type (no body)
+<type-decl> ::= "type" <type-identifier> <generic-params>? <type-body>
+              | "type" <type-identifier> <generic-params>?            // intrinsic type (no body)
               | "type" <type-identifier> "=" <type>                   // type alias
-// 说明：类型别名不支持泛型参数，但目标类型可以是泛型实例化类型（如 [Int]List）
+// 说明：类型别名不支持泛型参数，但目标类型可以是泛型实例化类型（如 List[Int]）
 // 类型别名在语义检查阶段被完全消除，后续阶段无需感知其存在
 <type-body> ::= "(" <field-list>? ")"                 // struct
               | "{" <variant-list>? "}"                // enum (sum type)
@@ -119,9 +119,9 @@
 // Trait Declarations
 // ============================================================================
 
-<trait-decl> ::= "trait" <generic-params>? <type-identifier> <trait-parents>? "{" <trait-member>* "}"
+<trait-decl> ::= "trait" <type-identifier> <generic-params>? <trait-parents>? "{" <trait-member>* "}"
 <trait-parents> ::= <type> ("and" <type>)*
-<trait-member> ::= <access-modifier>? <generic-params>? <identifier> "(" <method-param-list>? ")" <type-annotation>? ";"?
+<trait-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"?
 // 说明：trait method 支持泛型参数，但不支持方法体
 
 // ============================================================================
@@ -129,8 +129,8 @@
 // ============================================================================
 
 <given-decl> ::= "given" <generic-params>? <type> ("as" <type>)? "{" <given-member>* "}"
-<given-member> ::= <access-modifier>? <generic-params>? <identifier> "(" <method-param-list>? ")" <type-annotation>? "=" <expression> ";"?
-                 | <access-modifier>? <generic-params>? <identifier> "(" <method-param-list>? ")" <type-annotation>? ";"?  // intrinsic given method
+<given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> "=" <expression> ";"?
+                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"?  // intrinsic given method
 // 说明：
 // 1) `given Type { ... }` 为类型固有实现
 // 2) `given Type as Trait { ... }` 为 trait 实现
@@ -147,32 +147,34 @@
                      | <generic-type>
 // 说明：当前 parser 约束里支持两类：
 // 1) 简单 trait 名（如 Any, Equatable）
-// 2) 以 '[' 开头的泛型 trait（如 [T]Iterator）
+// 2) 泛型 trait（如 Iterator[T]）
 
 // ============================================================================
 // Types
 // ============================================================================
 
-<type> ::= <type-identifier> <type-suffix>*
-         | <generic-type> <type-suffix>*
-         | <function-type> <type-suffix>*
-         | <module-qualified-type> <type-suffix>*
-         | <module-qualified-generic-type> <type-suffix>*
-         | "Self" <type-suffix>*
+<type> ::= <type-prefix>* <type-atom>
+
+<type-atom> ::= <type-identifier>
+              | <generic-type>
+              | <function-type>
+              | <module-qualified-type>
+              | <module-qualified-generic-type>
+              | "Self"
+
+<type-prefix> ::= "ref" | "mut" "ref" | "ptr" | "mut" "ptr" | "weakref" | "mut" "weakref"
 
 <module-qualified-type> ::= <identifier> "." <type-identifier>
-<module-qualified-generic-type> ::= <identifier> "." <generic-type>
+<module-qualified-generic-type> ::= <identifier> "." <type-identifier> "[" <type-list> "]"
 
-<type-suffix> ::= "ref" | "mut" "ref" | "ptr" | "mut" "ptr" | "weakref" | "mut" "weakref"
-
-<generic-type> ::= "[" <type-list> "]" <type-identifier>
-<function-type> ::= "[" <type-list> "]" "Func"
-// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
+<generic-type> ::= <type-identifier> "[" <type-list> "]"
+<function-type> ::= "Func" "[" <type-list> "]"
+// Function type: Func[ParamType1, ParamType2, ..., ReturnType]
 // The last type is the return type, all others are parameter types
 // Examples:
-//   [Int]Func           - () -> Int (no params, returns Int)
-//   [Int, Int]Func      - (Int) -> Int (one param, returns Int)
-//   [Int, Int, Int]Func - (Int, Int) -> Int (two params, returns Int)
+//   Func[Int]           - () -> Int (no params, returns Int)
+//   Func[Int, Int]      - (Int) -> Int (one param, returns Int)
+//   Func[Int, Int, Int] - (Int, Int) -> Int (two params, returns Int)
 
 <type-list> ::= <type> ("," <type>)* ","?
 
@@ -291,11 +293,9 @@
 // Prefix Expressions
 // ============================================================================
 
-<prefix-expression> ::= <cast-expression>
+<prefix-expression> ::= "-" <prefix-expression>
                       | "~" <prefix-expression>
                       | <postfix-expression>
-
-<cast-expression> ::= "(" <type> ")" <prefix-expression>
 
 // ============================================================================
 // Postfix Expressions
@@ -306,21 +306,23 @@
                    | <subscript-suffix>
                    | <member-suffix>
                    | <storage-modifier-suffix>
+                   | <cast-suffix>
                    | <qualified-method-suffix>
                    | <generic-method-suffix>
 
 <call-suffix> ::= "(" <argument-list>? ")"
 <subscript-suffix> ::= "[" <expression-list> "]"
 <member-suffix> ::= "." <identifier>
-<storage-modifier-suffix> ::= "." ("ref" | "ptr" | "val")
+<storage-modifier-suffix> ::= "." ("ref" | "ptr" | "val" | "weakref")
+<cast-suffix> ::= "(" <type> ")"
 
 // 限定方法调用：消歧义，指定 trait。可选地附带方法级泛型参数。
-// 例: n.(Tag)plus_ten()  /  b.(Tag)[Int]transform(f)
-<qualified-method-suffix> ::= "." "(" <type-identifier> ")" ("[" <type-list> "]")? <identifier> "(" <argument-list>? ")"
+// 例: n.(Tag)plus_ten()  /  b.(Tag)transform[Int](f)
+<qualified-method-suffix> ::= "." "(" <type-identifier> ")" <identifier> ("[" <type-list> "]")? "(" <argument-list>? ")"
 
 // 泛型方法调用：方法级泛型参数，不指定 trait。
-// 例: b.[Int]transform(f)
-<generic-method-suffix> ::= "." "[" <type-list> "]" <identifier> "(" <argument-list>? ")"
+// 例: b.transform[Int](f)
+<generic-method-suffix> ::= "." <identifier> "[" <type-list> "]" "(" <argument-list>? ")"
 
 <argument> ::= <identifier> ":" <expression>    // named argument
              | <expression>                      // positional argument
@@ -334,8 +336,8 @@
 <primary-expression> ::= <literal>
                        | <identifier>
                        | "self"
+                       | "it"
                        | <implicit-member-expression>
-                       | <generic-instantiation>
                        | <collection-literal>
                        | <block-expression>
                        | <lambda-expression>
@@ -344,7 +346,9 @@
 
 <pair-literal> ::= "(" <expression> "," <expression> ")"
 
-<generic-instantiation> ::= "[" <type-list> "]" <identifier>
+// Generic instantiation / explicit generic call is postfix:
+//   Box[Int](42)
+//   make[Int](1)
 
 <collection-literal> ::= "[" "]"
                        | "[" <expression-list> ","? "]"
@@ -409,7 +413,7 @@
 //   Point(_, y)              - ignore first field, bind second
 //   Point(0, y)              - match first field literally, bind second
 //   Rect(Point(a, b), w, h)  - nested struct destructuring
-//   Box(v)                   - works with generic structs (e.g., [Int]Box)
+//   Box(v)                   - works with generic structs (e.g., Box[Int])
 
 <comparison-pattern> ::= <comparison-op> "-"? <integer-literal>
 // Comparison patterns: > n, < n, >= n, <= n (where n is an integer literal, optionally negative)

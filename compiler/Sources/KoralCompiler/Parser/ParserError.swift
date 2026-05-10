@@ -50,6 +50,7 @@ public enum ParserError: Error {
   case unexpectedToken(span: SourceSpan, got: String, expected: String? = nil)
   case expectedIdentifier(span: SourceSpan, got: String)
   case expectedTypeIdentifier(span: SourceSpan, got: String)
+  case missingReturnType(span: SourceSpan)
   case unexpectedEndOfFile(span: SourceSpan)
   case invalidVariableName(span: SourceSpan, name: String)
   case invalidFunctionName(span: SourceSpan, name: String)
@@ -79,6 +80,7 @@ public enum ParserError: Error {
     case .unexpectedToken(let span, _, _): return span
     case .expectedIdentifier(let span, _): return span
     case .expectedTypeIdentifier(let span, _): return span
+    case .missingReturnType(let span): return span
     case .unexpectedEndOfFile(let span): return span
     case .invalidVariableName(let span, _): return span
     case .invalidFunctionName(let span, _): return span
@@ -117,6 +119,8 @@ public enum ParserError: Error {
       return "Expected identifier, got: \(token)"
     case .expectedTypeIdentifier(_, let token):
       return "Expected type identifier, got: \(token)"
+    case .missingReturnType:
+      return "Missing return type: function and method declarations must explicitly declare a return type"
     case .unexpectedEndOfFile:
       return "Unexpected end of file"
     case .invalidVariableName(_, let name):

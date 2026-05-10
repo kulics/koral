@@ -62,8 +62,6 @@ extension Parser {
         mutable = true
       }
 
-      let typePrams = try parseTypeParameters()
-
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
@@ -73,6 +71,8 @@ extension Parser {
       }
 
       try match(.identifier(name))
+
+      let typePrams = try parseTypeParameters()
 
       if isForeign && !typePrams.isEmpty {
         throw ParserError.foreignFunctionNoGenerics(span: currentSpan)
@@ -122,8 +122,6 @@ extension Parser {
         try match(.string(cnameValue))
       }
 
-      let typeParams = try parseTypeParameters()
-
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
@@ -133,6 +131,8 @@ extension Parser {
       }
 
       try match(.identifier(name))
+
+      let typeParams = try parseTypeParameters()
 
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
@@ -184,9 +184,6 @@ extension Parser {
   private func parseTraitDeclaration(access: AccessModifier, span: SourceSpan) throws -> GlobalNode {
     try match(.traitKeyword)
 
-    // Parse optional type parameters for generic traits: [T Any]Iterator
-    let typeParams = try parseTypeParameters()
-
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
     }
@@ -195,6 +192,9 @@ extension Parser {
       throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
     try match(.identifier(name))
+
+    // Parse optional postfix type parameters for generic traits: Iterator[T Any]
+    let typeParams = try parseTypeParameters()
 
     // Optional inheritance list: trait Child ParentA and ParentB { ... }
     var superTraits: [TypeNode] = []
@@ -217,12 +217,13 @@ extension Parser {
     var methods: [TraitMethodSignature] = []
     while currentToken !== .rightBrace {
       let methodAccess = try parseAccessModifier(default: .public)
-      let methodTypeParams = try parseTypeParameters()
 
       guard case .identifier(let methodName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(methodName))
+
+      let methodTypeParams = try parseTypeParameters()
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -311,12 +312,12 @@ extension Parser {
       // For simplicity, skip specific 'intrinsic' keyword check on methods since the whole block is intrinsic.
       // But verify no body.
 
-      let methodTypeParams = try parseTypeParameters()
-
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
+
+      let methodTypeParams = try parseTypeParameters()
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -408,12 +409,12 @@ extension Parser {
     while currentToken !== .rightBrace {
       let methodAccess = try parseAccessModifier(default: .protected)
 
-      let typeParams = try parseTypeParameters()
-
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
       try match(.identifier(name))
+
+      let typeParams = try parseTypeParameters()
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -450,10 +451,10 @@ extension Parser {
       }
       try match(.rightParen)
 
-      var returnType: TypeNode = .identifier("Void")
-      if currentToken !== .equal {
-        returnType = try parseType()
+      if currentToken === .equal {
+        throw ParserError.missingReturnType(span: currentSpan)
       }
+      let returnType = try parseType()
 
       try match(.equal)
       let body = try expression()
@@ -551,9 +552,8 @@ extension Parser {
   }
 
   private func parseTraitConstraint() throws -> TypeNode {
-    // Support both simple identifiers (e.g., Any, Equatable) and generic types (e.g., [T]Iterator)
-    if currentToken === .leftBracket {
-      // Generic type constraint like [T]Iterator
+    // Trait constraints now share the full type surface, including postfix generics.
+    if canStartTypeSyntax() {
       return try parseType()
     }
     guard case .identifier(let name) = currentToken else {
@@ -599,10 +599,10 @@ extension Parser {
     }
     try match(.rightParen)
 
-    var returnType: TypeNode = .identifier("Void")
-    if currentToken !== .equal {
-      returnType = try parseType()
+    if currentToken === .equal {
+      throw ParserError.missingReturnType(span: currentSpan)
     }
+    let returnType = try parseType()
 
     if isIntrinsic {
       if currentToken === .equal {
@@ -669,10 +669,10 @@ extension Parser {
       }
     }
 
-    var returnType: TypeNode = .identifier("Void")
-    if currentToken !== .semicolon && !shouldTerminateStatement() {
-      returnType = try parseType()
+    if currentToken === .semicolon || shouldTerminateStatement() {
+      throw ParserError.missingReturnType(span: currentSpan)
     }
+    let returnType = try parseType()
 
     if currentToken === .equal {
       throw ParserError.foreignFunctionNoBody(span: currentSpan)
@@ -940,7 +940,7 @@ extension Parser {
       let alias = try parseUsingAliasIfPresent()
       
       // Validate: alias must start with uppercase
-      if let alias, let first = alias.first, !first.isUppercase {
+      if let alias, !isValidTypeName(alias) {
         throw ParserError.invalidUsingAliasCase(
           span: startSpan,
           alias: alias,
@@ -1122,11 +1122,11 @@ extension Parser {
       }
     }()
 
-    guard let referencedIdentifier, let referencedFirst = referencedIdentifier.first, let aliasFirst = alias.first else {
+    guard let referencedIdentifier else {
       return
     }
 
-    if referencedFirst.isUppercase && !aliasFirst.isUppercase {
+    if isValidTypeName(referencedIdentifier) && !isValidTypeName(alias) {
       throw ParserError.invalidUsingAliasCase(
         span: span,
         alias: alias,
@@ -1135,7 +1135,7 @@ extension Parser {
       )
     }
 
-    if referencedFirst.isLowercase && !aliasFirst.isLowercase {
+    if isValidVariableName(referencedIdentifier) && !isValidVariableName(alias) {
       throw ParserError.invalidUsingAliasCase(
         span: span,
         alias: alias,

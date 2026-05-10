@@ -54,7 +54,13 @@ given Printer {
     private print_type(self mut ref, t CstType) Void = when t in {
         .Named(name) then self.write_token(name),
         .SelfType(kw) then self.write_token(kw),
+        .Mut(inner, kw) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_type(inner.val)
+        },
         .Generic(lb, args, rb, base) then {
+            self.write_token(base)
             self.write_token(lb)
             let mut i UInt = 0
             while i < args.count() then {
@@ -64,22 +70,21 @@ given Printer {
                 i += 1
             }
             self.write_token(rb)
-            self.write_token(base)
         },
         .Ref(inner, kw) then {
-            self.print_type(inner.val)
-            self.write_space()
             self.write_token(kw)
+            self.write_space()
+            self.print_type(inner.val)
         },
         .Ptr(inner, kw) then {
-            self.print_type(inner.val)
-            self.write_space()
             self.write_token(kw)
+            self.write_space()
+            self.print_type(inner.val)
         },
         .Weakref(inner, kw) then {
-            self.print_type(inner.val)
-            self.write_space()
             self.write_token(kw)
+            self.write_space()
+            self.print_type(inner.val)
         },
     }
 
@@ -235,10 +240,10 @@ given Printer {
             self.print_expr(operand.val)
         },
         .TypeCast(lp, cast_type, rp, operand) then {
+            self.print_expr(operand.val)
             self.write_token(lp)
             self.print_type(cast_type.val)
             self.write_token(rp)
-            self.print_expr(operand.val)
         },
         .Paren(lp, inner, rp) then {
             let mut core_ref = inner
@@ -267,7 +272,8 @@ given Printer {
             self.print_call_args(args)
             self.write_token(rb)
         },
-        .GenericInst(lb, type_args, rb, name) then {
+        .GenericInst(base, lb, type_args, rb) then {
+            self.print_expr(base.val)
             self.write_token(lb)
             let mut i UInt = 0
             while i < type_args.count() then {
@@ -277,7 +283,6 @@ given Printer {
                 i += 1
             }
             self.write_token(rb)
-            self.write_token(name)
         },
         .ImplicitMember(dot, name, lp, args, rp) then {
             self.write_token(dot)
@@ -426,7 +431,7 @@ given Printer {
         },
     }
 
-    private print_call_args(self mut ref, args [CstCallArg]List) Void = {
+    private print_call_args(self mut ref, args List[CstCallArg]) Void = {
         let mut i UInt = 0
         while i < args.count() then {
             let a = args[i]
@@ -440,7 +445,7 @@ given Printer {
     // Block printing: { items }
     // ========================================================================
 
-    private print_block(self mut ref, lb Token, items [CstItem ref]List, rb Token) Void = {
+    private print_block(self mut ref, lb Token, items List[ref CstItem], rb Token) Void = {
         self.write_token(lb)
         if items.count() == 0 then {
             self.write_token(rb)
@@ -449,7 +454,7 @@ given Printer {
         self.print_block_items_multiline(items, rb)
     }
 
-    private print_block_multiline(self mut ref, lb Token, items [CstItem ref]List, rb Token) Void = {
+    private print_block_multiline(self mut ref, lb Token, items List[ref CstItem], rb Token) Void = {
         self.write_token(lb)
         if items.count() == 0 then {
             self.write_token(rb)
@@ -458,7 +463,7 @@ given Printer {
         self.print_block_items_multiline(items, rb)
     }
 
-    private print_block_items_multiline(self mut ref, items [CstItem ref]List, rb Token) Void = {
+    private print_block_items_multiline(self mut ref, items List[ref CstItem], rb Token) Void = {
         self.write_newline()
         self.indent += 1
         let mut i UInt = 0
@@ -492,7 +497,7 @@ given Printer {
     // ========================================================================
 
     private print_if(self mut ref, kw Token, cond CstExpr, then_kw Token,
-        then_body CstExpr, else_kw [Token]Option, else_body [CstExpr ref]Option
+        then_body CstExpr, else_kw Option[Token], else_body Option[ref CstExpr]
     ) Void = {
         self.write_token(kw)
         self.write_space()
@@ -563,7 +568,7 @@ given Printer {
     // ========================================================================
 
     private print_when(self mut ref, kw Token, subject CstExpr, is_kw Token,
-        lb Token, arms [CstWhenArm ref]List, rb Token
+        lb Token, arms List[ref CstWhenArm], rb Token
     ) Void = {
         self.write_token(kw)
         self.write_space()
@@ -717,17 +722,10 @@ given Printer {
             let mut i UInt = 0
             while i < params.count() then {
                 when params[i] in {
-                    .SelfParam(kw, comma) then {
+                    .SelfParam(kw, mut_kw, ref_kw, comma) then {
                         self.write_token(kw)
-                        if comma is .Some(c) then { 
-                            self.write_token(c)
-                            self.write_space() 
-                        }
-                    },
-                    .SelfRefParam(kw, ref_kw, comma) then {
-                        self.write_token(kw)
-                        self.write_space()
-                        self.write_token(ref_kw)
+                        if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
+                        if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
                         if comma is .Some(c) then { 
                             self.write_token(c)
                             self.write_space() 
@@ -758,11 +756,11 @@ given Printer {
     // ========================================================================
 
     private print_func_decl(self mut ref,
-        vis [Token]Option, mods [Token]List,
-        let_kw [Token]Option, mut_kw [Token]Option,
-        gp [CstGenericParams ref]Option, name [Token]Option,
-        lp [Token]Option, params [CstParam]List, rp [Token]Option,
-        ret [CstType ref]Option, eq Token, body CstExpr
+        vis Option[Token], mods List[Token],
+        let_kw Option[Token], mut_kw Option[Token],
+        gp Option[ref CstGenericParams], name Option[Token],
+        lp Option[Token], params List[CstParam], rp Option[Token],
+        ret Option[ref CstType], eq Token, body CstExpr
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
@@ -828,11 +826,11 @@ given Printer {
     // ========================================================================
 
     private print_foreign_decl(self mut ref,
-        vis [Token]Option, mods [Token]List,
-        let_kw [Token]Option, mut_kw [Token]Option,
-        gp [CstGenericParams ref]Option, name [Token]Option,
-        lp [Token]Option, params [CstParam]List, rp [Token]Option,
-        ret [CstType ref]Option
+        vis Option[Token], mods List[Token],
+        let_kw Option[Token], mut_kw Option[Token],
+        gp Option[ref CstGenericParams], name Option[Token],
+        lp Option[Token], params List[CstParam], rp Option[Token],
+        ret Option[ref CstType]
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
@@ -865,7 +863,7 @@ given Printer {
     // Params printing
     // ========================================================================
 
-    private print_params(self mut ref, params [CstParam]List) Void = {
+    private print_params(self mut ref, params List[CstParam]) Void = {
         let mut i UInt = 0
         while i < params.count() then {
             self.print_param(params[i])
@@ -873,7 +871,7 @@ given Printer {
         }
     }
 
-    private print_params_multiline(self mut ref, params [CstParam]List) Void = {
+    private print_params_multiline(self mut ref, params List[CstParam]) Void = {
         self.write_newline()
         self.indent += 1
         let mut i UInt = 0
@@ -887,8 +885,9 @@ given Printer {
 
     private print_param_multiline(self mut ref, param CstParam) Void = {
         when param in {
-            .SelfParam(kw, ref_kw, _) then {
+            .SelfParam(kw, mut_kw, ref_kw, _) then {
                 self.write_token(kw)
+                if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
                 if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
                 self.write(",")
             },
@@ -904,8 +903,9 @@ given Printer {
 
     private print_param(self mut ref, param CstParam) Void = {
         when param in {
-            .SelfParam(kw, ref_kw, comma) then {
+            .SelfParam(kw, mut_kw, ref_kw, comma) then {
                 self.write_token(kw)
+                if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
                 if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
                 if comma is .Some(c) then { self.write_token(c); self.write_space() }
             },
@@ -924,8 +924,8 @@ given Printer {
     // ========================================================================
 
     private print_type_decl(self mut ref,
-        vis [Token]Option, mods [Token]List, kw Token,
-        gp [CstGenericParams ref]Option, name Token, body CstTypeBody
+        vis Option[Token], mods List[Token], kw Token,
+        gp Option[ref CstGenericParams], name Token, body CstTypeBody
     ) Void = {
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         let mut mi UInt = 0
@@ -994,7 +994,7 @@ given Printer {
         self.write(",")
     }
 
-    private print_enum_body(self mut ref, lb Token, cases [CstItem ref]List, rb Token) Void = {
+    private print_enum_body(self mut ref, lb Token, cases List[ref CstItem], rb Token) Void = {
         self.write_token(lb)
         if cases.count() == 0 then {
             self.write_token(rb)
@@ -1089,9 +1089,9 @@ given Printer {
     // ========================================================================
 
     private print_trait_decl(self mut ref,
-        vis [Token]Option, kw Token, gp [CstGenericParams ref]Option,
-        name Token, supers [CstType ref]List,
-        lb Token, members [CstItem ref]List, rb Token
+        vis Option[Token], kw Token, gp Option[ref CstGenericParams],
+        name Token, supers List[ref CstType],
+        lb Token, members List[ref CstItem], rb Token
     ) Void = {
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         self.write_token(kw)
@@ -1113,10 +1113,10 @@ given Printer {
     // ========================================================================
 
     private print_given_decl(self mut ref,
-        vis [Token]Option, mods [Token]List, kw Token,
-        gp [CstGenericParams ref]Option, target CstType,
-        as_kw [Token]Option, trait_type [CstType ref]Option,
-        lb Token, members [CstItem ref]List, rb Token
+        vis Option[Token], mods List[Token], kw Token,
+        gp Option[ref CstGenericParams], target CstType,
+        as_kw Option[Token], trait_type Option[ref CstType],
+        lb Token, members List[ref CstItem], rb Token
     ) Void = {
         if vis is .Some(v) then { self.write_token(v); self.write_space() }
         let mut mi UInt = 0
@@ -1145,7 +1145,7 @@ given Printer {
     // Member block (shared by trait/given)
     // ========================================================================
 
-    private print_member_block(self mut ref, lb Token, members [CstItem ref]List, rb Token) Void = {
+    private print_member_block(self mut ref, lb Token, members List[ref CstItem], rb Token) Void = {
         self.write_token(lb)
         if members.count() == 0 then {
             self.write_token(rb)
@@ -1210,7 +1210,7 @@ given Printer {
     // File printing (top-level)
     // ========================================================================
 
-    public print_file(self mut ref, items [CstItem ref]List) Void = {
+    public print_file(self mut ref, items List[ref CstItem]) Void = {
         let mut i UInt = 0
         while i < items.count() then {
             let item = items[i].val
@@ -1275,7 +1275,7 @@ given Printer {
         _ then false,
     }
 
-    private previous_non_blank_is_comment(self, items [CstItem ref]List, index UInt) Bool = {
+    private previous_non_blank_is_comment(self, items List[ref CstItem], index UInt) Bool = {
         if index == 0 then { return false }
         let mut i = index
         while i > 0 then {
@@ -1286,7 +1286,7 @@ given Printer {
         return false
     }
 
-    private previous_non_blank_is_simple(self, items [CstItem ref]List, index UInt) Bool = {
+    private previous_non_blank_is_simple(self, items List[ref CstItem], index UInt) Bool = {
         if index == 0 then { return false }
         let mut i = index
         while i > 0 then {
@@ -1298,7 +1298,7 @@ given Printer {
         return false
     }
 
-    private next_non_blank_is_code(self, items [CstItem ref]List, index UInt) Bool = {
+    private next_non_blank_is_code(self, items List[ref CstItem], index UInt) Bool = {
         let mut i = index + 1
         while i < items.count() then {
             if items[i] is .BlankLine() then { i += 1; continue }
@@ -1307,7 +1307,7 @@ given Printer {
         return false
     }
 
-    private next_non_blank_is_simple(self, items [CstItem ref]List, index UInt) Bool = {
+    private next_non_blank_is_simple(self, items List[ref CstItem], index UInt) Bool = {
         let mut i = index + 1
         while i < items.count() then {
             if items[i] is .BlankLine() then { i += 1; continue }
@@ -1317,7 +1317,7 @@ given Printer {
         return false
     }
 
-    private next_is_trailing_comment(self, items [CstItem ref]List, index UInt) Bool = {
+    private next_is_trailing_comment(self, items List[ref CstItem], index UInt) Bool = {
         if index + 1 >= items.count() then { return false }
         return when items[index + 1] in { .TrailingComment(_) then true, _ then false }
     }
@@ -1388,8 +1388,8 @@ given Printer {
             }
             yield len
         },
-        .GenericInst(_, type_args, _, name) then {
-            let mut len = 2 + name.to_string().count()
+        .GenericInst(base, _, type_args, _) then {
+            let mut len = self.estimate_expr_length(base.val) + 2
             let mut i UInt = 0
             while i < type_args.count() then {
                 if i > 0 then { len += 2 }
@@ -1417,8 +1417,9 @@ given Printer {
     private estimate_type_length(self, t CstType) UInt = when t in {
         .Named(name) then name.to_string().count(),
         .SelfType(_) then 4,
+        .Mut(inner, _) then self.estimate_type_length(inner.val) + 4,
         .Generic(_, args, _, base) then {
-            let mut len = 2 + base.to_string().count()
+            let mut len = base.to_string().count() + 2
             let mut i UInt = 0
             while i < args.count() then {
                 if i > 0 then { len += 2 }
@@ -1433,11 +1434,11 @@ given Printer {
     }
 
     private estimate_head_length(self,
-        vis [Token]Option, mods [Token]List,
-        let_kw [Token]Option, mut_kw [Token]Option,
-        gp [CstGenericParams ref]Option, name [Token]Option,
-        lp [Token]Option, params [CstParam]List, rp [Token]Option,
-        ret [CstType ref]Option
+        vis Option[Token], mods List[Token],
+        let_kw Option[Token], mut_kw Option[Token],
+        gp Option[ref CstGenericParams], name Option[Token],
+        lp Option[Token], params List[CstParam], rp Option[Token],
+        ret Option[ref CstType]
     ) UInt = {
         let mut len UInt = 0
         if vis is .Some(v) then { len += v.to_string().count() + 1 }
@@ -1468,8 +1469,9 @@ given Printer {
             let mut pi UInt = 0
             while pi < params.count() then {
                 when params[pi] in {
-                    .SelfParam(_, ref_kw, comma) then {
+                    .SelfParam(_, mut_kw, ref_kw, comma) then {
                         len += 4
+                        if mut_kw is .Some(_) then { len += 4 }
                         if ref_kw is .Some(_) then { len += 4 }
                         if comma is .Some(_) then { len += 2 }
                     },
@@ -1487,9 +1489,9 @@ given Printer {
     }
 
     private estimate_struct_decl_length(self,
-        vis [Token]Option, mods [Token]List, kw Token,
-        gp [CstGenericParams ref]Option, name Token,
-        fields [CstStructField]List
+        vis Option[Token], mods List[Token], kw Token,
+        gp Option[ref CstGenericParams], name Token,
+        fields List[CstStructField]
     ) UInt = {
         let mut len UInt = 0
         if vis is .Some(v) then { len += v.to_string().count() + 1 }
@@ -1596,7 +1598,7 @@ given Printer {
 // Top-level format_source function
 // ============================================================================
 
-public let format_source(source String) [String]Result = {
+public let format_source(source String) Result[String] = {
     let mut tokenizer = Tokenizer.new(source)
     let tokens = tokenizer.tokenize() or return
     let mut parser = CstParser.new(tokens)
@@ -1605,5 +1607,5 @@ public let format_source(source String) [String]Result = {
     printer.print_file(file.items)
     printer.finalize()
     let result = printer.result()
-    return [String]Result.Ok(result)
+    return Result[String].Ok(result)
 }

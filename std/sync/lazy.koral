@@ -11,19 +11,18 @@
 // the cached value.
 // ============================================================================
 
-private type [T Any]LazyStorage(
+private type LazyStorage[T Any](
     state AtomicInt,
     mutex Mutex,
-    func [T]Func,
-    mut value [T]Option,
+    func Func[T],
+    mut value Option[T],
 )
 
-public type [T Any]Lazy(private storage [T]LazyStorage mut ref)
+public type Lazy[T Any](private storage mut ref LazyStorage[T])
 
-given[T Any] [T]Lazy {
-
-    public new(f [T]Func) [T]Lazy =
-        [T]Lazy(box([T]LazyStorage(AtomicInt.new(0), Mutex.new(), f, [T]Option.None())))
+given[T Any] Lazy[T] {
+    public new(f Func[T]) Lazy[T] =
+        Lazy[T](box(LazyStorage[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None())))
 
     public get(self ref) T = {
         if self.storage.state.load() == 1 then {
@@ -33,7 +32,7 @@ given[T Any] [T]Lazy {
         finally self.storage.mutex.unlock()
         if self.storage.state.load() == 0 then {
             let result = self.storage.func()
-            self.storage.value = [T]Option.Some(result)
+            self.storage.value = Option[T].Some(result)
             self.storage.state.store(1)
         }
         return self.storage.value.unwrap()

@@ -17,17 +17,17 @@ foreign let __koral_waitpid(pid UInt32) Int32
 
 /// Wait for child process with full exit information.
 /// Returns 0 on success, non-zero on failure.
-foreign let __koral_waitpid_full(pid UInt32, exit_code Int32 ptr, signal_num Int32 ptr) Int32
+foreign let __koral_waitpid_full(pid UInt32, exit_code ptr Int32, signal_num ptr Int32) Int32
 
 /// Non-blocking check if child process has exited.
 /// Returns >0 if exited, 0 if still running, <0 on error.
-foreign let __koral_try_waitpid(pid UInt32, exit_code Int32 ptr, signal_num Int32 ptr) Int32
+foreign let __koral_try_waitpid(pid UInt32, exit_code ptr Int32, signal_num ptr Int32) Int32
 
 /// Concurrently read all data from stdout and stderr pipes (uses poll/select internally).
 /// Allocates memory for output buffers (caller must free with dealloc_memory).
 foreign let __koral_read_all_pipes(stdout_fd Int32, stderr_fd Int32,
-    out_stdout UInt8 mut ptr mut ptr, out_stdout_len UInt64 ptr,
-    out_stderr UInt8 mut ptr mut ptr, out_stderr_len UInt64 ptr) Int32
+    out_stdout mut ptr mut ptr UInt8, out_stdout_len mut ptr UInt64,
+    out_stderr mut ptr mut ptr UInt8, out_stderr_len mut ptr UInt64) Int32
 
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
@@ -77,7 +77,7 @@ given ProcessStorage as Drop {
 // ============================================================================
 
 /// Child process handle providing wait, pipe access, and lifecycle management.
-public type Process(protected mut storage ProcessStorage mut ref)
+public type Process(protected mut storage mut ref ProcessStorage)
 
 given Process {
 
@@ -85,26 +85,26 @@ given Process {
     public pid(self ref) UInt32 = self.storage.pid
 
     /// Block until the child process exits, returning its exit status.
-    public wait(self ref) [ExitStatus]Result = {
+    public wait(self ref) Result[ExitStatus] = {
         if self.storage.waited then {
-            return [ExitStatus]Result.Error(box("process already waited"))
+            return Result[ExitStatus].Error(box("process already waited"))
         }
         let mut exit_code Int32 = 0
         let mut signal_num Int32 = 0
         let result = __koral_waitpid_full(self.storage.pid, exit_code.ptr, signal_num.ptr)
         if result <> 0 then {
-            return [ExitStatus]Result.Error(box(last_error_message()))
+            return Result[ExitStatus].Error(box(last_error_message()))
         }
         self.storage.waited = true
         return if signal_num > 0 then
-            [ExitStatus]Result.Ok(ExitStatus.from_signal((Int)signal_num))
+            Result[ExitStatus].Ok(ExitStatus.from_signal(signal_num(Int)))
         else
-            [ExitStatus]Result.Ok(ExitStatus.from_code((Int)exit_code))
+            Result[ExitStatus].Ok(ExitStatus.from_code(exit_code(Int)))
     }
 
     /// Wait for the child process to exit and capture all stdout/stderr output.
     /// Uses __koral_read_all_pipes for concurrent reading to avoid pipe deadlock.
-    public wait_output(self ref) [CommandOutput]Result = {
+    public wait_output(self ref) Result[CommandOutput] = {
         // Close un-taken stdin_fd to send EOF to child
         if self.storage.stdin_fd >= 0 then {
             __koral_pipe_close(self.storage.stdin_fd)
@@ -118,9 +118,9 @@ given Process {
         self.storage.stderr_fd = -1
 
         // Read both pipes concurrently via C runtime (uses poll/select internally)
-        let mut out_stdout = [UInt8]null_ptr()
+        let mut out_stdout = null_ptr[UInt8]()
         let mut out_stdout_len UInt64 = 0
-        let mut out_stderr = [UInt8]null_ptr()
+        let mut out_stderr = null_ptr[UInt8]()
         let mut out_stderr_len UInt64 = 0
 
         finally {
@@ -132,10 +132,10 @@ given Process {
             }
         }
         finally {
-            if out_stdout <> [UInt8]null_ptr() then {
+            if out_stdout <> null_ptr[UInt8]() then {
                 dealloc_memory(out_stdout)
             }
-            if out_stderr <> [UInt8]null_ptr() then {
+            if out_stderr <> null_ptr[UInt8]() then {
                 dealloc_memory(out_stderr)
             }
         }
@@ -147,85 +147,85 @@ given Process {
         )
 
         if read_result <> 0 then {
-            return [CommandOutput]Result.Error(box(last_error_message()))
+            return Result[CommandOutput].Error(box(last_error_message()))
         }
 
         let stdout_content = if out_stdout_len > 0 then {
-            let s = String.from_utf8_ptr_unchecked(out_stdout, (UInt)out_stdout_len)
-            out_stdout = [UInt8]null_ptr()
+            let s = String.from_utf8_ptr_unchecked(out_stdout, out_stdout_len(UInt))
+            out_stdout = null_ptr[UInt8]()
             yield s
         } else {
-            out_stdout = [UInt8]null_ptr()
+            out_stdout = null_ptr[UInt8]()
             yield String.new()
         }
         let stderr_content = if out_stderr_len > 0 then {
-            let s = String.from_utf8_ptr_unchecked(out_stderr, (UInt)out_stderr_len)
-            out_stderr = [UInt8]null_ptr()
+            let s = String.from_utf8_ptr_unchecked(out_stderr, out_stderr_len(UInt))
+            out_stderr = null_ptr[UInt8]()
             yield s
         } else {
-            out_stderr = [UInt8]null_ptr()
+            out_stderr = null_ptr[UInt8]()
             yield String.new()
         }
 
         return when self.wait() in {
-            .Ok(status) then [CommandOutput]Result.Ok(
+            .Ok(status) then Result[CommandOutput].Ok(
                 CommandOutput(status, stdout_content, stderr_content)
             ),
-            .Error(e) then [CommandOutput]Result.Error(e),
+            .Error(e) then Result[CommandOutput].Error(e),
         }
     }
 
     /// Non-blocking check if the child process has exited.
     /// Returns Ok(Some(status)) if exited, Ok(None) if still running, Error on system error.
-    public try_wait(self ref) [[ExitStatus]Option]Result = {
+    public try_wait(self ref) Result[Option[ExitStatus]] = {
         let mut exit_code Int32 = 0
         let mut signal_num Int32 = 0
         let result = __koral_try_waitpid(self.storage.pid, exit_code.ptr, signal_num.ptr)
         if result < 0 then {
-            return [[ExitStatus]Option]Result.Error(box(last_error_message()))
+            return Result[Option[ExitStatus]].Error(box(last_error_message()))
         }
         if result == 0 then {
-            return [[ExitStatus]Option]Result.Ok([ExitStatus]Option.None())
+            return Result[Option[ExitStatus]].Ok(Option[ExitStatus].None())
         }
         self.storage.waited = true
         let status = if signal_num > 0 then {
-            yield ExitStatus.from_signal((Int)signal_num)
+            yield ExitStatus.from_signal(signal_num(Int))
         } else {
-            yield ExitStatus.from_code((Int)exit_code)
+            yield ExitStatus.from_code(exit_code(Int))
         }
-        return [[ExitStatus]Option]Result.Ok([ExitStatus]Option.Some(status))
+        return Result[Option[ExitStatus]].Ok(Option[ExitStatus].Some(status))
     }
 
     /// Take ownership of the stdin pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).
-    public take_stdin_pipe(self ref) [StdinPipe]Option = {
+    public take_stdin_pipe(self ref) Option[StdinPipe] = {
         if self.storage.stdin_fd < 0 then {
-            return [StdinPipe]Option.None()
+            return Option[StdinPipe].None()
         }
         let fd = self.storage.stdin_fd
         self.storage.stdin_fd = -1
-        return [StdinPipe]Option.Some(StdinPipe(box(PipeStorage(fd))))
+        return Option[StdinPipe].Some(StdinPipe(box(PipeStorage(fd))))
     }
 
     /// Take ownership of the stdout pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).
-    public take_stdout_pipe(self ref) [StdoutPipe]Option = {
+    public take_stdout_pipe(self ref) Option[StdoutPipe] = {
         if self.storage.stdout_fd < 0 then {
-            return [StdoutPipe]Option.None()
+            return Option[StdoutPipe].None()
         }
         let fd = self.storage.stdout_fd
         self.storage.stdout_fd = -1
-        return [StdoutPipe]Option.Some(StdoutPipe(box(PipeStorage(fd))))
+        return Option[StdoutPipe].Some(StdoutPipe(box(PipeStorage(fd))))
     }
 
     /// Take ownership of the stderr pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).
-    public take_stderr_pipe(self ref) [StderrPipe]Option = {
+    public take_stderr_pipe(self ref) Option[StderrPipe] = {
         if self.storage.stderr_fd < 0 then {
-            return [StderrPipe]Option.None()
+            return Option[StderrPipe].None()
         }
         let fd = self.storage.stderr_fd
         self.storage.stderr_fd = -1
-        return [StderrPipe]Option.Some(StderrPipe(box(PipeStorage(fd))))
+        return Option[StderrPipe].Some(StderrPipe(box(PipeStorage(fd))))
     }
 }

@@ -3,6 +3,102 @@
 
 /// Extension containing all expression parsing methods
 extension Parser {
+
+  private func parseBracketedTypeArguments() throws -> [TypeNode] {
+    try match(.leftBracket)
+    var typeArgs: [TypeNode] = []
+    while currentToken !== .rightBracket {
+      typeArgs.append(try parseType())
+      if currentToken === .comma {
+        try match(.comma)
+      }
+    }
+    try match(.rightBracket)
+    return typeArgs
+  }
+
+  private func parseCallArgumentsList() throws -> [CallArg] {
+    try match(.leftParen)
+    var arguments: [CallArg] = []
+    if currentToken !== .rightParen {
+      repeat {
+        arguments.append(try parseCallArgument())
+        if currentToken === .comma {
+          try match(.comma)
+          if currentToken === .rightParen { break }
+        } else {
+          break
+        }
+      } while true
+    }
+    try match(.rightParen)
+    return arguments
+  }
+
+  private func tryParseMethodTypeArguments() throws -> [TypeNode]? {
+    guard currentToken === .leftBracket else { return nil }
+
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+
+    do {
+      let typeArgs = try parseBracketedTypeArguments()
+      guard currentToken === .leftParen else {
+        lexer.restoreState(savedLexer)
+        currentToken = savedToken
+        return nil
+      }
+      return typeArgs
+    } catch {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+      return nil
+    }
+  }
+
+  private func tryParsePostfixCastSuffix(base: ExpressionNode) throws -> ExpressionNode? {
+    guard currentToken === .leftParen else { return nil }
+
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+
+    do {
+      try match(.leftParen)
+      let targetType = try parseType()
+      guard currentToken === .rightParen else {
+        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+      }
+      try match(.rightParen)
+      return .castExpression(type: targetType, expression: base)
+    } catch {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+      return nil
+    }
+  }
+
+  private func tryParsePostfixGenericApplication(base: ExpressionNode) throws -> ExpressionNode? {
+    guard currentToken === .leftBracket else { return nil }
+
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+
+    do {
+      let typeArgs = try parseTypeListInBrackets()
+      switch base {
+      case .identifier(let name):
+        return .genericInstantiation(base: name, args: typeArgs)
+      default:
+        lexer.restoreState(savedLexer)
+        currentToken = savedToken
+        return nil
+      }
+    } catch {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+      return nil
+    }
+  }
   
   // MARK: - Expression Entry Point
   
@@ -333,9 +429,6 @@ extension Parser {
     if currentToken === .forKeyword {
       return try forExpression()
     }
-    if let cast = try tryParseCastExpression() {
-      return cast
-    }
     if currentToken === .minus {
       let _ = currentSpan
       try match(.minus)
@@ -359,30 +452,6 @@ extension Parser {
     return try parsePostfixExpression()
   }
 
-  /// Attempt to parse a C-style cast expression: `(Type)expr`.
-  /// Uses lexer state save/restore to disambiguate from parenthesized expressions.
-  private func tryParseCastExpression() throws -> ExpressionNode? {
-    guard currentToken === .leftParen else { return nil }
-
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-
-    do {
-      try match(.leftParen)
-      let targetType = try parseType()
-      guard currentToken === .rightParen else {
-        throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
-      }
-      try match(.rightParen)
-      let expr = try parsePrefixExpression()
-      return .castExpression(type: targetType, expression: expr)
-    } catch {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-      return nil
-    }
-  }
-  
   // MARK: - Postfix Expressions
   
   private func parsePostfixExpression() throws -> ExpressionNode {
@@ -428,7 +497,9 @@ extension Parser {
           continue
         }
 
-        // Qualified disambiguation call: base.(TraitName)method(...) or base.(TraitName)[T]method(...)
+        // Qualified disambiguation call:
+        // - base.(TraitName)method(...)
+        // - base.(TraitName)method[T](...)
         if currentToken === .leftParen {
           try match(.leftParen)
           guard case .identifier(let traitName) = currentToken else {
@@ -440,18 +511,6 @@ extension Parser {
           try match(.identifier(traitName))
           try match(.rightParen)
 
-          var methodTypeArgs: [TypeNode] = []
-          if currentToken === .leftBracket {
-            try match(.leftBracket)
-            while currentToken !== .rightBracket {
-              methodTypeArgs.append(try parseType())
-              if currentToken === .comma {
-                try match(.comma)
-              }
-            }
-            try match(.rightBracket)
-          }
-
           guard case .identifier(let methodName) = currentToken else {
             throw ParserError.expectedIdentifier(
               span: currentSpan,
@@ -459,6 +518,8 @@ extension Parser {
             )
           }
           try match(.identifier(methodName))
+
+          let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
 
           guard currentToken === .leftParen else {
             throw ParserError.unexpectedToken(
@@ -468,21 +529,7 @@ extension Parser {
             )
           }
 
-          try match(.leftParen)
-          var arguments: [CallArg] = []
-          if currentToken !== .rightParen {
-            repeat {
-              arguments.append(try parseCallArgument())
-              if currentToken === .comma {
-                try match(.comma)
-                // Allow trailing comma.
-                if currentToken === .rightParen { break }
-              } else {
-                break
-              }
-            } while true
-          }
-          try match(.rightParen)
+          let arguments = try parseCallArgumentsList()
 
           if methodTypeArgs.isEmpty {
             expr = .qualifiedMethodCall(
@@ -503,56 +550,13 @@ extension Parser {
           continue
         }
         
-        // Check for generic method call: obj.[Type]method(args)
-        if currentToken === .leftBracket {
-          try match(.leftBracket)
-          var methodTypeArgs: [TypeNode] = []
-          while currentToken !== .rightBracket {
-            methodTypeArgs.append(try parseType())
-            if currentToken === .comma {
-              try match(.comma)
-            }
-          }
-          try match(.rightBracket)
-          
-          guard case .identifier(let methodName) = currentToken else {
-            throw ParserError.expectedIdentifier(
-              span: currentSpan, got: currentToken.description)
-          }
-          try match(.identifier(methodName))
-          
-          // Must be followed by a call
-          guard currentToken === .leftParen else {
-            throw ParserError.unexpectedToken(
-              span: currentSpan,
-              got: currentToken.description,
-              expected: "("
-            )
-          }
-          try match(.leftParen)
-          var arguments: [CallArg] = []
-          if currentToken !== .rightParen {
-            repeat {
-              arguments.append(try parseCallArgument())
-              if currentToken === .comma {
-                try match(.comma)
-                // Allow trailing comma.
-                if currentToken === .rightParen { break }
-              } else {
-                break
-              }
-            } while true
-          }
-          try match(.rightParen)
-          expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: methodName, arguments: arguments)
-          continue
-        }
-        
         guard case .identifier(let member) = currentToken else {
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
         }
         try match(.identifier(member))
+
+        let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
         
         // Check if this is a static method call: TypeName.methodName(...)
         // TypeName starts with uppercase, methodName starts with lowercase
@@ -562,46 +566,54 @@ extension Parser {
           if case .identifier(let baseName) = expr, isValidTypeName(baseName) {
             // This is TypeName.methodName - check for call
             if currentToken === .leftParen {
-              try match(.leftParen)
-              var arguments: [CallArg] = []
-              if currentToken !== .rightParen {
-                repeat {
-                  arguments.append(try parseCallArgument())
-                  if currentToken === .comma {
-                    try match(.comma)
-                    // Allow trailing comma.
-                    if currentToken === .rightParen { break }
-                  } else {
-                    break
-                  }
-                } while true
+              let arguments = try parseCallArgumentsList()
+              if methodTypeArgs.isEmpty {
+                expr = .staticMethodCall(typeName: baseName, typeArgs: [], methodName: member, arguments: arguments)
+              } else {
+                expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
               }
-              try match(.rightParen)
-              expr = .staticMethodCall(typeName: baseName, typeArgs: [], methodName: member, arguments: arguments)
               continue
             }
           }
-          // Check if base is a generic instantiation: [T]TypeName.methodName(...)
+          // Check if base is a generic instantiation: TypeName[T].methodName(...)
           if case .genericInstantiation(let baseName, let typeArgs) = expr {
             if currentToken === .leftParen {
-              try match(.leftParen)
-              var arguments: [CallArg] = []
-              if currentToken !== .rightParen {
-                repeat {
-                  arguments.append(try parseCallArgument())
-                  if currentToken === .comma {
-                    try match(.comma)
-                    // Allow trailing comma.
-                    if currentToken === .rightParen { break }
-                  } else {
-                    break
-                  }
-                } while true
+              let arguments = try parseCallArgumentsList()
+              if methodTypeArgs.isEmpty {
+                expr = .staticMethodCall(typeName: baseName, typeArgs: typeArgs, methodName: member, arguments: arguments)
+              } else {
+                expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
               }
-              try match(.rightParen)
-              expr = .staticMethodCall(typeName: baseName, typeArgs: typeArgs, methodName: member, arguments: arguments)
               continue
             }
+          }
+
+          if !methodTypeArgs.isEmpty, currentToken === .leftParen {
+            let arguments = try parseCallArgumentsList()
+            expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
+            continue
+          }
+
+          if !methodTypeArgs.isEmpty {
+            throw ParserError.unexpectedToken(
+              span: currentSpan,
+              got: currentToken.description,
+              expected: "("
+            )
+          }
+        } else if !methodTypeArgs.isEmpty {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "("
+          )
+        }
+
+        if !methodTypeArgs.isEmpty {
+          if currentToken === .leftParen {
+            let arguments = try parseCallArgumentsList()
+            expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
+              continue
           }
         }
         
@@ -612,22 +624,30 @@ extension Parser {
           expr = .memberPath(base: expr, path: [member])
         }
       } else if currentToken === .leftParen {
-        expr = try parseCall(expr)
-      } else if currentToken === .leftBracket {
-        try match(.leftBracket)
-        var args: [ExpressionNode] = []
-        if currentToken !== .rightBracket {
-          repeat {
-            args.append(try expression())
-            if currentToken === .comma {
-              try match(.comma)
-            } else {
-              break
-            }
-          } while true
+        if let castExpr = try tryParsePostfixCastSuffix(base: expr) {
+          expr = castExpr
+        } else {
+          expr = try parseCall(expr)
         }
-        try match(.rightBracket)
-        expr = .subscriptExpression(base: expr, arguments: args)
+      } else if currentToken === .leftBracket {
+        if let genericExpr = try tryParsePostfixGenericApplication(base: expr) {
+          expr = genericExpr
+        } else {
+          try match(.leftBracket)
+          var args: [ExpressionNode] = []
+          if currentToken !== .rightBracket {
+            repeat {
+              args.append(try expression())
+              if currentToken === .comma {
+                try match(.comma)
+              } else {
+                break
+              }
+            } while true
+          }
+          try match(.rightBracket)
+          expr = .subscriptExpression(base: expr, arguments: args)
+        }
       } else {
         break
       }
@@ -641,7 +661,10 @@ extension Parser {
   /// Parse a single call argument, which may be a named argument (label: expr) or positional (expr).
   private func parseCallArgument() throws -> CallArg {
     // Try to parse as named argument: identifier followed by colon
-    if case .identifier(let name) = currentToken, !name.first!.isUppercase {
+    if case .identifier(let name) = currentToken,
+       isValidVariableName(name),
+       name != "_"
+    {
       let savedState = lexer.saveState()
       let savedToken = currentToken
       do {
@@ -728,7 +751,7 @@ extension Parser {
       // Could be: parenthesized expression (expr) or lambda expression (params) -> body
       return try parseParenOrLambda()
     case .leftBracket:
-      return try parseBracketStartedExpression()
+      return try parseCollectionLiteralExpression()
     case .dot:
       // Implicit member expression: .memberName(args)
       return try parseImplicitMemberExpression()
@@ -736,50 +759,9 @@ extension Parser {
       throw ParserError.unexpectedToken(
         span: currentSpan,
         got: currentToken.description,
-        expected: "number, identifier, boolean literal, block expression, or generic instantiation"
+        expected: "number, identifier, boolean literal, block expression, or collection literal"
       )
     }
-  }
-
-  /// Parse an expression that starts with '['.
-  /// This can be either a generic instantiation (`[T]List`) or a collection literal.
-  private func parseBracketStartedExpression() throws -> ExpressionNode {
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-
-    do {
-      return try parseGenericInstantiationExpression()
-    } catch {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-      return try parseCollectionLiteralExpression()
-    }
-  }
-
-  private func parseGenericInstantiationExpression() throws -> ExpressionNode {
-    try match(.leftBracket)
-    var args: [TypeNode] = []
-    while currentToken !== .rightBracket {
-      args.append(try parseType())
-      if currentToken === .comma {
-        try match(.comma)
-      }
-    }
-    try match(.rightBracket)
-
-    guard case .identifier(let name) = currentToken else {
-      throw ParserError.expectedIdentifier(
-        span: currentSpan, got: currentToken.description)
-    }
-    try match(.identifier(name))
-
-    // Check if it's a call
-    if currentToken === .leftParen {
-      let callee = ExpressionNode.genericInstantiation(base: name, args: args)
-      return try parseCall(callee)
-    }
-
-    return .genericInstantiation(base: name, args: args)
   }
 
   private func parseCollectionLiteralExpression() throws -> ExpressionNode {
@@ -1032,10 +1014,7 @@ extension Parser {
         var paramType: TypeNode? = nil
         if currentToken !== .comma && currentToken !== .rightParen {
           // Could be a type annotation or an operator (if this is an expression)
-          // Types start with uppercase identifier or [
-          if case .identifier(let typeName) = currentToken, typeName.first?.isUppercase == true {
-            paramType = try parseType()
-          } else if currentToken === .leftBracket {
+          if canStartTypeSyntax() {
             paramType = try parseType()
           } else {
             // Not a type, this might be an expression like (a + b)
@@ -1056,9 +1035,7 @@ extension Parser {
       var returnType: TypeNode? = nil
       if currentToken !== .arrow {
         // Could be a return type
-        if case .identifier(let typeName) = currentToken, typeName.first?.isUppercase == true {
-          returnType = try parseType()
-        } else if currentToken === .leftBracket {
+        if canStartTypeSyntax() {
           returnType = try parseType()
         }
       }

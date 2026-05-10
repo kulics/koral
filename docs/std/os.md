@@ -5,83 +5,83 @@ This page lists the public API of module `Std.Os` (declaration-only syntax), org
 
 ## Free Functions
 ```koral
-public let [T IntoPath]create_dir(path T) [Void]Result
+public let create_dir[T IntoPath](path T) Result[Void]
 
-public let [T IntoPath]create_dir_all(path T) [Void]Result
+public let create_dir_all[T IntoPath](path T) Result[Void]
 
-public let [T IntoPath]remove_dir(path T) [Void]Result
+public let remove_dir[T IntoPath](path T) Result[Void]
 
-public let [T IntoPath]remove_dir_all(path T) [Void]Result
+public let remove_dir_all[T IntoPath](path T) Result[Void]
 
-public let [T IntoPath]read_dir(path T) [DirIterator]Result
+public let read_dir[T IntoPath](path T) Result[DirIterator]
 
-public let [T IntoPath]walk_dir(path T) [WalkDirIterator]Result
+public let walk_dir[T IntoPath](path T) Result[WalkDirIterator]
 
-public let [T IntoPath]create_temp_dir(dir T, prefix: String) [Path]Result
+public let create_temp_dir[T IntoPath](dir T, prefix: String) Result[Path]
 
-public let env(name String) [String]Option
+public let env(name String) Option[String]
 
-public let set_env(name String, value String) [Void]Result
+public let set_env(name String, value String) Result[Void]
 
-public let remove_env(name String) [Void]Result
+public let remove_env(name String) Result[Void]
 
-public let all_env() [[String, String]Pair]List
+public let all_env() List[Pair[String, String]]
 
-public let home_dir() [Path]Option
+public let home_dir() Option[Path]
 
 public let temp_dir() Path
 
-public let current_dir() [Path]Result
+public let current_dir() Result[Path]
 
-public let [T IntoPath]set_current_dir(path T) [Void]Result
+public let set_current_dir[T IntoPath](path T) Result[Void]
 
-public let hostname() [String]Result
+public let hostname() Result[String]
 
-public let current_exe() [Path]Result
+public let current_exe() Result[Path]
 
-public let [T IntoPath]read_file(path T) [[UInt8]List]Result
+public let read_file[T IntoPath](path T) Result[List[UInt8]]
 
-public let [T IntoPath]write_file(path T, content: [UInt8]List) [Void]Result
+public let write_file[T IntoPath](path T, content: List[UInt8]) Result[Void]
 
-public let [T IntoPath]append_file(path T, content: [UInt8]List) [Void]Result
+public let append_file[T IntoPath](path T, content: List[UInt8]) Result[Void]
 
-public let [T IntoPath]read_text_file(path T) [String]Result
+public let read_text_file[T IntoPath](path T) Result[String]
 
-public let [T IntoPath]write_text_file(path T, content: String) [Void]Result
+public let write_text_file[T IntoPath](path T, content: String) Result[Void]
 
-public let [T IntoPath]append_text_file(path T, content: String) [Void]Result
+public let append_text_file[T IntoPath](path T, content: String) Result[Void]
 
-public let [T1 IntoPath, T2 IntoPath]copy_file(src T1, to: T2) [Void]Result
+public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void]
 
-public let [T IntoPath]remove_file(path T) [Void]Result
+public let remove_file[T IntoPath](path T) Result[Void]
 
-public let [T1 IntoPath, T2 IntoPath]rename_path(src T1, to: T2) [Void]Result
+public let rename_path[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void]
 
-public let [T IntoPath]path_exist(path T) Bool
+public let path_exist[T IntoPath](path T) Bool
 
-public let [T IntoPath]absolute_path(path T) [Path]Result
+public let absolute_path[T IntoPath](path T) Result[Path]
 
-public let [T IntoPath]canonicalize_path(path T) [Path]Result
+public let canonicalize_path[T IntoPath](path T) Result[Path]
 
-public let [T IntoPath]open_file(path T, mode OpenMode) [File]Result
+public let open_file[T IntoPath](path T, mode OpenMode) Result[File]
 
-public let [T IntoPath]create_file(path T) [File]Result
+public let create_file[T IntoPath](path T) Result[File]
 
-public let [T IntoPath]file_info(path T) [FileInfo]Result
+public let file_info[T IntoPath](path T) Result[FileInfo]
 
-public let [T IntoPath]symlink_info(path T) [FileInfo]Result
+public let symlink_info[T IntoPath](path T) Result[FileInfo]
 
-public let [T IntoPath]set_permissions(path T, perm Permission) [Void]Result
+public let set_permissions[T IntoPath](path T, perm Permission) Result[Void]
 
-public let [T1 IntoPath, T2 IntoPath]create_hard_link(link T1, to: T2) [Void]Result
+public let create_hard_link[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Void]
 
-public let [T1 IntoPath, T2 IntoPath]create_symlink(link T1, to: T2) [Void]Result
+public let create_symlink[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Void]
 
-public let [T IntoPath]read_symlink(path T) [Path]Result
+public let read_symlink[T IntoPath](path T) Result[Path]
 
-public let [T IntoPath]truncate_file(path T, size UInt64) [Void]Result
+public let truncate_file[T IntoPath](path T, size UInt64) Result[Void]
 
-public let [T IntoPath]create_temp_file(dir T, prefix: String) [File]Result
+public let create_temp_file[T IntoPath](dir T, prefix: String) Result[File]
 
 public let path_separator() String
 
@@ -136,44 +136,44 @@ given DirEntry {
     public is_file(self ref) Bool
     public is_dir(self ref) Bool
     public is_symlink(self ref) Bool
-    public info(self ref) [FileInfo]Result
+    public info(self ref) Result[FileInfo]
 }
 
 given DirEntry as ToString {
     public to_string(self ref) String
 }
 
-given DirIterator as [DirEntry]Iterator {
-    public next(self mut ref) [DirEntry]Option
+given DirIterator as Iterator[DirEntry] {
+    public next(self mut ref) Option[DirEntry]
 }
 
-given WalkDirIterator as [DirEntry]Iterator {
-    public next(self mut ref) [DirEntry]Option
+given WalkDirIterator as Iterator[DirEntry] {
+    public next(self mut ref) Option[DirEntry]
 }
 
 given File {
     public fd(self ref) Int
     public path(self ref) Path
-    public info(self ref) [FileInfo]Result
-    public sync(self ref) [Void]Result
-    public lock(self ref) [Void]Result
-    public lock_shared(self ref) [Void]Result
-    public try_lock(self ref) [Bool]Result
-    public try_lock_shared(self ref) [Bool]Result
-    public unlock(self ref) [Void]Result
+    public info(self ref) Result[FileInfo]
+    public sync(self ref) Result[Void]
+    public lock(self ref) Result[Void]
+    public lock_shared(self ref) Result[Void]
+    public try_lock(self ref) Result[Bool]
+    public try_lock_shared(self ref) Result[Bool]
+    public unlock(self ref) Result[Void]
 }
 
 given File as Reader {
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given File as Writer {
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self ref) [Void]Result
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(self ref) Result[Void]
 }
 
 given File as Seeker {
-    public seek(self ref, pos Io.SeekOrigin) [UInt64]Result
+    public seek(self ref, pos Io.SeekOrigin) Result[UInt64]
 }
 
 given FileType {
@@ -238,7 +238,7 @@ given Path as IntoPath {
 given Path {
     public is_empty(self ref) Bool
     public is_absolute(self ref) Bool
-    public [T IntoPath]join(self ref, path T) Path
+    public join[T IntoPath](self ref, path T) Path
     public dir_name(self ref) Path
     public base_name(self ref) String
     public ext_name(self ref) String
@@ -246,10 +246,10 @@ given Path {
     public with_ext_name(self ref, ext String) Path
     public with_base_name(self ref, name String) Path
     public normalize(self ref) Path
-    public components(self ref) [String]List
+    public components(self ref) List[String]
     public starts_with(self ref, prefix Path) Bool
     public ends_with(self ref, suffix Path) Bool
-    public [T IntoPath]relative_to(self ref, base T) [Path]Result
+    public relative_to[T IntoPath](self ref, base T) Result[Path]
 }
 
 given Path as Eq {

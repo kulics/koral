@@ -83,12 +83,12 @@ public indirect enum TypeNode: CustomStringConvertible {
   case weakReference(TypeNode, mutable: Bool)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
-  /// Function type: [ParamType1, ParamType2, ..., ReturnType]Func
+  /// Function type: Func[ParamType1, ParamType2, ..., ReturnType]
   /// The last type in args is the return type, all others are parameter types
   case functionType(paramTypes: [TypeNode], returnType: TypeNode)
   /// Module-qualified type: module.TypeName
   case moduleQualified(module: String, name: String)
-  /// Module-qualified generic type: module.[T]List
+  /// Module-qualified generic type: module.List[T]
   case moduleQualifiedGeneric(module: String, base: String, args: [TypeNode])
   
   public var description: String {
@@ -96,25 +96,25 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .identifier(let name):
       return name
     case .reference(let inner, let mutable):
-      return mutable ? "\(inner) mut ref" : "\(inner) ref"
+      return mutable ? "mut ref \(inner)" : "ref \(inner)"
     case .pointer(let inner, let mutable):
-      return mutable ? "\(inner) mut ptr" : "\(inner) ptr"
+      return mutable ? "mut ptr \(inner)" : "ptr \(inner)"
     case .weakReference(let inner, let mutable):
-      return mutable ? "\(inner) mut weakref" : "\(inner) weakref"
+      return mutable ? "mut weakref \(inner)" : "weakref \(inner)"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
-      return "[\(argsStr)]\(base)"
+      return "\(base)[\(argsStr)]"
     case .inferredSelf:
       return "Self"
     case .functionType(let paramTypes, let returnType):
       let allTypes = paramTypes + [returnType]
       let typesStr = allTypes.map { $0.description }.joined(separator: ", ")
-      return "[\(typesStr)]Func"
+      return "Func[\(typesStr)]"
     case .moduleQualified(let module, let name):
       return "\(module).\(name)"
     case .moduleQualifiedGeneric(let module, let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
-      return "\(module).[\(argsStr)]\(base)"
+      return "\(module).\(base)[\(argsStr)]"
     }
   }
 }

@@ -8,16 +8,16 @@
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let __koral_thread_join(handle UInt8 ptr) Int32
-foreign let __koral_thread_detach(handle UInt8 ptr) Void
+foreign let __koral_thread_join(handle ptr UInt8) Int32
+foreign let __koral_thread_detach(handle ptr UInt8) Void
 
 // ============================================================================
 // ThreadStorage (internal)
 // ============================================================================
 type ThreadStorage(
-    handle UInt8 ptr,
+    handle ptr UInt8,
     thread_id UInt64,
-    thread_name [String]Option,
+    thread_name Option[String],
     mut waited Bool,
     mut detached Bool,
 )
@@ -41,25 +41,25 @@ given ThreadStorage as Drop {
 /// OS thread handle. Manages thread lifetime (wait/detach).
 /// Created by Task.spawn() or run_task(), not constructed directly.
 /// Auto-detaches on drop if not waited/detached.
-public type Thread(protected storage ThreadStorage mut ref)
+public type Thread(protected storage mut ref ThreadStorage)
 
 given Thread {
 
     /// Block until the thread finishes.
     /// Returns Error if already waited or detached.
-    public wait(self ref) [Void]Result = {
+    public wait(self ref) Result[Void] = {
         if self.storage.waited then {
-            return [Void]Result.Error(box("thread already waited"))
+            return Result[Void].Error(box("thread already waited"))
         }
         if self.storage.detached then {
-            return [Void]Result.Error(box("thread already detached"))
+            return Result[Void].Error(box("thread already detached"))
         }
         let result = __koral_thread_join(self.storage.handle)
         self.storage.waited = true
         if result <> 0 then {
-            return [Void]Result.Error(box("failed to wait thread"))
+            return Result[Void].Error(box("failed to wait thread"))
         }
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
@@ -75,5 +75,5 @@ given Thread {
     public id(self ref) UInt64 = self.storage.thread_id
 
     /// Get the thread name.
-    public name(self ref) [String]Option = self.storage.thread_name
+    public name(self ref) Option[String] = self.storage.thread_name
 }

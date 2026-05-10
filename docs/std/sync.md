@@ -5,7 +5,7 @@ This page lists the public API of module `Std.Sync` (declaration-only syntax), o
 
 ## Free Functions
 ```koral
-public let [T Any]make_channel(capacity UInt) [[T]SendChannel, [T]RecvChannel]Pair
+public let make_channel[T Any](capacity UInt) Pair[SendChannel[T], RecvChannel[T]]
 ```
 
 ## Traits
@@ -19,13 +19,13 @@ public type AtomicInt
 
 public type AtomicUInt
 
-public type [T Any]SendChannel
+public type SendChannel[T Any]
 
-public type [T Any]RecvChannel
+public type RecvChannel[T Any]
 
 public type LatchGate
 
-public type [T Any]Lazy
+public type Lazy[T Any]
 
 public type Mutex
 
@@ -80,14 +80,14 @@ given AtomicUInt as ToString {
     public to_string(self ref) String
 }
 
-given[T Any] [T]SendChannel {
-    public send(self ref, value T) [Void]Result
-    public try_send(self ref, value T) [Bool]Result
+given[T Any] SendChannel[T] {
+    public send(self ref, value T) Result[Void]
+    public try_send(self ref, value T) Result[Bool]
 }
 
-given[T Any] [T]RecvChannel {
-    public recv(self ref) [T]Result
-    public try_recv(self ref) [[T]Option]Result
+given[T Any] RecvChannel[T] {
+    public recv(self ref) Result[T]
+    public try_recv(self ref) Result[Option[T]]
 }
 
 given LatchGate {
@@ -98,8 +98,8 @@ given LatchGate {
     public wait(self ref) Void
 }
 
-given[T Any] [T]Lazy {
-    public new(f [T]Func) [T]Lazy
+given[T Any] Lazy[T] {
+    public new(f Func[T]) Lazy[T]
     public get(self ref) T
     public is_initialized(self ref) Bool
 }

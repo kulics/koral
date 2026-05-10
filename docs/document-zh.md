@@ -82,7 +82,7 @@ let e = 2
 每个可执行程序都需要一个入口点。在 Koral 中，这个入口点是 `main` 函数。一个典型的 `main` 函数声明如下。
 
 ```koral
-let main() = {}
+let main() Void = {}
 ```
 
 这里我们声明了一个名称为 `main` 的函数。`=` 右边是函数体，`{}` 表示一个空的块表达式，返回 `Void`。
@@ -94,7 +94,7 @@ let main() = {}
 现在让我们的程序输出一些内容看看，标准库提供了 `println` 函数，用于向标准输出打印一行文本。
 
 ```koral
-let main() = println("Hello, world!")
+let main() Void = println("Hello, world!")
 ```
 
 现在尝试执行这个程序，我们可以看到控制台上显示了 `Hello, world!`。
@@ -169,15 +169,15 @@ let (_, g) = (1, 2)                   // 丢弃第一个元素
 
 #### 引用创建规则（`.ref` / `box`）
 
-Koral 将 `ref` 和 `mut ref` 作为受语言管理的引用类型。`T ref` 是只读引用，`T mut ref` 是可变引用，支持 `.val = expr` 赋值：
+Koral 将 `ref` 和 `mut ref` 作为受语言管理的引用类型。`ref T` 是只读引用，`mut ref T` 是可变引用，支持 `.val = expr` 赋值：
 
 - `x.ref` 表示从已有左值形成受管理引用。结果类型由源的可变性决定：
-  - `let mut` 绑定 → `.ref` 产出 `T mut ref`
-  - `let`（不可变）绑定 → `.ref` 产出 `T ref`
-  - 可变路径（如 `mut ref` 的 `mut` 字段）→ `.ref` 产出 `T mut ref`
-- `T mut ref` 可隐式转换为 `T ref`（宽化）。反向转换不允许。
+  - `let mut` 绑定 → `.ref` 产出 `mut ref T`
+  - `let`（不可变）绑定 → `.ref` 产出 `ref T`
+  - 可变路径（如 `mut ref` 的 `mut` 字段）→ `.ref` 产出 `mut ref T`
+- `mut ref T` 可隐式转换为 `ref T`（宽化）。反向转换不允许。
 - 对右值使用 `.ref` 会报错。
-- 若要从字面量/临时值形成受管理引用，请使用 `box(expr)`，它返回 `T mut ref`。
+- 若要从字面量/临时值形成受管理引用，请使用 `box(expr)`，它返回 `mut ref T`。
 
 方法与下标的接收者调整还有一条额外规则：
 
@@ -188,12 +188,12 @@ Koral 将 `ref` 和 `mut ref` 作为受语言管理的引用类型。`T ref` 是
 
 ```koral
 let mut x = 10
-let rx Int mut ref = x.ref   // let mut → T mut ref
+let rx mut ref Int = x.ref   // let mut → mut ref T
 
 let y = 10
-let ry Int ref = y.ref       // let → T ref
+let ry ref Int = y.ref       // let → ref T
 
-let owned Int mut ref = box(42) // box() 返回 T mut ref
+let owned mut ref Int = box(42) // box() 返回 mut ref T
 
 // let rz = 42.ref           // 错误：右值不能借用
 ```
@@ -335,13 +335,13 @@ Duration 字面量会被降糖为 `Duration.new(seconds: ..., nanoseconds: ...)`
 
 ### 类型转换
 
-不同数值类型之间需要显式转换，使用 `(Type)expr` 语法：
+不同数值类型之间需要显式转换，使用 `expr(Type)` 语法：
 
 ```koral
 let a Int = 42
-let b Float64 = (Float64)a    // Int -> Float64
-let c Int32 = (Int32)a        // Int -> Int32
-let d UInt8 = (UInt8)255      // Int -> UInt8
+let b Float64 = a(Float64)    // Int -> Float64
+let c Int32 = a(Int32)        // Int -> Int32
+let d UInt8 = 255(UInt8)      // Int -> UInt8
 ```
 
 ### 字符串
@@ -437,7 +437,7 @@ s.split(",")                 // 按分隔符分割
 s.lines()                    // 按行分割
 
 // 拼接字符串列表
-list.join_to_string(", ")   // 用分隔符拼接 [String]List
+list.join_to_string(", ")   // 用分隔符拼接 List[String]
 ```
 
 ### Rune 字面量
@@ -457,20 +457,20 @@ Rune 字面量推断规则：
 
 ### 集合字面量
 
-Koral 支持三种内置集合类型的字面量：`[T]List`、`[T]Set`、`[K, V]Dict`。
+Koral 支持三种内置集合类型的字面量：`List[T]`、`Set[T]`、`Dict[K, V]`。
 
 ```koral
-let a = [1, 2, 3]                    // 默认推断为 [Int]List
-let b [Int]Set = [1, 2, 3]           // 由上下文推断为 [Int]Set
-let c = ["x": 1, "y": 2]          // 推断为 [String, Int]Dict
-let empty [Int]List = []             // 空字面量必须有类型上下文
+let a = [1, 2, 3]                    // 默认推断为 List[Int]
+let b Set[Int] = [1, 2, 3]           // 由上下文推断为 Set[Int]
+let c = ["x": 1, "y": 2]             // 推断为 Dict[String, Int]
+let empty List[Int] = []             // 空字面量必须有类型上下文
 ```
 
 规则说明：
 
-- `[e1, e2, ...]` 是集合字面量；无类型上下文时默认推断为 `[T]List`。
-- 在 `[T]Set` 类型上下文中，同样的语法会推断为 Set。
-- `[k1: v1, k2: v2, ...]` 是 Dict 字面量，推断为 `[K, V]Dict`。
+- `[e1, e2, ...]` 是集合字面量；无类型上下文时默认推断为 `List[T]`。
+- 在 `Set[T]` 类型上下文中，同样的语法会推断为 Set。
+- `[k1: v1, k2: v2, ...]` 是 Dict 字面量，推断为 `Dict[K, V]`。
 - `[]` 在无上下文时无法推断类型，必须显式标注目标类型。
 - 集合字面量和 Dict 字面量都支持尾随逗号。
 - 集合字面量仅支持内置 `List` / `Set` / `Dict`，不支持第三方容器类型。
@@ -479,50 +479,50 @@ let empty [Int]List = []             // 空字面量必须有类型上下文
 
 引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用。Koral 区分只读引用和可变引用：
 
-- `T ref` — 只读引用。支持 `.val` 读取，但不支持 `.val = expr` 赋值。
-- `T mut ref` — 可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
-- `T mut ref` 可隐式转换为 `T ref`（宽化）。反向转换不允许。
+- `ref T` — 只读引用。支持 `.val` 读取，但不支持 `.val = expr` 赋值。
+- `mut ref T` — 可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
+- `mut ref T` 可隐式转换为 `ref T`（宽化）。反向转换不允许。
 
 使用 `.ref` 后缀表达式可以创建一个引用。结果类型由源的可变性决定：
 
 ```koral
 let mut n = 42
-let a = n.ref            // let mut → T mut ref
+let a = n.ref            // let mut → mut ref T
 let b = a.val            // 解引用，得到 42
 a.val = 100              // 解引用赋值（mut ref 支持 .val = expr）
 println(ref_count(a))    // 引用计数
 
 let m = 42
-let c = m.ref            // let → T ref（只读）
+let c = m.ref            // let → ref T（只读）
 let d = c.val            // 解引用读取，得到 42
 // c.val = 100           // 错误：ref 不支持 .val 赋值
 ```
 
-`ref` 和 `mut ref` 表示受语言管理的引用类型。`x.ref` 会从左值形成引用，结果的可变性由源决定。编译器会优先将它保持为栈安全的借用形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。`box(expr)` 返回 `T mut ref`，通过显式地产生逃逸引用来构造。
+`ref` 和 `mut ref` 表示受语言管理的引用类型。`x.ref` 会从左值形成引用，结果的可变性由源决定。编译器会优先将它保持为栈安全的借用形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。`box(expr)` 返回 `mut ref T`，通过显式地产生逃逸引用来构造。
 
 指针类型同样区分只读和可变：
 
-- `T ptr` — 只读指针。支持 `.val` 读取，但不支持 `.val` 赋值和 `p[i]` 赋值。
-- `T mut ptr` — 可变指针。支持 `.val` 读取、`.val = expr` 赋值、`p[i]` 读取和 `p[i] = expr` 赋值。
-- `T mut ptr` 可隐式转换为 `T ptr`。反向转换不允许。
+- `ptr T` — 只读指针。支持 `.val` 读取，但不支持 `.val` 赋值和 `p[i]` 赋值。
+- `mut ptr T` — 可变指针。支持 `.val` 读取、`.val = expr` 赋值、`p[i]` 读取和 `p[i] = expr` 赋值。
+- `mut ptr T` 可隐式转换为 `ptr T`。反向转换不允许。
 
 #### 弱引用
 
-弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`mut ref` 一样，弱引用也区分可变性：`T weakref`（只读）和 `T mut weakref`（可变）。
+弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`mut ref` 一样，弱引用也区分可变性：`weakref T`（只读）和 `mut weakref T`（可变）。
 
 使用 `.weakref` 后缀表达式从 ref 类型创建弱引用，使用 `.to_ref()` 方法尝试将弱引用升级回强引用（返回 `Option` 类型）。
 
 ```koral
-let strong Int mut ref = box(42)
+let strong mut ref Int = box(42)
 
-// 可变路径：mut ref → mut weakref → [T mut ref]Option
-let weak = strong.weakref              // T mut ref → T mut weakref
-let upgraded = weak.to_ref()           // T mut weakref → [T mut ref]Option
+// 可变路径：mut ref → mut weakref → Option[mut ref T]
+let weak = strong.weakref              // mut ref T → mut weakref T
+let upgraded = weak.to_ref()           // mut weakref T → Option[mut ref T]
 
-// 只读路径：ref → weakref → [T ref]Option
-let ro Int ref = strong                // 隐式宽化
-let ro_weak = ro.weakref               // T ref → T weakref
-let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
+// 只读路径：ref → weakref → Option[ref T]
+let ro ref Int = strong                // 隐式宽化
+let ro_weak = ro.weakref               // ref T → weakref T
+let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 ```
 
 ### 内存管理
@@ -530,7 +530,7 @@ let ro_upgraded = ro_weak.to_ref()     // T weakref → [T ref]Option
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`ref` 和 `mut ref` 是 Koral 的受管理引用类型。`T ref` 是只读的，`T mut ref` 是可变的。它们既可以从左值形成（可变性由源决定），也可以通过 `box(expr)` 这类方式显式构造逃逸引用（返回 `T mut ref`）。方法/下标接收者调整还允许在 `self ref` 调用中对右值接收者进行临时物化；这个特例仅限接收者位置，不会让右值上的 `.ref` 合法化，而 `self mut ref` 仍然要求可写左值。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
+- **引用（Reference）**：`ref` 和 `mut ref` 是 Koral 的受管理引用类型。`ref T` 是只读的，`mut ref T` 是可变的。它们既可以从左值形成（可变性由源决定），也可以通过 `box(expr)` 这类方式显式构造逃逸引用（返回 `mut ref T`）。方法/下标接收者调整还允许在 `self ref` 调用中对右值接收者进行临时物化；这个特例仅限接收者位置，不会让右值上的 `.ref` 合法化，而 `self mut ref` 仍然要求可写左值。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -647,15 +647,15 @@ Koral 提供了三个特殊的操作符用于处理 `Option` 和 `Result` 类型
 在 `and then` 和 `or else` 表达式中，关键字 `it` 用于引用被解包的值：对于 `and then`，`it` 是内部的 `Some` 或 `Ok` 值；对于 `Result` 类型的 `or else`，`it` 是 `Error` 值。
 
 ```koral
-let opt = [Int]Option.Some(42)
+let opt = Option[Int].Some(42)
 let val = opt or else 0           // 42（因为 opt 是 Some）
 
-let none = [Int]Option.None()
+let none = Option[Int].None()
 let val2 = none or else 0         // 0（因为 none 是 None）
 
 let mapped = opt and then it * 2   // Some(84)
 
-let load_port(path String) [Int]Result = {
+let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return
     parse_int(text)
 }
@@ -676,7 +676,7 @@ let load_port(path String) [Int]Result = {
 操作符优先级从高到低如下：
 
 1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 存储修饰 `.ref/.ptr/.val`, 限定/泛型方法后缀
-2. 前缀: 一元 `-`, `~`, 类型转换 `(Type)expr`
+2. 前缀: 一元 `-`, `~`
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
 5. 移位: `<<`, `>>`
@@ -702,7 +702,7 @@ let load_port(path String) [Int]Result = {
 例如：
 
 ```koral
-let main() = if 1 == 1 then println("yes") else println("no")
+let main() Void = if 1 == 1 then println("yes") else println("no")
 ```
 
 执行上面的程序会看到 `yes`。
@@ -712,7 +712,7 @@ let main() = if 1 == 1 then println("yes") else println("no")
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
 ```koral
-let main() = println(if 1 == 1 then "yes" else "no")
+let main() Void = println(if 1 == 1 then "yes" else "no")
 ```
 
 由于 `if` 本身也是表达式，因此 `else` 后面自然也可以接另外一个 `if` 表达式，这样我们就可以实现连续的条件判断。
@@ -725,7 +725,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 当我们不需要处理 `else` 分支时，可以省略 `else` 分支，这时它的值是 `Void`。
 
 ```koral
-let main() = if 1 == 1 then println("yes")
+let main() Void = if 1 == 1 then println("yes")
 ```
 
 当 `if` 分支 body 是块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `yield`；这也提供了分支内的 early exit：
@@ -746,7 +746,7 @@ let label = if score >= 90 then {
 `if` 还支持 `is` 模式匹配语法，可以在条件判断的同时解构值：
 
 ```koral
-let opt = [Int]Option.Some(42)
+let opt = Option[Int].Some(42)
 if opt is .Some(v) then {
     println(v)  // 42
 } else {
@@ -828,7 +828,7 @@ while true then {
 每次迭代，迭代器产生的下一个值会尝试匹配 `pattern`，如果匹配成功，则执行 `then` 后面的语句 body。`for` 只能作为语句使用。
 
 ```koral
-let nums [Int]List = [10, 20, 30]
+let nums List[Int] = [10, 20, 30]
 for x in nums then {
     println(x)
 }
@@ -847,7 +847,7 @@ for i in 0..5 then {
 `finally` 后面跟一个表达式，该表达式的返回值会被丢弃。
 
 ```koral
-let main() = {
+let main() Void = {
     println("start")
     finally println("cleanup")
     println("work")
@@ -858,7 +858,7 @@ let main() = {
 同一作用域内的多个 `finally` 按声明的逆序（LIFO）执行：
 
 ```koral
-let main() = {
+let main() Void = {
     finally println("first")
     finally println("second")
     finally println("third")
@@ -991,8 +991,8 @@ when p in {
 }
 
 // 泛型结构体解构
-type [T Any]Box(val T)
-let b = [Int]Box(42)
+type Box[T Any](val T)
+let b = Box[Int](42)
 when b in {
     Box(v) then println(v),  // 42
 }
@@ -1007,7 +1007,7 @@ when b in {
 当在 `if` 或 `while` 等条件表达式中使用时，`is` 在匹配成功后还可以将模式中的变量绑定到当前作用域；但在其他位置，`is` 只能做纯布尔测试，不能绑定变量。
 
 ```koral
-let opt = [Int]Option.Some(42)
+let opt = Option[Int].Some(42)
 let has_value = opt is .Some(_)
 let is_empty = opt is not .Some(_)
 
@@ -1032,14 +1032,14 @@ if opt is .Some(v) and v > 0 then {
 
 ### 定义
 
-函数通过 `let` 关键字定义，函数的名字后面使用 `()` 表示这个函数接受的参数，括号后面是这个函数的返回类型。返回类型在上下文明确时可以省略，由编译器推断返回类型。
+函数通过 `let` 关键字定义，函数的名字后面使用 `()` 表示这个函数接受的参数，括号后面是这个函数的返回类型。命名函数和方法都必须显式写出返回类型。
 
 函数的 `=` 右边必须声明一个表达式，这个表达式的值就是函数的返回值。
 
 ```koral
 let f1() Int = 1
 let f2(a Int) Int = a + 1
-let f3(a Int) = a + 1     // 返回类型推断
+let f3(a Int) Int = a + 1
 ```
 
 ### 调用
@@ -1056,14 +1056,14 @@ let b = f2(1)
 参数是函数执行时能够接收的数据。使用 `参数名 类型` 声明参数。
 
 ```koral
-let add(x Int, y Int) = x + y
+let add(x Int, y Int) Int = x + y
 let a = add(1, 2) // a == 3
 ```
 
 可变参数使用 `mut` 关键字标记：
 
 ```koral
-let increment(mut x Int) = { x += 1; return x }
+let increment(mut x Int) Int = { x += 1; return x }
 ```
 
 #### 命名参数
@@ -1082,7 +1082,7 @@ let create_rect(x Int, y Int, width: Int, height: Int) Rect = todo()
 create_rect(10, 20, width: 100, height: 200)
 
 // 全部命名参数
-let connect(host: String, port: Int) = todo()
+let connect(host: String, port: Int) Void = todo()
 connect(host: "localhost", port: 8080)
 ```
 
@@ -1125,7 +1125,7 @@ given MyType as Drawable {
 函数类型（`Func`）不携带命名参数标签，lambda 参数始终使用位置参数语法：
 
 ```koral
-let f [String, Int, Void]Func = (host String, port Int) -> {
+let f Func[String, Int, Void] = (host String, port Int) -> {
     connect(host: host, port: port)
 }
 f("localhost", 8080)
@@ -1135,22 +1135,22 @@ Foreign 声明（`foreign let`、`foreign type`）不支持命名参数。
 
 ### 函数类型
 
-在 Koral 中，函数也是一种类型。函数的类型使用 `[T1, T2, ..., R]Func` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
+在 Koral 中，函数也是一种类型。函数的类型使用 `Func[T1, T2, ..., R]` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
 
 ```koral
-let sqrt(x Int) = x * x          // [Int, Int]Func
-let f [Int, Int]Func = sqrt
+let sqrt(x Int) Int = x * x          // Func[Int, Int]
+let f Func[Int, Int] = sqrt
 let a = f(2)                      // a == 4
 ```
 
 利用这个特性，我们也可以定义函数类型的参数或者返回值。
 
 ```koral
-let hello() = println("Hello, world!")
-let run(f [Void]Func) = f()
-let toRun() = run
+let hello() Void = println("Hello, world!")
+let run(f Func[Void]) Void = f()
+let toRun() Func[Func[Void], Void] = run
 
-let main() = toRun()(hello)
+let main() Void = toRun()(hello)
 ```
 
 ### Lambda 表达式
@@ -1158,15 +1158,15 @@ let main() = toRun()(hello)
 Lambda 表达式与函数定义很相似，只是 `=` 换成了 `->`，并且没有函数名和 let 关键字。
 
 ```koral
-let f1(x Int) Int = x + 1            // [Int, Int]Func
-let f2 = (x Int) Int -> x + 1        // [Int, Int]Func
+let f1(x Int) Int = x + 1            // Func[Int, Int]
+let f2 = (x Int) Int -> x + 1        // Func[Int, Int]
 let a = f1(1) + f2(1)                // a == 4
 ```
 
 在上下文中可以得知 lambda 的类型时，可以省略参数类型和返回类型：
 
 ```koral
-let f [Int, Int]Func = (x) -> x + 1
+let f Func[Int, Int] = (x) -> x + 1
 ```
 
 Lambda 支持多种形式：
@@ -1185,7 +1185,7 @@ Lambda 支持多种形式：
 Lambda 表达式可以捕获其周围作用域中的变量，这被称为闭包。
 
 ```koral
-let make_adder(base Int) [Int, Int]Func = {
+let make_adder(base Int) Func[Int, Int] = {
     return (x) -> base + x
 }
 
@@ -1210,7 +1210,7 @@ let g = () -> y + 1  // 错误: 不能捕获可变变量 'y'
 闭包使柯里化成为可能：
 
 ```koral
-let add [Int, [Int, Int]Func]Func = (x) -> (y) -> x + y
+let add Func[Int, Func[Int, Int]] = (x) -> (y) -> x + y
 
 let add10 = add(10)
 let result = add10(32)  // result == 42
@@ -1249,7 +1249,7 @@ let a Point = Point(0, 0)
 ```koral
 type Point(x Int, y Int)
 
-let main() = {
+let main() Void = {
     let a = Point(64, 128)
     println(a.x)  // 64
     println(a.y)  // 128
@@ -1263,7 +1263,7 @@ let main() = {
 ```koral
 type Point(mut x Int, mut y Int)
 
-let main() = {
+let main() Void = {
     let a = Point(64, 128)
     a.x = 2  // ok，因为 x 是 mut
     a.y = 0  // ok，因为 y 是 mut
@@ -1308,27 +1308,27 @@ let area = when s in {
 - 若编译器无法从上下文推断期望类型，则该表达式会被拒绝。
 
 ```koral
-// 枚举构造 — 省略 [Int]Option 前缀
-let a [Int]Option = .Some(42)
-let b [Int]Option = .None()
+// 枚举构造 — 省略 Option[Int] 前缀
+let a Option[Int] = .Some(42)
+let b Option[Int] = .None()
 
 // 函数参数中使用
-let process(opt [Int]Option) Void = when opt in {
+let process(opt Option[Int]) Void = when opt in {
     .Some(v) then println(v.to_string()),
-    .None then println("none"),
+    .None() then println("none"),
 }
 process(.Some(10))
 
 // 赋值中使用
-let mut x [Int]Option = .None()
+let mut x Option[Int] = .None()
 x = .Some(100)
 
 // 条件表达式分支中使用
-let c [Int]Option = if true then .Some(1) else .None()
+let c Option[Int] = if true then .Some(1) else .None()
 
-// 静态方法调用 — 省略 [Int]List 前缀
-let list [Int]List = .new()
-let list2 [Int]List = .with_capacity(10)
+// 静态方法调用 — 省略 List[Int] 前缀
+let list List[Int] = .new()
+let list2 List[Int] = .with_capacity(10)
 ```
 
 ### 类型别名 (Type Alias)
@@ -1338,7 +1338,7 @@ let list2 [Int]List = .with_capacity(10)
 ```koral
 type Meters = Int
 type Coord = Point
-type IntList = [Int]List
+type IntList = List[Int]
 ```
 
 类型别名在编译时被完全消除，别名与目标类型完全等价：
@@ -1366,7 +1366,7 @@ private type InternalId = Int  // 仅文件内可见
 ```
 
 限制：
-- 类型别名不支持泛型参数（如 `type [T]Alias = [T]List` 不合法），但目标类型可以是泛型实例化类型（如 `type IntList = [Int]List`）。
+- 类型别名不支持泛型参数（如 `type Alias[T] = List[T]` 不合法），但目标类型可以是泛型实例化类型（如 `type IntList = List[Int]`）。
 - 不允许循环引用（如 `type A = A`）。
 - 类型别名名称必须以大写字母开头。
 
@@ -1463,16 +1463,16 @@ println(a.not_equals(b))
 带块级约束的工具方法：
 
 ```koral
-trait [T Any]Iterator {
-    next(self mut ref) [T]Option
+trait Iterator[T Any] {
+    next(self mut ref) Option[T]
 }
 
-given [T Ord] [T]Iterator {
-    max(self) [T]Option = ...
-    min(self) [T]Option = ...
+given[T Ord] Iterator[T] {
+    max(self) Option[T] = ...
+    min(self) Option[T] = ...
 }
 
-// 对实现了 [Int]Iterator 的类型，max/min 可用
+// 对实现了 Iterator[Int] 的类型，max/min 可用
 ```
 
 分发规则：
@@ -1491,9 +1491,9 @@ given [T Ord] [T]Iterator {
 当出现同名候选冲突时，可使用限定调用：
 
 - 实例方法：`object.(TraitName)method(...)`
-- 静态方法：`T.(TraitName)method(...)`
-- 泛型实例方法：`object.(TraitName)[TypeArgs...]method(...)`
-- 泛型静态方法：`T.(TraitName)[TypeArgs...]method(...)`
+- 静态方法：`Type.(TraitName)method(value, ...)`
+- 泛型实例方法：`object.(TraitName)method[TypeArgs...](...)`
+- 泛型静态方法：`Type.(TraitName)method[TypeArgs...](value, ...)`
 
 其中泛型方法要求 trait 限定写在方法类型参数之前。
 
@@ -1520,8 +1520,8 @@ given [T Ord] [T]Iterator {
 ```koral
 given Point {
     public distance(self) Float64 = {
-        let dx = (Float64)self.x
-        let dy = (Float64)self.y
+        let dx = self.x(Float64)
+        let dy = self.y(Float64)
         return dx + dy // ...
     }
     
@@ -1539,20 +1539,20 @@ let p = Point.origin()
 - `Eq` / `Ord`：相等性与排序比较。
 - `Hash`：Dict/Set 键的哈希支持。
 - `ToString`：字符串转换。
-- `[T]Iterator`：迭代协议（`next(self mut ref) [T]Option`）。
+- `Iterator[T]`：迭代协议（`next(self mut ref) Option[T]`）。
 - `Error`：错误消息接口（`message(self ref) String`）。
 
 操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`，下标访问对应 `Index`/`MutIndex`）。
 
 ### Trait Object
 
-Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `TraitName ref` 或 `TraitName mut ref` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
+Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `ref TraitName` 或 `mut ref TraitName` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
 
 #### 基本语法
 
 Trait object 构造遵循以下规则：
 
-- 目标类型写作 `TraitName ref` 或 `TraitName mut ref`。
+- 目标类型写作 `ref TraitName` 或 `mut ref TraitName`。
 - 源值必须实现该 Trait，并在期望该 trait object 类型的上下文中发生转换。
 - `box(...)` 是提供拥有值并完成此类转换的标准方式。
 
@@ -1579,8 +1579,8 @@ given Square as Drawable {
 }
 
 // 创建 trait object
-let shape Drawable ref = box(Circle(10))
-let mutable_shape Drawable mut ref = box(Square(4))
+let shape ref Drawable = box(Circle(10))
+let mutable_shape mut ref Drawable = box(Square(4))
 
 // 通过 trait object 调用方法（动态派发）
 shape.draw()  // "Drawing circle"
@@ -1590,9 +1590,9 @@ mutable_shape.draw()
 
 通过 trait object 调用时，接收者可变性规则与普通引用一致：
 
-- `TraitName ref` 只能调用声明为 `self ref` 的 requirement。
-- `TraitName mut ref` 可以调用 `self mut ref` 和 `self ref` 的 requirement。
-- `TraitName ref` 不能调用 `self mut ref` 的 requirement。
+- `ref TraitName` 只能调用声明为 `self ref` 的 requirement。
+- `mut ref TraitName` 可以调用 `self mut ref` 和 `self ref` 的 requirement。
+- `ref TraitName` 不能调用 `self mut ref` 的 requirement。
 
 #### 对象安全性
 
@@ -1618,7 +1618,7 @@ trait Resettable {
 }
 ```
 
-Trait object（`TraitName ref`、`TraitName mut ref`）不支持直接 `.val`，应通过动态派发调用 trait 方法。
+Trait object（`ref TraitName`、`mut ref TraitName`）不支持直接 `.val`，应通过动态派发调用 trait 方法。
 
 ## 泛型
 
@@ -1626,24 +1626,24 @@ Trait object（`TraitName ref`、`TraitName mut ref`）不支持直接 `.val`，
 
 ### 泛型数据类型
 
-泛型数据类型在标识符的前面使用 `[T Constraint]` 语法定义泛型参数：
+泛型数据类型使用 `类型名[T Constraint]` 语法定义泛型参数：
 
 ```koral
-type [T1 Any, T2 Any]Pair(left T1, right T2)
+type Pair[T1 Any, T2 Any](left T1, right T2)
 ```
 
 构造泛型数据类型时，在泛型参数的位置传入实际的类型：
 
 ```koral
-let a1 = [Int, Int]Pair(1, 2)
-let a2 = [Bool, String]Pair(true, "hello")
+let a1 = Pair[Int, Int](1, 2)
+let a2 = Pair[Bool, String](true, "hello")
 ```
 
 当上下文类型明确时，可以省略泛型类型参数：
 
 ```koral
-let a1 = Pair(1, 2)           // 推断为 [Int, Int]Pair
-let a2 = Pair(true, "hello")  // 推断为 [Bool, String]Pair
+let a1 = Pair(1, 2)           // 推断为 Pair[Int, Int]
+let a2 = Pair(true, "hello")  // 推断为 Pair[Bool, String]
 ```
 
 Pair 也支持字面量写法：
@@ -1655,10 +1655,10 @@ let p2 = (true, "hello")     // 等价于 Pair(true, "hello")
 
 ### 泛型函数
 
-泛型函数在函数名前面使用相同的语法定义泛型参数：
+泛型函数在函数名后面声明类型参数：
 
 ```koral
-let [T Any]identity(x T) T = x
+let identity[T Any](x T) T = x
 
 println(identity(42))       // 42
 println(identity("hello"))  // hello
@@ -1669,20 +1669,20 @@ println(identity("hello"))  // hello
 泛型参数可以指定 Trait 约束，限制可接受的类型：
 
 ```koral
-let [T Ord]max_val(a T, b T) T = if a > b then a else b
-let [T Eq]contains(list [T]List, value T) Bool = list.contains(value)
+let max_val[T Ord](a T, b T) T = if a > b then a else b
+let contains[T Eq](list List[T], value T) Bool = list.contains(value)
 ```
 
 多个约束使用 `and` 连接：
 
 ```koral
-let [T ToString and Hash]describe(value T) String = value.to_string()
+let describe[T ToString and Hash](value T) String = value.to_string()
 ```
 
-约束也可以使用泛型 trait 形式（例如 `[T]Iterator`）：
+约束也可以使用泛型 trait 形式（例如 `Iterator[T]`）：
 
 ```koral
-let [I [Int]Iterator]consume(iter I) Void = {}
+let consume[I Iterator[Int]](iter I) Void = {}
 ```
 
 ### 泛型方法
@@ -1690,8 +1690,8 @@ let [I [Int]Iterator]consume(iter I) Void = {}
 `given` 块中也可以定义泛型方法：
 
 ```koral
-given [T Any] [T]Option {
-    public [U Any]map(self, f [T, U]Func) [U]Option = self and then f(it)
+given[T Any] Option[T] {
+    public map[U Any](self, f Func[T, U]) Option[U] = self and then f(it)
 }
 ```
 
@@ -1701,27 +1701,27 @@ given [T Any] [T]Option {
 
 ```koral
 // List
-let nums [Int]List = [1, 2, 3]
+let nums List[Int] = [1, 2, 3]
 
 // Dict
-let scores [String, Int]Dict = ["alice": 10, "bob": 8]
+let scores Dict[String, Int] = ["alice": 10, "bob": 8]
 
 // Set
-let tags [String]Set = ["koral", "lang"]
+let tags Set[String] = ["koral", "lang"]
 
 // Option + or else / and then
-let port = [Int]Option.Some(8080) or else 80
-let doubled = [Int]Option.Some(21) and then it * 2
+let port = Option[Int].Some(8080) or else 80
+let doubled = Option[Int].Some(21) and then it * 2
 
 // or return
-let read_number(path String) [Int]Result = {
+let read_number(path String) Result[Int] = {
     let text = read_text_file(path) or return
     parse_int(text)
 }
 
-// Result（错误端为 Error ref）
-let ok = [Int]Result.Ok(42)
-let err = [Int]Result.Error(box("failed"))
+// Result（错误端为 ref Error）
+let ok = Result[Int].Ok(42)
+let err = Result[Int].Error(box("failed"))
 ```
 
 完整 API 请查看 `docs/std/` 下各模块文档。
@@ -1818,7 +1818,7 @@ using Std.Io as Io          // 使用模块别名导入
     - 被引用标识符首字母大写 -> 别名首字母必须大写
     - 被引用标识符首字母小写 -> 别名首字母必须小写
 
-#### 显式限定类型（`module.Type` / `module.[T]Type`）
+#### 显式限定类型（`module.Type` / `module.Type[T]`）
 
 在类型位置可以使用模块前缀来显式限定类型：
 
@@ -1826,7 +1826,7 @@ using Std.Io as Io          // 使用模块别名导入
 public using "models" as Models
 
 let user Models.User = Models.User("Alice")
-let boxes Models.[Int]Box = [Int]Box.new()
+let boxes Models.Box[Int] = Models.Box[Int].new()
 ```
 
 合法性规则：
@@ -1834,7 +1834,7 @@ let boxes Models.[Int]Box = [Int]Box.new()
 1. `module` 必须能解析为已导入的模块符号。
 2. `Type` 必须归属于该模块（归属校验）。
 3. 该类型必须对当前位置可见（`private` 类型不可访问）。
-4. 对 `module.[T]Type`，在通过归属校验后，再校验泛型参数个数与约束。
+4. 对 `module.Type[T]`，在通过归属校验后，再校验泛型参数个数与约束。
 
 统一报错口径：
 
@@ -1952,5 +1952,5 @@ foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
 
 ```koral
 public intrinsic type Int
-public intrinsic let [T Any]ref_count(r T ref) Int
+public intrinsic let ref_count[T Any](r ref T) Int
 ```

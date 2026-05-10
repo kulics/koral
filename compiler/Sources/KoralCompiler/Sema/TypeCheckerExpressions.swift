@@ -6,6 +6,15 @@ import Foundation
 
 extension TypeChecker {
 
+  private func isASCIITypeStyleIdentifier(_ name: String) -> Bool {
+    guard !name.isEmpty else { return false }
+    for scalar in name.unicodeScalars {
+      if scalar == "_" { continue }
+      return scalar.value >= 65 && scalar.value <= 90
+    }
+    return false
+  }
+
   private func enforceGenericFunctionCallConstraints(
     typeParameters: [TypeParameterDecl],
     args: [Type]
@@ -3724,7 +3733,7 @@ extension TypeChecker {
       // 2. Try Generic Struct/Enum Template (Implicit Type Inference)
       // Only for identifiers starting with uppercase (type naming convention)
       // This allows writing Stream(iter) instead of [T, R]Stream(iter)
-      if let firstChar = name.first, firstChar.isUppercase {
+      if isASCIITypeStyleIdentifier(name) {
         // Try generic struct template
         if let template = currentScope.lookupGenericStructTemplate(name) {
           // Validate named argument labels for generic struct construction

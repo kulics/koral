@@ -6,181 +6,181 @@
 // Write strategy: data goes into internal list; auto-flush when list is full.
 // ============================================================================
 
-private type [W Writer]BufWriterStorage(inner W, mut buf [UInt8]List, cap UInt)
+private type BufWriterStorage[W Writer](inner W, mut buf List[UInt8], cap UInt)
 
-public type [W Writer]BufWriter(private storage [W]BufWriterStorage mut ref)
+public type BufWriter[W Writer](private storage mut ref BufWriterStorage[W])
 
-given[W Writer] [W]BufWriter {
+given[W Writer] BufWriter[W] {
 
     // --- Static constructors ---
 
-    public new(w W) [W]BufWriter =
-        [W]BufWriter(box([W]BufWriterStorage(w, [UInt8]List.with_capacity(4096), 4096)))
+    public new(w W) BufWriter[W] =
+        BufWriter[W](box(BufWriterStorage[W](w, List[UInt8].with_capacity(4096), 4096)))
 
-    public with_capacity(cap UInt, w W) [W]BufWriter = {
+    public with_capacity(cap UInt, w W) BufWriter[W] = {
         if cap == 0 then {
             panic("BufWriter.with_capacity: zero capacity")
         }
-        return [W]BufWriter(box([W]BufWriterStorage(w, [UInt8]List.with_capacity(cap), cap)))
+        return BufWriter[W](box(BufWriterStorage[W](w, List[UInt8].with_capacity(cap), cap)))
     }
 
     // --- Instance methods ---
 
-    public write_byte(self ref, b UInt8) [Void]Result = {
+    public write_byte(self ref, b UInt8) Result[Void] = {
         if self.storage.buf.count() >= self.storage.cap then {
             let flush_result = self.flush()
             when flush_result in {
                 .Ok(_) then {},
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
         }
         self.storage.buf.push(b)
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
-    public write_string(self ref, s String) [Void]Result = {
+    public write_string(self ref, s String) Result[Void] = {
         let bytes = s.to_bytes()
         let result = self.write(from: bytes, ..)
         when result in {
             .Ok(_) then {
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             },
             .Error(e) then {
-                return [Void]Result.Error(e)
+                return Result[Void].Error(e)
             },
         }
     }
 
-    public write_line(self ref, s String) [Void]Result = {
+    public write_line(self ref, s String) Result[Void] = {
         let result = self.write_string(s)
         when result in {
             .Ok(_) then {
                 return self.write_byte(10)
             },
             .Error(e) then {
-                return [Void]Result.Error(e)
+                return Result[Void].Error(e)
             },
         }
     }
 
-    public write_rune(self ref, r Rune) [Void]Result = {
+    public write_rune(self ref, r Rune) Result[Void] = {
         let cp = r.to_uint32()
         // 1-byte ASCII
         if cp < 128 then {
-            let wr = self.write_byte((UInt8)cp)
+            let wr = self.write_byte(cp(UInt8))
             when wr in {
                 .Ok(_) then {
-                    return [Void]Result.Ok({})
+                    return Result[Void].Ok({})
                 },
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
         }
         // 2-byte
         if cp < 2048 then {
-            let r1 = self.write_byte((UInt8)(cp >> 6) | 192)
+            let r1 = self.write_byte((cp >> 6)(UInt8) | 192)
             when r1 in {
                 .Ok(_) then {},
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
-            let r2 = self.write_byte((UInt8)(cp & 63) | 128)
+            let r2 = self.write_byte((cp & 63)(UInt8) | 128)
             when r2 in {
                 .Ok(_) then {
-                    return [Void]Result.Ok({})
+                    return Result[Void].Ok({})
                 },
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
         }
         // 3-byte
         if cp < 65536 then {
-            let r1 = self.write_byte((UInt8)(cp >> 12) | 224)
+            let r1 = self.write_byte((cp >> 12)(UInt8) | 224)
             when r1 in {
                 .Ok(_) then {},
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
-            let r2 = self.write_byte((UInt8)((cp >> 6) & 63) | 128)
+            let r2 = self.write_byte(((cp >> 6) & 63)(UInt8) | 128)
             when r2 in {
                 .Ok(_) then {},
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
-            let r3 = self.write_byte((UInt8)(cp & 63) | 128)
+            let r3 = self.write_byte((cp & 63)(UInt8) | 128)
             when r3 in {
                 .Ok(_) then {
-                    return [Void]Result.Ok({})
+                    return Result[Void].Ok({})
                 },
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
         }
         // 4-byte
-        let r1 = self.write_byte((UInt8)(cp >> 18) | 240)
+        let r1 = self.write_byte((cp >> 18)(UInt8) | 240)
         when r1 in {
             .Ok(_) then {},
             .Error(e) then {
-                return [Void]Result.Error(e)
+                return Result[Void].Error(e)
             },
         }
-        let r2 = self.write_byte((UInt8)((cp >> 12) & 63) | 128)
+        let r2 = self.write_byte(((cp >> 12) & 63)(UInt8) | 128)
         when r2 in {
             .Ok(_) then {},
             .Error(e) then {
-                return [Void]Result.Error(e)
+                return Result[Void].Error(e)
             },
         }
-        let r3 = self.write_byte((UInt8)((cp >> 6) & 63) | 128)
+        let r3 = self.write_byte(((cp >> 6) & 63)(UInt8) | 128)
         when r3 in {
             .Ok(_) then {},
             .Error(e) then {
-                return [Void]Result.Error(e)
+                return Result[Void].Error(e)
             },
         }
-        let r4 = self.write_byte((UInt8)(cp & 63) | 128)
+        let r4 = self.write_byte((cp & 63)(UInt8) | 128)
         when r4 in {
             .Ok(_) then {
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             },
             .Error(e) then {
-                return [Void]Result.Error(e)
+                return Result[Void].Error(e)
             },
         }
     }
 }
 
-given[W Writer] [W]BufWriter as Writer {
+given[W Writer] BufWriter[W] as Writer {
 
     // Writes data from src[range] into internal buffer. Auto-flushes when full.
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = from.slice_spec(range)
         let start = span.start()
         let end = span.end()
         let available = span.len()
         if available == 0 then {
-            return [UInt]Result.Ok(0)
+            return Result[UInt].Ok(0)
         }
 
         let remaining_cap = self.storage.cap - self.storage.buf.count()
         if available <= remaining_cap then {
             self.storage.buf.push_sublist(from, start..<end)
-            return [UInt]Result.Ok(available)
+            return Result[UInt].Ok(available)
         }
 
         if self.storage.buf.count() > 0 then {
             when self.flush() in {
                 .Ok(_) then {},
                 .Error(e) then {
-                    return [UInt]Result.Error(e)
+                    return Result[UInt].Error(e)
                 },
             }
         }
@@ -188,25 +188,25 @@ given[W Writer] [W]BufWriter as Writer {
         let new_remaining = self.storage.cap - self.storage.buf.count()
         if available <= new_remaining then {
             self.storage.buf.push_sublist(from, start..<end)
-            return [UInt]Result.Ok(available)
+            return Result[UInt].Ok(available)
         }
 
         let direct_result = self.storage.inner.write_all(from: from, start..<end)
         when direct_result in {
             .Ok(_) then {
-                return [UInt]Result.Ok(available)
+                return Result[UInt].Ok(available)
             },
             .Error(e) then {
-                return [UInt]Result.Error(e)
+                return Result[UInt].Error(e)
             },
         }
     }
 
     // Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
-    public flush(self ref) [Void]Result = {
+    public flush(self ref) Result[Void] = {
         let total = self.storage.buf.count()
         if total == 0 then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         let mut start UInt = 0
@@ -214,7 +214,7 @@ given[W Writer] [W]BufWriter as Writer {
             when self.storage.inner.write(from: self.storage.buf, start..<total) in {
                 .Ok(n) then {
                     if n == 0 then {
-                        return [Void]Result.Error(box(IoError.WriteZero()))
+                        return Result[Void].Error(box(IoError.WriteZero()))
                     }
                     start += n
                 },
@@ -224,23 +224,23 @@ given[W Writer] [W]BufWriter as Writer {
                         self.storage.buf.clear()
                         self.storage.buf.push_list(remain)
                     }
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
         }
 
         self.storage.buf.clear()
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 }
 
-given[W Writer and Seeker] [W]BufWriter as Seeker {
+given[W Writer and Seeker] BufWriter[W] as Seeker {
 
-    public seek(self ref, pos SeekOrigin) [UInt64]Result = {
+    public seek(self ref, pos SeekOrigin) Result[UInt64] = {
         when self.flush() in {
             .Ok(_) then {},
             .Error(e) then {
-                return [UInt64]Result.Error(e)
+                return Result[UInt64].Error(e)
             },
         }
         return self.storage.inner.seek(pos)

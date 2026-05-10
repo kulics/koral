@@ -9,11 +9,11 @@
 // ============================================================================
 
 // Internal storage for String (COW semantics)
-protected type StringStorage(mut data UInt8 mut ptr, mut len UInt, mut cap UInt)
+protected type StringStorage(mut data mut ptr UInt8, mut len UInt, mut cap UInt)
 
 given StringStorage as Drop {
 
-    drop(self mut ref) = {
+    drop(self mut ref) Void = {
         if ref_is_borrow(self) then {
             return
         }
@@ -22,7 +22,7 @@ given StringStorage as Drop {
 }
 
 // String type with COW semantics
-public type String(protected mut storage StringStorage mut ref)
+public type String(protected mut storage mut ref StringStorage)
 
 // String iterator types
 public type StringSplitAsciiWhitespaceIterator(protected source String, protected mut index UInt)
@@ -39,9 +39,9 @@ public type StringBytesIterator(protected source String, protected mut index UIn
 given String {
 
     // Unsafe constructor: does not validate UTF-8
-    public from_utf8_ptr_unchecked(bytes UInt8 ptr, len UInt) String = {
+    public from_utf8_ptr_unchecked(bytes ptr UInt8, len UInt) String = {
         let cap = len + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         copy_memory(data, bytes, len)
         init_memory(data + len, 0)
         let storage = box(StringStorage(data, len, cap))
@@ -49,7 +49,7 @@ given String {
     }
 
     // Validate UTF-8 byte sequence (strict)
-    private validate_utf8(bytes UInt8 ptr, len UInt) Bool = {
+    private validate_utf8(bytes ptr UInt8, len UInt) Bool = {
         let mut i UInt = 0
         while i < len then {
             let b0 = bytes[i]
@@ -71,7 +71,7 @@ given String {
                 if (b1 & 192) <> 128 then {
                     return false
                 }
-                let cp = ((UInt32)b0 & 31) << 6 | (UInt32)b1 & 63
+                let cp = ((b0(UInt32) & 31) << 6) | (b1(UInt32) & 63)
                 if cp < 128 then {
                     return false
                 }
@@ -88,7 +88,7 @@ given String {
                 if (b1 & 192) <> 128 or (b2 & 192) <> 128 then {
                     return false
                 }
-                let cp = ((UInt32)b0 & 15) << 12 | ((UInt32)b1 & 63) << 6 | (UInt32)b2 & 63
+                let cp = ((b0(UInt32) & 15) << 12) | ((b1(UInt32) & 63) << 6) | (b2(UInt32) & 63)
                 if cp < 2048 then {
                     return false
                 }
@@ -109,7 +109,7 @@ given String {
                 if (b1 & 192) <> 128 or (b2 & 192) <> 128 or (b3 & 192) <> 128 then {
                     return false
                 }
-                let cp = ((UInt32)b0 & 7) << 18 | ((UInt32)b1 & 63) << 12 | ((UInt32)b2 & 63) << 6 | (UInt32)b3 & 63
+                let cp = ((b0(UInt32) & 7) << 18) | ((b1(UInt32) & 63) << 12) | ((b2(UInt32) & 63) << 6) | (b3(UInt32) & 63)
                 if cp < 65536 or cp > 1114111 then {
                     return false
                 }
@@ -123,31 +123,31 @@ given String {
     }
 
     // Checked constructor: validates UTF-8
-    public from_utf8_ptr(bytes UInt8 ptr, len UInt) [String]Result = {
+    public from_utf8_ptr(bytes ptr UInt8, len UInt) Result[String] = {
         if not String.validate_utf8(bytes, len) then {
-            return [String]Result.Error(box("Invalid UTF-8"))
+            return Result[String].Error(box("Invalid UTF-8"))
         }
-        return [String]Result.Ok(String.from_utf8_ptr_unchecked(bytes, len))
+        return Result[String].Ok(String.from_utf8_ptr_unchecked(bytes, len))
     }
 
-    public from_bytes(bytes [UInt8]List) [String]Result =
+    public from_bytes(bytes List[UInt8]) Result[String] =
         String.from_utf8_ptr(bytes.borrow_ptr(), bytes.count())
 
-    public from_bytes_unchecked(bytes [UInt8]List) String =
+    public from_bytes_unchecked(bytes List[UInt8]) String =
         String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count())
 
     // Checked constructor from C string (null-terminated, validates UTF-8)
-    public from_cstring(cstr UInt8 ptr) [String]Result = {
+    public from_cstring(cstr ptr UInt8) Result[String] = {
         let mut len UInt = 0
-        while cstr[len] <> (UInt8)0 then {
+        while cstr[len] <> 0(UInt8) then {
             len += 1
         }
         return String.from_utf8_ptr(cstr, len)
     }
 
-    public from_cstring_unchecked(cstr UInt8 ptr) String = {
+    public from_cstring_unchecked(cstr ptr UInt8) String = {
         let mut len UInt = 0
-        while cstr[len] <> (UInt8)0 then {
+        while cstr[len] <> 0(UInt8) then {
             len += 1
         }
         return String.from_utf8_ptr_unchecked(cstr, len)
@@ -155,7 +155,7 @@ given String {
 
     public with_capacity(capacity UInt) String = {
         let cap = if capacity < 1 then 1 else capacity + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         init_memory(data, 0)
         let storage = box(StringStorage(data, 0, cap))
         return String(storage)
@@ -163,7 +163,7 @@ given String {
 
     public new() String = {
         let cap UInt = 16 // 默认容量
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         init_memory(data, 0)
         let storage = box(StringStorage(data, 0, cap))
         return String(storage)
@@ -195,7 +195,7 @@ given String {
     private ensure_unique(self mut ref) Void = {
         if ref_is_borrow(self.storage) or ref_count(self.storage) > 1 then {
             let old = self.storage
-            let new_data = [UInt8]alloc_memory(old.cap)
+            let new_data = alloc_memory[UInt8](old.cap)
             copy_memory(new_data, old.data, old.len + 1)
             let new_storage = box(StringStorage(new_data, old.len, old.cap))
             self.storage = new_storage
@@ -210,7 +210,7 @@ given String {
         if new_cap < min_cap then {
             new_cap = min_cap
         }
-        let new_data = [UInt8]alloc_memory(new_cap)
+        let new_data = alloc_memory[UInt8](new_cap)
         copy_memory(new_data, self.storage.data, self.storage.len + 1)
         let new_storage = box(StringStorage(new_data, self.storage.len, new_cap))
         self.storage = new_storage
@@ -220,7 +220,7 @@ given String {
     public is_empty(self ref) Bool = self.storage.len == 0
     public capacity(self ref) UInt = self.storage.cap - 1
 
-    public to_bytes(self ref) [UInt8]List = {
+    public to_bytes(self ref) List[UInt8] = {
         let len = self.storage.len
         let mut bytes = make_bytes(len)
         if len == 0 then {
@@ -230,11 +230,11 @@ given String {
         return bytes
     }
 
-    public get(self ref, index UInt) [UInt8]Option = {
+    public get(self ref, index UInt) Option[UInt8] = {
         if index >= self.storage.len then {
-            return [UInt8]Option.None()
+            return Option[UInt8].None()
         }
-        return [UInt8]Option.Some(self.storage.data[index])
+        return Option[UInt8].Some(self.storage.data[index])
     }
 
     public push_byte(self mut ref, value UInt8) Void = {
@@ -255,7 +255,7 @@ given String {
         self.storage.data[self.storage.len] = 0
     }
 
-    public push_substring(self mut ref, other String, range [UInt]Range) Void = {
+    public push_substring(self mut ref, other String, range Range[UInt]) Void = {
         let span = other.slice_spec(range)
         let start = span.start()
         let copy_len = span.len()
@@ -303,17 +303,17 @@ given String {
         return true
     }
 
-    public find(self ref, pat String) [UInt]Option = self.find_from(0, pat)
+    public find(self ref, pat String) Option[UInt] = self.find_from(0, pat)
 
-    public find_last(self ref, pat String) [UInt]Option = {
+    public find_last(self ref, pat String) Option[UInt] = {
         if pat.storage.len == 0 then {
-            return [UInt]Option.None()
+            return Option[UInt].None()
         }
-        let mut result = [UInt]Option.None()
+        let mut result = Option[UInt].None()
         let mut start UInt = 0
         // Using while is pattern matching for iterator-like loop
         while self.find_from(start, pat) is .Some(idx) then {
-            result = [UInt]Option.Some(idx)
+            result = Option[UInt].Some(idx)
             start = idx + 1
         }
         return result
@@ -324,7 +324,7 @@ given String {
             panic("substring out of bounds")
         }
         let cap = len + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         copy_memory(data, self.storage.data + start, len)
         init_memory(data + len, 0)
         let storage = box(StringStorage(data, len, cap))
@@ -355,7 +355,7 @@ given String {
         }
     }
 
-    public slice_spec(self ref, range [UInt]Range) SliceSpec = {
+    public slice_spec(self ref, range Range[UInt]) SliceSpec = {
         let len = self.storage.len
         let mut start UInt = 0
         let mut end UInt = 0
@@ -439,7 +439,7 @@ given String {
         return SliceSpec.new(offset: start, len: end - start)
     }
 
-    public substring(self ref, range [UInt]Range) String = {
+    public substring(self ref, range Range[UInt]) String = {
         let span = self.slice_spec(range)
         return self.make_substring(span.start(), span.len())
     }
@@ -493,7 +493,7 @@ given String {
 
     public to_ascii_lowercase(self ref) String = {
         let cap = self.storage.len + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         let mut i UInt = 0
         while i < self.storage.len then {
             init_memory(data + i, String.to_lower_byte(self.storage.data[i]))
@@ -506,7 +506,7 @@ given String {
 
     public to_ascii_uppercase(self ref) String = {
         let cap = self.storage.len + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         let mut i UInt = 0
         while i < self.storage.len then {
             init_memory(data + i, String.to_upper_byte(self.storage.data[i]))
@@ -519,7 +519,7 @@ given String {
 
     public to_ascii_titlecase(self ref) String = {
         let cap = self.storage.len + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         let mut in_word = false
         let mut i UInt = 0
         while i < self.storage.len then {
@@ -542,15 +542,15 @@ given String {
         return String(storage)
     }
 
-    public find_from(self ref, start UInt, pat String) [UInt]Option = {
+    public find_from(self ref, start UInt, pat String) Option[UInt] = {
         if pat.storage.len == 0 then {
-            return [UInt]Option.None()
+            return Option[UInt].None()
         }
         if start > self.storage.len then {
             panic("find start out of bounds")
         }
         if pat.storage.len > self.storage.len then {
-            return [UInt]Option.None()
+            return Option[UInt].None()
         }
         let mut i = start
         let max = self.storage.len - pat.storage.len
@@ -565,11 +565,11 @@ given String {
                 j += 1
             }
             if ok then {
-                return [UInt]Option.Some(i)
+                return Option[UInt].Some(i)
             }
             i += 1
         }
-        return [UInt]Option.None()
+        return Option[UInt].None()
     }
 
     public contains(self ref, pat String) Bool = self.find_from(0, pat).is_some()
@@ -580,7 +580,7 @@ given String {
         }
         let total = self.storage.len * times
         let cap = total + 1
-        let data = [UInt8]alloc_memory(cap)
+        let data = alloc_memory[UInt8](cap)
         let mut offset UInt = 0
         let mut t UInt = 0
         while t < times then {
@@ -631,32 +631,32 @@ given String {
 
     // Split on the first occurrence of `sep`, returning (before, after).
     // Returns None if `sep` is not found.
-    public split_once(self ref, sep String) [[String, String]Pair]Option = {
+    public split_once(self ref, sep String) Option[Pair[String, String]] = {
         when self.find(sep) in {
             .Some(idx) then {
                 let before = self.make_substring(0, idx)
                 let after_start = idx + sep.storage.len
                 let after = self.make_substring(after_start, self.storage.len - after_start)
-                return [[String, String]Pair]Option.Some(Pair(before, after))
+                return Option[Pair[String, String]].Some(Pair(before, after))
             },
             .None then {
-                return [[String, String]Pair]Option.None()
+                return Option[Pair[String, String]].None()
             },
         }
     }
 
     // Split on the last occurrence of `sep`, returning (before, after).
     // Returns None if `sep` is not found.
-    public split_last_once(self ref, sep String) [[String, String]Pair]Option = {
+    public split_last_once(self ref, sep String) Option[Pair[String, String]] = {
         when self.find_last(sep) in {
             .Some(idx) then {
                 let before = self.make_substring(0, idx)
                 let after_start = idx + sep.storage.len
                 let after = self.make_substring(after_start, self.storage.len - after_start)
-                return [[String, String]Pair]Option.Some(Pair(before, after))
+                return Option[Pair[String, String]].Some(Pair(before, after))
             },
             .None then {
-                return [[String, String]Pair]Option.None()
+                return Option[Pair[String, String]].None()
             },
         }
     }
@@ -708,19 +708,19 @@ given String {
         }
     }
 
-    public strip_prefix(self ref, prefix String) [String]Option = {
+    public strip_prefix(self ref, prefix String) Option[String] = {
         if self.starts_with(prefix) then {
-            return [String]Option.Some(self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len))
+            return Option[String].Some(self.make_substring(prefix.storage.len, self.storage.len - prefix.storage.len))
         }
-        return [String]Option.None()
+        return Option[String].None()
     }
 
-    public strip_suffix(self ref, suffix String) [String]Option = {
+    public strip_suffix(self ref, suffix String) Option[String] = {
         if self.ends_with(suffix) then {
             let remain = self.storage.len - suffix.storage.len
-            return [String]Option.Some(self.make_substring(0, remain))
+            return Option[String].Some(self.make_substring(0, remain))
         }
-        return [String]Option.None()
+        return Option[String].None()
     }
 
     // Return byte iterator for iterating over raw UTF-8 bytes
@@ -730,8 +730,8 @@ given String {
     public runes(self ref) StringRunesIterator = StringRunesIterator(self.val, 0)
 
     // Convert string to a List of Runes for random access
-    public to_runes(self ref) [Rune]List = {
-        let mut list = [Rune]List.new()
+    public to_runes(self ref) List[Rune] = {
+        let mut list = List[Rune].new()
         for r in self.runes() then {
             list.push(r)
         }
@@ -744,38 +744,38 @@ given String {
 
         // Handle invalid code points - append replacement character
         if not rune.is_valid() then {
-            self.push_byte((UInt8)239) // 0xEF
-            self.push_byte((UInt8)191) // 0xBF
-            self.push_byte((UInt8)189) // 0xBD
+            self.push_byte(239(UInt8)) // 0xEF
+            self.push_byte(191(UInt8)) // 0xBF
+            self.push_byte(189(UInt8)) // 0xBD
             return
         }
 
         // 1-byte sequence (ASCII)
-        if cp < (UInt32)128 then {
-            self.push_byte((UInt8)cp)
+        if cp < 128(UInt32) then {
+            self.push_byte(cp(UInt8))
             return
         }
 
         // 2-byte sequence
-        if cp < (UInt32)2048 then {
-            self.push_byte((UInt8)(cp >> 6) | (UInt8)192)
-            self.push_byte((UInt8)(cp & (UInt32)63) | (UInt8)128)
+        if cp < 2048(UInt32) then {
+            self.push_byte((cp >> 6)(UInt8) | 192(UInt8))
+            self.push_byte((cp & 63(UInt32))(UInt8) | 128(UInt8))
             return
         }
 
         // 3-byte sequence
-        if cp < (UInt32)65536 then {
-            self.push_byte((UInt8)(cp >> 12) | (UInt8)224)
-            self.push_byte((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
-            self.push_byte((UInt8)(cp & (UInt32)63) | (UInt8)128)
+        if cp < 65536(UInt32) then {
+            self.push_byte((cp >> 12)(UInt8) | 224(UInt8))
+            self.push_byte(((cp >> 6) & 63(UInt32))(UInt8) | 128(UInt8))
+            self.push_byte((cp & 63(UInt32))(UInt8) | 128(UInt8))
             return
         }
 
         // 4-byte sequence
-        self.push_byte((UInt8)(cp >> 18) | (UInt8)240)
-        self.push_byte((UInt8)((cp >> 12) & (UInt32)63) | (UInt8)128)
-        self.push_byte((UInt8)((cp >> 6) & (UInt32)63) | (UInt8)128)
-        self.push_byte((UInt8)(cp & (UInt32)63) | (UInt8)128)
+        self.push_byte((cp >> 18)(UInt8) | 240(UInt8))
+        self.push_byte(((cp >> 12) & 63(UInt32))(UInt8) | 128(UInt8))
+        self.push_byte(((cp >> 6) & 63(UInt32))(UInt8) | 128(UInt8))
+        self.push_byte((cp & 63(UInt32))(UInt8) | 128(UInt8))
     }
 }
 
@@ -824,23 +824,23 @@ given String as Hash {
         let mut i UInt = 0
         while i < self.storage.len then {
             let b UInt8 = self.storage.data[i]
-            h = h.combine_hash((UInt)b)
+            h = h.combine_hash(b(UInt))
             i += 1
         }
         return h
     }
 }
 
-given String as [UInt, UInt8]Index {
+given String as Index[UInt, UInt8] {
 
-    public ref_at(self ref, key UInt) UInt8 ref = {
+    public ref_at(self ref, key UInt) ref UInt8 = {
         if key >= self.storage.len then {
             panic("String index out of bounds")
         }
         if ref_is_borrow(self) then {
-            return [UInt8, String]make_ref(self.storage.data + key, self)
+            return make_ref[UInt8, String](self.storage.data + key, self)
         }
-        return [UInt8, StringStorage]make_ref(self.storage.data + key, self.storage)
+        return make_ref[UInt8, StringStorage](self.storage.data + key, self.storage)
     }
 }
 
@@ -849,16 +849,16 @@ given String as [UInt, UInt8]Index {
 // ============================================================================
 
 // Iterator types provide next() method
-given StringSplitAsciiWhitespaceIterator as [String]Iterator {
+given StringSplitAsciiWhitespaceIterator as Iterator[String] {
 
-    public next(self mut ref) [String]Option = {
+    public next(self mut ref) Option[String] = {
         let len = self.source.count()
         let mut i = self.index
         while i < len and String.is_ascii_space(self.source[i]) then {
             i += 1
         }
         if i >= len then {
-            return [String]Option.None()
+            return Option[String].None()
         }
         let start = i
         while i < len and not String.is_ascii_space(self.source[i]) then {
@@ -866,60 +866,60 @@ given StringSplitAsciiWhitespaceIterator as [String]Iterator {
         }
         let part = self.source.make_substring(start, i - start)
         self.index = i
-        return [String]Option.Some(part)
+        return Option[String].Some(part)
     }
 }
 
-given StringSplitIterator as [String]Iterator {
+given StringSplitIterator as Iterator[String] {
 
-    public next(self mut ref) [String]Option = {
+    public next(self mut ref) Option[String] = {
         let len = self.source.count()
         if self.sep.count() == 0 then {
             if self.index == 0 then {
                 self.index = len + 1
-                return [String]Option.Some(self.source.make_substring(0, len))
+                return Option[String].Some(self.source.make_substring(0, len))
             }
-            return [String]Option.None()
+            return Option[String].None()
         }
         if self.index > len then {
-            return [String]Option.None()
+            return Option[String].None()
         }
         when self.source.find_from(self.index, self.sep) in {
             .Some(i) then {
                 let part = self.source.make_substring(self.index, i - self.index)
                 self.index = i + self.sep.count()
-                return [String]Option.Some(part)
+                return Option[String].Some(part)
             },
             .None then {
                 let part = self.source.make_substring(self.index, len - self.index)
                 self.index = len + 1
-                return [String]Option.Some(part)
+                return Option[String].Some(part)
             },
         }
     }
 }
 
-given StringLinesIterator as [String]Iterator {
+given StringLinesIterator as Iterator[String] {
 
-    public next(self mut ref) [String]Option = {
+    public next(self mut ref) Option[String] = {
         let len = self.source.count()
         if self.index > len then {
-            return [String]Option.None()
+            return Option[String].None()
         }
         if self.index == len then {
             self.index = len + 1
-            return [String]Option.None()
+            return Option[String].None()
         }
         when self.source.find_from(self.index, "\n") in {
             .Some(i) then {
                 let part = self.source.make_substring(self.index, i - self.index)
                 self.index = i + 1
-                return [String]Option.Some(part)
+                return Option[String].Some(part)
             },
             .None then {
                 let part = self.source.make_substring(self.index, len - self.index)
                 self.index = len + 1
-                return [String]Option.Some(part)
+                return Option[String].Some(part)
             },
         }
     }
@@ -932,13 +932,13 @@ given StringLinesIterator as [String]Iterator {
 // Iterator type for rune iteration (provides next() method)
 public type StringRunesIterator(protected source String, protected mut byte_index UInt)
 
-given StringRunesIterator as [Rune]Iterator {
+given StringRunesIterator as Iterator[Rune] {
 
     // Decode next UTF-8 sequence and return Rune
-    public next(self mut ref) [Rune]Option = {
+    public next(self mut ref) Option[Rune] = {
         let len = self.source.count()
         if self.byte_index >= len then {
-            return [Rune]Option.None()
+            return Option[Rune].None()
         }
 
         let b0 = self.source[self.byte_index]
@@ -946,98 +946,98 @@ given StringRunesIterator as [Rune]Iterator {
         // 1-byte sequence (ASCII): 0xxxxxxx
         if b0 < 128 then {
             self.byte_index = self.byte_index + 1
-            return [Rune]Option.Some(Rune((UInt32)b0))
+            return Option[Rune].Some(Rune(b0(UInt32)))
         }
 
         // Invalid: continuation byte as first byte
         if b0 < 192 then {
             self.byte_index = self.byte_index + 1
-            return [Rune]Option.Some(Rune.replacement_char())
+            return Option[Rune].Some(Rune.replacement_char())
         }
 
         // 2-byte sequence: 110xxxxx 10xxxxxx
         if b0 < 224 then {
             if self.byte_index + 1 >= len then {
                 self.byte_index = self.byte_index + 1
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
             let b1 = self.source[self.byte_index + 1]
             if (b1 & 192) <> 128 then {
                 self.byte_index = self.byte_index + 1
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
-            let cp = ((UInt32)b0 & 31) << 6 | (UInt32)b1 & 63
+            let cp = ((b0(UInt32) & 31) << 6) | (b1(UInt32) & 63)
             // Check for overlong encoding
             if cp < 128 then {
                 self.byte_index = self.byte_index + 2
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
             self.byte_index = self.byte_index + 2
-            return [Rune]Option.Some(Rune(cp))
+            return Option[Rune].Some(Rune(cp))
         }
 
         // 3-byte sequence: 1110xxxx 10xxxxxx 10xxxxxx
         if b0 < 240 then {
             if self.byte_index + 2 >= len then {
                 self.byte_index = self.byte_index + 1
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
             let b1 = self.source[self.byte_index + 1]
             let b2 = self.source[self.byte_index + 2]
             if (b1 & 192) <> 128 or (b2 & 192) <> 128 then {
                 self.byte_index = self.byte_index + 1
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
-            let cp = ((UInt32)b0 & 15) << 12 | ((UInt32)b1 & 63) << 6 | (UInt32)b2 & 63
+            let cp = ((b0(UInt32) & 15) << 12) | ((b1(UInt32) & 63) << 6) | (b2(UInt32) & 63)
             // Check for overlong encoding or surrogate
             if cp < 2048 or (cp >= 55296 and cp <= 57343) then {
                 self.byte_index = self.byte_index + 3
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
             self.byte_index = self.byte_index + 3
-            return [Rune]Option.Some(Rune(cp))
+            return Option[Rune].Some(Rune(cp))
         }
 
         // 4-byte sequence: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         if b0 < 248 then {
             if self.byte_index + 3 >= len then {
                 self.byte_index = self.byte_index + 1
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
             let b1 = self.source[self.byte_index + 1]
             let b2 = self.source[self.byte_index + 2]
             let b3 = self.source[self.byte_index + 3]
             if (b1 & 192) <> 128 or (b2 & 192) <> 128 or (b3 & 192) <> 128 then {
                 self.byte_index = self.byte_index + 1
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
-            let cp = ((UInt32)b0 & 7) << 18 | ((UInt32)b1 & 63) << 12 | ((UInt32)b2 & 63) << 6 | (UInt32)b3 & 63
+            let cp = ((b0(UInt32) & 7) << 18) | ((b1(UInt32) & 63) << 12) | ((b2(UInt32) & 63) << 6) | (b3(UInt32) & 63)
             // Check for overlong encoding or out of range
             if cp < 65536 or cp > 1114111 then {
                 self.byte_index = self.byte_index + 4
-                return [Rune]Option.Some(Rune.replacement_char())
+                return Option[Rune].Some(Rune.replacement_char())
             }
             self.byte_index = self.byte_index + 4
-            return [Rune]Option.Some(Rune(cp))
+            return Option[Rune].Some(Rune(cp))
         }
 
         // Invalid first byte
         self.byte_index = self.byte_index + 1
-        return [Rune]Option.Some(Rune.replacement_char())
+        return Option[Rune].Some(Rune.replacement_char())
     }
 }
 
 // ============================================================================
 // String Bytes Iterator
 // ============================================================================
-given StringBytesIterator as [UInt8]Iterator {
+given StringBytesIterator as Iterator[UInt8] {
 
-    public next(self mut ref) [UInt8]Option = {
+    public next(self mut ref) Option[UInt8] = {
         if self.index >= self.source.count() then {
-            return [UInt8]Option.None()
+            return Option[UInt8].None()
         }
         let b = self.source.get(self.index).unwrap()
         self.index += 1
-        return [UInt8]Option.Some(b)
+        return Option[UInt8].Some(b)
     }
 }

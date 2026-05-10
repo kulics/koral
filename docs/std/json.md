@@ -21,8 +21,8 @@ public type JsonValue {
     Bool(value Bool),
     Number(value Float64),
     String(value String),
-    Array(elements [JsonValue ref]List),
-    Object(entries [String, JsonValue ref]Dict),
+    Array(elements List[ref JsonValue]),
+    Object(entries Dict[String, ref JsonValue]),
 }
 ```
 
@@ -43,13 +43,13 @@ given JsonValue {
     public is_string(self ref) Bool
     public is_array(self ref) Bool
     public is_object(self ref) Bool
-    public as_bool(self ref) [Bool]Option
-    public as_number(self ref) [Float64]Option
-    public as_string(self ref) [String]Option
-    public as_array(self ref) [[JsonValue ref]List]Option
-    public as_object(self ref) [[String, JsonValue ref]Dict]Option
-    public get_field(self ref, key String) [JsonValue ref]Option
-    public get_element(self ref, index UInt) [JsonValue ref]Option
+    public as_bool(self ref) Option[Bool]
+    public as_number(self ref) Option[Float64]
+    public as_string(self ref) Option[String]
+    public as_array(self ref) Option[List[ref JsonValue]]
+    public as_object(self ref) Option[Dict[String, ref JsonValue]]
+    public get_field(self ref, key String) Option[ref JsonValue]
+    public get_element(self ref, index UInt) Option[ref JsonValue]
     public to_string_pretty(self ref) String
 }
 
@@ -58,7 +58,7 @@ given JsonValue as Eq {
 }
 
 given JsonValue as Parseable {
-    public parse(s String) [Self]Result
+    public parse(s String) Result[Self]
 }
 
 given JsonValue as ToString {

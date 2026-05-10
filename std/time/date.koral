@@ -9,7 +9,7 @@ using Super.Text.Parseable
 // ============================================================================
 
 /// Helper: push a zero-padded integer of given width to a string.
-let push_padded(s String mut ref, value Int, width Int) Void = {
+let push_padded(s mut ref String, value Int, width Int) Void = {
     if width >= 4 and value < 1000 then { s.push_byte('0') }
     if width >= 3 and value < 100 then { s.push_byte('0') }
     if width >= 2 and value < 10 then { s.push_byte('0') }
@@ -20,14 +20,14 @@ let push_padded(s String mut ref, value Int, width Int) Void = {
 type ParseResult(value Int, pos Int)
 
 let parse_digits(s String, pos Int, count Int) ParseResult = {
-    let len = (Int)s.count()
+    let len = s.count()(Int)
     if pos + count > len then { return ParseResult(-1, pos) }
     let mut value = 0
     let mut i = 0
     while i < count then {
-        let c = s[(UInt)(pos + i)]
-        if c < (UInt8)48 or c > (UInt8)57 then { return ParseResult(-1, pos) }
-        value = value * 10 + (Int)(c - (UInt8)48)
+        let c = s[(pos + i)(UInt)]
+        if c < 48(UInt8) or c > 57(UInt8) then { return ParseResult(-1, pos) }
+        value = value * 10 + (c - 48(UInt8))(Int)
         i = i + 1
     }
     return ParseResult(value, pos + count)
@@ -35,20 +35,20 @@ let parse_digits(s String, pos Int, count Int) ParseResult = {
 
 /// Helper: parse variable-length digits (1-9) for fractional seconds.
 let parse_frac_digits(s String, pos Int) ParseResult = {
-    let len = (Int)s.count()
+    let len = s.count()(Int)
     let mut value = 0
     let mut i = 0
     let mut digit_count = 0
     while pos + i < len and digit_count < 9 then {
-        let c = s[(UInt)(pos + i)]
-        if c < (UInt8)48 or c > (UInt8)57 then {
+        let c = s[(pos + i)(UInt)]
+        if c < 48(UInt8) or c > 57(UInt8) then {
             if digit_count == 0 then { return ParseResult(-1, pos) }
             let mut v = value
             let mut d = digit_count
             while d < 9 then { v = v * 10; d = d + 1 }
             return ParseResult(v, pos + i)
         }
-        value = value * 10 + (Int)(c - (UInt8)48)
+        value = value * 10 + (c - 48(UInt8))(Int)
         digit_count = digit_count + 1
         i = i + 1
     }
@@ -88,15 +88,15 @@ let civil_from_days(z Int64) CivilDate = {
     let d = doy - (153 * mp + 2) / 5 + 1
     let m = if mp < 10 then mp + 3 else mp - 9
     let yr = if m <= 2 then y + 1 else y
-    return CivilDate((Int)yr, (Int)m, (Int)d)
+    return CivilDate(yr(Int), m(Int), d(Int))
 }
 
 /// Convert (year, month, day) to Unix day count (days since 1970-01-01).
 let days_from_civil(y Int, m Int, d Int) Int64 = {
-    let yr = (Int64)(if m <= 2 then y - 1 else y)
+    let yr = (if m <= 2 then y - 1 else y)(Int64)
     let era = floor_div(yr, 400)
     let yoe = yr - era * 400
-    let doy = (153 * (Int64)(if m > 2 then m - 3 else m + 9) + 2) / 5 + (Int64)d - 1
+    let doy = (153 * (if m > 2 then m - 3 else m + 9)(Int64) + 2) / 5 + d(Int64) - 1
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
     return era * 146097 + doe - 719468
 }
@@ -130,14 +130,14 @@ given Date {
 
     /// Creates a Date from year, month, day components.
     /// Returns Error if any field is out of range.
-    public new(year: Int, month: Int, day: Int) [Date]Result = {
+    public new(year: Int, month: Int, day: Int) Result[Date] = {
         if month < 1 or month > 12 then {
-            return [Date]Result.Error(box("invalid date: month out of range"))
+            return Result[Date].Error(box("invalid date: month out of range"))
         }
         if day < 1 or day > month_day_count(year, month) then {
-            return [Date]Result.Error(box("invalid date: day out of range"))
+            return Result[Date].Error(box("invalid date: day out of range"))
         }
-        return [Date]Result.Ok(Date(days_from_civil(year, month, day)))
+        return Result[Date].Ok(Date(days_from_civil(year, month, day)))
     }
 
     /// Returns the Unix epoch date (1970-01-01).
@@ -162,17 +162,17 @@ given Date {
     /// Returns the ISO 8601 weekday number (1=Monday .. 7=Sunday).
     public weekday(self) Int = {
         // 1970-01-01 was a Thursday (ISO weekday 4).
-        let d = self.days % (Int64)7
-        let w = if d < 0 then d + (Int64)7 else d
+        let d = self.days % 7(Int64)
+        let w = if d < 0 then d + 7(Int64) else d
         // shift epoch day to Monday-based ISO range and convert to 1..7
-        return (Int)(((w + (Int64)3) % (Int64)7) + (Int64)1)
+        return (((w + 3(Int64)) % 7(Int64)) + 1(Int64))(Int)
     }
 
     /// Returns the day of year (1-366).
     public day_of_year(self) Int = {
         let c = civil_from_days(self.days)
         let jan1 = days_from_civil(c.year, 1, 1)
-        let diff = (Int)(self.days - jan1)
+        let diff = (self.days - jan1)(Int)
         return diff + 1
     }
 
@@ -193,10 +193,10 @@ given Date {
 given Date {
 
     /// Adds the given number of days (negative to subtract).
-    public add_days(self, n Int) Date = Date(self.days + (Int64)n)
+    public add_days(self, n Int) Date = Date(self.days + n(Int64))
 
     /// Returns the number of days from self to other (positive if other is later).
-    public days_to(self, other Date) Int = (Int)(other.days - self.days)
+    public days_to(self, other Date) Int = (other.days - self.days)(Int)
 
     /// Adds the given number of months (negative to subtract).
     /// If the resulting day exceeds the month's length, it is clamped to the last day.
@@ -258,19 +258,19 @@ given Date as ToString {
 given Date as Parseable {
 
     /// Parses an ISO 8601 date string: "YYYY-MM-DD".
-    public parse(s String) [Date]Result = {
-        let len = (Int)s.count()
+    public parse(s String) Result[Date] = {
+        let len = s.count()(Int)
         if len <> 10 then {
-            return [Date]Result.Error(box("invalid date: expected YYYY-MM-DD"))
+            return Result[Date].Error(box("invalid date: expected YYYY-MM-DD"))
         }
         let yr = parse_digits(s, 0, 4)
-        if yr.value < 0 then { return [Date]Result.Error(box("invalid date: expected 4-digit year")) }
-        if s[4] <> (UInt8)45 then { return [Date]Result.Error(box("invalid date: expected '-' after year")) }
+        if yr.value < 0 then { return Result[Date].Error(box("invalid date: expected 4-digit year")) }
+        if s[4] <> 45(UInt8) then { return Result[Date].Error(box("invalid date: expected '-' after year")) }
         let mo = parse_digits(s, 5, 2)
-        if mo.value < 0 then { return [Date]Result.Error(box("invalid date: expected 2-digit month")) }
-        if s[7] <> (UInt8)45 then { return [Date]Result.Error(box("invalid date: expected '-' after month")) }
+        if mo.value < 0 then { return Result[Date].Error(box("invalid date: expected 2-digit month")) }
+        if s[7] <> 45(UInt8) then { return Result[Date].Error(box("invalid date: expected '-' after month")) }
         let dy = parse_digits(s, 8, 2)
-        if dy.value < 0 then { return [Date]Result.Error(box("invalid date: expected 2-digit day")) }
+        if dy.value < 0 then { return Result[Date].Error(box("invalid date: expected 2-digit day")) }
         return Date.new(year: yr.value, month: mo.value, day: dy.value)
     }
 }
