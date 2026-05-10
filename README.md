@@ -1,6 +1,6 @@
 # The Koral Programming Language
 
-Koral is an experimental compiled language that combines **Go's aggressive escape analysis** with **Swift's Automatic Reference Counting (ARC)**. It targets C to deliver predictable, high-performance memory management without a garbage collector, while keeping the syntax clean and expression-oriented.
+Koral is an experimental compiled language that combines **Go's aggressive escape analysis** with **Swift's Automatic Reference Counting (ARC)**. It targets C to deliver predictable, high-performance memory management without a garbage collector, while keeping the syntax clean and its core control flow expression-oriented.
 
 This repository contains the compiler, standard library, formatter, language documentation, and sample projects.
 
@@ -41,14 +41,14 @@ let shared_point = heap_point
 ## Language Highlights
 
 - **No GC, No Manual `free`**: Automatic memory management based on reference counting and escape analysis.
-- **Expression-Oriented**: `if`, `when`, `while`, and blocks all produce values.
+- **Expression-Oriented Control Flow**: `if`, `when`, and blocks produce values; `while` and `for` keep the same surface style but remain statement-only.
 - **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
 - **Algebraic Data Types**: Structs and enums with exhaustive pattern matching.
 - **C Interop**: Foreign function interface (FFI) and a C backend for broad platform compatibility.
 
 ## Syntax Quick Tour
 
-### Everything is an expression
+### Expression-oriented core control flow
 
 ```koral
 let sign = if x > 0 then 1 else if x < 0 then -1 else 0
@@ -59,6 +59,19 @@ let label = when status in {
     .Stopped then "done",
 }
 ```
+
+Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. When a branch body uses a block, that block still defaults to `Void`; use `yield` to produce the enclosing `if` or `when` expression's value from inside the block.
+
+```koral
+let label = if score >= 90 then {
+    if score == 100 then yield "perfect"
+    yield "A"
+} else {
+    yield "other"
+}
+```
+
+`while` and `for` intentionally keep the same `... then ...` surface shape, but they are statements rather than value-producing expressions.
 
 ### Pattern matching built into `if` and `while`
 

@@ -12,7 +12,7 @@ Specification note:
 
 ## Key Features
 
-- Modern, easy-to-scan syntax with optional semicolons and expression-oriented design.
+- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if`, `when`, and blocks produce values, while `while` and `for` remain statement-only.
 - Automatic memory management based on reference counting, ownership analysis, and escape analysis.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
@@ -604,6 +604,74 @@ y |= 1      // y = y | 1
 y ^= 15     // y = y ^ 15
 y <<= 1     // y = y << 1
 y >>= 2     // y = y >> 2
+```
+
+### Operator Overloading
+
+Koral supports trait-based operator overloading for arithmetic, comparison, and indexing operations.
+
+The built-in operator mappings are:
+
+- `+` -> `Add[R]` via `add(self, other R) Self`
+- `-` (binary) -> `Sub[R]` via `sub(self, other R) Self`
+- `-` (unary) -> `Neg` via `neg(self) Self`
+- `*` -> `Mul[R]` via `mul(self, other R) Self`
+- `/` -> `Div[R]` via `div(self, other R) Self`
+- `%` -> `Rem[R]` via `rem(self, other R) Self`
+- `==` / `<>` -> `Eq` via `equals(self, other Self) Bool`
+- `<` / `>` / `<=` / `>=` -> `Ord` via `compare(self, other Self) Int`
+- `value[key]` -> `Index[K, V]` via `ref_at(self ref, key K) ref V`
+- `value[key] = expr` -> `MutIndex[K, V]` via `mut_ref_at(self mut ref, key K) mut ref V`
+
+Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are currently built-in and are not customized through public operator traits.
+
+```koral
+type Vec2(x Int, y Int)
+
+given Vec2 as Add[Vec2] {
+    add(self, other Vec2) Vec2 = Vec2(self.x + other.x, self.y + other.y)
+}
+
+given Vec2 as Neg {
+    neg(self) Vec2 = Vec2(-self.x, -self.y)
+}
+
+given Vec2 as Eq {
+    equals(self, other Vec2) Bool = self.x == other.x and self.y == other.y
+}
+
+given Vec2 as Ord {
+    compare(self, other Vec2) Int =
+        if self.x <> other.x then self.x.compare(other.x) else self.y.compare(other.y)
+}
+
+let sum = Vec2(1, 2) + Vec2(3, 4)
+let flipped = -sum
+let same = sum == Vec2(4, 6)
+let ordered = Vec2(1, 0) < Vec2(2, 0)
+```
+
+Custom subscripts use `Index[K, V]` and `MutIndex[K, V]`:
+
+```koral
+type Pair(mut left Int, mut right Int)
+
+given Pair as Index[Int, Int] {
+    ref_at(self ref, key Int) ref Int =
+        if key == 0 then self.left.ref else self.right.ref
+}
+
+given Pair as MutIndex[Int, Int] {
+    mut_ref_at(self mut ref, key Int) mut ref Int =
+        if key == 0 then self.left.ref else self.right.ref
+}
+
+let pair = Pair(10, 20)
+println(pair[0])
+
+let mut pair2 = Pair(1, 2)
+pair2[1] = 99
+println(pair2[1])
 ```
 
 ### Value Coalescing and Optional Chaining
@@ -1499,8 +1567,10 @@ let p = Point.origin()
 
 The most commonly used core traits are:
 
+- `Add[R]` / `Sub[R]` / `Neg` / `Mul[R]` / `Div[R]` / `Rem[R]`: arithmetic operator traits.
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
+- `Index[K, V]` / `MutIndex[K, V]`: subscript access and subscript assignment.
 - `ToString`: conversion to string.
 - `Iterator[T]`: iteration protocol (`next(self mut ref) Option[T]`).
 - `Error`: error message interface (`message(self ref) String`).
