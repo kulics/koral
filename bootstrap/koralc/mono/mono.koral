@@ -26,14 +26,14 @@ public type InstantiatedFunction(
 // trait_conformance is Some(trait_name) when this method satisfies a trait.
 public type ConcreteMethodEntry(
     symbol Symbol,
-    trait_conformance [String]Option,
+    trait_conformance Option[String],
 )
 
 public type ConcreteCallableInfo(
     def_id DefId,
     logical_name String,
-    owner_type [Type]Option,
-    trait_conformance [String]Option,
+    owner_type Option[Type],
+    trait_conformance Option[String],
 )
 
 private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
@@ -78,16 +78,16 @@ protected let mono_type_simple_name(context CompilerContext, t Type) String = {
     }
 }
 
-private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id DefId) [String]Option = {
-    let name = context.get_name(def_id) or else { return [String]Option.None() }
-    let module_path = context.get_module_path(def_id) or else [String]List.new()
+private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id DefId) Option[String] = {
+    let name = context.get_name(def_id) or else { return Option[String].None() }
+    let module_path = context.get_module_path(def_id) or else List[String].new()
     let is_private = when context.get_access(def_id) in {
         .Some(access) then access is .Private(),
         .None() then false,
     }
     let source_file = context.get_source_file(def_id) or else ""
 
-    let mut parts = [String]List.new()
+    let mut parts = List[String].new()
     if not module_path.is_empty() then {
         let mut path_str = String.new()
         let mut first = true
@@ -101,9 +101,9 @@ private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id 
     if is_private and not source_file.is_empty() then {
         let mut hash UInt32 = 0
         for byte in source_file.bytes() then {
-            hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
+            hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32))
         }
-        parts.push("f\((UInt)(hash % 10000))")
+        parts.push("f\((hash % 10000)(UInt))")
     }
     parts.push(name)
 
@@ -114,7 +114,7 @@ private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id 
         out.push_string(part)
         first = false
     }
-    return [String]Option.Some(out)
+    return Option[String].Some(out)
 }
 
 private let mono_concrete_layout_key_for_type(context CompilerContext, t Type) String = {
@@ -178,7 +178,7 @@ private let concrete_trait_method_lookup_key(context CompilerContext, receiver_t
 // for the final trait-placeholder resolution pass.
 public type TemplateInfo(
     base_name String,
-    args [Type ref]List,
+    args List[ref Type],
 )
 
 // ── VtableRequest ─────────────────────────────────────────────────────────────
@@ -188,76 +188,76 @@ public type TemplateInfo(
 public type VtableRequest(
     concrete_type Type,
     trait_name String,
-    trait_type_args [Type ref]List,
+    trait_type_args List[ref Type],
 )
 
 // ── MonomorphizedProgram ──────────────────────────────────────────────────────
 
 // The output of the monomorphization phase.
 public type MonomorphizedProgram(
-    global_nodes [TypedDecl]List,
-    traits [String, TraitDeclInfo]Dict,
-    vtable_requests [VtableRequest]List,
-    receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
-    concrete_callables_by_def_id [UInt, ConcreteCallableInfo]Dict,
-    c_identifier_by_def_id [UInt, String]Dict,
-    def_ids_by_name [String, [DefId]List]Dict,
-    type_def_ids_by_name [String, [DefId]List]Dict,
-    type_by_c_type_name [String, Type]Dict,
-    callable_by_def_id [UInt, CallableCodegenInfo]Dict,
-    static_method_by_key [String, DefId]Dict,
-    trait_method_by_key [String, DefId]Dict,
-    type_layout_by_key [String, TypeLayoutInfo]Dict,
-    foreign_function_def_ids [UInt]Set,
-    foreign_global_var_def_ids [UInt]Set,
-    foreign_type_def_ids [UInt]Set,
+    global_nodes List[TypedDecl],
+    traits Dict[String, TraitDeclInfo],
+    vtable_requests List[VtableRequest],
+    receiver_method_dispatch Dict[UInt, ReceiverMethodDispatchInfo],
+    concrete_callables_by_def_id Dict[UInt, ConcreteCallableInfo],
+    c_identifier_by_def_id Dict[UInt, String],
+    def_ids_by_name Dict[String, List[DefId]],
+    type_def_ids_by_name Dict[String, List[DefId]],
+    type_by_c_type_name Dict[String, Type],
+    callable_by_def_id Dict[UInt, CallableCodegenInfo],
+    static_method_by_key Dict[String, DefId],
+    trait_method_by_key Dict[String, DefId],
+    type_layout_by_key Dict[String, TypeLayoutInfo],
+    foreign_function_def_ids Set[UInt],
+    foreign_global_var_def_ids Set[UInt],
+    foreign_type_def_ids Set[UInt],
 )
 
 given MonomorphizedProgram {
 
-    public semantic_global_nodes(self) [TypedDecl]List = {
+    public semantic_global_nodes(self) List[TypedDecl] = {
         return self.global_nodes
     }
 
-    public semantic_traits(self) [String, TraitDeclInfo]Dict = {
+    public semantic_traits(self) Dict[String, TraitDeclInfo] = {
         return self.traits
     }
 
-    public semantic_vtable_requests(self) [VtableRequest]List = {
+    public semantic_vtable_requests(self) List[VtableRequest] = {
         return self.vtable_requests
     }
 
-    public semantic_receiver_method_dispatch(self) [UInt, ReceiverMethodDispatchInfo]Dict = {
+    public semantic_receiver_method_dispatch(self) Dict[UInt, ReceiverMethodDispatchInfo] = {
         return self.receiver_method_dispatch
     }
 
-    public codegen_callable(self, def_id DefId) [CallableCodegenInfo]Option = {
+    public codegen_callable(self, def_id DefId) Option[CallableCodegenInfo] = {
         return self.callable_by_def_id.get(def_id.id)
     }
 
-    public c_identifier(self, def_id DefId) [String]Option = {
+    public c_identifier(self, def_id DefId) Option[String] = {
         return self.c_identifier_by_def_id.get(def_id.id)
     }
 
-    public def_ids_named(self, name String) [DefId]List = {
+    public def_ids_named(self, name String) List[DefId] = {
         return when self.def_ids_by_name.get(name) in {
             .Some(def_ids) then def_ids,
-            .None() then [DefId]List.new(),
+            .None() then List[DefId].new(),
         }
     }
 
-    public type_def_ids_named(self, name String) [DefId]List = {
+    public type_def_ids_named(self, name String) List[DefId] = {
         return when self.type_def_ids_by_name.get(name) in {
             .Some(def_ids) then def_ids,
-            .None() then [DefId]List.new(),
+            .None() then List[DefId].new(),
         }
     }
 
-    public codegen_type_from_c_type_name(self, c_type_name String) [Type]Option = {
+    public codegen_type_from_c_type_name(self, c_type_name String) Option[Type] = {
         return self.type_by_c_type_name.get(c_type_name)
     }
 
-    public codegen_layout_by_key(self, type_key String) [TypeLayoutInfo]Option = {
+    public codegen_layout_by_key(self, type_key String) Option[TypeLayoutInfo] = {
         return self.type_layout_by_key.get(type_key)
     }
 
@@ -273,68 +273,68 @@ given MonomorphizedProgram {
         return self.foreign_type_def_ids.contains(def_id.id)
     }
 
-    public lookup_receiver_method_by_indexed_key(self, indexed_key String) [DefId]Option = {
+    public lookup_receiver_method_by_indexed_key(self, indexed_key String) Option[DefId] = {
         return self.static_method_by_key.get(indexed_key)
     }
 
-    public concrete_callable_index(self) [UInt, ConcreteCallableInfo]Dict = {
+    public concrete_callable_index(self) Dict[UInt, ConcreteCallableInfo] = {
         return self.concrete_callables_by_def_id
     }
 
     // Look up the DefId for a static method by type name and method name.
     // The key is built as "TypeName.methodName".
-    public lookup_static_method(self, type_name String, method_name String) [DefId]Option = {
+    public lookup_static_method(self, type_name String, method_name String) Option[DefId] = {
         let key = "\(type_name).\(method_name)"
         return self.static_method_by_key.get(key)
     }
 
-    public lookup_receiver_method(self, receiver_key String, method_name String) [DefId]Option = {
+    public lookup_receiver_method(self, receiver_key String, method_name String) Option[DefId] = {
         let key = "\(receiver_key).\(method_name)"
         return self.static_method_by_key.get(key)
     }
 
-    public lookup_trait_method(self, receiver_key String, trait_name String, method_name String) [DefId]Option = {
+    public lookup_trait_method(self, receiver_key String, trait_name String, method_name String) Option[DefId] = {
         let key = "\(receiver_key)|\(trait_name)|\(method_name)"
         return self.trait_method_by_key.get(key)
     }
 
-    public lookup_concrete_callable(self, def_id DefId) [ConcreteCallableInfo]Option = {
+    public lookup_concrete_callable(self, def_id DefId) Option[ConcreteCallableInfo] = {
         return self.concrete_callables_by_def_id.get(def_id.id)
     }
 
-    public lookup_global_function_by_node_index(self, node_index UInt) [DefId]Option = {
+    public lookup_global_function_by_node_index(self, node_index UInt) Option[DefId] = {
         if node_index < self.global_nodes.count() then {
             return when self.global_nodes[node_index] in {
-                .FunctionDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                .IntrinsicFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                .ForeignFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                _ then [DefId]Option.None(),
+                .FunctionDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+                .IntrinsicFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+                .ForeignFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+                _ then Option[DefId].None(),
             }
         }
-        return [DefId]Option.None()
+        return Option[DefId].None()
     }
 
-    public lookup_global_variable_by_node_index(self, node_index UInt) [DefId]Option = {
+    public lookup_global_variable_by_node_index(self, node_index UInt) Option[DefId] = {
         if node_index < self.global_nodes.count() then {
             return when self.global_nodes[node_index] in {
-                .LetDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                .ForeignLetDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                _ then [DefId]Option.None(),
+                .LetDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+                .ForeignLetDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+                _ then Option[DefId].None(),
             }
         }
-        return [DefId]Option.None()
+        return Option[DefId].None()
     }
 
-    public lookup_global_type_by_node_index(self, node_index UInt) [DefId]Option = {
+    public lookup_global_type_by_node_index(self, node_index UInt) Option[DefId] = {
         if node_index < self.global_nodes.count() then {
             return when self.global_nodes[node_index] in {
-                .TypeStructDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                .TypeEnumDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                .ForeignTypeDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
-                _ then [DefId]Option.None(),
+                .TypeStructDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+                .TypeEnumDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+                .ForeignTypeDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+                _ then Option[DefId].None(),
             }
         }
-        return [DefId]Option.None()
+        return Option[DefId].None()
     }
 }
 
@@ -349,7 +349,7 @@ given MonomorphizedProgram {
 // context              – unified metadata context shared with downstream passes
 public type TypeCheckerOutput(
     program TypedProgram,
-    instantiation_requests [InstantiationRequest]List,
+    instantiation_requests List[InstantiationRequest],
     generic_templates GenericTemplateRegistry,
     context CompilerContext,
 )
@@ -361,34 +361,34 @@ public type TypeCheckerOutput(
 protected type MonomorphizerStorage(
     // ── Input ────────────────────────────────────────────────────────────────
     generic_templates GenericTemplateRegistry,
-    source_given_decls [TypedDecl]List,
+    source_given_decls List[TypedDecl],
 
     // ── Caches ───────────────────────────────────────────────────────────────
-    mut instantiated_types [String, Type]Dict,
-    mut instantiated_functions [String, InstantiatedFunction]Dict,
-    mut instantiated_function_symbols [String, Symbol]Dict,
-    mut generated_layouts [String]Set,
+    mut instantiated_types Dict[String, Type],
+    mut instantiated_functions Dict[String, InstantiatedFunction],
+    mut instantiated_function_symbols Dict[String, Symbol],
+    mut generated_layouts Set[String],
 
     // ── Output ───────────────────────────────────────────────────────────────
-    mut generated_nodes [TypedDecl]List,
+    mut generated_nodes List[TypedDecl],
 
     // ── State ────────────────────────────────────────────────────────────────
-    mut layout_to_template_info [String, TemplateInfo]Dict,
-    mut extension_methods [String, [String, ConcreteMethodEntry]Dict]Dict,
-    mut extension_method_def_ids [String, DefId]Dict,
-    mut concrete_callables_by_def_id [UInt, ConcreteCallableInfo]Dict,
-    mut remapped_function_def_ids [UInt, [[DefId, Type]Pair]List]Dict,
-    mut receiver_method_dispatch [UInt, ReceiverMethodDispatchInfo]Dict,
-    mut vtable_requests [VtableRequest]List,
+    mut layout_to_template_info Dict[String, TemplateInfo],
+    mut extension_methods Dict[String, Dict[String, ConcreteMethodEntry]],
+    mut extension_method_def_ids Dict[String, DefId],
+    mut concrete_callables_by_def_id Dict[UInt, ConcreteCallableInfo],
+    mut remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
+    mut receiver_method_dispatch Dict[UInt, ReceiverMethodDispatchInfo],
+    mut vtable_requests List[VtableRequest],
 
     // ── Work queue ───────────────────────────────────────────────────────────
-    mut pending_requests [InstantiationRequest]List,
-    mut processed_request_keys [String]Set,
-    mut pending_request_keys [String]Set,
+    mut pending_requests List[InstantiationRequest],
+    mut processed_request_keys Set[String],
+    mut pending_request_keys Set[String],
 
     // ── Recursion detection ──────────────────────────────────────────────────
-    mut instantiating_types [String]Set,
-    mut instantiating_functions [String]Set,
+    mut instantiating_types Set[String],
+    mut instantiating_functions Set[String],
     mut current_recursion_depth Int,
     mut extension_body_resolution_depth Int,
 
@@ -400,7 +400,7 @@ protected type MonomorphizerStorage(
 
 // Core monomorphization engine.  All mutable state lives in storage (heap-allocated)
 // so passing Monomorphizer by ref never copies large data onto the stack.
-public type Monomorphizer(protected mut storage MonomorphizerStorage mut ref)
+public type Monomorphizer(protected mut storage mut ref MonomorphizerStorage)
 
 // ── Monomorphizer initialisation ──────────────────────────────────────────────
 
@@ -442,7 +442,7 @@ private let given_member_has_generic_parameter(member TypedGivenMember) Bool = {
     return has_generic_parameter(member.return_type)
 }
 
-private let given_members_have_generic_parameter(members [TypedGivenMember]List) Bool = {
+private let given_members_have_generic_parameter(members List[TypedGivenMember]) Bool = {
     for member in members then {
         if given_member_has_generic_parameter(member) then { return true }
     }
@@ -459,28 +459,28 @@ private let is_source_given_decl(decl TypedDecl) Bool = {
 }
 
 /// Extract the DefId from a TypedDecl node's embedded identifier, if present.
-protected let decl_def_id(decl TypedDecl) [DefId]Option = {
+protected let decl_def_id(decl TypedDecl) Option[DefId] = {
     return when decl in {
-        .FunctionDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .IntrinsicFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .ForeignFunctionDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .LetDecl(_, _, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .ForeignLetDecl(_, _, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .TypeStructDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .TypeEnumDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        .ForeignTypeDecl(_, _, _, _, id) then [DefId]Option.Some(id.def_id),
-        _ then [DefId]Option.None(),
+        .FunctionDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .IntrinsicFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .ForeignFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .LetDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .ForeignLetDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .TypeStructDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .TypeEnumDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .ForeignTypeDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+        _ then Option[DefId].None(),
     }
 }
 
 private type MonoProgramInputs(
-    initial_nodes [TypedDecl]List,
-    source_given_decls [TypedDecl]List,
+    initial_nodes List[TypedDecl],
+    source_given_decls List[TypedDecl],
 )
 
 private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
-    let mut initial_nodes = [TypedDecl]List.new()
-    let mut source_given_decls = [TypedDecl]List.new()
+    let mut initial_nodes = List[TypedDecl].new()
+    let mut source_given_decls = List[TypedDecl].new()
     for decl in program.declarations then {
         if is_source_given_decl(decl) then {
             source_given_decls.push(decl)
@@ -496,7 +496,7 @@ given Monomorphizer {
 
     public new_with_inputs(
         program TypedProgram,
-        instantiation_requests [InstantiationRequest]List,
+        instantiation_requests List[InstantiationRequest],
         generic_templates GenericTemplateRegistry,
         context CompilerContext,
     ) Monomorphizer = {
@@ -509,15 +509,15 @@ given Monomorphizer {
     // • Non-generic global nodes are copied directly into generated_nodes.
     // • All InstantiationRequests from the input are enqueued in pending_requests.
     // • Every cache / map / set is initialised empty.
-    public new(input TypeCheckerOutput ref) Monomorphizer = {
+    public new(input ref TypeCheckerOutput) Monomorphizer = {
         let collected = collect_mono_program_inputs(input.program)
         let initial_nodes = collected.initial_nodes
         let source_given_decls = collected.source_given_decls
 
         // Copy and deduplicate instantiation requests up front to avoid
         // pathological queue growth from repeated identical requests.
-        let mut requests = [InstantiationRequest]List.new()
-        let mut queued_keys = [String]Set.new()
+        let mut requests = List[InstantiationRequest].new()
+        let mut queued_keys = Set[String].new()
         for req in input.instantiation_requests then {
             let key = req.deduplication_key()
             if not queued_keys.contains(key) then {
@@ -530,27 +530,27 @@ given Monomorphizer {
             input.generic_templates,
             source_given_decls,
             // caches
-            [String, Type]Dict.new(),
-            [String, InstantiatedFunction]Dict.new(),
-            [String, Symbol]Dict.new(),
-            [String]Set.new(),
+            Dict[String, Type].new(),
+            Dict[String, InstantiatedFunction].new(),
+            Dict[String, Symbol].new(),
+            Set[String].new(),
             // output
             initial_nodes,
             // state
-            [String, TemplateInfo]Dict.new(),
-            [String, [String, ConcreteMethodEntry]Dict]Dict.new(),
-            [String, DefId]Dict.new(),
-            [UInt, ConcreteCallableInfo]Dict.new(),
-            [UInt, [[DefId, Type]Pair]List]Dict.new(),
-            [UInt, ReceiverMethodDispatchInfo]Dict.new(),
-            [VtableRequest]List.new(),
+            Dict[String, TemplateInfo].new(),
+            Dict[String, Dict[String, ConcreteMethodEntry]].new(),
+            Dict[String, DefId].new(),
+            Dict[UInt, ConcreteCallableInfo].new(),
+            Dict[UInt, List[Pair[DefId, Type]]].new(),
+            Dict[UInt, ReceiverMethodDispatchInfo].new(),
+            List[VtableRequest].new(),
             // work queue
             requests,
-            [String]Set.new(),
+            Set[String].new(),
             queued_keys,
             // recursion detection
-            [String]Set.new(),
-            [String]Set.new(),
+            Set[String].new(),
+            Set[String].new(),
             0,
             0,
             // shared metadata context
@@ -567,19 +567,19 @@ given Monomorphizer {
     private seed_given_method_def_ids(self ref, node TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, [String]Option.None(), members)
+                self.register_given_members_def_ids(target_type, Option[String].None(), members)
             },
             .GivenTraitDecl(target_type, trait_name, _, members, _) then {
-                self.register_given_members_def_ids(target_type, [String]Option.Some(trait_name), members)
+                self.register_given_members_def_ids(target_type, Option[String].Some(trait_name), members)
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
-                self.register_given_members_def_ids(target_type, [String]Option.None(), members)
+                self.register_given_members_def_ids(target_type, Option[String].None(), members)
             },
             _ then {},
         }
     }
 
-    private register_given_members_def_ids(self ref, target_type Type, trait_conformance [String]Option, members [TypedGivenMember]List) Void = {
+    private register_given_members_def_ids(self ref, target_type Type, trait_conformance Option[String], members List[TypedGivenMember]) Void = {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
@@ -601,7 +601,7 @@ given Monomorphizer {
                     if not self.storage.concrete_callables_by_def_id.contains_key(m.def_id.id) then {
                         self.storage.concrete_callables_by_def_id.insert(
                             m.def_id.id,
-                            ConcreteCallableInfo(m.def_id, m.name, [Type]Option.Some(target_type), trait_conformance),
+                            ConcreteCallableInfo(m.def_id, m.name, Option[Type].Some(target_type), trait_conformance),
                         )
                     }
                     let key1 = "\(type_key).\(m.name)"
@@ -697,12 +697,12 @@ given Monomorphizer {
 
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
-        let mut resolved_nodes = [TypedDecl]List.new()
-        let mut ri = (UInt)0
+        let mut resolved_nodes = List[TypedDecl].new()
+        let mut ri = 0(UInt)
         while ri < self.storage.generated_nodes.count() then {
             let node = self.storage.generated_nodes[ri]
             resolved_nodes.push(resolve_types_in_global_node(self, node))
-            ri += (UInt)1
+            ri += 1(UInt)
         }
         self.storage.generated_nodes = resolved_nodes
 
@@ -750,11 +750,11 @@ given Monomorphizer {
         let concrete_callables = self.build_concrete_callable_index()
         let def_ids_by_name = self.build_codegen_def_id_name_index()
         let type_def_ids_by_name = self.build_codegen_type_def_id_name_index()
-        let mut c_identifier_by_def_id = [UInt, String]Dict.new()
-        let mut foreign_function_def_ids = [UInt]Set.new()
-        let mut foreign_global_var_def_ids = [UInt]Set.new()
-        let mut foreign_type_def_ids = [UInt]Set.new()
-        let mut foreign_def_ids = [UInt]Set.new()
+        let mut c_identifier_by_def_id = Dict[UInt, String].new()
+        let mut foreign_function_def_ids = Set[UInt].new()
+        let mut foreign_global_var_def_ids = Set[UInt].new()
+        let mut foreign_type_def_ids = Set[UInt].new()
+        let mut foreign_def_ids = Set[UInt].new()
         self.collect_codegen_foreign_def_ids(foreign_function_def_ids.ref, foreign_global_var_def_ids.ref, foreign_type_def_ids.ref, foreign_def_ids.ref)
         self.collect_codegen_c_identifiers(type_def_ids_by_name, foreign_def_ids, c_identifier_by_def_id.ref)
         let type_by_c_type_name = self.build_codegen_type_name_index(c_identifier_by_def_id)
@@ -787,62 +787,62 @@ given Monomorphizer {
 
     // Instantiate a generic struct template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.3).
-    instantiate_struct_impl(self ref, template GenericStructTemplate, args [Type ref]List) Type = {
+    instantiate_struct_impl(self ref, template GenericStructTemplate, args List[ref Type]) Type = {
         return instantiate_struct(self, template, args)
     }
 
     // Instantiate a generic enum template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.4).
-    instantiate_enum_impl(self ref, template GenericEnumTemplate, args [Type ref]List) Type = {
+    instantiate_enum_impl(self ref, template GenericEnumTemplate, args List[ref Type]) Type = {
         return instantiate_enum(self, template, args)
     }
 
     // Instantiate a generic function template with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.1).
-    instantiate_function_impl(self ref, template GenericFunctionTemplate, args [Type ref]List) InstantiatedFunction = {
+    instantiate_function_impl(self ref, template GenericFunctionTemplate, args List[ref Type]) InstantiatedFunction = {
         return instantiate_function(self, template, args)
     }
 
     // Instantiate a generic extension method with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.2).
-    instantiate_extension_method_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args [Type ref]List, method_type_args [Type ref]List) Symbol = {
+    instantiate_extension_method_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) Symbol = {
         let sym = instantiate_extension_method(self, base_type, template_name, box(template), type_args, method_type_args)
         return sym
     }
 
-    instantiate_extension_method_def_id_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args [Type ref]List, method_type_args [Type ref]List) DefId = {
+    instantiate_extension_method_def_id_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
         return instantiate_extension_method_def_id(self, base_type, template_name, box(template), type_args, method_type_args)
     }
 
-    instantiate_extension_method_def_id_ref_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate mut ref, type_args [Type ref]List, method_type_args [Type ref]List) DefId = {
+    instantiate_extension_method_def_id_ref_impl(self ref, base_type Type, template_name String, template mut ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
         return instantiate_extension_method_def_id(self, base_type, template_name, template, type_args, method_type_args)
     }
 
     // Resolve a trait placeholder method call to a concrete implementation.
     // Implemented in mono_functions.koral (task 6.6).
-    instantiate_trait_placeholder_method_impl(self ref, base_type Type, method_name String, method_type_args [Type ref]List) Void = {
+    instantiate_trait_placeholder_method_impl(self ref, base_type Type, method_name String, method_type_args List[ref Type]) Void = {
         instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args)
     }
 
-    instantiate_trait_vtable_methods_impl(self ref, concrete_type Type, trait_name String, trait_type_args [Type ref]List) Void = {
+    instantiate_trait_vtable_methods_impl(self ref, concrete_type Type, trait_name String, trait_type_args List[ref Type]) Void = {
         instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_type_args)
     }
 
     // Substitute generic type parameters in a Type.
     // Implemented in mono_type_resolution.koral (task 8.1).
-    substitute_type_impl(self ref, t Type, substitution [String, Type]Dict) Type = {
+    substitute_type_impl(self ref, t Type, substitution Dict[String, Type]) Type = {
         return substitute_type(self, t, substitution)
     }
 
     // Substitute generic type parameters in a TypeNode, resolving to a concrete Type.
     // Implemented in mono_type_resolution.koral (task 8.3).
-    resolve_type_node_impl(self ref, node TypeNode, substitution [String, Type]Dict) Type = {
+    resolve_type_node_impl(self ref, node TypeNode, substitution Dict[String, Type]) Type = {
         return resolve_type_node(self, node, substitution)
     }
 
     // Substitute generic type parameters throughout a TypedExpr tree.
     // Implemented in mono_expr_substitution.koral (task 9.1).
-    substitute_types_in_expression_impl(self ref, expr TypedExpr ref, substitution [String, Type]Dict) TypedExpr ref = {
+    substitute_types_in_expression_impl(self ref, expr ref TypedExpr, substitution Dict[String, Type]) ref TypedExpr = {
         return substitute_types_in_expression(self, expr, substitution)
     }
 
@@ -850,9 +850,9 @@ given Monomorphizer {
     // Key format: concrete receiver layout key + method name, preserving
     // ref/mutref/ptr wrappers so blanket impls do not overwrite value impls.
     // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + concrete_callables.
-    build_static_method_lookup(self, nodes [TypedDecl]List) [String, DefId]Dict = {
+    build_static_method_lookup(self, nodes List[TypedDecl]) Dict[String, DefId] = {
         let materialized = self.build_materialized_def_ids()
-        let mut lookup = [String, DefId]Dict.new()
+        let mut lookup = Dict[String, DefId].new()
 
         // Step 1: Merge extension_method_def_ids (populated during instantiation).
         for entry in self.storage.extension_method_def_ids.iterator() then {
@@ -912,12 +912,12 @@ given Monomorphizer {
         return lookup
     }
 
-    build_concrete_callable_index(self) [UInt, ConcreteCallableInfo]Dict = {
+    build_concrete_callable_index(self) Dict[UInt, ConcreteCallableInfo] = {
         return self.storage.concrete_callables_by_def_id
     }
 
-    private build_materialized_def_ids(self) [UInt]Set = {
-        let mut materialized = [UInt]Set.new()
+    private build_materialized_def_ids(self) Set[UInt] = {
+        let mut materialized = Set[UInt].new()
 
         for node in self.storage.generated_nodes then {
             when node in {
@@ -955,9 +955,9 @@ given Monomorphizer {
         return materialized
     }
 
-    build_trait_method_lookup(self) [String, DefId]Dict = {
+    build_trait_method_lookup(self) Dict[String, DefId] = {
         let materialized = self.build_materialized_def_ids()
-        let mut lookup = [String, DefId]Dict.new()
+        let mut lookup = Dict[String, DefId].new()
         for entry in self.storage.concrete_callables_by_def_id.iterator() then {
             let def_id = DefId(entry.first)
             let concrete = entry.second
@@ -979,14 +979,14 @@ given Monomorphizer {
         return lookup
     }
 
-    private append_codegen_def_id_name_index(self, index [String, [DefId]List]Dict mut ref, name String, def_id DefId) Void = {
+    private append_codegen_def_id_name_index(self, index mut ref Dict[String, List[DefId]], name String, def_id DefId) Void = {
         if name.is_empty() then {
             return
         }
 
         let mut def_ids = when index.get(name) in {
             .Some(existing) then existing,
-            .None() then [DefId]List.new(),
+            .None() then List[DefId].new(),
         }
 
         if not def_ids.iterator().any((existing) -> existing.id == def_id.id) then {
@@ -995,8 +995,8 @@ given Monomorphizer {
         }
     }
 
-    private build_codegen_def_id_name_index(self) [String, [DefId]List]Dict = {
-        let mut index = [String, [DefId]List]Dict.new()
+    private build_codegen_def_id_name_index(self) Dict[String, List[DefId]] = {
+        let mut index = Dict[String, List[DefId]].new()
         let mut id UInt = 1
         while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
@@ -1008,8 +1008,8 @@ given Monomorphizer {
         return index
     }
 
-    private build_codegen_type_def_id_name_index(self) [String, [DefId]List]Dict = {
-        let mut index = [String, [DefId]List]Dict.new()
+    private build_codegen_type_def_id_name_index(self) Dict[String, List[DefId]] = {
+        let mut index = Dict[String, List[DefId]].new()
         let mut id UInt = 1
         while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
@@ -1030,17 +1030,17 @@ given Monomorphizer {
         return index
     }
 
-    private find_codegen_type_def_id(self, type_def_ids_by_name [String, [DefId]List]Dict, name String) [DefId]Option = {
+    private find_codegen_type_def_id(self, type_def_ids_by_name Dict[String, List[DefId]], name String) Option[DefId] = {
         return when type_def_ids_by_name.get(name) in {
-            .Some(def_ids) then when def_ids.get((UInt)0) in {
-                .Some(def_id) then [DefId]Option.Some(def_id),
-                .None() then [DefId]Option.None(),
+            .Some(def_ids) then when def_ids.get(0(UInt)) in {
+                .Some(def_id) then Option[DefId].Some(def_id),
+                .None() then Option[DefId].None(),
             },
-            .None() then [DefId]Option.None(),
+            .None() then Option[DefId].None(),
         }
     }
 
-    private codegen_emitted_identifier_for_def(self, def_id DefId, name String, foreign_def_ids [UInt]Set) String = {
+    private codegen_emitted_identifier_for_def(self, def_id DefId, name String, foreign_def_ids Set[UInt]) String = {
         if foreign_def_ids.contains(def_id.id) then {
             return name
         }
@@ -1060,13 +1060,13 @@ given Monomorphizer {
         return if raw_name.starts_with("_k__k__") then raw_name.substring(3..) else raw_name
     }
 
-    private codegen_emitted_type_name(self, c_identifier_by_def_id [UInt, String]Dict, type_def_ids_by_name [String, [DefId]List]Dict, t Type) String = {
+    private codegen_emitted_type_name(self, c_identifier_by_def_id Dict[UInt, String], type_def_ids_by_name Dict[String, List[DefId]], t Type) String = {
         return when t in {
             .StructureType(def_id) then {
                 yield when c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
                     .None() then when self.storage.context.get_name(def_id) in {
-                        .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, [UInt]Set.new()),
+                        .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, Set[UInt].new()),
                         .None() then "T_\(def_id.id)",
                     },
                 }
@@ -1075,7 +1075,7 @@ given Monomorphizer {
                 yield when c_identifier_by_def_id.get(def_id.id) in {
                     .Some(name) then name,
                     .None() then when self.storage.context.get_name(def_id) in {
-                        .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, [UInt]Set.new()),
+                        .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, Set[UInt].new()),
                         .None() then "U_\(def_id.id)",
                     },
                 }
@@ -1162,10 +1162,10 @@ given Monomorphizer {
 
     private collect_codegen_foreign_def_ids(
         self,
-        foreign_function_def_ids [UInt]Set mut ref,
-        foreign_global_var_def_ids [UInt]Set mut ref,
-        foreign_type_def_ids [UInt]Set mut ref,
-        foreign_def_ids [UInt]Set mut ref
+        foreign_function_def_ids mut ref Set[UInt],
+        foreign_global_var_def_ids mut ref Set[UInt],
+        foreign_type_def_ids mut ref Set[UInt],
+        foreign_def_ids mut ref Set[UInt]
     ) Void = {
         for node in self.storage.generated_nodes then {
             when node in {
@@ -1188,9 +1188,9 @@ given Monomorphizer {
 
     private collect_codegen_c_identifiers(
         self,
-        type_def_ids_by_name [String, [DefId]List]Dict,
-        foreign_def_ids [UInt]Set,
-        c_identifier_by_def_id [UInt, String]Dict mut ref
+        type_def_ids_by_name Dict[String, List[DefId]],
+        foreign_def_ids Set[UInt],
+        c_identifier_by_def_id mut ref Dict[UInt, String]
     ) Void = {
         // First pass: register c identifiers for all nodes that carry an identifier.
         for node in self.storage.generated_nodes then {
@@ -1249,8 +1249,8 @@ given Monomorphizer {
         }
     }
 
-    private build_codegen_type_name_index(self, c_identifier_by_def_id [UInt, String]Dict) [String, Type]Dict = {
-        let mut type_by_c_type_name = [String, Type]Dict.new()
+    private build_codegen_type_name_index(self, c_identifier_by_def_id Dict[UInt, String]) Dict[String, Type] = {
+        let mut type_by_c_type_name = Dict[String, Type].new()
         let mut id UInt = 1
         while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)
@@ -1290,12 +1290,12 @@ given Monomorphizer {
 
     private build_callable_codegen_index(
         self,
-        c_identifier_by_def_id [UInt, String]Dict mut ref,
-        type_def_ids_by_name [String, [DefId]List]Dict,
-        concrete_callables [UInt, ConcreteCallableInfo]Dict,
-        foreign_function_def_ids [UInt]Set
-    ) [UInt, CallableCodegenInfo]Dict = {
-        let mut callable_by_def_id = [UInt, CallableCodegenInfo]Dict.new()
+        c_identifier_by_def_id mut ref Dict[UInt, String],
+        type_def_ids_by_name Dict[String, List[DefId]],
+        concrete_callables Dict[UInt, ConcreteCallableInfo],
+        foreign_function_def_ids Set[UInt]
+    ) Dict[UInt, CallableCodegenInfo] = {
+        let mut callable_by_def_id = Dict[UInt, CallableCodegenInfo].new()
         for entry in concrete_callables.iterator() then {
             let def_id = DefId(entry.first)
             let concrete = entry.second
@@ -1318,8 +1318,8 @@ given Monomorphizer {
                 .None() then Type.Unknown(),
             }
             let normalized_receiver_type = when concrete.owner_type in {
-                .Some(owner_type) then [Type]Option.Some(mono_receiver_lookup_type(self.storage.context, owner_type)),
-                .None() then [Type]Option.None(),
+                .Some(owner_type) then Option[Type].Some(mono_receiver_lookup_type(self.storage.context, owner_type)),
+                .None() then Option[Type].None(),
             }
             let callable = CallableCodegenInfo(
                 def_id,
@@ -1335,23 +1335,23 @@ given Monomorphizer {
         return callable_by_def_id
     }
 
-    private codegen_layout_type_for_def_id(self, def_id DefId) [Type]Option = {
+    private codegen_layout_type_for_def_id(self, def_id DefId) Option[Type] = {
         return when self.storage.context.get_kind(def_id) in {
             .Some(kind) then when kind in {
                 .TypeDef(type_kind) then when type_kind in {
-                    .Structure() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.StructureType(def_id)),
-                    .Enum() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.EnumType(def_id)),
-                    .Opaque() then [Type]Option.Some(Type.OpaqueType(def_id)),
-                    _ then [Type]Option.None(),
+                    .Structure() then Option[Type].Some(self.storage.context.lookup_type(def_id) or else Type.StructureType(def_id)),
+                    .Enum() then Option[Type].Some(self.storage.context.lookup_type(def_id) or else Type.EnumType(def_id)),
+                    .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
+                    _ then Option[Type].None(),
                 },
                 .GenericTemplate(template_kind) then when template_kind in {
-                    .Structure() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.StructureType(def_id)),
-                    .Enum() then [Type]Option.Some(self.storage.context.lookup_type(def_id) or else Type.EnumType(def_id)),
-                    _ then [Type]Option.None(),
+                    .Structure() then Option[Type].Some(self.storage.context.lookup_type(def_id) or else Type.StructureType(def_id)),
+                    .Enum() then Option[Type].Some(self.storage.context.lookup_type(def_id) or else Type.EnumType(def_id)),
+                    _ then Option[Type].None(),
                 },
-                _ then [Type]Option.None(),
+                _ then Option[Type].None(),
             },
-            .None() then [Type]Option.None(),
+            .None() then Option[Type].None(),
         }
     }
 
@@ -1390,36 +1390,36 @@ given Monomorphizer {
         }
     }
 
-    private codegen_drop_c_name_for_layout(self, canonical_type Type, emitted_type_name String) [String]Option = {
+    private codegen_drop_c_name_for_layout(self, canonical_type Type, emitted_type_name String) Option[String] = {
         return when canonical_type in {
-            .StructureType(_) then [String]Option.Some("__koral_\(emitted_type_name)_drop"),
-            .EnumType(_) then [String]Option.Some("__koral_\(emitted_type_name)_drop"),
-            _ then [String]Option.None(),
+            .StructureType(_) then Option[String].Some("__koral_\(emitted_type_name)_drop"),
+            .EnumType(_) then Option[String].Some("__koral_\(emitted_type_name)_drop"),
+            _ then Option[String].None(),
         }
     }
 
-    private codegen_vtable_type_name_for_layout(self, canonical_type Type, emitted_type_name String) [String]Option = {
+    private codegen_vtable_type_name_for_layout(self, canonical_type Type, emitted_type_name String) Option[String] = {
         return when canonical_type in {
-            .StructureType(_) then [String]Option.Some(emitted_type_name),
-            .EnumType(_) then [String]Option.Some(emitted_type_name),
-            _ then [String]Option.None(),
+            .StructureType(_) then Option[String].Some(emitted_type_name),
+            .EnumType(_) then Option[String].Some(emitted_type_name),
+            _ then Option[String].None(),
         }
     }
 
-    private codegen_underlying_type_for_layout(self, layout_type Type) [Type]Option = {
+    private codegen_underlying_type_for_layout(self, layout_type Type) Option[Type] = {
         return when layout_type in {
             .OpaqueType(opaque_def_id) then self.storage.context.lookup_type(opaque_def_id),
-            _ then [Type]Option.None(),
+            _ then Option[Type].None(),
         }
     }
 
     private build_type_layout_index(
         self,
-        c_identifier_by_def_id [UInt, String]Dict,
-        type_def_ids_by_name [String, [DefId]List]Dict,
-        foreign_type_def_ids [UInt]Set
-    ) [String, TypeLayoutInfo]Dict = {
-        let mut type_layout_by_key = [String, TypeLayoutInfo]Dict.new()
+        c_identifier_by_def_id Dict[UInt, String],
+        type_def_ids_by_name Dict[String, List[DefId]],
+        foreign_type_def_ids Set[UInt]
+    ) Dict[String, TypeLayoutInfo] = {
+        let mut type_layout_by_key = Dict[String, TypeLayoutInfo].new()
         let mut id UInt = 1
         while id < self.storage.context.next_def_id() then {
             let def_id = DefId(id)

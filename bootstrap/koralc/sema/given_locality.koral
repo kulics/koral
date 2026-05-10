@@ -22,27 +22,27 @@ public type GivenOwnerKind {
 public type GivenOwner(
     kind GivenOwnerKind,
     display_name String,
-    module_path [String]List,
+    module_path List[String],
 )
 
 // ── GivenLocalityChecker ──────────────────────────────────────────────────────
 
 public type GivenLocalityChecker(
     context CompilerContext,
-    trait_registry TraitRegistry ref,
-    current_module_path [String]List,
-    generic_templates GenericTemplateRegistry ref,
-    global_scope Scope ref,
+    trait_registry ref TraitRegistry,
+    current_module_path List[String],
+    generic_templates ref GenericTemplateRegistry,
+    global_scope ref Scope,
 )
 
 given GivenLocalityChecker {
 
     public new(
         context CompilerContext,
-        trait_registry TraitRegistry ref,
-        current_module_path [String]List,
-        generic_templates GenericTemplateRegistry ref,
-        global_scope Scope ref,
+        trait_registry ref TraitRegistry,
+        current_module_path List[String],
+        generic_templates ref GenericTemplateRegistry,
+        global_scope ref Scope,
     ) GivenLocalityChecker = {
         return GivenLocalityChecker(context, trait_registry, current_module_path, generic_templates, global_scope)
     }
@@ -51,56 +51,56 @@ given GivenLocalityChecker {
 
     // 检查 given T { ... }（无 trait）的局部性。
     // 返回 None 表示通过，Some(message) 表示违规。
-    public check_given_owner_locality(self, target_type Type) [String]Option = {
+    public check_given_owner_locality(self, target_type Type) Option[String] = {
         let owner = when self.resolve_type_owner(target_type) in {
             .Some(o) then o,
-            .None() then { return [String]Option.None() },  // 内建类型，跳过
+            .None() then { return Option[String].None() },  // 内建类型，跳过
         }
         if self.module_path_eq(owner.module_path, self.current_module_path) then {
-            return [String]Option.None()
+            return Option[String].None()
         }
         let kind_label = when owner.kind in {
             .TraitOwner() then "trait",
             .TypeOwner() then "type",
         }
-        return [String]Option.Some(
+        return Option[String].Some(
             "Cannot declare 'given \(owner.display_name)' in module '\(self.format_module_path(self.current_module_path))': \(kind_label) is declared in '\(self.format_module_path(owner.module_path))'"
         )
     }
 
     // 检查 given T as Trait { ... }（有 trait）的局部性（孤儿规则）。
     // 返回 None 表示通过，Some(message) 表示违规。
-    public check_given_conformance_locality(self, target_type Type, trait_name String) [String]Option = {
+    public check_given_conformance_locality(self, target_type Type, trait_name String) Option[String] = {
         let type_owner = when self.resolve_type_owner(target_type) in {
             .Some(o) then o,
-            .None() then { return [String]Option.None() },  // 内建类型，跳过
+            .None() then { return Option[String].None() },  // 内建类型，跳过
         }
         let trait_owner = when self.resolve_trait_owner(trait_name) in {
             .Some(o) then o,
-            .None() then { return [String]Option.None() },  // 未知 trait，跳过
+            .None() then { return Option[String].None() },  // 未知 trait，跳过
         }
 
         let type_is_local = self.module_path_eq(type_owner.module_path, self.current_module_path)
         let trait_is_local = self.module_path_eq(trait_owner.module_path, self.current_module_path)
 
         if type_is_local or trait_is_local then {
-            return [String]Option.None()
+            return Option[String].None()
         }
 
         let type_display = self.context.type_display_name(target_type)
-        return [String]Option.Some(
+        return Option[String].Some(
             "Cannot declare 'given \(type_display) as \(trait_name)' in module '\(self.format_module_path(self.current_module_path))': declaration must be in type module '\(self.format_module_path(type_owner.module_path))' or trait module '\(self.format_module_path(trait_owner.module_path))'"
         )
     }
 
     // ── Owner 解析 ───────────────────────────────────────────────────────
 
-    private resolve_type_owner(self, t Type) [GivenOwner]Option = {
+    private resolve_type_owner(self, t Type) Option[GivenOwner] = {
         return when t in {
-            .ReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("Ref")),
-            .PointerType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("Ptr")),
-            .WeakReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("WeakRef")),
-            .MutableWeakReferenceType(_) then [GivenOwner]Option.Some(self.type_modifier_owner("MutWeakRef")),
+            .ReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("Ref")),
+            .PointerType(_) then Option[GivenOwner].Some(self.type_modifier_owner("Ptr")),
+            .WeakReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("WeakRef")),
+            .MutableWeakReferenceType(_) then Option[GivenOwner].Some(self.type_modifier_owner("MutWeakRef")),
             .StructureType(def_id) then {
                 let name = when self.context.get_name(def_id) in {
                     .Some(n) then n,
@@ -108,9 +108,9 @@ given GivenLocalityChecker {
                 }
                 let mod_path = when self.context.get_module_path(def_id) in {
                     .Some(mp) then mp,
-                    .None() then [String]List.new(),
+                    .None() then List[String].new(),
                 }
-                yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
+                yield Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
             .EnumType(def_id) then {
                 let name = when self.context.get_name(def_id) in {
@@ -119,9 +119,9 @@ given GivenLocalityChecker {
                 }
                 let mod_path = when self.context.get_module_path(def_id) in {
                     .Some(mp) then mp,
-                    .None() then [String]List.new(),
+                    .None() then List[String].new(),
                 }
-                yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
+                yield Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
             .OpaqueType(def_id) then {
                 let name = when self.context.get_name(def_id) in {
@@ -130,33 +130,33 @@ given GivenLocalityChecker {
                 }
                 let mod_path = when self.context.get_module_path(def_id) in {
                     .Some(mp) then mp,
-                    .None() then [String]List.new(),
+                    .None() then List[String].new(),
                 }
-                yield [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
+                yield Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), name, mod_path))
             },
             .GenericStruct(template, _) then self.resolve_generic_base_owner(template),
             .GenericEnum(template, _) then self.resolve_generic_base_owner(template),
             .TraitObject(name, _) then self.resolve_trait_owner(name),
             // 内建类型（Int, Bool, String 等）没有 owner，跳过检查
-            _ then [GivenOwner]Option.None(),
+            _ then Option[GivenOwner].None(),
         }
     }
 
-    private resolve_trait_owner(self, trait_name String) [GivenOwner]Option = {
+    private resolve_trait_owner(self, trait_name String) Option[GivenOwner] = {
         if self.trait_registry.get(trait_name) is .Some(info) then {
-            return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TraitOwner(), trait_name, info.module_path))
+            return Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TraitOwner(), trait_name, info.module_path))
         }
-        return [GivenOwner]Option.None()
+        return Option[GivenOwner].None()
     }
 
-    private resolve_generic_base_owner(self, base_name String) [GivenOwner]Option = {
+    private resolve_generic_base_owner(self, base_name String) Option[GivenOwner] = {
         // 先检查是否是 trait
         if self.resolve_trait_owner(base_name) is .Some(owner) then {
-            return [GivenOwner]Option.Some(owner)
+            return Option[GivenOwner].Some(owner)
         }
         // 内建泛型类型
         if base_name == "Ptr" or base_name == "Ref" or base_name == "WeakRef" then {
-            return [GivenOwner]Option.Some(self.type_modifier_owner(base_name))
+            return Option[GivenOwner].Some(self.type_modifier_owner(base_name))
         }
         // 查找泛型模板
         if self.global_scope.lookup_type(base_name) is .Some(t) then {
@@ -164,26 +164,26 @@ given GivenLocalityChecker {
                 .StructureType(def_id) then {
                     let mod_path = when self.context.get_module_path(def_id) in {
                         .Some(mp) then mp,
-                        .None() then [String]List.new(),
+                        .None() then List[String].new(),
                     }
-                    return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
+                    return Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
                 },
                 .EnumType(def_id) then {
                     let mod_path = when self.context.get_module_path(def_id) in {
                         .Some(mp) then mp,
-                        .None() then [String]List.new(),
+                        .None() then List[String].new(),
                     }
-                    return [GivenOwner]Option.Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
+                    return Option[GivenOwner].Some(GivenOwner(GivenOwnerKind.TypeOwner(), base_name, mod_path))
                 },
                 _ then {},
             }
         }
-        return [GivenOwner]Option.None()
+        return Option[GivenOwner].None()
     }
 
     // ── 辅助方法 ─────────────────────────────────────────────────────────
 
-    private module_path_eq(self, a [String]List, b [String]List) Bool = {
+    private module_path_eq(self, a List[String], b List[String]) Bool = {
         if a.count() <> b.count() then { return false }
         let mut i UInt = 0
         while i < a.count() then {
@@ -193,7 +193,7 @@ given GivenLocalityChecker {
         return true
     }
 
-    private format_module_path(self, path [String]List) String = {
+    private format_module_path(self, path List[String]) String = {
         if path.is_empty() then { return "<root>" }
         let mut result = String.new()
         let mut first = true
@@ -206,7 +206,7 @@ given GivenLocalityChecker {
     }
 
     private type_modifier_owner(self, display_name String) GivenOwner = {
-        let mut std_path = [String]List.new()
+        let mut std_path = List[String].new()
         std_path.push("Std")
         return GivenOwner(GivenOwnerKind.TypeOwner(), display_name, std_path)
     }

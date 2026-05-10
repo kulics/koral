@@ -30,9 +30,9 @@ given CodeGen {
             .EnumType(def_id) then def_id,
             .GenericEnum(template, _) then when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
                 .Some(def_id) then def_id,
-                .None() then DefId((UInt)0),
+                .None() then DefId(0(UInt)),
             },
-            _ then DefId((UInt)0),
+            _ then DefId(0(UInt)),
         }
     }
 
@@ -88,7 +88,7 @@ given CodeGen {
         }
     }
 
-    private enum_constructor_arg_value(self mut ref, arg_expr_ref TypedExpr ref, param_type Type, expected_trait_type Type) String = {
+    private enum_constructor_arg_value(self mut ref, arg_expr_ref ref TypedExpr, param_type Type, expected_trait_type Type) String = {
         if expected_trait_type is .Unknown() then {
             return self.generate_expression_ssa(arg_expr_ref)
         }
@@ -119,50 +119,50 @@ given CodeGen {
         }
     }
 
-    private concrete_struct_fields_from_def(self, def_id DefId) [[TypedField]List]Option = {
+    private concrete_struct_fields_from_def(self, def_id DefId) Option[List[TypedField]] = {
         return when self.context.get_struct_fields(def_id) in {
             .Some(fields) then {
-                let mut typed_fields = [TypedField]List.new()
+                let mut typed_fields = List[TypedField].new()
                 for field in fields then {
                     if self.type_mentions_unresolved_generic(field.field_type) then {
-                        return [[TypedField]List]Option.None()
+                        return Option[List[TypedField]].None()
                     }
                     typed_fields.push(TypedField(field.access, field.name, field.mutable, field.field_type, field.named))
                 }
-                yield [[TypedField]List]Option.Some(typed_fields)
+                yield Option[List[TypedField]].Some(typed_fields)
             },
-            .None() then [[TypedField]List]Option.None(),
+            .None() then Option[List[TypedField]].None(),
         }
     }
 
-    private concrete_enum_cases_from_def(self, def_id DefId) [[TypedEnumCase]List]Option = {
+    private concrete_enum_cases_from_def(self, def_id DefId) Option[List[TypedEnumCase]] = {
         return when self.context.get_enum_cases(def_id) in {
             .Some(cases) then {
-                let mut typed_cases = [TypedEnumCase]List.new()
+                let mut typed_cases = List[TypedEnumCase].new()
                 for case_info in cases then {
-                    let mut typed_fields = [TypedEnumCaseField]List.new()
+                    let mut typed_fields = List[TypedEnumCaseField].new()
                     for param in case_info.params then {
                         if self.type_mentions_unresolved_generic(param.param_type) then {
-                            return [[TypedEnumCase]List]Option.None()
+                            return Option[List[TypedEnumCase]].None()
                         }
                         typed_fields.push(TypedEnumCaseField(param.name, param.param_type, param.named))
                     }
                     typed_cases.push(TypedEnumCase(case_info.name, typed_fields))
                 }
-                yield [[TypedEnumCase]List]Option.Some(typed_cases)
+                yield Option[List[TypedEnumCase]].Some(typed_cases)
             },
             .None() then self.concrete_enum_cases_from_program(def_id),
         }
     }
 
-    private struct_fields_contain_generic(self, fields [TypedField]List) Bool = {
+    private struct_fields_contain_generic(self, fields List[TypedField]) Bool = {
         for field in fields then {
             if self.type_mentions_unresolved_generic(field.field_type) then { return true }
         }
         return false
     }
 
-    private enum_cases_contain_generic(self, cases [TypedEnumCase]List) Bool = {
+    private enum_cases_contain_generic(self, cases List[TypedEnumCase]) Bool = {
         for case_info in cases then {
             for field in case_info.fields then {
                 if self.type_mentions_unresolved_generic(field.field_type) then { return true }
@@ -176,7 +176,7 @@ given CodeGen {
     /// 生成结构体类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_type_declaration(self mut ref, name String, fields [TypedField]List) Void = {
+    public generate_type_declaration(self mut ref, name String, fields List[TypedField]) Void = {
         // 生成结构体定义
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
@@ -247,7 +247,7 @@ given CodeGen {
     /// 生成枚举类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_enum_declaration(self mut ref, name String, cases [TypedEnumCase]List) Void = {
+    public generate_enum_declaration(self mut ref, name String, cases List[TypedEnumCase]) Void = {
         // 生成枚举结构体定义
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
@@ -310,7 +310,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
                 // 过滤掉 Void 类型字段
-                let mut non_void_fields = [TypedEnumCaseField]List.new()
+                let mut non_void_fields = List[TypedEnumCaseField].new()
                 for f in case_info.fields then {
                     when f.field_type in {
                         .VoidType() then {},
@@ -365,7 +365,7 @@ given CodeGen {
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
                 // 过滤掉 Void 类型字段
-                let mut non_void_fields = [TypedEnumCaseField]List.new()
+                let mut non_void_fields = List[TypedEnumCaseField].new()
                 for f in case_info.fields then {
                     when f.field_type in {
                         .VoidType() then {},
@@ -395,7 +395,7 @@ given CodeGen {
     /// 生成 foreign struct 定义（无 copy/drop 函数）
     ///
     /// Requirements: 3.5
-    public generate_foreign_struct_declaration(self mut ref, name String, fields [TypedField]List) Void = {
+    public generate_foreign_struct_declaration(self mut ref, name String, fields List[TypedField]) Void = {
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
             for field in fields then {
@@ -413,7 +413,7 @@ given CodeGen {
     /// 生成枚举构造代码，返回持有结果的临时变量名
     ///
     /// Requirements: 3.6
-    public generate_enum_constructor(self mut ref, enum_type Type, case_name String, args [TypedExpr ref]List) String = {
+    public generate_enum_constructor(self mut ref, enum_type Type, case_name String, args List[ref TypedExpr]) String = {
         let type_name = self.enum_constructor_type_name(enum_type)
 
         let c_type = "struct \(type_name)"
@@ -426,7 +426,7 @@ given CodeGen {
 
         let def_id = self.enum_constructor_def_id(enum_type)
         let mut tag_index UInt = 0
-        let mut case_params = [EnumCaseParam]List.new()
+        let mut case_params = List[EnumCaseParam].new()
         let missing_case_metadata = def_id.id == 0
         if def_id.id <> 0 then {
             tag_index = self.context.enum_case_tag_index_by_raw_id(def_id.id, case_name)
@@ -452,7 +452,7 @@ given CodeGen {
         let escaped_case_name = self.sanitize_codegen_identifier(case_name_tail)
 
         // 过滤掉 Void 类型参数，并与 args 对应
-        let mut non_void_pairs = [[TypedExpr ref, EnumCaseParam]Pair]List.new()
+        let mut non_void_pairs = List[Pair[ref TypedExpr, EnumCaseParam]].new()
         let param_count = case_params.count()
         let arg_count = args.count()
         let min_count = if param_count < arg_count then param_count else arg_count
@@ -462,7 +462,7 @@ given CodeGen {
             when param.param_type in {
                 .VoidType() then {},
                 _ then {
-                    non_void_pairs.push([TypedExpr ref, EnumCaseParam]Pair(args[idx], param))
+                    non_void_pairs.push(Pair[ref TypedExpr, EnumCaseParam](args[idx], param))
                 },
             }
             idx += 1
@@ -498,9 +498,9 @@ given CodeGen {
     /// 从 global_nodes 中收集所有类型声明，去重后按依赖拓扑排序
     ///
     /// Requirements: 3.7, 3.8
-    public collect_and_sort_type_declarations(self mut ref) [TypeDeclaration]List = {
+    public collect_and_sort_type_declarations(self mut ref) List[TypeDeclaration] = {
         // 第一步：从 def_id_map 收集所有具体类型声明，去重。
-        let mut decl_map = [String, TypeDeclaration]Dict.new()
+        let mut decl_map = Dict[String, TypeDeclaration].new()
 
         // 收集已单态化的具体类型定义。
         let mut id UInt = 1
@@ -576,19 +576,19 @@ given CodeGen {
         }
 
         // 第二步：构建依赖图
-        let mut all_names = [String]List.new()
+        let mut all_names = List[String].new()
         for entry in decl_map then {
             all_names.push(entry.first)
         }
 
         // in_degree: 每个节点的入度
-        let mut in_degree = [String, UInt]Dict.new()
+        let mut in_degree = Dict[String, UInt].new()
         // dependents: 每个节点的后继（依赖它的节点）
-        let mut dependents = [String, [String]List]Dict.new()
+        let mut dependents = Dict[String, List[String]].new()
 
         for n in all_names then {
             in_degree.insert(n, 0)
-            dependents.insert(n, [String]List.new())
+            dependents.insert(n, List[String].new())
         }
 
         // 构建边：对每个类型声明，找出其字段依赖的其他类型
@@ -598,9 +598,9 @@ given CodeGen {
                     let deps = self.get_type_dependencies(decl, decl_map)
                     for dep in deps then {
                         // dep 必须在 n 之前定义（dep -> n）
-                        let cur_in = in_degree.get(n) or else (UInt)0
+                        let cur_in = in_degree.get(n) or else 0(UInt)
                         in_degree.insert(n, cur_in + 1)
-                        let mut dep_list = dependents.get(dep) or else [String]List.new()
+                        let mut dep_list = dependents.get(dep) or else List[String].new()
                         dep_list.push(n)
                         dependents.insert(dep, dep_list)
                     }
@@ -610,14 +610,14 @@ given CodeGen {
         }
 
         // 第三步：Kahn 拓扑排序
-        let mut result = [TypeDeclaration]List.new()
+        let mut result = List[TypeDeclaration].new()
         let mut remaining = all_names.count()
 
         while remaining > 0 then {
             // 收集所有零入度节点，按名称排序
-            let mut zero_in = [String]List.new()
+            let mut zero_in = List[String].new()
             for n in all_names then {
-                let deg = in_degree.get(n) or else (UInt)0
+                let deg = in_degree.get(n) or else 0(UInt)
                 if deg == 0 then {
                     zero_in.push(n)
                 }
@@ -626,7 +626,7 @@ given CodeGen {
             if zero_in.is_empty() then {
                 // 存在循环依赖，按原始顺序输出剩余节点
                 for n in all_names then {
-                    let deg = in_degree.get(n) or else (UInt)0
+                    let deg = in_degree.get(n) or else 0(UInt)
                     if deg > 0 then {
                         when decl_map.get(n) in {
                             .Some(decl) then { result.push(decl) },
@@ -645,12 +645,12 @@ given CodeGen {
                         .None() then {},
                     }
                     // 标记为已处理（入度设为大数）
-                    in_degree.insert(n, (UInt)9999999)
+                    in_degree.insert(n, 9999999(UInt))
                     remaining -= 1
                     // 减少后继节点的入度
-                    let successors = dependents.get(n) or else [String]List.new()
+                    let successors = dependents.get(n) or else List[String].new()
                     for s in successors then {
-                        let cur = in_degree.get(s) or else (UInt)0
+                        let cur = in_degree.get(s) or else 0(UInt)
                         if cur > 0 then {
                             in_degree.insert(s, cur - 1)
                         }
@@ -665,9 +665,9 @@ given CodeGen {
     // ── 辅助：获取类型声明的依赖集合 ─────────────────────────────────────────
 
     /// 获取一个类型声明所依赖的其他类型名称集合
-    get_type_dependencies(self, decl TypeDeclaration, decl_map [String, TypeDeclaration]Dict) [String]List = {
-        let mut deps = [String]List.new()
-        let mut seen = [String]Set.new()
+    get_type_dependencies(self, decl TypeDeclaration, decl_map Dict[String, TypeDeclaration]) List[String] = {
+        let mut deps = List[String].new()
+        let mut seen = Set[String].new()
 
         when decl in {
             .Structure(name, fields) then {
@@ -720,26 +720,26 @@ given CodeGen {
     }
 
     /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 EnumType 有效）
-    c_name_for_type(self, t Type) [String]Option = {
+    c_name_for_type(self, t Type) Option[String] = {
         return when t in {
             .StructureType(def_id) then {
                 yield when self.c_identifier_opt(def_id) in {
-                    .Some(n) then [String]Option.Some(n),
+                    .Some(n) then Option[String].Some(n),
                     .None() then {
                         yield when self.context.get_name(def_id) in {
-                            .Some(n) then [String]Option.Some(self.sanitize_codegen_identifier(n)),
-                            .None() then [String]Option.None(),
+                            .Some(n) then Option[String].Some(self.sanitize_codegen_identifier(n)),
+                            .None() then Option[String].None(),
                         }
                     },
                 }
             },
             .EnumType(def_id) then {
                 yield when self.c_identifier_opt(def_id) in {
-                    .Some(n) then [String]Option.Some(n),
+                    .Some(n) then Option[String].Some(n),
                     .None() then {
                         yield when self.context.get_name(def_id) in {
-                            .Some(n) then [String]Option.Some(self.sanitize_codegen_identifier(n)),
-                            .None() then [String]Option.None(),
+                            .Some(n) then Option[String].Some(self.sanitize_codegen_identifier(n)),
+                            .None() then Option[String].None(),
                         }
                     },
                 }
@@ -749,11 +749,11 @@ given CodeGen {
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_opt(def_id) in {
-                            .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
+                            .Some(n) then Option[String].Some(n),
+                            .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                         }
                     },
-                    .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
+                    .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                 }
             },
             .GenericEnum(template, _) then {
@@ -761,14 +761,14 @@ given CodeGen {
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_opt(def_id) in {
-                            .Some(n) then [String]Option.Some(n),
-                            .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
+                            .Some(n) then Option[String].Some(n),
+                            .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                         }
                     },
-                    .None() then [String]Option.Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
+                    .None() then Option[String].Some(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t))),
                 }
             },
-            _ then [String]Option.None(),
+            _ then Option[String].None(),
         }
     }
 
@@ -797,8 +797,8 @@ given CodeGen {
 }
 
 /// 对字符串列表进行字典序排序（插入排序）
-let sort_strings(list [String]List) [String]List = {
-    let mut result = [String]List.new()
+let sort_strings(list List[String]) List[String] = {
+    let mut result = List[String].new()
     for s in list then {
         result.push(s)
     }

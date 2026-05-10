@@ -10,7 +10,7 @@
 
 private type StaticDispatchReceiver(
     type_name String,
-    type_args [TypeNode ref]List,
+    type_args List[ref TypeNode],
 )
 
 given Parser {
@@ -151,7 +151,7 @@ given Parser {
     }
 
     // Parse a lambda expression: (params) [ReturnType] -> body
-    private parse_lambda_expression(self mut ref) [Expr ref]Result = {
+    private parse_lambda_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
 
         if self.current().kind is .LParen() then {
@@ -160,7 +160,7 @@ given Parser {
             return .Error(box("Expected '(' in lambda expression"))
         }
 
-        let mut params = [LambdaParam]List.new()
+        let mut params = List[LambdaParam].new()
 
         // Parse parameter list
         while true then {
@@ -177,12 +177,12 @@ given Parser {
             }
 
             // Optional type annotation
-            let mut type_ann = [TypeNode]Option.None()
+            let mut type_ann = Option[TypeNode].None()
             if self.is_type_start() then {
                 let t = self.parse_type() or else {
                     return .Error(box("parse lambda parameter type error"))
                 }
-                type_ann = [TypeNode]Option.Some(t)
+                type_ann = Option[TypeNode].Some(t)
             }
 
             params.push(LambdaParam(name, type_ann))
@@ -200,14 +200,14 @@ given Parser {
         }
 
         // Optional return type
-        let mut return_type = [TypeNode]Option.None()
+        let mut return_type = Option[TypeNode].None()
         let has_arrow = when self.current().kind in { .Arrow() then true, _ then false }
         if not has_arrow then {
             if self.is_type_start() then {
                 let t = self.parse_type() or else {
                     return .Error(box("parse lambda return type error"))
                 }
-                return_type = [TypeNode]Option.Some(t)
+                return_type = Option[TypeNode].Some(t)
             }
         }
 
@@ -223,7 +223,7 @@ given Parser {
         return .Ok(box(Expr.LambdaExpr(params, return_type, body, self.span_from_start(start))))
     }
 
-    private build_duration_literal_expression(self, value String, unit String, span SourceSpan) [Expr ref]Result = {
+    private build_duration_literal_expression(self, value String, unit String, span SourceSpan) Result[ref Expr] = {
         let mut secs_expr = box(Expr.IntegerLiteral("0", span))
         let mut nanos_expr = box(Expr.IntegerLiteral("0", span))
 
@@ -254,18 +254,18 @@ given Parser {
             },
         }
 
-        let mut args = [Expr ref]List.new()
+        let mut args = List[ref Expr].new()
         args.push(secs_expr)
         args.push(nanos_expr)
 
-        let ctor = box(Expr.StaticMethodCall("Duration", [TypeNode ref]List.new(), "new", args, span))
-        let mut unwrap_path = [String]List.new()
+        let ctor = box(Expr.StaticMethodCall("Duration", List[ref TypeNode].new(), "new", args, span))
+        let mut unwrap_path = List[String].new()
         unwrap_path.push("unwrap")
         let callee = box(Expr.MemberPath(ctor, unwrap_path, span))
-        return .Ok(box(Expr.Call(callee, [Expr ref]List.new(), span)))
+        return .Ok(box(Expr.Call(callee, List[ref Expr].new(), span)))
     }
 
-    private parse_primary(self mut ref) [Expr ref]Result = {
+    private parse_primary(self mut ref) Result[ref Expr] = {
         let t = self.current()
 
         when t.kind in {
@@ -340,7 +340,7 @@ given Parser {
                 let span = self.span_from_start(t)
                 self.advance() // consume '.'
                 let member_name = self.expect_identifier("implicit member name") or return
-                let mut call_args = [Expr ref]List.new()
+                let mut call_args = List[ref Expr].new()
                 let cur_kind = self.current().kind
                 let has_lparen = when cur_kind in { .LParen() then true, _ then false }
                 let no_newline = not self.current().has_newline_before
@@ -359,14 +359,14 @@ given Parser {
                 self.advance()
                 if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
                     let rhs = self.parse_unary() or return
-                    return .Ok(box(Expr.RangeExpr(RangeOperator.To(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs), self.span_from_start(t))))
+                    return .Ok(box(Expr.RangeExpr(RangeOperator.To(), Option[ref Expr].None(), Option[ref Expr].Some(rhs), self.span_from_start(t))))
                 }
-                return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), [Expr ref]Option.None(), [Expr ref]Option.None(), self.span_from_start(t))))
+                return .Ok(box(Expr.RangeExpr(RangeOperator.Full(), Option[ref Expr].None(), Option[ref Expr].None(), self.span_from_start(t))))
             },
             .RangeLess() then {
                 self.advance()
                 let rhs = self.parse_unary() or return
-                return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), [Expr ref]Option.None(), [Expr ref]Option.Some(rhs), self.span_from_start(t))))
+                return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), Option[ref Expr].None(), Option[ref Expr].Some(rhs), self.span_from_start(t))))
             },
             _ then {
                 return .Error(box("Unexpected token: \(token_text(t))"))
@@ -374,30 +374,17 @@ given Parser {
         }
     }
 
-    private parse_bracket_leading_expression(self mut ref) [Expr ref]Result = {
-        let t = self.current()
-        self.parse_debug("bracket-leading expr @ \(t.line):\(t.column)")
-        if self.is_generic_type_expr() then {
-            let type_args = self.parse_type_arg_list() or else {
-                return .Error(box("parse generic type expression error"))
-            }
-            let type_name = self.expect_identifier("generic type name") or else {
-                return .Error(box("Expected type name after type arguments"))
-            }
-            self.parse_debug("generic instantiation head=\(type_name)")
-            return .Ok(box(Expr.GenericInstantiation(type_name, type_args, self.span_from_start(t))))
-        }
-
+    private parse_bracket_leading_expression(self mut ref) Result[ref Expr] = {
         return self.parse_collection_or_dict_literal()
     }
 
-    private extract_static_dispatch_receiver(self, expr Expr ref) [StaticDispatchReceiver]Option = {
+    private extract_static_dispatch_receiver(self, expr ref Expr) Option[StaticDispatchReceiver] = {
         return when expr in {
             .Identifier(base_name, _) then if self.is_upper_first(base_name)
-                then [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, [TypeNode ref]List.new()))
-                else [StaticDispatchReceiver]Option.None(),
+                then Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, List[ref TypeNode].new()))
+                else Option[StaticDispatchReceiver].None(),
             .GenericInstantiation(base_name, type_args, _) then {
-                yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(base_name, type_args))
+                yield Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, type_args))
             },
             .MemberPath(base_expr, path, _) then {
                 if not path.is_empty() then {
@@ -413,27 +400,27 @@ given Parser {
                                 }
                             }
                             if all_upper then {
-                                return [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(qualified, [TypeNode ref]List.new()))
+                                return Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(qualified, List[ref TypeNode].new()))
                             }
                         }
                     }
 
                     let last = path[path.count() - 1]
                     if self.is_upper_first(last) then {
-                        yield [StaticDispatchReceiver]Option.Some(StaticDispatchReceiver(last, [TypeNode ref]List.new()))
+                        yield Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(last, List[ref TypeNode].new()))
                     } else {
-                        yield [StaticDispatchReceiver]Option.None()
+                        yield Option[StaticDispatchReceiver].None()
                     }
                 }
-                yield [StaticDispatchReceiver]Option.None()
+                yield Option[StaticDispatchReceiver].None()
             },
-            _ then [StaticDispatchReceiver]Option.None(),
+            _ then Option[StaticDispatchReceiver].None(),
         }
     }
 
-    private member_path_call_receiver_expr(self, base Expr ref, path [String]List) Expr ref = {
+    private member_path_call_receiver_expr(self, base ref Expr, path List[String]) ref Expr = {
         return if path.count() == 1 then base else {
-            let mut receiver_path = [String]List.new()
+            let mut receiver_path = List[String].new()
             let mut idx UInt = 0
             while idx + 1 < path.count() then {
                 receiver_path.push(path[idx])
@@ -443,11 +430,19 @@ given Parser {
         }
     }
 
-    private parse_parenthesized_expression(self mut ref) [Expr ref]Result = {
+    private parse_parenthesized_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
-        // Check for lambda: () -> body  or  (params) [ReturnType] -> body
-        if self.is_lambda_expression() then {
-            return self.parse_lambda_expression()
+        let saved = self.save_state()
+        when self.parse_lambda_expression() in {
+            .Ok(lambda_expr) then {
+                return .Ok(lambda_expr)
+            },
+            .Error(err) then {
+                self.restore_state(saved)
+                if self.is_lambda_expression() then {
+                    return .Error(err)
+                }
+            },
         }
 
         self.advance()
@@ -461,7 +456,7 @@ given Parser {
                     return .Error(box("Expected ')'"))
                 }
                 self.advance()
-                let mut args = [Expr ref]List.new()
+                let mut args = List[ref Expr].new()
                 args.push(first)
                 args.push(second)
                 let span = self.span_from_start(start)
@@ -477,7 +472,7 @@ given Parser {
         }
     }
 
-    private parse_block_expression(self mut ref) [Expr ref]Result = {
+    private parse_block_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
         when self.current().kind in {
             .LBrace() then { self.advance() },
@@ -492,7 +487,7 @@ given Parser {
         return .Ok(box(Expr.Block(statements, span)))
     }
 
-    private parse_call_argument(self mut ref, context String) [Expr ref]Result = {
+    private parse_call_argument(self mut ref, context String) Result[ref Expr] = {
         let start = self.current()
         let saved = self.save_state()
 
@@ -515,7 +510,7 @@ given Parser {
         return self.parse_expression_checked("\(context) arguments")
     }
 
-    private parse_pattern_argument(self mut ref, stop_on_in Bool) [PatternElement]Result = {
+    private parse_pattern_argument(self mut ref, stop_on_in Bool) Result[PatternElement] = {
         let saved = self.save_state()
 
         when self.current().kind in {
@@ -527,7 +522,7 @@ given Parser {
                         self.restore_state(saved)
                         return .Error(box("parse named pattern argument error"))
                     }
-                    return .Ok(PatternElement([String]Option.Some(label), box(pattern)))
+                    return .Ok(PatternElement(Option[String].Some(label), box(pattern)))
                 }
             },
             _ then {},
@@ -535,11 +530,11 @@ given Parser {
 
         self.restore_state(saved)
         let pattern = self.parse_pattern_or(stop_on_in) or return
-        return .Ok(PatternElement([String]Option.None(), box(pattern)))
+        return .Ok(PatternElement(Option[String].None(), box(pattern)))
     }
 
-    private parse_argument_list_until_rparen(self mut ref, context String) [[Expr ref]List]Result = {
-        let mut args = [Expr ref]List.new()
+    private parse_argument_list_until_rparen(self mut ref, context String) Result[List[ref Expr]] = {
+        let mut args = List[ref Expr].new()
         if self.current().kind is .RParen() then {
             return .Ok(args)
         }
@@ -560,11 +555,11 @@ given Parser {
         return .Ok(args)
     }
 
-    private parse_control_flow_body(self mut ref) [Expr ref]Result = {
+    private parse_control_flow_body(self mut ref) Result[ref Expr] = {
         return self.parse_expression_checked("control-flow body")
     }
 
-    private parse_when_arm_body(self mut ref) [Expr ref]Result = {
+    private parse_when_arm_body(self mut ref) Result[ref Expr] = {
         // `when` arm body follows expression grammar; block is one expression form.
         if self.current().kind is .LBrace() then {
             let body = self.parse_block_expression() or return
@@ -573,7 +568,7 @@ given Parser {
         return self.parse_expression_checked("when arm body")
     }
 
-    private expect_kw_then(self mut ref, context String) [Token]Result = {
+    private expect_kw_then(self mut ref, context String) Result[Token] = {
         let t = self.current()
         when t.kind in {
             .KwThen() then {
@@ -586,7 +581,7 @@ given Parser {
         }
     }
 
-    private expect_kw_in(self mut ref, context String) [Token]Result = {
+    private expect_kw_in(self mut ref, context String) Result[Token] = {
         let t = self.current()
         when t.kind in {
             .KwIn() then {
@@ -599,7 +594,7 @@ given Parser {
         }
     }
 
-    private expect_lbrace(self mut ref, context String) [Token]Result = {
+    private expect_lbrace(self mut ref, context String) Result[Token] = {
         let t = self.current()
         when t.kind in {
             .LBrace() then {
@@ -612,7 +607,7 @@ given Parser {
         }
     }
 
-    private parse_when_arm(self mut ref) [WhenArm]Result = {
+    private parse_when_arm(self mut ref) Result[WhenArm] = {
         let arm_start_index = self.index
         let arm_start = self.current()
         self.parse_debug("when arm begin @ \(arm_start.line):\(arm_start.column) token=\(token_text(arm_start))")
@@ -630,8 +625,8 @@ given Parser {
         return .Ok(WhenArm(pattern, body))
     }
 
-    private parse_when_arms(self mut ref) [[WhenArm]List]Result = {
-        let mut arms = [WhenArm]List.new()
+    private parse_when_arms(self mut ref) Result[List[WhenArm]] = {
+        let mut arms = List[WhenArm].new()
         while true then {
             when self.current().kind in {
                 .RBrace() then {
@@ -653,44 +648,31 @@ given Parser {
         return .Ok(arms)
     }
 
-    private try_parse_cast_prefix(self mut ref) [Expr ref]Option = {
+    private try_parse_postfix_cast_suffix(self mut ref, base ref Expr) Option[ref Expr] = {
         let saved = self.save_state()
-        let start = self.current()
         when self.current().kind in {
             .LParen() then {},
-            _ then { return [Expr ref]Option.None() },
+            _ then { return Option[ref Expr].None() },
         }
 
         self.advance()
 
         let cast_type = self.parse_type() or else {
             self.restore_state(saved)
-            return [Expr ref]Option.None()
+            return Option[ref Expr].None()
         }
 
         when self.current().kind in {
             .RParen() then { self.advance() },
             _ then {
                 self.restore_state(saved)
-                return [Expr ref]Option.None()
+                return Option[ref Expr].None()
             },
         }
-
-        if self.current().has_newline_before then {
-            self.restore_state(saved)
-            return [Expr ref]Option.None()
-        }
-
-        let operand = self.parse_unary() or else {
-            self.restore_state(saved)
-            return [Expr ref]Option.None()
-        }
-
-        let span = self.span_from_start(start)
-        return [Expr ref]Option.Some(box(Expr.CastExpr(cast_type, operand, span)))
+        return Option[ref Expr].Some(box(Expr.CastExpr(cast_type, base, self.span_from_expr_start(base))))
     }
 
-    private parse_pattern_primary(self mut ref, stop_on_in Bool) [PatternNode]Result = {
+    private parse_pattern_primary(self mut ref, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
 
         when self.current().kind in {
@@ -824,7 +806,7 @@ given Parser {
                     if self.is_upper_first(name) then {
                         if self.current().kind is .LParen() then {
                             self.advance()
-                            let mut elements = [PatternElement]List.new()
+                            let mut elements = List[PatternElement].new()
                             if self.current().kind is .RParen() then {
                                 self.advance()
                             } else {
@@ -852,7 +834,7 @@ given Parser {
             .Dot() then {
                 self.advance()
                 let case_name = self.expect_identifier("enum case pattern") or return
-                let mut elements = [PatternElement]List.new()
+                let mut elements = List[PatternElement].new()
 
                 if self.current().kind is .LParen() then {
                     self.advance()
@@ -889,9 +871,9 @@ given Parser {
                         .RParen() then { self.advance() },
                         _ then { return .Error(box("Expected ')' in pair pattern")) },
                     }
-                    let mut elements = [PatternElement]List.new()
-                    elements.push(PatternElement([String]Option.None(), box(first)))
-                    elements.push(PatternElement([String]Option.None(), box(second)))
+                    let mut elements = List[PatternElement].new()
+                    elements.push(PatternElement(Option[String].None(), box(first)))
+                    elements.push(PatternElement(Option[String].None(), box(second)))
                     parsed_pattern = PatternNode.StructPattern("Pair", elements, self.span_from_start(start))
                 } else {
                     when self.current().kind in {
@@ -908,7 +890,7 @@ given Parser {
         return .Ok(node)
     }
 
-    private parse_pattern_not(self mut ref, stop_on_in Bool) [PatternNode]Result = {
+    private parse_pattern_not(self mut ref, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
         if self.current().kind is .KwNot() then {
             self.advance()
@@ -918,7 +900,7 @@ given Parser {
         return self.parse_pattern_primary(stop_on_in)
     }
 
-    private parse_pattern_and(self mut ref, stop_on_in Bool) [PatternNode]Result = {
+    private parse_pattern_and(self mut ref, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
         let mut left = self.parse_pattern_not(stop_on_in) or return
 
@@ -931,7 +913,7 @@ given Parser {
         return .Ok(left)
     }
 
-    private parse_pattern_or(self mut ref, stop_on_in Bool) [PatternNode]Result = {
+    private parse_pattern_or(self mut ref, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
         let mut left = self.parse_pattern_and(stop_on_in) or return
 
@@ -948,7 +930,7 @@ given Parser {
         return .Ok(left)
     }
 
-    private collect_pattern_until_then(self mut ref) [PatternNode]Result = {
+    private collect_pattern_until_then(self mut ref) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
@@ -956,11 +938,11 @@ given Parser {
         }
     }
 
-    private parse_single_pattern(self mut ref) [PatternNode]Result = {
+    private parse_single_pattern(self mut ref) Result[PatternNode] = {
         return self.parse_pattern_primary(false)
     }
 
-    private collect_pattern_until_clause_end(self mut ref) [PatternNode]Result = {
+    private collect_pattern_until_clause_end(self mut ref) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
@@ -969,7 +951,7 @@ given Parser {
         }
     }
 
-    private collect_pattern_until_in(self mut ref) [PatternNode]Result = {
+    private collect_pattern_until_in(self mut ref) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(true) or return
         when self.current().kind in {
             .KwIn() then { return .Ok(pattern) },
@@ -977,7 +959,7 @@ given Parser {
         }
     }
 
-    private parse_collection_or_dict_literal(self mut ref) [Expr ref]Result = {
+    private parse_collection_or_dict_literal(self mut ref) Result[ref Expr] = {
         let start = self.current()
         self.advance()
 
@@ -991,7 +973,7 @@ given Parser {
         if self.current().kind is .Colon() then {
             self.advance()
             let first_value = self.parse_expression() or return
-            let mut entries = [ExprPair]List.new()
+            let mut entries = List[ExprPair].new()
             entries.push(ExprPair(first, first_value))
 
             while self.current().kind is .Comma() then {
@@ -1015,7 +997,7 @@ given Parser {
             return .Ok(box(Expr.DictLiteral(entries, self.span_from_start(start))))
         }
 
-        let mut elements = [Expr ref]List.new()
+        let mut elements = List[ref Expr].new()
         elements.push(first)
 
         while self.current().kind is .Comma() then {
@@ -1034,7 +1016,7 @@ given Parser {
         return .Ok(box(Expr.CollectionLiteral(elements, self.span_from_start(start))))
     }
 
-    private parse_when_expression(self mut ref) [Expr ref]Result = {
+    private parse_when_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
         self.advance()
         let subject = self.parse_expression_checked("when subject") or return
@@ -1048,7 +1030,7 @@ given Parser {
         return .Ok(box(Expr.WhenExpr(subject, arms, self.span_from_start(start))))
     }
 
-    private parse_if_expression(self mut ref) [Expr ref]Result = {
+    private parse_if_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
         self.advance()
         let condition = self.parse_expression_checked("if condition") or return
@@ -1056,7 +1038,7 @@ given Parser {
         let _ = self.expect_kw_then("if expression") or return
         let then_expr = self.parse_control_flow_body() or return
 
-        let mut else_expr = [Expr ref]Option.None()
+        let mut else_expr = Option[ref Expr].None()
         if self.current().kind is .KwElse() then {
             self.advance()
             let parsed_else = self.parse_expression_checked("if else body") or return
@@ -1067,7 +1049,7 @@ given Parser {
         return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr, span)))
     }
 
-    private parse_while_expression(self mut ref) [Expr ref]Result = {
+    private parse_while_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
         self.advance()
         let condition = self.parse_expression_checked("while condition") or return
@@ -1079,7 +1061,7 @@ given Parser {
         return .Ok(box(Expr.WhileExpr(condition, body, span)))
     }
 
-    private parse_for_expression(self mut ref) [Expr ref]Result = {
+    private parse_for_expression(self mut ref) Result[ref Expr] = {
         let start = self.current()
         self.advance()
         let pattern = self.collect_pattern_until_in() or return
@@ -1095,7 +1077,49 @@ given Parser {
         return .Ok(box(Expr.ForExpr(pattern, iterable, body, self.span_from_start(start))))
     }
 
-    private parse_call_suffix(self mut ref, base Expr ref) [Expr ref]Result = {
+    private parse_postfix_generic_application(self mut ref, base ref Expr) Result[ref Expr] = {
+        return when base in {
+            .Identifier(name, _) then {
+                let type_args = self.parse_type_arg_list() or else {
+                    return .Error(box("parse generic application type arguments error"))
+                }
+                yield .Ok(box(Expr.GenericInstantiation(name, type_args, self.span_from_expr_start(base))))
+            },
+            _ then .Error(box("generic application requires a type-like base expression")),
+        }
+    }
+
+    private try_parse_postfix_generic_application(self mut ref, base ref Expr) Option[ref Expr] = {
+        let saved = self.save_state()
+        let parsed = self.parse_postfix_generic_application(base)
+        return when parsed in {
+            .Ok(expr) then Option[ref Expr].Some(expr),
+            .Error(_) then {
+                self.restore_state(saved)
+                yield Option[ref Expr].None()
+            },
+        }
+    }
+
+    private try_parse_method_type_args(self mut ref) Option[List[ref TypeNode]] = {
+        if self.current().kind is not .LBracket() then {
+            return Option[List[ref TypeNode]].None()
+        }
+
+        let saved = self.save_state()
+        let type_args = self.parse_type_arg_list() or else {
+            self.restore_state(saved)
+            return Option[List[ref TypeNode]].None()
+        }
+        if self.current().kind is .LParen() then {
+            return Option[List[ref TypeNode]].Some(type_args)
+        }
+
+        self.restore_state(saved)
+        return Option[List[ref TypeNode]].None()
+    }
+
+    private parse_call_suffix(self mut ref, base ref Expr) Result[ref Expr] = {
         self.advance()
         let args = self.parse_argument_list_until_rparen("call") or return
         when self.current().kind in {
@@ -1112,21 +1136,21 @@ given Parser {
                 return when receiver_expr in {
                     .Identifier(type_name, _) then {
                         let expr = if self.is_upper_first(type_name)
-                            then box(Expr.StaticMethodCall(type_name, [TypeNode ref]List.new(), member, args, self.span_from_expr_start(base)))
+                            then box(Expr.StaticMethodCall(type_name, List[ref TypeNode].new(), member, args, self.span_from_expr_start(base)))
                             else box(Expr.Call(base, args, self.span_from_expr_start(base)))
-                        yield [Expr ref]Result.Ok(expr)
+                        yield Result[ref Expr].Ok(expr)
                     },
                     .GenericInstantiation(type_name, type_args, _) then {
-                        yield [Expr ref]Result.Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base))))
+                        yield Result[ref Expr].Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base))))
                     },
                     .MemberPath(_, _, _) then {
                         let expr = when self.extract_static_dispatch_receiver(receiver_expr) in {
                             .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))),
                             .None() then box(Expr.Call(base, args, self.span_from_expr_start(base))),
                         }
-                        yield [Expr ref]Result.Ok(expr)
+                        yield Result[ref Expr].Ok(expr)
                     },
-                    _ then [Expr ref]Result.Ok(box(Expr.Call(base, args, self.span_from_expr_start(base)))),
+                    _ then Result[ref Expr].Ok(box(Expr.Call(base, args, self.span_from_expr_start(base)))),
                 }
             },
             _ then {},
@@ -1134,7 +1158,7 @@ given Parser {
         return .Ok(box(Expr.Call(base, args, self.span_from_expr_start(base))))
     }
 
-    private parse_subscript_suffix(self mut ref, base Expr ref) [Expr ref]Result = {
+    private parse_subscript_suffix(self mut ref, base ref Expr) Result[ref Expr] = {
         self.advance()
         if self.current().kind is .RBracket() then {
             return .Error(box("Subscript expression requires one index argument"))
@@ -1147,16 +1171,16 @@ given Parser {
             .RBracket() then { self.advance() },
             _ then { return .Error(box("Expected ']' after subscript argument")) },
         }
-        let mut args = [Expr ref]List.new()
+        let mut args = List[ref Expr].new()
         args.push(index)
         return .Ok(box(Expr.SubscriptExpr(base, args, self.span_from_expr_start(base))))
     }
 
-    private append_member_path_segment(self, base Expr ref, member String) Expr ref = {
+    private append_member_path_segment(self, base ref Expr, member String) ref Expr = {
         let span = self.span_from_expr_start(base)
         return when base in {
             .MemberPath(path_base, path, _) then {
-                let mut extended = [String]List.new()
+                let mut extended = List[String].new()
                 for segment in path then {
                     extended.push(segment)
                 }
@@ -1164,14 +1188,14 @@ given Parser {
                 yield box(Expr.MemberPath(path_base, extended, span))
             },
             _ then {
-                let mut path = [String]List.new()
+                let mut path = List[String].new()
                 path.push(member)
                 yield box(Expr.MemberPath(base, path, span))
             },
         }
     }
 
-    private parse_dot_suffix(self mut ref, base Expr ref) [Expr ref]Result = {
+    private parse_dot_suffix(self mut ref, base ref Expr) Result[ref Expr] = {
         self.advance()
 
         // --- 后缀存储修饰符 ---
@@ -1214,11 +1238,11 @@ given Parser {
                 _ then { return .Error(box("Expected ')' after qualified method trait")) },
             }
 
-            let method_type_args = if self.current().kind is .LBracket()
-                then self.parse_type_arg_list() or return
-                else [TypeNode ref]List.new()
-
             let method_name = self.expect_identifier("qualified method name") or return
+            let method_type_args = when self.try_parse_method_type_args() in {
+                .Some(type_args) then type_args,
+                .None() then List[ref TypeNode].new(),
+            }
             when self.current().kind in {
                 .LParen() then { self.advance() },
                 _ then { return .Error(box("Expected '(' after qualified method name")) },
@@ -1234,23 +1258,12 @@ given Parser {
                 else .Ok(box(Expr.QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, self.span_from_expr_start(base))))
         }
 
-        if self.current().kind is .LBracket() then {
-            let method_type_args = self.parse_type_arg_list() or return
-            let method_name = self.expect_identifier("generic method name") or return
-            when self.current().kind in {
-                .LParen() then { self.advance() },
-                _ then { return .Error(box("Expected '(' after generic method name")) },
-            }
-            let args = self.parse_argument_list_until_rparen("generic method call") or return
-            when self.current().kind in {
-                .RParen() then { self.advance() },
-                _ then { return .Error(box("Expected ')' after generic method call arguments")) },
-            }
-            return .Ok(box(Expr.GenericMethodCall(base, method_type_args, method_name, args, self.span_from_expr_start(base))))
-        }
-
         let member = self.expect_identifier("member access") or return
         self.parse_debug("dot suffix member=\(member)")
+        let method_type_args = when self.try_parse_method_type_args() in {
+            .Some(type_args) then type_args,
+            .None() then List[ref TypeNode].new(),
+        }
 
         let has_lparen = when self.current().kind in {
             .LParen() then true,
@@ -1258,7 +1271,7 @@ given Parser {
         }
         let static_receiver = self.extract_static_dispatch_receiver(base)
 
-        if has_lparen and static_receiver is .Some(receiver) then {
+        if has_lparen and static_receiver is .Some(receiver) and method_type_args.is_empty() then {
             self.parse_debug("static dispatch receiver=\(receiver.type_name) member=\(member)")
             self.advance()
             let args = self.parse_argument_list_until_rparen("static method call") or return
@@ -1269,12 +1282,26 @@ given Parser {
             return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))))
         }
 
+        if has_lparen and not method_type_args.is_empty() then {
+            self.advance()
+            let args = self.parse_argument_list_until_rparen("generic method call") or return
+            when self.current().kind in {
+                .RParen() then { self.advance() },
+                _ then { return .Error(box("Expected ')' after generic method call arguments")) },
+            }
+            return .Ok(box(Expr.GenericMethodCall(base, method_type_args, member, args, self.span_from_expr_start(base))))
+        }
+
+        if not method_type_args.is_empty() then {
+            return .Error(box("Expected '(' after generic method name"))
+        }
+
         let member_path = self.append_member_path_segment(base, member)
         let _ = has_lparen
         return .Ok(member_path)
     }
 
-    private parse_postfix_suffixes(self mut ref, base Expr ref) [Expr ref]Result = {
+    private parse_postfix_suffixes(self mut ref, base ref Expr) Result[ref Expr] = {
         let mut expr = base
 
         while true then {
@@ -1282,11 +1309,28 @@ given Parser {
             when self.current().kind in {
                 .LParen() then {
                     if has_nl then { break }
-                    expr = self.parse_call_suffix(expr) or return
+                    expr = when self.try_parse_postfix_cast_suffix(expr) in {
+                        .Some(cast_expr) then cast_expr,
+                        .None() then self.parse_call_suffix(expr) or return,
+                    }
                 },
                 .LBracket() then {
                     if has_nl then { break }
-                    expr = self.parse_subscript_suffix(expr) or return
+                    when expr in {
+                        .Identifier(name, _) then {
+                            if self.is_upper_first(name) then {
+                                expr = self.parse_postfix_generic_application(expr) or return
+                            } else {
+                                expr = when self.try_parse_postfix_generic_application(expr) in {
+                                    .Some(generic_expr) then generic_expr,
+                                    .None() then self.parse_subscript_suffix(expr) or return,
+                                }
+                            }
+                        },
+                        _ then {
+                            expr = self.parse_subscript_suffix(expr) or return
+                        },
+                    }
                 },
                 .Dot() then {
                     if not self.can_continue_dot_postfix() then { break }
@@ -1299,16 +1343,12 @@ given Parser {
         return .Ok(expr)
     }
 
-    private parse_call(self mut ref) [Expr ref]Result = {
+    private parse_call(self mut ref) Result[ref Expr] = {
         let expr = self.parse_primary() or return
         return self.parse_postfix_suffixes(expr)
     }
 
-    private parse_unary(self mut ref) [Expr ref]Result = {
-        if self.current().kind is .LParen() and self.try_parse_cast_prefix() is .Some(expr) then {
-            return .Ok(expr)
-        }
-
+    private parse_unary(self mut ref) Result[ref Expr] = {
         if self.current().kind is .Minus() then {
             let start = self.current()
             self.advance()

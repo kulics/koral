@@ -25,21 +25,21 @@ type EmittableFunction(
     def_id DefId,
     c_name String,
     declaration_params String,
-    params [TypedParam]List,
+    params List[TypedParam],
     return_type Type,
-    body TypedExpr ref,
+    body ref TypedExpr,
 )
 
 type ForeignFunctionPrototype(
     name String,
-    params [TypedParam]List,
+    params List[TypedParam],
     return_type Type,
 )
 
 type ForeignDeclarations(
-    libraries [String]List,
-    empty_types [String]List,
-    functions [ForeignFunctionPrototype]List,
+    libraries List[String],
+    empty_types List[String],
+    functions List[ForeignFunctionPrototype],
 )
 
 type ForeignGlobalVariable(
@@ -51,15 +51,15 @@ type ForeignGlobalVariable(
 type EmittableGlobalVariable(
     c_name String,
     decl_type Type,
-    initializer TypedExpr ref,
-    simple_literal [String]Option,
+    initializer ref TypedExpr,
+    simple_literal Option[String],
 )
 
 type ProgramCodegenScan(
     foreign_declarations ForeignDeclarations,
-    emittable_functions [EmittableFunction]List,
-    foreign_globals [ForeignGlobalVariable]List,
-    globals [EmittableGlobalVariable]List,
+    emittable_functions List[EmittableFunction],
+    foreign_globals List[ForeignGlobalVariable],
+    globals List[EmittableGlobalVariable],
 )
 
 given CodeGen {
@@ -260,7 +260,7 @@ given CodeGen {
         return when self.program.semantic_traits().get(trait_name) in {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false }
-                yield info.module_path[(UInt)0] == "Std"
+                yield info.module_path[0(UInt)] == "Std"
             },
             .None() then false,
         }
@@ -295,7 +295,7 @@ given CodeGen {
         self.emit_c_main()
     }
 
-    public generated_buffer(self ref) String ref = self.buffer
+    public generated_buffer(self ref) ref String = self.buffer
 
     public generate(self mut ref) String = {
         self.generate_into_buffer()
@@ -303,14 +303,14 @@ given CodeGen {
     }
 
     private scan_program_codegen_inputs(self mut ref) ProgramCodegenScan = {
-        let mut seen_libraries = [String]Set.new()
-        let mut libraries = [String]List.new()
-        let mut empty_types = [String]List.new()
-        let mut foreign_functions = [ForeignFunctionPrototype]List.new()
+        let mut seen_libraries = Set[String].new()
+        let mut libraries = List[String].new()
+        let mut empty_types = List[String].new()
+        let mut foreign_functions = List[ForeignFunctionPrototype].new()
         let stdlib_functions = ["exit", "abort"]
-        let mut functions = [EmittableFunction]List.new()
-        let mut foreign_globals = [ForeignGlobalVariable]List.new()
-        let mut globals = [EmittableGlobalVariable]List.new()
+        let mut functions = List[EmittableFunction].new()
+        let mut foreign_globals = List[ForeignGlobalVariable].new()
+        let mut globals = List[EmittableGlobalVariable].new()
 
         let mut node_index UInt = 0
         let program_nodes = self.program.semantic_global_nodes()
@@ -364,9 +364,9 @@ given CodeGen {
                             .BoolLiteral(v) then if v then "1" else "0",
                             _ then "0",
                         }
-                        yield [String]Option.Some(lit_val)
+                        yield Option[String].Some(lit_val)
                     } else {
-                        yield [String]Option.None()
+                        yield Option[String].None()
                     }
                     globals.push(EmittableGlobalVariable(c_name, decl_type, initializer_ref, simple_literal))
                 },
@@ -393,8 +393,8 @@ given CodeGen {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
                                 let function_type_opt = when self.context.get_function_type(m.def_id) in {
-                                    .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
-                                    .None() then [Type]Option.None(),
+                                    .Some(function_type) then Option[Type].Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
+                                    .None() then Option[Type].None(),
                                 }
                                 let effective_return_type = when function_type_opt in {
                                     .Some(function_type) then self.function_type_return_type(function_type),
@@ -418,7 +418,7 @@ given CodeGen {
                 },
                 .FunctionDecl(_, name, _, return_type, _, _, fn_id) then {
                     // Use the identifier embedded in the node (like Swift's identifier.defId)
-                    let node_def_id = [DefId]Option.Some(fn_id.def_id)
+                    let node_def_id = Option[DefId].Some(fn_id.def_id)
                     if name == "main" then {
                         when node_def_id in {
                             .Some(def_id) then {
@@ -426,8 +426,8 @@ given CodeGen {
                                     .Some(cn) then cn,
                                     .None() then self.sanitize_codegen_identifier(name),
                                 }
-                                self.user_main_function_name = [String]Option.Some(c_name)
-                                self.user_main_return_type = [Type]Option.Some(return_type)
+                                self.user_main_function_name = Option[String].Some(c_name)
+                                self.user_main_return_type = Option[Type].Some(return_type)
                             },
                             .None() then {},
                         }
@@ -435,7 +435,7 @@ given CodeGen {
                     if self.type_contains_generic(return_type) then { continue }
                     let params = when node in {
                         .FunctionDecl(_, _, params_val, _, _, _, _) then params_val,
-                        _ then [TypedParam]List.new(),
+                        _ then List[TypedParam].new(),
                     }
                     let body_ref = when node in {
                         .FunctionDecl(_, _, _, _, body_val, _, _) then body_val,
@@ -467,7 +467,7 @@ given CodeGen {
                         },
                         .None() then self.sanitize_codegen_identifier(name),
                     }
-                    functions.push(EmittableFunction(node_def_id or else DefId((UInt)0), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
+                    functions.push(EmittableFunction(node_def_id or else DefId(0(UInt)), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
@@ -481,8 +481,8 @@ given CodeGen {
                             .Some(body_ref) then {
                                 let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
                                 let function_type_opt = when self.context.get_function_type(m.def_id) in {
-                                    .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
-                                    .None() then [Type]Option.None(),
+                                    .Some(function_type) then Option[Type].Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
+                                    .None() then Option[Type].None(),
                                 }
                                 let effective_return_type = when function_type_opt in {
                                     .Some(function_type) then self.function_type_return_type(function_type),
@@ -679,9 +679,9 @@ given CodeGen {
         }
     }
 
-    private is_object_safe_trait_callable(self, params [TypedParam]List, return_type Type) Bool = {
+    private is_object_safe_trait_callable(self, params List[TypedParam], return_type Type) Bool = {
         if not params.is_empty() then {
-            let receiver = params[(UInt)0]
+            let receiver = params[0(UInt)]
             if receiver.name == "self" and not self.is_object_safe_trait_receiver(receiver.param_type) then {
                 return false
             }
@@ -718,11 +718,11 @@ given CodeGen {
         }
     }
 
-    private should_emit_trait_tool_function(self, name String, params [TypedParam]List, return_type Type) Bool = {
+    private should_emit_trait_tool_function(self, name String, params List[TypedParam], return_type Type) Bool = {
         if params.is_empty() then {
             return true
         }
-        let first_param = params[(UInt)0]
+        let first_param = params[0(UInt)]
         return when first_param.param_type in {
             .TraitObject(_, _) then self.is_object_safe_trait_callable(params, return_type),
             _ then true,
@@ -732,7 +732,7 @@ given CodeGen {
     /// 生成函数前向声明（跳过含泛型参数的函数）
     ///
     /// Requirements: 4.1, 4.2, 13.2
-    emit_function_declarations(self ref, functions [EmittableFunction]List) Void = {
+    emit_function_declarations(self ref, functions List[EmittableFunction]) Void = {
         for function in functions then {
             if self.type_is_never(function.return_type) then {
                 self.buffer.push_string("_Noreturn ")
@@ -771,7 +771,7 @@ given CodeGen {
     /// 生成全局变量声明
     ///
     /// Requirements: 12.3, 12.4, 12.5
-    emit_global_variables(self mut ref, foreign_globals [ForeignGlobalVariable]List, globals [EmittableGlobalVariable]List) Void = {
+    emit_global_variables(self mut ref, foreign_globals List[ForeignGlobalVariable], globals List[EmittableGlobalVariable]) Void = {
         for global in foreign_globals then {
             let c_type = self.c_type_name(global.decl_type)
             if global.mutable then {
@@ -789,7 +789,7 @@ given CodeGen {
                 },
                 .None() then {
                     self.buffer.push_string("\(c_type) \(global.c_name);\n")
-                    self.global_initializations.push([String, TypedExpr ref]Pair(global.c_name, global.initializer))
+                    self.global_initializations.push(Pair[String, ref TypedExpr](global.c_name, global.initializer))
                 },
             }
         }
@@ -810,7 +810,7 @@ given CodeGen {
     /// 逐函数生成实现，含逃逸分析预分析
     ///
     /// Requirements: 4.3, 4.4, 4.5, 13.3
-    emit_function_implementations(self mut ref, functions [EmittableFunction]List) Void = {
+    emit_function_implementations(self mut ref, functions List[EmittableFunction]) Void = {
         let global_escape_result = analyze_global_escape_summaries(self.program, self.context)
         self.escape_context.set_global_analysis(self.program, global_escape_result.summaries, self.context)
 
@@ -818,9 +818,9 @@ given CodeGen {
             // Always keep a local per-function fallback and merge conservatively.
             // This avoids under-approximating escapes when global pre-analysis misses a path.
             let return_type_opt = if self.type_is_void_or_never(function.return_type) then {
-                yield [Type]Option.None()
+                yield Option[Type].None()
             } else {
-                yield [Type]Option.Some(function.return_type)
+                yield Option[Type].Some(function.return_type)
             }
             let mut fallback_ctx = EscapeContext.new()
             fallback_ctx.set_global_analysis(self.program, global_escape_result.summaries, self.context)
@@ -830,7 +830,7 @@ given CodeGen {
 
             let escaped_variables = when global_escape_result.escaped_variables_per_function.get(function.def_id.id) in {
                 .Some(ev) then {
-                    let mut merged = [String, EscapeResult]Dict.new()
+                    let mut merged = Dict[String, EscapeResult].new()
                     for entry in ev.iterator() then {
                         merged.insert(entry.first, entry.second)
                     }
@@ -854,10 +854,10 @@ given CodeGen {
         self mut ref,
         def_id DefId,
         c_name String,
-        params [TypedParam]List,
+        params List[TypedParam],
         return_type Type,
-        body TypedExpr ref,
-        escaped_variables [String, EscapeResult]Dict,
+        body ref TypedExpr,
+        escaped_variables Dict[String, EscapeResult],
     ) Void = {
         if self.emitted_function_names.contains(c_name) then {
             return
@@ -866,9 +866,9 @@ given CodeGen {
 
         // 逃逸分析预分析
         let return_type_opt = if self.type_is_void_or_never(return_type) then {
-            yield [Type]Option.None()
+            yield Option[Type].None()
         } else {
-            yield [Type]Option.Some(return_type)
+            yield Option[Type].Some(return_type)
         }
         self.escape_context.reset(return_type_opt)
         self.escape_context.escaped_variables = escaped_variables
@@ -878,12 +878,12 @@ given CodeGen {
         let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
         let new_prefix = when self.method_owner_type(def_id) in {
-            .Some(owner_type) then [String]Option.Some(self.emitted_type_c_name_fallback(owner_type)),
+            .Some(owner_type) then Option[String].Some(self.emitted_type_c_name_fallback(owner_type)),
             .None() then self.extract_type_prefix_from_c_name(c_name),
         }
         self.current_function_type_prefix = new_prefix
-        self.current_function_c_name = [String]Option.Some(c_name)
-        self.current_function_return_type = [Type]Option.Some(return_type)
+        self.current_function_c_name = Option[String].Some(c_name)
+        self.current_function_return_type = Option[Type].Some(return_type)
         self.lifetime_scope_stack.clear()
         self.defer_scope_stack.clear()
         self.loop_stack.clear()
@@ -905,11 +905,11 @@ given CodeGen {
         let function_type_opt = self.context.get_function_type(def_id)
         let body_param_count = when function_type_opt in {
             .Some(function_type) then self.function_type_param_count(function_type),
-            .None() then (UInt)0,
+            .None() then 0(UInt),
         }
         let body_params = when function_type_opt in {
             .Some(function_type) then {
-                let mut adjusted = [TypedParam]List.new()
+                let mut adjusted = List[TypedParam].new()
                 let mut i UInt = 0
                 for p in params then {
                     let concrete_type = if i < body_param_count then self.function_type_param_type(function_type, i) or else p.param_type else p.param_type
@@ -1042,7 +1042,7 @@ given CodeGen {
     // ── 辅助：构建参数列表字符串 ──────────────────────────────────────────────
 
     /// 将 [TypedParam]List 转换为 C 参数声明字符串
-    public build_param_list(self, params [TypedParam]List) String = {
+    public build_param_list(self, params List[TypedParam]) String = {
         if params.is_empty() then { return "void" }
 
         let mut result = String.new()
@@ -1062,7 +1062,7 @@ given CodeGen {
     }
 
     // 只生成参数类型（不带参数名），用于函数声明
-    public build_param_type_list(self, params [TypedParam]List) String = {
+    public build_param_type_list(self, params List[TypedParam]) String = {
         if params.is_empty() then { return "void" }
 
         let mut result = String.new()
@@ -1078,27 +1078,27 @@ given CodeGen {
         return result
     }
 
-    public build_param_type_list_from_function_type(self, params [TypedParam]List, function_type Type) String = {
+    public build_param_type_list_from_function_type(self, params List[TypedParam], function_type Type) String = {
         if params.is_empty() then { return "void" }
         if self.function_type_param_count(function_type) <> params.count() then {
             return self.build_param_type_list(params)
         }
 
         let mut result = String.new()
-        let mut index = (UInt)0
+        let mut index = 0(UInt)
         while index < self.function_type_param_count(function_type) then {
-            if index > (UInt)0 then {
+            if index > 0(UInt) then {
                 result.push_string(", ")
             }
             let param_type = self.function_type_param_type(function_type, index) or else params[index].param_type
             result.push_string(self.c_type_name(param_type))
-            index += (UInt)1
+            index += 1(UInt)
         }
         return result
     }
 
     // 生成方法参数类型列表，self 参数使用 target_type
-    public build_method_param_type_list(self, params [TypedParam]List, target_type Type) String = {
+    public build_method_param_type_list(self, params List[TypedParam], target_type Type) String = {
         if params.is_empty() then { return "void" }
 
         let mut result = String.new()
@@ -1120,35 +1120,35 @@ given CodeGen {
         return result
     }
 
-    public build_method_param_type_list_from_function_type(self, params [TypedParam]List, target_type Type, function_type Type) String = {
+    public build_method_param_type_list_from_function_type(self, params List[TypedParam], target_type Type, function_type Type) String = {
         if params.is_empty() then { return "void" }
         if self.function_type_param_count(function_type) <> params.count() then {
             return self.build_method_param_type_list(params, target_type)
         }
 
         let mut result = String.new()
-        let mut index = (UInt)0
+        let mut index = 0(UInt)
         while index < self.function_type_param_count(function_type) then {
-            if index > (UInt)0 then {
+            if index > 0(UInt) then {
                 result.push_string(", ")
             }
             let param_type = self.function_type_param_type(function_type, index) or else params[index].param_type
             result.push_string(self.c_type_name(param_type))
-            index += (UInt)1
+            index += 1(UInt)
         }
         return result
     }
 
-    public build_named_param_list_from_function_type(self, params [TypedParam]List, function_type Type) String = {
+    public build_named_param_list_from_function_type(self, params List[TypedParam], function_type Type) String = {
         if params.is_empty() then { return "void" }
         if self.function_type_param_count(function_type) <> params.count() then {
             return self.build_param_list(params)
         }
 
         let mut result = String.new()
-        let mut index = (UInt)0
+        let mut index = 0(UInt)
         while index < self.function_type_param_count(function_type) then {
-            if index > (UInt)0 then {
+            if index > 0(UInt) then {
                 result.push_string(", ")
             }
             let param = params[index]
@@ -1158,7 +1158,7 @@ given CodeGen {
             result.push_string(c_type)
             result.push_string(" ")
             result.push_string(c_name)
-            index += (UInt)1
+            index += 1(UInt)
         }
         return result
     }
@@ -1183,7 +1183,7 @@ given CodeGen {
     /// 检查参数列表是否包含泛型参数
     ///
     /// Requirements: 13.2
-    params_contain_generic(self, params [TypedParam]List) Bool = {
+    params_contain_generic(self, params List[TypedParam]) Bool = {
         for p in params then {
             if self.type_contains_generic(p.param_type) then { return true }
         }
@@ -1203,28 +1203,28 @@ given CodeGen {
     /// 例如 "_k__T_Deque_reserve" -> Some("_k__T_Deque")
     /// 例如 "Std_String_count" -> Some("Std_String")
     /// 例如 "HelloWorld_main" -> None (no underscore-separated method suffix)
-    extract_type_prefix_from_c_name(self, c_name String) [String]Option = {
+    extract_type_prefix_from_c_name(self, c_name String) Option[String] = {
         // 从右向左找最后一个 '_' 分隔符，提取前缀
         let bytes = c_name.to_bytes()
         let len = bytes.count()
-        if len == 0 then { return [String]Option.None() }
+        if len == 0 then { return Option[String].None() }
         // 找最后一个 '_' 的位置
         let mut last_underscore UInt = 0
         let mut found = false
         let mut i UInt = 0
         while i < len then {
             let b = bytes[i]
-            if b == (UInt8)95 then {  // '_' = 95
+            if b == 95(UInt8) then {  // '_' = 95
                 last_underscore = i
                 found = true
             }
             i += 1
         }
         if not found or last_underscore == 0 then {
-            return [String]Option.None()
+            return Option[String].None()
         }
         // 提取前缀（不含最后的 '_'）
         let prefix = c_name.substring(0..<last_underscore)
-        return [String]Option.Some(prefix)
+        return Option[String].Some(prefix)
     }
 }

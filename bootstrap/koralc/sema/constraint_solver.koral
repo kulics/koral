@@ -27,13 +27,13 @@ given ConstraintSolverError as Error {
 
 // 类型替换：将类型变量 ID 映射到具体类型。
 public type TypeSubstitution(
-    mapping [UInt, Type]Dict,
+    mapping Dict[UInt, Type],
 )
 
 given TypeSubstitution {
 
     public new() TypeSubstitution = {
-        return TypeSubstitution([UInt, Type]Dict.new())
+        return TypeSubstitution(Dict[UInt, Type].new())
     }
 
     // 将替换应用到类型 t，递归替换所有已知的类型变量。
@@ -47,11 +47,11 @@ given TypeSubstitution {
                 }
             },
             .FunctionType(params, ret) then {
-                let mut new_params = [Type ref]List.new()
-                let mut i = (UInt)0
+                let mut new_params = List[ref Type].new()
+                let mut i = 0(UInt)
                 while i < params.count() then {
                     new_params.push(box(self.apply(params[i].val.param_type)))
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 yield Type.FunctionType(types_to_param_entries(new_params), box(self.apply(ret.val)))
             },
@@ -74,20 +74,20 @@ given TypeSubstitution {
                 yield Type.MutableWeakReferenceType(box(self.apply(inner.val)))
             },
             .GenericStruct(template, args) then {
-                let mut new_args = [Type ref]List.new()
-                let mut i = (UInt)0
+                let mut new_args = List[ref Type].new()
+                let mut i = 0(UInt)
                 while i < args.count() then {
                     new_args.push(box(self.apply(args[i].val)))
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 yield Type.GenericStruct(template, new_args)
             },
             .GenericEnum(template, args) then {
-                let mut new_args = [Type ref]List.new()
-                let mut i = (UInt)0
+                let mut new_args = List[ref Type].new()
+                let mut i = 0(UInt)
                 while i < args.count() then {
                     new_args.push(box(self.apply(args[i].val)))
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 yield Type.GenericEnum(template, new_args)
             },
@@ -99,12 +99,12 @@ given TypeSubstitution {
 // 约束求解器。
 public type ConstraintSolver(
     mut unifier Unifier,
-    mut constraints [Constraint]List,
-    mut default_constraints [Constraint]List,
-    mut errors [ConstraintSolverError]List,
+    mut constraints List[Constraint],
+    mut default_constraints List[Constraint],
+    mut errors List[ConstraintSolverError],
     // 用于 Instantiate 约束判断 struct/enum 的类型查找回调。
     // 由 TypeChecker 在创建 ConstraintSolver 后注入。
-    mut enum_type_names [String]Set,
+    mut enum_type_names Set[String],
 )
 
 given ConstraintSolver {
@@ -112,10 +112,10 @@ given ConstraintSolver {
     public new() ConstraintSolver = {
         return ConstraintSolver(
             Unifier.new(),
-            [Constraint]List.new(),
-            [Constraint]List.new(),
-            [ConstraintSolverError]List.new(),
-            [String]Set.new()
+            List[Constraint].new(),
+            List[Constraint].new(),
+            List[ConstraintSolverError].new(),
+            Set[String].new()
         )
     }
 
@@ -136,67 +136,67 @@ given ConstraintSolver {
     // 对 constraints 按 priority 做插入排序（priority 越小越优先）。
     private sort_constraints(self mut ref) Void = {
         let n = self.constraints.count()
-        let mut i = (UInt)1
+        let mut i = 1(UInt)
         while i < n then {
             let key = self.constraints[i]
             let key_priority = key.priority()
             let mut j = i
-            while j > (UInt)0 then {
-                let prev = self.constraints[j - (UInt)1]
+            while j > 0(UInt) then {
+                let prev = self.constraints[j - 1(UInt)]
                 if prev.priority() > key_priority then {
                     self.constraints[j] = prev
-                    j -= (UInt)1
+                    j -= 1(UInt)
                 } else {
                     break
                 }
             }
             self.constraints[j] = key
-            i += (UInt)1
+            i += 1(UInt)
         }
     }
 
     // 求解所有约束，返回 TypeSubstitution。
-    public solve(self mut ref) [TypeSubstitution]Result = {
+    public solve(self mut ref) Result[TypeSubstitution] = {
         // 1. 按优先级排序
         self.sort_constraints()
 
         // 2. 依次处理每个约束（支持 re-queue）
-        let mut max_iterations = self.constraints.count() * (UInt)3 + (UInt)100
-        let mut iteration = (UInt)0
-        while self.constraints.count() > (UInt)0 and iteration < max_iterations then {
-            let c = self.constraints[(UInt)0]
+        let mut max_iterations = self.constraints.count() * 3(UInt) + 100(UInt)
+        let mut iteration = 0(UInt)
+        while self.constraints.count() > 0(UInt) and iteration < max_iterations then {
+            let c = self.constraints[0(UInt)]
             // 移除第一个约束
-            let mut remaining = [Constraint]List.new()
-            let mut j = (UInt)1
+            let mut remaining = List[Constraint].new()
+            let mut j = 1(UInt)
             while j < self.constraints.count() then {
                 remaining.push(self.constraints[j])
-                j += (UInt)1
+                j += 1(UInt)
             }
             self.constraints = remaining
             self.process_constraint(c)
-            iteration += (UInt)1
+            iteration += 1(UInt)
         }
 
         // 3. 处理 default_constraints
-        let mut di = (UInt)0
+        let mut di = 0(UInt)
         while di < self.default_constraints.count() then {
             let c = self.default_constraints[di]
             self.process_default_constraint(c)
-            di += (UInt)1
+            di += 1(UInt)
         }
 
         // 4. 若有错误，返回第一个错误
-        if self.errors.count() > (UInt)0 then {
-            return [TypeSubstitution]Result.Error(box(self.errors[(UInt)0]))
+        if self.errors.count() > 0(UInt) then {
+            return Result[TypeSubstitution].Error(box(self.errors[0(UInt)]))
         }
 
         // 5. 构建 TypeSubstitution（完全解析所有绑定）
         let bindings = self.unifier.current_bindings()
-        let mut resolved_bindings = [UInt, Type]Dict.new()
+        let mut resolved_bindings = Dict[UInt, Type].new()
         for entry in bindings then {
             resolved_bindings.insert(entry.first, self.unifier.resolve_deep(entry.second))
         }
-        return [TypeSubstitution]Result.Ok(TypeSubstitution(resolved_bindings))
+        return Result[TypeSubstitution].Ok(TypeSubstitution(resolved_bindings))
     }
 
     // 处理单个约束。
@@ -281,8 +281,8 @@ given ConstraintSolver {
     }
 
     // 辅助：将 [Type]List 转换为 [Type ref]List。
-    private types_to_refs(self, types [Type]List) [Type ref]List = {
-        let mut out = [Type ref]List.new()
+    private types_to_refs(self, types List[Type]) List[ref Type] = {
+        let mut out = List[ref Type].new()
         for t in types then {
             out.push(box(t))
         }

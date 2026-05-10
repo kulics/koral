@@ -93,7 +93,7 @@ public let layout_key(t Type) String = {
     }
 }
 
-private let instantiation_layout_key(mono Monomorphizer ref, t Type) String = {
+private let instantiation_layout_key(mono ref Monomorphizer, t Type) String = {
     return when t in {
         .ReferenceType(inner) then "ref_\(instantiation_layout_key(mono, inner.val))",
         .MutableReferenceType(inner) then "mutref_\(instantiation_layout_key(mono, inner.val))",
@@ -135,9 +135,9 @@ private let instantiation_layout_key(mono Monomorphizer ref, t Type) String = {
     }
 }
 
-private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Option = {
-    let name = mono.storage.context.get_name(def_id) or else { return [String]Option.None() }
-    let module_path = mono.storage.context.get_module_path(def_id) or else [String]List.new()
+private let concrete_layout_key(mono ref Monomorphizer, def_id DefId) Option[String] = {
+    let name = mono.storage.context.get_name(def_id) or else { return Option[String].None() }
+    let module_path = mono.storage.context.get_module_path(def_id) or else List[String].new()
     let is_private = when mono.storage.context.get_access(def_id) in {
         .Some(access) then when access in {
             .Private() then true,
@@ -147,7 +147,7 @@ private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Op
     }
     let source_file = mono.storage.context.get_source_file(def_id) or else ""
 
-    let mut parts = [String]List.new()
+    let mut parts = List[String].new()
     if not module_path.is_empty() then {
         let mut path_str = String.new()
         let mut first = true
@@ -162,9 +162,9 @@ private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Op
     if is_private and not source_file.is_empty() then {
         let mut hash UInt32 = 0
         for byte in source_file.bytes() then {
-            hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
+            hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32))
         }
-        parts.push("f\((UInt)(hash % 10000))")
+        parts.push("f\((hash % 10000)(UInt))")
     }
 
     parts.push(name)
@@ -176,7 +176,7 @@ private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Op
         result.push_string(part)
         first = false
     }
-    return [String]Option.Some(result)
+    return Option[String].Some(result)
 }
 
 // ── make_layout_name ──────────────────────────────────────────────────────────
@@ -189,7 +189,7 @@ private let concrete_layout_key(mono Monomorphizer ref, def_id DefId) [String]Op
 //   make_layout_name("List",   [Int])          → "List_Int"
 //   make_layout_name("Dict",    [String, Int])  → "Dict_String_Int"
 //   make_layout_name("Option", [ref String])   → "Option_ref_String"
-public let make_layout_name(mono Monomorphizer ref, template_name String, args [Type ref]List) String = {
+public let make_layout_name(mono ref Monomorphizer, template_name String, args List[ref Type]) String = {
     let mut out = template_name
     for a in args then {
         out.push_string("_")
@@ -198,7 +198,7 @@ public let make_layout_name(mono Monomorphizer ref, template_name String, args [
     return out
 }
 
-private let enqueue_pending_request_if_needed(mono Monomorphizer ref, req InstantiationRequest) Void = {
+private let enqueue_pending_request_if_needed(mono ref Monomorphizer, req InstantiationRequest) Void = {
     let key = req.deduplication_key()
     if mono.storage.processed_request_keys.contains(key) then { return }
     if mono.storage.pending_request_keys.contains(key) then { return }
@@ -207,14 +207,14 @@ private let enqueue_pending_request_if_needed(mono Monomorphizer ref, req Instan
     mono.storage.pending_requests.push(req)
 }
 
-private let is_std_drop_trait_conformance(mono Monomorphizer ref, conformance_trait_name [String]Option) Bool = {
+private let is_std_drop_trait_conformance(mono ref Monomorphizer, conformance_trait_name Option[String]) Bool = {
     return when conformance_trait_name in {
         .Some(trait_name) then {
             if trait_name <> "Drop" then { return false }
             yield when mono.storage.generic_templates.traits.get(trait_name) in {
                 .Some(info) then {
                     if info.module_path.is_empty() then { return false }
-                    yield info.module_path[(UInt)0] == "Std"
+                    yield info.module_path[0(UInt)] == "Std"
                 },
                 .None() then false,
             }
@@ -238,11 +238,11 @@ private let is_std_drop_trait_conformance(mono Monomorphizer ref, conformance_tr
 //   make_extension_method_layout_name("Dict",   [String, Int], "get",   [])       → "Dict_String_Int_get"
 //   make_extension_method_layout_name("List",  [Int],         "map",   [String]) → "List_Int_map_String"
 public let make_extension_method_layout_name(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     template_name String,
-    type_args [Type ref]List,
+    type_args List[ref Type],
     method_name String,
-    method_type_args [Type ref]List,
+    method_type_args List[ref Type],
 ) String = {
     let mut out = template_name
     for a in type_args then {
@@ -259,10 +259,10 @@ public let make_extension_method_layout_name(
 }
 
 public let make_extension_method_lookup_key(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     base_name String,
     method_name String,
-    method_type_args [Type ref]List,
+    method_type_args List[ref Type],
 ) String = {
     let mut out = "\(base_name).\(method_name)"
     for a in method_type_args then {
@@ -311,7 +311,7 @@ public let has_generic_parameter(t Type) Bool = {
 
 // Returns true if any type in the args list is still unresolved enough that
 // monomorphization should not materialize a concrete layout yet.
-public let args_have_generic_parameter(args [Type ref]List) Bool = {
+public let args_have_generic_parameter(args List[ref Type]) Bool = {
     for a in args then {
         if has_generic_parameter(a.val) or is_placeholder_inferred_type(a.val) then { return true }
     }
@@ -337,7 +337,7 @@ public let args_have_generic_parameter(args [Type ref]List) Bool = {
 //   l. If template has drop, enqueue ExtensionMethod instantiation request
 //   m. Return StructureType(def_id)
 //
-public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemplate, args [Type ref]List) Type = {
+public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemplate, args List[ref Type]) Type = {
     if args.count() <> template.type_parameters.count() then {
         panic("Monomorphization error: struct type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
     }
@@ -363,15 +363,15 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     let concrete_type = Type.StructureType(def_id)
     mono.storage.instantiated_types.insert(layout_name, concrete_type)
 
-    let mut type_arg_list = [Type]List.new()
+    let mut type_arg_list = List[Type].new()
     for a in args then {
         type_arg_list.push(a.val)
     }
     mono.storage.context.set_struct_info(def_id, StructTypeInfo(
-        [StructField]List.new(),
+        List[StructField].new(),
         true,
-        [[Type]List]Option.Some(type_arg_list),
-        [String]Option.Some(template.name),
+        Option[List[Type]].Some(type_arg_list),
+        Option[String].Some(template.name),
     ))
 
     // d. Check instantiating_types for direct cycle detection.
@@ -383,17 +383,17 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     mono.storage.instantiating_types.insert(layout_name)
 
     // f. Build type substitution map: template.type_parameters[i].name → args[i].
-    let mut substitution = [String, Type]Dict.new()
-    let mut param_idx = (UInt)0
+    let mut substitution = Dict[String, Type].new()
+    let mut param_idx = 0(UInt)
     while param_idx < template.type_parameters.count() then {
         let param = template.type_parameters[param_idx]
         let arg = args[param_idx]
         substitution.insert(param.name, arg.val)
-        param_idx += (UInt)1
+        param_idx += 1(UInt)
     }
 
     // g. Resolve each field's TypeNode to a concrete Type; check for direct recursion.
-    let mut concrete_fields = [TypedField]List.new()
+    let mut concrete_fields = List[TypedField].new()
     for field in template.fields then {
         let resolved_type = mono.resolve_type_node_impl(field.field_type, substitution)
 
@@ -418,7 +418,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     }
 
     // Register struct fields in the DefIdMap for later use.
-    let mut struct_fields = [StructField]List.new()
+    let mut struct_fields = List[StructField].new()
     for cf in concrete_fields then {
         struct_fields.push(StructField(cf.name, cf.field_type, cf.mutable, cf.access, cf.named))
     }
@@ -426,8 +426,8 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
     mono.storage.context.set_struct_info(def_id, StructTypeInfo(
         struct_fields,
         true,
-        [[Type]List]Option.Some(type_arg_list),
-        [String]Option.Some(template.name),
+        Option[List[Type]].Some(type_arg_list),
+        Option[String].Some(template.name),
     ))
 
     // i. Create TypeStructDecl and add to generated_nodes.
@@ -462,7 +462,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
                             concrete_type,
                             ext_template.val,
                             args,
-                            [Type ref]List.new(),
+                            List[ref Type].new(),
                         ),
                         0,
                         "",
@@ -497,7 +497,7 @@ public let instantiate_struct(mono Monomorphizer ref, template GenericStructTemp
 //   l. If template has drop, enqueue ExtensionMethod instantiation request
 //   m. Return EnumType(def_id)
 //
-public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate, args [Type ref]List) Type = {
+public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate, args List[ref Type]) Type = {
     if args.count() <> template.type_parameters.count() then {
         panic("Monomorphization error: enum type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
     }
@@ -523,15 +523,15 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     let concrete_type = Type.EnumType(def_id)
     mono.storage.instantiated_types.insert(layout_name, concrete_type)
 
-    let mut type_arg_list = [Type]List.new()
+    let mut type_arg_list = List[Type].new()
     for a in args then {
         type_arg_list.push(a.val)
     }
     mono.storage.context.set_enum_info(def_id, EnumTypeInfo(
-        [EnumCaseInfo]List.new(),
+        List[EnumCaseInfo].new(),
         true,
-        [[Type]List]Option.Some(type_arg_list),
-        [String]Option.Some(template.name),
+        Option[List[Type]].Some(type_arg_list),
+        Option[String].Some(template.name),
     ))
 
     // d. Check instantiating_types for direct cycle detection.
@@ -543,19 +543,19 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     mono.storage.instantiating_types.insert(layout_name)
 
     // f. Build type substitution map: template.type_parameters[i].name → args[i].
-    let mut substitution = [String, Type]Dict.new()
-    let mut param_idx = (UInt)0
+    let mut substitution = Dict[String, Type].new()
+    let mut param_idx = 0(UInt)
     while param_idx < template.type_parameters.count() then {
         let param = template.type_parameters[param_idx]
         let arg = args[param_idx]
         substitution.insert(param.name, arg.val)
-        param_idx += (UInt)1
+        param_idx += 1(UInt)
     }
 
     // g. Resolve each case's param TypeNodes to concrete Types; check for direct recursion.
-    let mut concrete_cases = [TypedEnumCase]List.new()
+    let mut concrete_cases = List[TypedEnumCase].new()
     for case_ in template.cases then {
-        let mut concrete_fields = [TypedEnumCaseField]List.new()
+        let mut concrete_fields = List[TypedEnumCaseField].new()
         for param in case_.params then {
             let resolved_type = mono.resolve_type_node_impl(param.param_type, substitution)
 
@@ -583,9 +583,9 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     }
 
     // Register enum cases in the DefIdMap for later use.
-    let mut enum_case_infos = [EnumCaseInfo]List.new()
+    let mut enum_case_infos = List[EnumCaseInfo].new()
     for cc in concrete_cases then {
-        let mut case_params = [EnumCaseParam]List.new()
+        let mut case_params = List[EnumCaseParam].new()
         for cf in cc.fields then {
             case_params.push(EnumCaseParam(cf.name, cf.field_type, cf.named))
         }
@@ -595,8 +595,8 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
     mono.storage.context.set_enum_info(def_id, EnumTypeInfo(
         enum_case_infos,
         true,
-        [[Type]List]Option.Some(type_arg_list),
-        [String]Option.Some(template.name),
+        Option[List[Type]].Some(type_arg_list),
+        Option[String].Some(template.name),
     ))
 
     // i. Create TypeEnumDecl and add to generated_nodes.
@@ -630,7 +630,7 @@ public let instantiate_enum(mono Monomorphizer ref, template GenericEnumTemplate
                             concrete_type,
                             ext_template.val,
                             args,
-                            [Type ref]List.new(),
+                            List[ref Type].new(),
                         ),
                         0,
                         "",

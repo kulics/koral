@@ -10,7 +10,7 @@ public type ModuleError {
     SubmoduleNotFound(name String, parent_path String),
     MissingEntryFile(submod_name String, expected_path String),
     SuperOutOfBounds(),
-    CircularDependency(path [String]List),
+    CircularDependency(path List[String]),
     InvalidModulePath(path String),
     DuplicateUsing(name String),
     ParseError(file String, message String),
@@ -36,42 +36,42 @@ given ModuleError {
 }
 
 private type PendingUsing {
-    Path(access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option),
-    Parent(access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, span SourceSpan),
-    File(access AccessModifier, file_name String, alias [String]Option),
+    Path(access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String]),
+    Parent(access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], span SourceSpan),
+    File(access AccessModifier, file_name String, alias Option[String]),
 }
 
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
 protected type ModuleResolverStorage(
-    mut resolving_files [String]List,
+    mut resolving_files List[String],
 )
 
-public type ModuleResolver(protected mut storage ModuleResolverStorage mut ref)
+public type ModuleResolver(protected mut storage mut ref ModuleResolverStorage)
 
 public type ResolvedModuleGraph(
     root_module_path String,
     import_graph ImportGraph,
-    loaded_nodes [LoadedNode]List,
-    loaded_nodes_with_path [[LoadedNode, [String]List]Pair]List,
-    node_source_paths [String]List,
-    module_paths [[String]List]List,
-    source_files [String]List,
+    loaded_nodes List[LoadedNode],
+    loaded_nodes_with_path List[Pair[LoadedNode, List[String]]],
+    node_source_paths List[String],
+    module_paths List[List[String]],
+    source_files List[String],
 )
 
 given ModuleResolver {
     public new() ModuleResolver = {
-        let s = box(ModuleResolverStorage([String]List.new()))
+        let s = box(ModuleResolverStorage(List[String].new()))
         return ModuleResolver(s)
     }
 
     // Locate child module entry: dir/<name>/<name>.koral or dir/<name>.koral
     // Returns Ok(path) or Error(message) if ambiguous or not found
-    private locate_child_module_entry(self, parent_dir String, child_name String) [String]Result = {
+    private locate_child_module_entry(self, parent_dir String, child_name String) Result[String] = {
         // Only valid PascalCase module identifiers participate in submodule lookup.
         // This avoids mistaking member names for module names.
         if validate_module_identifier(child_name) is .Some(_) then {
-            return [String]Result.Error(box("Invalid module identifier: \(child_name)"))
+            return Result[String].Error(box("Invalid module identifier: \(child_name)"))
         }
 
         // Convert PascalCase identifier to snake_case file name
@@ -85,31 +85,31 @@ given ModuleResolver {
 
         // 歧义：两者都存在，报错
         if has_dir and has_file then {
-            return [String]Result.Error(box(
+            return Result[String].Error(box(
                 ModuleError.AmbiguousModuleEntry(child_name, file_entry, dir_entry).message()
             ))
         }
 
-        if has_dir then { return [String]Result.Ok(dir_entry) }
-        if has_file then { return [String]Result.Ok(file_entry) }
-        return [String]Result.Error(box("Module '\(child_name)' not found in '\(parent_dir)'"))
+        if has_dir then { return Result[String].Ok(dir_entry) }
+        if has_file then { return Result[String].Ok(file_entry) }
+        return Result[String].Error(box("Module '\(child_name)' not found in '\(parent_dir)'"))
     }
 
     // Resolve the entry file for a module starting from base_module with relative segments.
-    private locate_module_entry(self, base_module ModuleInfo, relative_segments [String]List) [String]Option = {
-        if relative_segments.is_empty() then { return [String]Option.None() }
+    private locate_module_entry(self, base_module ModuleInfo, relative_segments List[String]) Option[String] = {
+        if relative_segments.is_empty() then { return Option[String].None() }
 
         // All segments must be valid PascalCase module identifiers
         for seg in relative_segments then {
             if validate_module_identifier(seg) is .Some(_) then {
-                return [String]Option.None()
+                return Option[String].None()
             }
         }
 
         if relative_segments.count() == 1 then {
             return when self.locate_child_module_entry(base_module.directory(), relative_segments[0]) in {
-                .Ok(p) then [String]Option.Some(p),
-                .Error(_) then [String]Option.None(),
+                .Ok(p) then Option[String].Some(p),
+                .Error(_) then Option[String].None(),
             }
         }
 
@@ -125,16 +125,16 @@ given ModuleResolver {
         }
         let last = relative_segments[last_idx]
         return when self.locate_child_module_entry(dir, last) in {
-            .Ok(p) then [String]Option.Some(p),
-            .Error(_) then [String]Option.None(),
+            .Ok(p) then Option[String].Some(p),
+            .Error(_) then Option[String].None(),
         }
     }
 
     // Main entry: resolve a module from its entry file.
-    public resolve_module(self, entry_file String) [CompilationUnit]Result = {
+    public resolve_module(self, entry_file String) Result[CompilationUnit] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
-            .Error(e) then { return [CompilationUnit]Result.Error(box("Cannot resolve path: \(entry_file)")) },
+            .Error(e) then { return Result[CompilationUnit].Error(box("Cannot resolve path: \(entry_file)")) },
         }
 
         module_debug("[module] resolve_module: \(abs_path)")
@@ -142,60 +142,60 @@ given ModuleResolver {
         let filename = abs_path.into_path().with_ext_name("").base_name()
 
         if validate_module_name(filename) is .Some(reason) then {
-            return [CompilationUnit]Result.Error(box("Invalid entry file name '\(filename)': \(reason)"))
+            return Result[CompilationUnit].Error(box("Invalid entry file name '\(filename)': \(reason)"))
         }
 
-        let mut root_path = [String]List.new()
+        let mut root_path = List[String].new()
         root_path.push(module_file_name_to_identifier(filename))
         let root = ModuleInfo.new(root_path, abs_path, false)
         let unit = CompilationUnit.new(root)
 
         let _ = self.resolve_file(abs_path, root, unit) or return
 
-        return [CompilationUnit]Result.Ok(unit)
+        return Result[CompilationUnit].Ok(unit)
     }
 
-    public resolve_for_typecheck(self, entry_file String, no_std Bool) [ResolvedModuleGraph]Result = {
-        let mut user_unit_opt = [CompilationUnit]Option.None()
-        let mut resolve_error = [Error ref]Option.None()
+    public resolve_for_typecheck(self, entry_file String, no_std Bool) Result[ResolvedModuleGraph] = {
+        let mut user_unit_opt = Option[CompilationUnit].None()
+        let mut resolve_error = Option[ref Error].None()
         when self.resolve_module(entry_file) in {
             .Ok(u) then {
-                user_unit_opt = [CompilationUnit]Option.Some(u)
+                user_unit_opt = Option[CompilationUnit].Some(u)
             },
             .Error(e) then {
-                resolve_error = [Error ref]Option.Some(e)
+                resolve_error = Option[ref Error].Some(e)
             },
         }
         if resolve_error is .Some(e) then {
-            return [ResolvedModuleGraph]Result.Error(e)
+            return Result[ResolvedModuleGraph].Error(e)
         }
         let user_unit = user_unit_opt or else {
-            return [ResolvedModuleGraph]Result.Error(box("module resolution failed"))
+            return Result[ResolvedModuleGraph].Error(box("module resolution failed"))
         }
         let user_unit_ref = box(user_unit)
         let std_unit = self.load_std_unit_for_typecheck(no_std, user_unit_ref.has_module("Std"))
-        return [ResolvedModuleGraph]Result.Ok(self.build_resolved_module_graph(std_unit, user_unit_ref))
+        return Result[ResolvedModuleGraph].Ok(self.build_resolved_module_graph(std_unit, user_unit_ref))
     }
 
-    private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) [CompilationUnit ref]Option = {
+    private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) Option[ref CompilationUnit] = {
         if no_std or user_has_std then {
-            return [CompilationUnit ref]Option.None()
+            return Option[ref CompilationUnit].None()
         }
         let std_path = find_std_entry_path() or else {
-            return [CompilationUnit ref]Option.None()
+            return Option[ref CompilationUnit].None()
         }
         return when self.resolve_module(std_path) in {
-            .Ok(unit) then [CompilationUnit ref]Option.Some(box(unit)),
-            .Error(_) then [CompilationUnit ref]Option.None(),
+            .Ok(unit) then Option[ref CompilationUnit].Some(box(unit)),
+            .Error(_) then Option[ref CompilationUnit].None(),
         }
     }
 
     private collect_effective_std_nodes_with_path(
         self,
-        std_unit [CompilationUnit ref]Option,
-        user_unit CompilationUnit ref,
-    ) [[LoadedNode, [String]List]Pair]List = {
-        let mut result = [[LoadedNode, [String]List]Pair]List.new()
+        std_unit Option[ref CompilationUnit],
+        user_unit ref CompilationUnit,
+    ) List[Pair[LoadedNode, List[String]]] = {
+        let mut result = List[Pair[LoadedNode, List[String]]].new()
         when std_unit in {
             .Some(su) then {
                 result = su.collect_all_nodes_with_path()
@@ -212,9 +212,9 @@ given ModuleResolver {
 
     private inject_std_prelude_imports(
         self,
-        std_unit CompilationUnit ref,
-        user_unit CompilationUnit ref,
-        graph ImportGraph mut ref,
+        std_unit ref CompilationUnit,
+        user_unit ref CompilationUnit,
+        graph mut ref ImportGraph,
     ) Void = {
         self.inject_std_prelude_imports_from_root(std_unit.root_module().path_string(), user_unit, graph)
     }
@@ -223,9 +223,9 @@ given ModuleResolver {
         self,
         std_root_key String,
         user_unit CompilationUnit,
-        graph ImportGraph mut ref,
+        graph mut ref ImportGraph,
     ) Void = {
-        let mut std_root_path = [String]List.new()
+        let mut std_root_path = List[String].new()
         std_root_path.push(std_root_key)
         if user_unit.has_module(std_root_key) then {
             when user_unit.get_module(std_root_key) in {
@@ -236,8 +236,8 @@ given ModuleResolver {
             }
         }
 
-        let mut seen = [String]Set.new()
-        let mut module_paths = [[String]List]List.new()
+        let mut seen = Set[String].new()
+        let mut module_paths = List[List[String]].new()
         for pair in user_unit.collect_all_nodes_with_path() then {
             let key = join_path(pair.second, ".")
             if key <> std_root_key and not seen.contains(key) then {
@@ -267,15 +267,15 @@ given ModuleResolver {
                 }
             }
             if not already then {
-                graph.add_module_import(mod_path, std_root_path, ImportKind.BatchImport(), [String]Option.None())
+                graph.add_module_import(mod_path, std_root_path, ImportKind.BatchImport(), Option[String].None())
             }
         }
         let _ = self
     }
 
-    private collect_unique_module_paths(self, loaded_nodes_with_path [[LoadedNode, [String]List]Pair]List) [[String]List]List = {
-        let mut seen = [String]Set.new()
-        let mut module_paths = [[String]List]List.new()
+    private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
+        let mut seen = Set[String].new()
+        let mut module_paths = List[List[String]].new()
         for pair in loaded_nodes_with_path then {
             let path = pair.second
             let key = join_path(path, ".")
@@ -288,9 +288,9 @@ given ModuleResolver {
         return module_paths
     }
 
-    private collect_unique_sources(self, loaded_nodes [LoadedNode]List) [String]List = {
-        let mut seen = [String]Set.new()
-        let mut source_files = [String]List.new()
+    private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
+        let mut seen = Set[String].new()
+        let mut source_files = List[String].new()
         for node in loaded_nodes then {
             if not seen.contains(node.source_file) then {
                 seen.insert(node.source_file)
@@ -303,10 +303,10 @@ given ModuleResolver {
 
     private build_resolved_module_graph(
         self,
-        std_unit [CompilationUnit ref]Option,
-        user_unit CompilationUnit ref,
+        std_unit Option[ref CompilationUnit],
+        user_unit ref CompilationUnit,
     ) ResolvedModuleGraph = {
-        let mut all_pairs = [[LoadedNode, [String]List]Pair]List.new()
+        let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
         for pair in self.collect_effective_std_nodes_with_path(std_unit, user_unit) then {
             all_pairs.push(pair)
         }
@@ -314,8 +314,8 @@ given ModuleResolver {
             all_pairs.push(pair)
         }
 
-        let mut loaded_nodes = [LoadedNode]List.new()
-        let mut node_source_paths = [String]List.new()
+        let mut loaded_nodes = List[LoadedNode].new()
+        let mut node_source_paths = List[String].new()
         for pair in all_pairs then {
             loaded_nodes.push(pair.first)
             node_source_paths.push(pair.first.source_file)
@@ -347,7 +347,7 @@ given ModuleResolver {
     }
 
     // Parse and process a single file into a module.
-    private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) [Void]Result = {
+    private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) Result[Void] = {
         let normalized_file = when absolute_path(file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
@@ -357,7 +357,7 @@ given ModuleResolver {
         for f in self.storage.resolving_files then {
             if f == normalized_file then {
                 module_debug("[module] circular-skip: \(normalized_file)")
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             }
         }
 
@@ -365,7 +365,7 @@ given ModuleResolver {
         module_debug("[module] resolve_file: \(normalized_file)")
         let pending = self.collect_pending_usings(normalized_file, module) or else {
             self.storage.resolving_files.pop()
-            return [Void]Result.Error(it)
+            return Result[Void].Error(it)
         }
 
         for using_decl in pending then {
@@ -375,7 +375,7 @@ given ModuleResolver {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
-                            return [Void]Result.Error(e)
+                            return Result[Void].Error(e)
                         },
                     }
                 },
@@ -384,7 +384,7 @@ given ModuleResolver {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
-                            return [Void]Result.Error(e)
+                            return Result[Void].Error(e)
                         },
                     }
                     self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file)
@@ -396,14 +396,14 @@ given ModuleResolver {
                                 .Ok(_) then {},
                                 .Error(e) then {
                                     self.storage.resolving_files.pop()
-                                    return [Void]Result.Error(e)
+                                    return Result[Void].Error(e)
                                 },
                             }
                         },
                         .Some(mod_name) then {
                             let import_source_file = when access in {
-                                .Private() then [String]Option.Some(normalized_file),
-                                _ then [String]Option.None(),
+                                .Private() then Option[String].Some(normalized_file),
+                                _ then Option[String].None(),
                             }
                             let mut target_path = module.path()
                             target_path.push(mod_name)
@@ -414,7 +414,7 @@ given ModuleResolver {
                                 .Ok(_) then {},
                                 .Error(e) then {
                                     self.storage.resolving_files.pop()
-                                    return [Void]Result.Error(e)
+                                    return Result[Void].Error(e)
                                 },
                             }
                         },
@@ -425,31 +425,31 @@ given ModuleResolver {
         }
 
         self.storage.resolving_files.pop()
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
-    private collect_pending_usings(self, normalized_file String, module ModuleInfo) [[PendingUsing]List]Result = {
+    private collect_pending_usings(self, normalized_file String, module ModuleInfo) Result[List[PendingUsing]] = {
         module_debug("[module] read: begin")
 
         let source = read_text_file(normalized_file.into_path()) or else {
-            return [[PendingUsing]List]Result.Error(box("Failed to read file: \(normalized_file)"))
+            return Result[List[PendingUsing]].Error(box("Failed to read file: \(normalized_file)"))
         }
         module_debug("[module] read: done")
         module_debug("[module] lex: begin")
 
         let tokens = lex(source) or else {
-            return [[PendingUsing]List]Result.Error(box("\(normalized_file): \(it.message())"))
+            return Result[List[PendingUsing]].Error(box("\(normalized_file): \(it.message())"))
         }
         module_debug("[module] lex: done")
         module_debug("[module] parse: begin")
 
         let program = parse(tokens) or else {
-            return [[PendingUsing]List]Result.Error(box("\(normalized_file): \(it.message())"))
+            return Result[List[PendingUsing]].Error(box("\(normalized_file): \(it.message())"))
         }
         module_debug("[module] parse: done")
         module_debug("[module] decl-loop: begin")
 
-        let mut pending = [PendingUsing]List.new()
+        let mut pending = List[PendingUsing].new()
         for decl in program.declarations then {
             when decl in {
                 .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
@@ -468,15 +468,15 @@ given ModuleResolver {
         }
 
         module_debug("[module] decl-loop: done")
-        return [[PendingUsing]List]Result.Ok(pending)
+        return Result[List[PendingUsing]].Ok(pending)
     }
 
     // Path using resolution: using Path.To.Thing (non-Super paths)
     // 1. If first segment matches a known submodule, handle as local submodule import
     // 2. Otherwise, try external module resolution
-    private resolve_path_using(self, access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
+    private resolve_path_using(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
         if path_segments.is_empty() then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         let first = path_segments[0]
@@ -487,7 +487,7 @@ given ModuleResolver {
                 let mut current = module
                 for seg in path_segments then {
                     if not current.has_submodule(seg) then {
-                        return [Void]Result.Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
+                        return Result[Void].Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
                     }
                     let mut next_path = current.path()
                     next_path.push(seg)
@@ -495,15 +495,15 @@ given ModuleResolver {
                     current = when unit.get_module(next_key) in {
                         .Some(sub) then sub,
                         .None() then {
-                            return [Void]Result.Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
+                            return Result[Void].Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
                         },
                     }
                 }
             }
 
             let import_source_file = when access in {
-                .Private() then [String]Option.Some(current_file),
-                _ then [String]Option.None(),
+                .Private() then Option[String].Some(current_file),
+                _ then Option[String].None(),
             }
 
             let mut target_path = module.path()
@@ -526,7 +526,7 @@ given ModuleResolver {
             } else {
                 unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
             }
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         // Record import edge for external path
@@ -537,10 +537,10 @@ given ModuleResolver {
     }
 
     // Record path import relationship into the ImportGraph.
-    private record_path_import(self, access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) Void = {
+    private record_path_import(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Void = {
         let import_source_file = when access in {
-            .Private() then [String]Option.Some(current_file),
-            _ then [String]Option.None(),
+            .Private() then Option[String].Some(current_file),
+            _ then Option[String].None(),
         }
         if path_segments.is_empty() then {
             return
@@ -553,11 +553,11 @@ given ModuleResolver {
 
         if is_batch then {
             unit.add_import_edge(module.path(), path_segments, ImportKind.BatchImport(), import_source_file)
-        } else if path_segments.count() >= (UInt)2 then {
-            let sym = path_segments[path_segments.count() - (UInt)1]
-            let mut sym_target = [String]List.new()
+        } else if path_segments.count() >= 2(UInt) then {
+            let sym = path_segments[path_segments.count() - 1(UInt)]
+            let mut sym_target = List[String].new()
             let mut i UInt = 0
-            while i + (UInt)1 < path_segments.count() then {
+            while i + 1(UInt) < path_segments.count() then {
                 sym_target.push(path_segments[i])
                 i += 1
             }
@@ -572,10 +572,10 @@ given ModuleResolver {
     }
 
     // Record parent import relationship into the ImportGraph.
-    private record_parent_import(self, access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) Void = {
+    private record_parent_import(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Void = {
         let import_source_file = when access in {
-            .Private() then [String]Option.Some(current_file),
-            _ then [String]Option.None(),
+            .Private() then Option[String].Some(current_file),
+            _ then Option[String].None(),
         }
 
         if path_segments.is_empty() then {
@@ -604,11 +604,11 @@ given ModuleResolver {
         let remaining_count = path_segments.count() - segment_index
         if is_batch then {
             unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-        } else if remaining_count >= (UInt)2 then {
-            let sym = path_segments[path_segments.count() - (UInt)1]
+        } else if remaining_count >= 2(UInt) then {
+            let sym = path_segments[path_segments.count() - 1(UInt)]
             let mut sym_target = current_path
             let mut i = segment_index
-            while i + (UInt)1 < path_segments.count() then {
+            while i + 1(UInt) < path_segments.count() then {
                 sym_target.push(path_segments[i])
                 i += 1
             }
@@ -624,7 +624,7 @@ given ModuleResolver {
 
     // Resolve file merge: using "file_name"
     // Locates file_name.koral (or file_name/file_name.koral) relative to the current file's directory and merges it.
-    private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
+    private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string()
         let file_entry = current_dir + "/" + file_name + ".koral"
         let dir_entry = current_dir + "/" + file_name + "/" + file_name + ".koral"
@@ -633,7 +633,7 @@ given ModuleResolver {
         let has_dir = path_exist(dir_entry.into_path())
 
         if has_file and has_dir then {
-            return [Void]Result.Error(box(
+            return Result[Void].Error(box(
                 "Ambiguous module '\(file_name)': both '\(file_entry)' and '\(dir_entry)' exist"
             ))
         }
@@ -641,11 +641,11 @@ given ModuleResolver {
         let file_path = if has_file then file_entry
         else if has_dir then dir_entry
         else {
-            return [Void]Result.Error(box("File '\(file_name).koral' not found in '\(current_dir)'"))
+            return Result[Void].Error(box("File '\(file_name).koral' not found in '\(current_dir)'"))
         }
 
         if module.has_merged_submodule(file_path) then {
-            return [Void]Result.Error(box("Duplicate using: \"\(file_name)\""))
+            return Result[Void].Error(box("Duplicate using: \"\(file_name)\""))
         }
 
         module.add_merged_submodule(file_path)
@@ -655,11 +655,11 @@ given ModuleResolver {
     // Resolve file submodule: using "file_name" as Name
     // Locates file_name.koral (or file_name/file_name.koral) relative to the current file's directory
     // and registers it as a named submodule.
-    private resolve_file_submodule(self, access AccessModifier, file_name String, mod_name String, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
+    private resolve_file_submodule(self, access AccessModifier, file_name String, mod_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string()
         let import_source_file = when access in {
-            .Private() then [String]Option.Some(current_file),
-            _ then [String]Option.None(),
+            .Private() then Option[String].Some(current_file),
+            _ then Option[String].None(),
         }
 
         // Try directory entry first, then file entry
@@ -670,7 +670,7 @@ given ModuleResolver {
         let has_file = path_exist(file_entry.into_path())
 
         if has_dir and has_file then {
-            return [Void]Result.Error(box(
+            return Result[Void].Error(box(
                 "Ambiguous module '\(mod_name)': both '\(file_entry)' and '\(dir_entry)' exist"
             ))
         }
@@ -678,7 +678,7 @@ given ModuleResolver {
         let entry_file = if has_dir then dir_entry
         else if has_file then file_entry
         else {
-            return [Void]Result.Error(box("Module file '\(file_name).koral' not found in '\(module.directory())'"))
+            return Result[Void].Error(box("Module file '\(file_name).koral' not found in '\(module.directory())'"))
         }
 
         if module.has_submodule(mod_name) then {
@@ -692,11 +692,11 @@ given ModuleResolver {
                 },
                 .Some(_) then {},
             }
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         if module.has_merged_submodule(entry_file) then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         let mut sub_path = module.path()
@@ -716,26 +716,26 @@ given ModuleResolver {
             .Some(_) then {},
         }
 
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     // Resolve external module: using std.io or using std.io.*
     // Uses KORAL_HOME environment variable to locate the standard library
-    private resolve_external(self, access AccessModifier, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, alias [String]Option, module ModuleInfo, unit CompilationUnit, current_file String) [Void]Result = {
+    private resolve_external(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
         if path_segments.is_empty() then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         let first_seg = path_segments[0]
 
-        let not_found = [Void]Result.Error(box("External module '\(first_seg)' not found"))
+        let not_found = Result[Void].Error(box("External module '\(first_seg)' not found"))
 
         // Reuse already loaded external modules first. Std is preloaded by the
         // driver in normal builds, so using Std.X must not depend on KORAL_HOME.
         let first_file_name = module_identifier_to_file_name(first_seg)
         let first_pascal = module_file_name_to_identifier(first_file_name)
         if unit.has_module(first_pascal) then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         let std_entry_opt = find_external_module_entry(first_pascal)
@@ -749,11 +749,11 @@ given ModuleResolver {
         }
 
         // 检查是否已加载（用 PascalCase 名作为 key）
-        let mut ext_path = [String]List.new()
+        let mut ext_path = List[String].new()
         ext_path.push(first_pascal)
         let ext_key = first_pascal
         if unit.has_module(ext_key) then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         // 加载外部模块
@@ -762,11 +762,11 @@ given ModuleResolver {
 
         let _ = self.resolve_file(std_entry, ext_module, unit) or return
 
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     // Resolve parent: using super.path or super.super.path
-    private resolve_parent(self, path_segments [String]List, imported_symbol [String]Option, is_batch Bool, module ModuleInfo, unit CompilationUnit, current_file String, span SourceSpan) [Void]Result = {
+    private resolve_parent(self, path_segments List[String], imported_symbol Option[String], is_batch Bool, module ModuleInfo, unit CompilationUnit, current_file String, span SourceSpan) Result[Void] = {
         let mut current = module
         let mut seg_idx = 0
         let access_checker = AccessChecker.new()
@@ -777,7 +777,7 @@ given ModuleResolver {
                 if current.parent() is .Some(p) then {
                     current = p
                 } else {
-                    return [Void]Result.Error(box(ModuleError.SuperOutOfBounds().message()))
+                    return Result[Void].Error(box(ModuleError.SuperOutOfBounds().message()))
                 }
                 seg_idx += 1
             } else {
@@ -786,14 +786,14 @@ given ModuleResolver {
         }
 
         // Remaining segments: navigate down from current
-        let mut remaining = [String]List.new()
+        let mut remaining = List[String].new()
         let mut i = 0
         for seg in path_segments then {
             if i >= seg_idx then { remaining.push(seg) }
             i += 1
         }
 
-        if remaining.is_empty() then { return [Void]Result.Ok({}) }
+        if remaining.is_empty() then { return Result[Void].Ok({}) }
 
         // Try to load submodules for remaining path
         let remaining_count = remaining.count()
@@ -817,7 +817,7 @@ given ModuleResolver {
                 let key = current.path_string() + "." + seg
                 when unit.get_module(key) in {
                     .Some(sub) then { current = sub },
-                    .None() then { return [Void]Result.Ok({}) },
+                    .None() then { return Result[Void].Ok({}) },
                 }
                 remaining_index += 1
                 continue
@@ -825,15 +825,15 @@ given ModuleResolver {
 
             let entry_file = when self.locate_child_module_entry(current.directory(), seg) in {
                 .Ok(f) then f,
-                .Error(_) then { return [Void]Result.Ok({}) },
+                .Error(_) then { return Result[Void].Ok({}) },
             }
 
             // 子模块合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
             if current.has_merged_submodule(entry_file) then {
-                if not is_batch and imported_symbol is .None() and remaining_index == remaining_count - (UInt)1 then {
-                    return [Void]Result.Ok({})
+                if not is_batch and imported_symbol is .None() and remaining_index == remaining_count - 1(UInt) then {
+                    return Result[Void].Ok({})
                 }
-                return [Void]Result.Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
+                return Result[Void].Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
             }
 
             let mut sub_path = current.path()
@@ -864,7 +864,7 @@ given ModuleResolver {
             remaining_index += 1
         }
 
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 }
 
@@ -913,7 +913,7 @@ public let module_file_name_to_identifier(filename String) String = {
 
 // Validate a PascalCase module identifier (used in source code)
 // Returns Some(reason) if invalid, None if valid
-private let validate_module_identifier(name String) [String]Option = {
+private let validate_module_identifier(name String) Option[String] = {
     if name.is_empty() then {
         return .Some("Module name cannot be empty")
     }
@@ -931,8 +931,8 @@ private let validate_module_identifier(name String) [String]Option = {
 }
 
 // Remove leading "Self" or "self" segment from path
-private let filter_self(segments [String]List) [String]List = {
-    let mut out = [String]List.new()
+private let filter_self(segments List[String]) List[String] = {
+    let mut out = List[String].new()
     let mut skip_first = true
     for seg in segments then {
         if skip_first and (seg == "Self" or seg == "self") then {

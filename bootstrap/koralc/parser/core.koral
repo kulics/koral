@@ -8,7 +8,7 @@ private type ParseDeclFlags(
 )
 
 public type Parser(
-    tokens [Token]List,
+    tokens List[Token],
     mut index UInt,
 )
 
@@ -43,7 +43,7 @@ given Parser {
         return text
     }
 
-    private previous_token(self) [Token]Option = {
+    private previous_token(self) Option[Token] = {
         if self.index == 0 then {
             return .None()
         }
@@ -64,7 +64,7 @@ given Parser {
         return SourceSpan(loc, loc)
     }
 
-    private span_from_expr_start(self, expr Expr ref) SourceSpan = {
+    private span_from_expr_start(self, expr ref Expr) SourceSpan = {
         let expr_base_span = expr_span(expr)
         let end_tok = self.previous_token() or else {
             return expr_base_span
@@ -91,8 +91,8 @@ given Parser {
     }
 
     // 按顶层 | 分割 pattern 文本（忽略括号内的 |）
-    private split_or_pattern(self, text String) [String]List = {
-        let mut result = [String]List.new()
+    private split_or_pattern(self, text String) List[String] = {
+        let mut result = List[String].new()
         let mut current = String.new()
         let mut depth UInt = 0
         let runes = text.to_runes()
@@ -154,19 +154,19 @@ given Parser {
             // 检查是否有括号参数：". SomeName ( ... )"
             when rest.find("(") in {
                 .Some(lparen_idx) then {
-                    let case_name = rest.substring((UInt)0..<lparen_idx).trim_ascii()
+                    let case_name = rest.substring(0..<lparen_idx).trim_ascii()
                     // 找最后一个 ')'
                     when rest.find_last(")") in {
                         .Some(rparen_idx) then {
                             let inner = rest.substring(lparen_idx + 1..<rparen_idx).trim_ascii()
-                            let mut elements = [PatternElement]List.new()
+                            let mut elements = List[PatternElement].new()
                             if not inner.is_empty() then {
                                 // 按逗号分割，每个子 pattern 递归解析
                                 let parts = self.split_pattern_args(inner)
                                 for part in parts then {
                                     let trimmed = part.trim_ascii()
                                     if not trimmed.is_empty() then {
-                                        elements.push(PatternElement([String]Option.None(), box(self.pattern_from_text(trimmed, span))))
+                                        elements.push(PatternElement(Option[String].None(), box(self.pattern_from_text(trimmed, span))))
                                     }
                                 }
                             }
@@ -178,7 +178,7 @@ given Parser {
                 .None() then {
                     let case_name = rest.trim_ascii()
                     if not case_name.is_empty() then {
-                        return PatternNode.EnumCase(case_name, [PatternElement]List.new(), span)
+                        return PatternNode.EnumCase(case_name, List[PatternElement].new(), span)
                     }
                 },
             }
@@ -187,8 +187,8 @@ given Parser {
     }
 
     // 按顶层逗号分割 pattern 参数列表（忽略括号内的逗号）
-    private split_pattern_args(self, text String) [String]List = {
-        let mut result = [String]List.new()
+    private split_pattern_args(self, text String) List[String] = {
+        let mut result = List[String].new()
         let mut current = String.new()
         let mut depth UInt = 0
         let runes = text.to_runes()
@@ -212,7 +212,7 @@ given Parser {
         return result
     }
 
-    public new(tokens [Token]List) Parser = {
+    public new(tokens List[Token]) Parser = {
         return Parser(tokens, 0)
     }
 
@@ -220,7 +220,7 @@ given Parser {
         if self.index < self.tokens.count() then {
             return self.tokens[self.index]
         }
-        return Token(TokenKind.Eof(), 0, 0, false, (UInt)0)
+        return Token(TokenKind.Eof(), 0, 0, false, 0(UInt))
     }
 
     private save_state(self) UInt = self.index
@@ -229,7 +229,7 @@ given Parser {
         self.index = saved
     }
 
-    private peek_kind(self) [TokenKind]Option = {
+    private peek_kind(self) Option[TokenKind] = {
         if self.index + 1 < self.tokens.count() then {
             return .Some(self.tokens[self.index + 1].kind)
         }
@@ -402,7 +402,7 @@ given Parser {
         if self.current().kind is not .Dot() then {
             return false
         }
-        return not self.current().has_newline_before or self.current().newline_count_before <= (UInt)1
+        return not self.current().has_newline_before or self.current().newline_count_before <= 1(UInt)
     }
 
     private should_continue_postfix_after_expression(self) Bool = {
@@ -414,7 +414,7 @@ given Parser {
         }
     }
 
-    private expect_identifier(self mut ref, label String) [String]Result = {
+    private expect_identifier(self mut ref, label String) Result[String] = {
         let t = self.current()
         if t.kind is .Identifier(name) then {
             self.advance()
@@ -463,7 +463,7 @@ given Parser {
         return ParseDeclFlags(access, has_explicit_access, is_foreign, is_intrinsic)
     }
 
-    private wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) [Decl]Result = {
+    private wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) Result[Decl] = {
         if is_foreign and is_intrinsic then {
             return .Error(box("foreign and intrinsic cannot be used together"))
         }
@@ -472,7 +472,7 @@ given Parser {
             return when base in {
                 .FunctionDecl(_, name, _, params, return_type, _, span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span)),
                 .LetDecl(_, name, mutable, type_name, _, span) then .Ok(Decl.ForeignLetDecl(access, name, mutable, type_name, span)),
-                .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, [String]Option.None(), [[Field]List]Option.Some(fields), span)),
+                .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span)),
                 .PathUsingDecl(_, path_segments, _, _, _, span) then if path_segments.is_empty()
                     then .Error(box("foreign using declaration requires library name"))
                     else .Ok(Decl.ForeignUsingDecl(access, path_segments[0], span)),
@@ -499,73 +499,23 @@ given Parser {
 
     private is_type_start(self) Bool = {
         return when self.current().kind in {
+            .KwMut() then true,
+            .KwRef() then true,
+            .KwPtr() then true,
+            .KwWeakref() then true,
             .KwSelfType() then true,
             .Identifier(_) then true,
-            .LBracket() then true,
             _ then false,
         }
     }
 
-    private parse_type_suffixes(self mut ref, base TypeNode) TypeNode = {
-        let mut base = base
-        while true then {
-            when self.current().kind in {
-                .KwMut() then {
-                    when self.peek_kind() in {
-                        .Some(next_kind) then {
-                            when next_kind in {
-                                .KwRef() then {
-                                    self.advance()
-                                    self.advance()
-                                    base = TypeNode.Reference(box(base), true)
-                                },
-                                .KwPtr() then {
-                                    self.advance()
-                                    self.advance()
-                                    base = TypeNode.Pointer(box(base), true)
-                                },
-                                .KwWeakref() then {
-                                    self.advance()
-                                    self.advance()
-                                    base = TypeNode.WeakReference(box(base), true)
-                                },
-                                _ then {
-                                    break
-                                },
-                            }
-                        },
-                        .None() then {
-                            break
-                        },
-                    }
-                },
-                .KwRef() then {
-                    self.advance()
-                    base = TypeNode.Reference(box(base), false)
-                },
-                .KwPtr() then {
-                    self.advance()
-                    base = TypeNode.Pointer(box(base), false)
-                },
-                .KwWeakref() then {
-                    self.advance()
-                    base = TypeNode.WeakReference(box(base), false)
-                },
-                _ then {
-                    break
-                },
-            }
-        }
-        return base
-    }
-
-    private parse_type_arg_list(self mut ref) [[TypeNode ref]List]Result = {
+    private parse_type_arg_list(self mut ref) Result[List[ref TypeNode]] = {
         when self.current().kind in {
             .LBracket() then { self.advance() },
             _ then { return .Error(box("Expected '[' to start type argument list")) },
         }
 
-        let mut args = [TypeNode ref]List.new()
+        let mut args = List[ref TypeNode].new()
         while true then {
             if self.current().kind is .RBracket() then {
                 self.advance()
@@ -590,57 +540,126 @@ given Parser {
         return .Ok(args)
     }
 
-    private parse_type(self mut ref) [TypeNode]Result = {
+    private parse_type(self mut ref) Result[TypeNode] = {
         when self.current().kind in {
-            .KwSelfType() then {
-                self.advance()
-                return .Ok(self.parse_type_suffixes(TypeNode.InferredSelf()))
+            .KwMut() then {
+                when self.peek_kind() in {
+                    .Some(next_kind) then {
+                        when next_kind in {
+                            .KwRef() then {
+                                self.advance()
+                                self.advance()
+                                let inner = self.parse_type() or else {
+                                    return .Error(box("parse type error"))
+                                }
+                                return .Ok(TypeNode.Reference(box(inner), true))
+                            },
+                            .KwPtr() then {
+                                self.advance()
+                                self.advance()
+                                let inner = self.parse_type() or else {
+                                    return .Error(box("parse type error"))
+                                }
+                                return .Ok(TypeNode.Pointer(box(inner), true))
+                            },
+                            .KwWeakref() then {
+                                self.advance()
+                                self.advance()
+                                let inner = self.parse_type() or else {
+                                    return .Error(box("parse type error"))
+                                }
+                                return .Ok(TypeNode.WeakReference(box(inner), true))
+                            },
+                            _ then {
+                                return .Error(box("Expected 'ref', 'ptr', or 'weakref' after 'mut' in type"))
+                            },
+                        }
+                    },
+                    _ then {
+                        return .Error(box("Expected 'ref', 'ptr', or 'weakref' after 'mut' in type"))
+                    },
+                }
             },
-            .LBracket() then {
-                let args = self.parse_type_arg_list() or else {
+            .KwRef() then {
+                self.advance()
+                let inner = self.parse_type() or else {
                     return .Error(box("parse type error"))
                 }
-                let base_name = self.expect_identifier("type name") or else {
-                    return .Error(box("Expected type identifier after type arguments"))
+                return .Ok(TypeNode.Reference(box(inner), false))
+            },
+            .KwPtr() then {
+                self.advance()
+                let inner = self.parse_type() or else {
+                    return .Error(box("parse type error"))
                 }
-
-                if base_name == "Func" then {
-                    if args.is_empty() then {
-                        return .Error(box("Function type must include a return type"))
-                    }
-                    let mut param_types = [TypeNode ref]List.new()
-                    let mut i UInt = 0
-                    while i + 1 < args.count() then {
-                        param_types.push(args[i])
-                        i += 1
-                    }
-                    let return_type = args[args.count() - 1]
-                    return .Ok(self.parse_type_suffixes(TypeNode.FunctionType(param_types, return_type)))
+                return .Ok(TypeNode.Pointer(box(inner), false))
+            },
+            .KwWeakref() then {
+                self.advance()
+                let inner = self.parse_type() or else {
+                    return .Error(box("parse type error"))
                 }
-
-                return .Ok(self.parse_type_suffixes(TypeNode.Generic(base_name, args)))
+                return .Ok(TypeNode.WeakReference(box(inner), false))
+            },
+            .KwSelfType() then {
+                self.advance()
+                return .Ok(TypeNode.InferredSelf())
             },
             .Identifier(module_or_name) then {
                 self.advance()
 
                 if self.current().kind is .Dot() then {
                     self.advance()
+                    let name = self.expect_identifier("qualified type name") or else {
+                        return .Error(box("Expected qualified type name"))
+                    }
+                    if not self.is_upper_first(name) then {
+                        let mut message = "Type name '"
+                        message.push_string(name)
+                        message.push_string("' must start with an uppercase letter")
+                        return .Error(box(message))
+                    }
                     if self.current().kind is .LBracket() then {
                         let args = self.parse_type_arg_list() or else {
                             return .Error(box("parse type error"))
                         }
-                        let base_name = self.expect_identifier("qualified generic type name") or else {
-                            return .Error(box("Expected qualified generic type name"))
-                        }
-                        return .Ok(self.parse_type_suffixes(TypeNode.ModuleQualifiedGeneric(module_or_name, base_name, args)))
+                        return .Ok(TypeNode.ModuleQualifiedGeneric(module_or_name, name, args))
                     }
-                    let name = self.expect_identifier("qualified type name") or else {
-                        return .Error(box("Expected qualified type name"))
-                    }
-                    return .Ok(self.parse_type_suffixes(TypeNode.ModuleQualified(module_or_name, name)))
+                    return .Ok(TypeNode.ModuleQualified(module_or_name, name))
                 }
 
-                return .Ok(self.parse_type_suffixes(TypeNode.Identifier(module_or_name)))
+                if module_or_name == "Func" and self.current().kind is .LBracket() then {
+                    let args = self.parse_type_arg_list() or else {
+                        return .Error(box("parse type error"))
+                    }
+                    if args.is_empty() then {
+                        return .Error(box("Function type must include a return type"))
+                    }
+                    let mut param_types = List[ref TypeNode].new()
+                    let mut i UInt = 0
+                    while i + 1 < args.count() then {
+                        param_types.push(args[i])
+                        i += 1
+                    }
+                    let return_type = args[args.count() - 1]
+                    return .Ok(TypeNode.FunctionType(param_types, return_type))
+                }
+
+                if not self.is_upper_first(module_or_name) then {
+                    let mut message = "Type name '"
+                    message.push_string(module_or_name)
+                    message.push_string("' must start with an uppercase letter")
+                    return .Error(box(message))
+                }
+
+                if self.current().kind is .LBracket() then {
+                    let args = self.parse_type_arg_list() or else {
+                        return .Error(box("parse type error"))
+                    }
+                    return .Ok(TypeNode.Generic(module_or_name, args))
+                }
+
+                return .Ok(TypeNode.Identifier(module_or_name))
             },
             _ then {
                 return .Error(box("Expected type"))
@@ -648,8 +667,8 @@ given Parser {
         }
     }
 
-    private parse_type_parameters(self mut ref) [[TypeParameter]List]Result = {
-        let mut params = [TypeParameter]List.new()
+    private parse_type_parameters(self mut ref) Result[List[TypeParameter]] = {
+        let mut params = List[TypeParameter].new()
 
         if self.current().kind is .LBracket() then {
             self.advance()
@@ -676,7 +695,7 @@ given Parser {
                 message.push_string(self.token_position_text(t))
                 return .Error(box(message))
             }
-            let mut constraints = [TypeNode ref]List.new()
+            let mut constraints = List[ref TypeNode].new()
             let first_constraint = self.parse_type() or else {
                 return .Error(box("parse type parameter constraint error"))
             }
@@ -706,8 +725,8 @@ given Parser {
         return .Ok(params)
     }
 
-    private parse_param_list(self mut ref) [[Param]List]Result = {
-        let mut params = [Param]List.new()
+    private parse_param_list(self mut ref) Result[List[Param]] = {
+        let mut params = List[Param].new()
 
         while true then {
             if self.current().kind is .RParen() then {
@@ -786,13 +805,9 @@ given Parser {
         return .Ok(params)
     }
 
-    private parse_let_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) [Decl]Result = {
+    private parse_let_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
-
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse type parameter error"))
-        }
 
         let mut is_mut = false
         if self.current().kind is .KwMut() then {
@@ -801,6 +816,9 @@ given Parser {
         }
 
         let name = self.expect_identifier("let declaration") or return
+        let type_params = self.parse_type_parameters() or else {
+            return .Error(box("parse type parameter error"))
+        }
 
         if self.current().kind is .LParen() then {
             if is_mut then {
@@ -828,11 +846,14 @@ given Parser {
             }
             self.advance()
 
-            let mut return_type = TypeNode.Identifier("Void")
-            if self.is_type_start() then {
-                return_type = self.parse_type() or else {
-                    return .Error(box("parse function return type error"))
-                }
+            if self.current().kind is .Assign() then {
+                return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+            }
+            if not self.is_type_start() then {
+                return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+            }
+            let return_type = self.parse_type() or else {
+                return .Error(box("parse function return type error"))
             }
 
             if is_foreign or is_intrinsic then {
@@ -906,15 +927,11 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    private parse_type_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) [Decl]Result = {
+    private parse_type_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse type parameter error"))
-        }
-
-        let mut foreign_cname = [String]Option.None()
+        let mut foreign_cname = Option[String].None()
         if is_foreign then {
             if self.current().kind is .StringLiteral(v) then {
                 foreign_cname = .Some(v)
@@ -929,6 +946,9 @@ given Parser {
             message.push_string("' must start with an uppercase letter")
             return .Error(box(message))
         }
+        let type_params = self.parse_type_parameters() or else {
+            return .Error(box("parse type parameter error"))
+        }
 
         when self.current().kind in {
             .Assign() then {
@@ -942,7 +962,7 @@ given Parser {
             },
             .LParen() then {
                 self.advance()
-                let mut fields = [Field]List.new()
+                let mut fields = List[Field].new()
                 while true then {
                     when self.current().kind in {
                         .RParen() then {
@@ -980,7 +1000,7 @@ given Parser {
                 }
                 self.consume_semicolon()
                 if is_foreign then {
-                    return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, [[Field]List]Option.Some(fields), self.span_from_start(start)))
+                    return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].Some(fields), self.span_from_start(start)))
                 }
                 let base = Decl.TypeStructDecl(access, name, type_params, fields, self.span_from_start(start))
                 return self.wrap_decl(access, is_foreign, is_intrinsic, base)
@@ -991,12 +1011,12 @@ given Parser {
                     if self.current().kind is .RBrace() then {
                         self.advance()
                         self.consume_semicolon()
-                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, [[Field]List]Option.None(), self.span_from_start(start)))
+                        return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start)))
                     }
                     return .Error(box("foreign type must use an empty body: {}"))
                 }
                 self.advance()
-                let mut cases = [EnumCase]List.new()
+                let mut cases = List[EnumCase].new()
                 while true then {
                     when self.current().kind in {
                         .RBrace() then {
@@ -1008,7 +1028,7 @@ given Parser {
                         },
                         _ then {
                             let case_name = self.expect_identifier("enum case") or return
-                            let mut case_fields = [EnumCaseField]List.new()
+                            let mut case_fields = List[EnumCaseField].new()
 
                             if self.current().kind is .LParen() then {
                                 self.advance()
@@ -1079,7 +1099,7 @@ given Parser {
         }
     }
 
-    private parse_let_statement(self mut ref) [Statement]Result = {
+    private parse_let_statement(self mut ref) Result[Statement] = {
         let start = self.current()
         self.advance()
 
@@ -1095,7 +1115,7 @@ given Parser {
 
         let name = self.expect_identifier("let statement") or return
 
-        let mut type_name = [TypeNode]Option.None()
+        let mut type_name = Option[TypeNode].None()
         if self.is_type_start() then {
             let parsed_type_name = self.parse_type() or else {
                 return .Error(box("parse let statement type error"))
@@ -1117,7 +1137,7 @@ given Parser {
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
 
-    private parse_pair_let_statement(self mut ref, start Token) [Statement]Result = {
+    private parse_pair_let_statement(self mut ref, start Token) Result[Statement] = {
         self.advance()
 
         let first = self.parse_pair_binding_element() or return
@@ -1144,12 +1164,12 @@ given Parser {
         return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)))
     }
 
-    private parse_pair_binding_element(self mut ref) [PairBindingElement]Result = {
+    private parse_pair_binding_element(self mut ref) Result[PairBindingElement] = {
         let start = self.current()
 
         if start.kind is .Identifier(name) and name == "_" then {
             self.advance()
-            return .Ok(PairBindingElement("_", false, [TypeNode]Option.None(), true, self.span_from_start(start)))
+            return .Ok(PairBindingElement("_", false, Option[TypeNode].None(), true, self.span_from_start(start)))
         }
 
         let mut is_mut = false
@@ -1160,7 +1180,7 @@ given Parser {
 
         let name = self.expect_identifier("pair let binding") or return
 
-        let mut type_name = [TypeNode]Option.None()
+        let mut type_name = Option[TypeNode].None()
         when self.current().kind in {
             .Comma() then {},
             .RParen() then {},
@@ -1192,9 +1212,9 @@ given Parser {
         }
     }
 
-    private parse_assignment_operator(self) [[CompoundAssignmentOperator]Option]Result = {
+    private parse_assignment_operator(self) Result[Option[CompoundAssignmentOperator]] = {
         return when self.current().kind in {
-            .Assign() then .Ok([CompoundAssignmentOperator]Option.None()),
+            .Assign() then .Ok(Option[CompoundAssignmentOperator].None()),
             .PlusAssign() then .Ok(.Some(CompoundAssignmentOperator.AddAssign())),
             .MinusAssign() then .Ok(.Some(CompoundAssignmentOperator.SubtractAssign())),
             .StarAssign() then .Ok(.Some(CompoundAssignmentOperator.MultiplyAssign())),
@@ -1209,7 +1229,7 @@ given Parser {
         }
     }
 
-    private parse_expression_checked(self mut ref, context String) [Expr ref]Result = {
+    private parse_expression_checked(self mut ref, context String) Result[ref Expr] = {
         let t = self.current()
         self.parse_debug("expr begin")
         let before = self.index
@@ -1225,8 +1245,8 @@ given Parser {
         return .Ok(expr)
     }
 
-    private parse_statement_list_until_rbrace(self mut ref, context String) [[Statement]List]Result = {
-        let mut statements = [Statement]List.new()
+    private parse_statement_list_until_rbrace(self mut ref, context String) Result[List[Statement]] = {
+        let mut statements = List[Statement].new()
         self.parse_debug("stmt-list begin")
         while true then {
             when self.current().kind in {
@@ -1254,20 +1274,20 @@ given Parser {
         return .Ok(statements)
     }
 
-    private apply_statement_postfix_continuation(self, base Expr ref, continuation Expr ref) [Expr ref]Result = {
+    private apply_statement_postfix_continuation(self, base ref Expr, continuation ref Expr) Result[ref Expr] = {
         return when continuation in {
             .ImplicitMemberExpr(member_name, args, _) then {
                 let span = expr_span(continuation)
-                let mut path = [String]List.new()
+                let mut path = List[String].new()
                 path.push(member_name)
                 let callee = box(Expr.MemberPath(base, path, span))
-                yield [Expr ref]Result.Ok(box(Expr.Call(callee, args, span)))
+                yield Result[ref Expr].Ok(box(Expr.Call(callee, args, span)))
             },
-            _ then [Expr ref]Result.Error(box("Expected postfix continuation expression")),
+            _ then Result[ref Expr].Error(box("Expected postfix continuation expression")),
         }
     }
 
-    private parse_statement_postfix_continuations(self mut ref, statement Statement) [Statement]Result = {
+    private parse_statement_postfix_continuations(self mut ref, statement Statement) Result[Statement] = {
         let mut current = statement
         while self.can_continue_dot_postfix() then {
             self.parse_debug("statement postfix continuation")
@@ -1287,7 +1307,7 @@ given Parser {
         return .Ok(current)
     }
 
-    private parse_statement(self mut ref) [Statement]Result = {
+    private parse_statement(self mut ref) Result[Statement] = {
         let start = self.current()
         self.parse_debug("statement dispatch")
         when self.current().kind in {
@@ -1299,7 +1319,7 @@ given Parser {
                 // return 后面如果是分号、右括号、或换行（自动终止），则返回 None
                 if self.should_terminate_statement() then {
                     self.consume_semicolon()
-                    return .Ok(Statement.ReturnStmt([Expr ref]Option.None(), self.span_from_start(start)))
+                    return .Ok(Statement.ReturnStmt(Option[ref Expr].None(), self.span_from_start(start)))
                 }
                 let value = self.parse_expression_checked("return statement value") or return
                 self.consume_semicolon()

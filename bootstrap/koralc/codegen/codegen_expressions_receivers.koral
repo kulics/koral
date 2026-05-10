@@ -3,7 +3,7 @@
 given CodeGen {
     // ── generate_receiver_method_call_raw ─────────────────────────────────────
 
-    private receiver_ref_should_use_heap(self mut ref, receiver_expr_opt [TypedExpr ref]Option) Bool = {
+    private receiver_ref_should_use_heap(self mut ref, receiver_expr_opt Option[ref TypedExpr]) Bool = {
         return when receiver_expr_opt in {
             .Some(receiver_expr) then {
                 let is_pattern_alias = when receiver_expr.expr_kind in {
@@ -62,35 +62,35 @@ given CodeGen {
         return result
     }
 
-    private receiver_call_function_type_opt(self, method_name String, method Symbol ref, concrete_receiver_type Type) [Type]Option = {
+    private receiver_call_function_type_opt(self, method_name String, method ref Symbol, concrete_receiver_type Type) Option[Type] = {
         return when self.context.get_function_type(method.def_id) in {
-            .Some(function_type) then [Type]Option.Some(self.bind_method_function_type(method.def_id, concrete_receiver_type, function_type)),
-            .None() then [Type]Option.None(),
+            .Some(function_type) then Option[Type].Some(self.bind_method_function_type(method.def_id, concrete_receiver_type, function_type)),
+            .None() then Option[Type].None(),
         }
     }
 
     private receiver_call_param_offset(self, fn_type Type, arg_count UInt) UInt = {
         let param_count = self.function_type_param_count(fn_type)
-        return if param_count == arg_count then (UInt)0 else (UInt)1
+        return if param_count == arg_count then 0(UInt) else 1(UInt)
     }
 
-    private receiver_call_expected_arg_type(self, fn_type Type, arg_index UInt, arg_count UInt) [Type]Option = {
+    private receiver_call_expected_arg_type(self, fn_type Type, arg_index UInt, arg_count UInt) Option[Type] = {
         let param_index = arg_index + self.receiver_call_param_offset(fn_type, arg_count)
         return self.function_type_param_type(fn_type, param_index)
     }
 
-    private receiver_call_self_type_opt(self, method_name String, method Symbol ref, receiver_type Type, arg_count UInt) [Type]Option = {
+    private receiver_call_self_type_opt(self, method_name String, method ref Symbol, receiver_type Type, arg_count UInt) Option[Type] = {
         return when self.receiver_call_function_type_opt(method_name, method, receiver_type) in {
             .Some(fn_type) then {
                 let param_count = self.function_type_param_count(fn_type)
                 let self_omitted = param_count == arg_count
-                yield if self_omitted or param_count == 0 then [Type]Option.Some(receiver_type) else self.function_type_param_type(fn_type, (UInt)0)
+                yield if self_omitted or param_count == 0 then Option[Type].Some(receiver_type) else self.function_type_param_type(fn_type, 0(UInt))
             },
-            .None() then [Type]Option.Some(receiver_type),
+            .None() then Option[Type].Some(receiver_type),
         }
     }
 
-    private receiver_expr_is_synthetic_ref(self, receiver_expr_opt [TypedExpr ref]Option) Bool = {
+    private receiver_expr_is_synthetic_ref(self, receiver_expr_opt Option[ref TypedExpr]) Bool = {
         return when receiver_expr_opt in {
             .Some(receiver_expr) then when receiver_expr.expr_kind in {
                 .RefExpr(_) then true,
@@ -118,7 +118,7 @@ given CodeGen {
         }
     }
 
-    private copy_receiver_ref_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option) String = {
+    private copy_receiver_ref_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt Option[ref TypedExpr]) String = {
         let is_lvalue = when receiver_expr_opt in {
             .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
             .None() then true,
@@ -135,7 +135,7 @@ given CodeGen {
         return self.materialize_deref_value(deref_value, expected_self_type)
     }
 
-    private prepare_existing_ref_receiver_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, expected_self_type Type, accept_weak_ref Bool) String = {
+    private prepare_existing_ref_receiver_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt Option[ref TypedExpr], expected_self_type Type, accept_weak_ref Bool) String = {
         let expected_is_ref = if accept_weak_ref then self.expected_is_any_ref(expected_self_type) else self.expected_is_strong_ref(expected_self_type)
         if expected_is_ref then {
             return self.copy_receiver_ref_argument(receiver_var, receiver_type, receiver_expr_opt)
@@ -143,7 +143,7 @@ given CodeGen {
         return self.deref_receiver_argument(receiver_var, expected_self_type)
     }
 
-    private prepare_value_receiver_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, expected_self_type Type) String = {
+    private prepare_value_receiver_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt Option[ref TypedExpr], receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, expected_self_type Type) String = {
         let receiver_is_synthetic_ref = self.receiver_expr_is_synthetic_ref(receiver_expr_opt)
         let expected_is_ref = self.expected_is_strong_ref(expected_self_type)
         if expected_is_ref then {
@@ -172,7 +172,7 @@ given CodeGen {
         return receiver_var
     }
 
-    private prepare_receiver_method_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt [TypedExpr ref]Option, receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method Symbol ref, arg_count UInt) String = {
+    private prepare_receiver_method_argument(self mut ref, receiver_var String, receiver_type Type, receiver_expr_opt Option[ref TypedExpr], receiver_is_lvalue Bool, receiver_lvalue_path String, receiver_control_path String, method ref Symbol, arg_count UInt) String = {
         let method_name = self.callable_c_name(method)
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
         let mut receiver_arg = receiver_var
@@ -201,18 +201,18 @@ given CodeGen {
         return receiver_arg
     }
 
-    private receiver_storage_type_opt(self, receiver TypedExpr ref) [Type]Option = {
+    private receiver_storage_type_opt(self, receiver ref TypedExpr) Option[Type] = {
         return when receiver.expr_kind in {
             .Variable(symbol) then {
                 yield when self.concretize_codegen_type(symbol.symbol_type) in {
-                    .ReferenceType(storage_inner) then [Type]Option.Some(Type.ReferenceType(storage_inner)),
-                    .MutableReferenceType(storage_inner) then [Type]Option.Some(Type.MutableReferenceType(storage_inner)),
-                    .WeakReferenceType(storage_inner) then [Type]Option.Some(Type.WeakReferenceType(storage_inner)),
-                    .MutableWeakReferenceType(storage_inner) then [Type]Option.Some(Type.MutableWeakReferenceType(storage_inner)),
-                    _ then [Type]Option.None(),
+                    .ReferenceType(storage_inner) then Option[Type].Some(Type.ReferenceType(storage_inner)),
+                    .MutableReferenceType(storage_inner) then Option[Type].Some(Type.MutableReferenceType(storage_inner)),
+                    .WeakReferenceType(storage_inner) then Option[Type].Some(Type.WeakReferenceType(storage_inner)),
+                    .MutableWeakReferenceType(storage_inner) then Option[Type].Some(Type.MutableWeakReferenceType(storage_inner)),
+                    _ then Option[Type].None(),
                 }
             },
-            _ then [Type]Option.None(),
+            _ then Option[Type].None(),
         }
     }
 
@@ -226,24 +226,24 @@ given CodeGen {
         }
     }
 
-    private receiver_lvalue_ref_argument_opt(self mut ref, receiver TypedExpr ref, expected_self_type_opt [Type]Option, receiver_is_lvalue Bool, receiver_components [String, String]Pair) [String]Option = {
+    private receiver_lvalue_ref_argument_opt(self mut ref, receiver ref TypedExpr, expected_self_type_opt Option[Type], receiver_is_lvalue Bool, receiver_components Pair[String, String]) Option[String] = {
         if not receiver_is_lvalue or receiver_components.first.count() == 0 then {
-            return [String]Option.None()
+            return Option[String].None()
         }
         return when expected_self_type_opt in {
             .Some(expected_self_type) then {
-                let mut result_opt = [String]Option.None()
+                let mut result_opt = Option[String].None()
                 if self.expected_is_strong_ref(expected_self_type) then {
                     let stack_ref = self.stack_ref_value(receiver_components.first, expected_self_type, receiver_components.second, true)
-                    result_opt = [String]Option.Some(self.copy_receiver_ref_argument(stack_ref, expected_self_type, [TypedExpr ref]Option.Some(receiver)))
+                    result_opt = Option[String].Some(self.copy_receiver_ref_argument(stack_ref, expected_self_type, Option[ref TypedExpr].Some(receiver)))
                 }
                 yield result_opt
             },
-            .None() then [String]Option.None(),
+            .None() then Option[String].None(),
         }
     }
 
-    private receiver_ref_expr_lvalue_argument_opt(self mut ref, receiver TypedExpr ref, expected_self_type_opt [Type]Option) [String]Option = {
+    private receiver_ref_expr_lvalue_argument_opt(self mut ref, receiver ref TypedExpr, expected_self_type_opt Option[Type]) Option[String] = {
         when receiver.expr_kind in {
             .RefExpr(inner_ref) then when expected_self_type_opt in {
                 .Some(expected_self_type) then {
@@ -251,17 +251,17 @@ given CodeGen {
                     if self.is_addressable_lvalue_expr(inner) and self.expected_is_strong_ref(expected_self_type) then {
                         let components = self.build_ref_components(inner)
                         let stack_ref = self.stack_ref_value(components.first, expected_self_type, components.second, true)
-                        return [String]Option.Some(self.copy_receiver_ref_argument(stack_ref, expected_self_type, [TypedExpr ref]Option.Some(receiver)))
+                        return Option[String].Some(self.copy_receiver_ref_argument(stack_ref, expected_self_type, Option[ref TypedExpr].Some(receiver)))
                     }
                 },
                 .None() then {},
             },
             _ then {},
         }
-        return [String]Option.None()
+        return Option[String].None()
     }
 
-    private prepare_receiver_method_argument_expr(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, arg_count UInt) String = {
+    private prepare_receiver_method_argument_expr(self mut ref, receiver ref TypedExpr, receiver_type Type, method ref Symbol, arg_count UInt) String = {
         let method_name = self.callable_c_name(method)
         let receiver_is_lvalue = self.is_addressable_lvalue_expr(receiver)
         let expected_self_type_opt = self.receiver_call_self_type_opt(method_name, method, receiver_type, arg_count)
@@ -273,14 +273,14 @@ given CodeGen {
         when self.receiver_storage_type_opt(receiver) in {
             .Some(receiver_storage_type) then {
                 let receiver_var = self.generate_expression_ssa(receiver)
-                return self.prepare_receiver_method_argument(receiver_var, receiver_storage_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, "", "NULL", method, arg_count)
+                return self.prepare_receiver_method_argument(receiver_var, receiver_storage_type, Option[ref TypedExpr].Some(receiver), receiver_is_lvalue, "", "NULL", method, arg_count)
             },
             .None() then {},
         }
 
         if self.receiver_needs_direct_ref_passing(receiver_type) then {
             let receiver_var = self.generate_expression_ssa(receiver)
-            return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, "", "NULL", method, arg_count)
+            return self.prepare_receiver_method_argument(receiver_var, receiver_type, Option[ref TypedExpr].Some(receiver), receiver_is_lvalue, "", "NULL", method, arg_count)
         }
 
         let receiver_needs_lvalue_components = receiver_is_lvalue and when expected_self_type_opt in {
@@ -290,7 +290,7 @@ given CodeGen {
         let receiver_components = if receiver_needs_lvalue_components then {
             yield self.build_ref_components(receiver)
         } else {
-            yield [String, String]Pair("", "NULL")
+            yield Pair[String, String]("", "NULL")
         }
 
         if self.receiver_lvalue_ref_argument_opt(receiver, expected_self_type_opt, receiver_is_lvalue, receiver_components) is .Some(receiver_arg) then {
@@ -298,13 +298,13 @@ given CodeGen {
         }
 
         let receiver_var = self.generate_expression_ssa(receiver)
-        return self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
+        return self.prepare_receiver_method_argument(receiver_var, receiver_type, Option[ref TypedExpr].Some(receiver), receiver_is_lvalue, receiver_components.first, receiver_components.second, method, arg_count)
     }
 
     /// 生成接收者方法调用的原始 C 表达式（不生成语句，只返回调用表达式）
-    generate_receiver_method_call_raw(self mut ref, receiver_var String, receiver_type Type, method Symbol ref) String = {
+    generate_receiver_method_call_raw(self mut ref, receiver_var String, receiver_type Type, method ref Symbol) String = {
         let method_name = self.callable_c_name(method)
-        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, [TypedExpr ref]Option.None(), true, "", "NULL", method, (UInt)0)
+        let receiver_arg = self.prepare_receiver_method_argument(receiver_var, receiver_type, Option[ref TypedExpr].None(), true, "", "NULL", method, 0(UInt))
         let c_type = self.c_type_name(method.symbol_type)
         if self.type_is_void_or_never(method.symbol_type) then {
             self.buffer.push_string(self.indent)
@@ -318,7 +318,7 @@ given CodeGen {
         }
     }
 
-    private resolve_receiver_call_method(self, concrete_receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) Symbol = {
+    private resolve_receiver_call_method(self, concrete_receiver_type Type, method ref Symbol, args List[ref TypedExpr], result_type Type) Symbol = {
         if method.def_id.id <> 0 then {
             if self.program.lookup_concrete_callable(method.def_id) is .Some(_) then {
                 return method.val
@@ -340,23 +340,23 @@ given CodeGen {
         return method.val
     }
 
-    private prepare_receiver_call_arguments(self mut ref, method_def_id DefId, args [TypedExpr ref]List, function_type_opt [Type]Option) [String]List = {
-        let mut prepared_args = [String]List.new()
+    private prepare_receiver_call_arguments(self mut ref, method_def_id DefId, args List[ref TypedExpr], function_type_opt Option[Type]) List[String] = {
+        let mut prepared_args = List[String].new()
         let mut arg_index UInt = 0
         for arg_ref in args then {
             let arg = arg_ref
             let expected_type_opt = when function_type_opt in {
                 .Some(fn_type) then self.receiver_call_expected_arg_type(fn_type, arg_index, args.count()),
-                .None() then [Type]Option.None(),
+                .None() then Option[Type].None(),
             }
-            let param_index = arg_index + (UInt)1
+            let param_index = arg_index + 1(UInt)
             prepared_args.push(self.prepare_call_argument_for_parameter(arg, expected_type_opt, method_def_id, param_index))
             arg_index += 1
         }
         return prepared_args
     }
 
-    private emit_receiver_call(self mut ref, method_name String, receiver_arg String, prepared_args [String]List, effective_result_type Type) String = {
+    private emit_receiver_call(self mut ref, method_name String, receiver_arg String, prepared_args List[String], effective_result_type Type) String = {
         let mut result = ""
         if self.type_is_void_or_never(effective_result_type) then {
             self.buffer.push_string(self.indent)
@@ -381,7 +381,7 @@ given CodeGen {
         return result
     }
 
-    public generate_receiver_method_call(self mut ref, receiver TypedExpr ref, receiver_type Type, method Symbol ref, args [TypedExpr ref]List, result_type Type) String = {
+    public generate_receiver_method_call(self mut ref, receiver ref TypedExpr, receiver_type Type, method ref Symbol, args List[ref TypedExpr], result_type Type) String = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let effective_method = self.resolve_receiver_call_method(concrete_receiver_type, method, args, result_type)
         let method_name = self.callable_c_name(box(effective_method))

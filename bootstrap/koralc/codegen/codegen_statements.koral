@@ -15,7 +15,7 @@
 // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
 
 given CodeGen {
-    private generate_statement_body_expr(self mut ref, expr TypedExpr ref) Void = {
+    private generate_statement_body_expr(self mut ref, expr ref TypedExpr) Void = {
         when expr.expr_kind in {
             .Block(statements) then {
                 for stmt in statements then {
@@ -402,7 +402,7 @@ given CodeGen {
             // Requirements: 6.9
             .YieldStmt(expr_ref, _) then {
                 if not self.yield_target_stack.is_empty() then {
-                    let target = self.yield_target_stack[self.yield_target_stack.count() - (UInt)1]
+                    let target = self.yield_target_stack[self.yield_target_stack.count() - 1(UInt)]
                     let value_result = self.generate_expression_ssa(expr_ref)
                     if self.needs_drop(expr_ref.expr_type)
                         and not value_result.is_empty()
@@ -412,10 +412,10 @@ given CodeGen {
                     }
                     let adapted_value = self.adapt_expression_result_to_type(expr_ref, value_result, target.result_type)
                     self.assign_expr_result(expr_ref, adapted_value, target.result_type, target.result_var)
-                    let cleanup_start = if self.lifetime_scope_stack.count() > target.base_scope_index + (UInt)1
-                        then target.base_scope_index + (UInt)1
-                        else self.lifetime_scope_stack.count() - (UInt)1
-                    if not self.lifetime_scope_stack.is_empty() and self.lifetime_scope_stack.count() - (UInt)1 >= cleanup_start then {
+                    let cleanup_start = if self.lifetime_scope_stack.count() > target.base_scope_index + 1(UInt)
+                        then target.base_scope_index + 1(UInt)
+                        else self.lifetime_scope_stack.count() - 1(UInt)
+                    if not self.lifetime_scope_stack.is_empty() and self.lifetime_scope_stack.count() - 1(UInt) >= cleanup_start then {
                         self.emit_cleanup(cleanup_start)
                     }
                     self.push_indented_goto(target.end_label)
@@ -427,14 +427,14 @@ given CodeGen {
     // ── 辅助方法 ──────────────────────────────────────────────────────────────
 
     /// 判断表达式是否应按 lvalue 执行 copy/move。
-    is_lvalue_expr(self, expr TypedExpr ref) Bool = {
+    is_lvalue_expr(self, expr ref TypedExpr) Bool = {
         return typed_expr_value_category(expr) is .LValue()
     }
 
     /// 判断表达式是否是可取地址的真实 lvalue。
     ///
     /// 这用于 `ref` 形成、`ref_count`/`ref_is_borrow` 降低，以及 `self ref` 接收者借用。
-    is_addressable_lvalue_expr(self, expr TypedExpr ref) Bool = {
+    is_addressable_lvalue_expr(self, expr ref TypedExpr) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
             .MemberPath(base_ref, _) then self.is_addressable_lvalue_expr(base_ref),
@@ -448,7 +448,7 @@ given CodeGen {
     /// 对于简单变量，返回其 C 标识符；
     /// 对于 MemberPath，调用 build_ref_components 获取字段路径。
     /// 此方法是 build_ref_components 的简化版，只返回路径字符串。
-    build_ref_components_path(self mut ref, expr TypedExpr ref) String = {
+    build_ref_components_path(self mut ref, expr ref TypedExpr) String = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
                 // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol

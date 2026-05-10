@@ -38,17 +38,17 @@ public type CodegenYieldTarget(
 )
 
 public type DeferredExpr(
-    expr TypedExpr ref,
-    pattern_binding_aliases [String, String]Dict,
+    expr ref TypedExpr,
+    pattern_binding_aliases Dict[String, String],
 )
 
 // ── TypeDeclaration ───────────────────────────────────────────────────────────
 
 /// 类型声明的轻量包装，用于依赖排序后的类型定义生成
 type TypeDeclaration {
-    Structure(name String, fields [TypedField]List),
-    Enum(name String, cases [TypedEnumCase]List),
-    ForeignStructure(name String, fields [TypedField]List),
+    Structure(name String, fields List[TypedField]),
+    Enum(name String, cases List[TypedEnumCase]),
+    ForeignStructure(name String, fields List[TypedField]),
 }
 
 given TypeDeclaration {
@@ -70,74 +70,74 @@ given TypeDeclaration {
 /// 生成等价的 C 语言源代码字符串。
 public type CodeGen(
     // 输入
-    program MonomorphizedProgram ref,
+    program ref MonomorphizedProgram,
     context CompilerContext,
-    c_keywords [String]Set,
+    c_keywords Set[String],
 
     // 输出缓冲区
-    mut buffer String mut ref,
+    mut buffer mut ref String,
 
     // 代码生成状态
     mut indent String,
     mut temp_var_counter UInt,
     mut lambda_counter UInt,
-    mut lambda_functions String mut ref,
-    mut lambda_env_structs String mut ref,
+    mut lambda_functions mut ref String,
+    mut lambda_env_structs mut ref String,
 
     // 本地符号的 C 标识符覆盖（全局符号直接读取 program projection）
-    mut local_c_identifier_overrides [UInt, String]Dict,
+    mut local_c_identifier_overrides Dict[UInt, String],
     // 内存管理
-    mut lifetime_scope_stack [[[String, Type]Pair]List mut ref]List,
-    mut defer_scope_stack [[DeferredExpr]List mut ref]List,
+    mut lifetime_scope_stack List[mut ref List[Pair[String, Type]]],
+    mut defer_scope_stack List[mut ref List[DeferredExpr]],
 
     // 用户定义的 drop 函数：TypeName -> C 函数名
-    mut user_defined_drops [String, String]Dict,
+    mut user_defined_drops Dict[String, String],
 
     // 代码生成入口扫描缓存
     mut program_scan ProgramCodegenScan,
 
     // 循环上下文
-    mut loop_stack [LoopContext]List,
-    mut yield_target_stack [CodegenYieldTarget]List,
+    mut loop_stack List[LoopContext],
+    mut yield_target_stack List[CodegenYieldTarget],
 
     // 逃逸分析
     mut escape_context EscapeContext,
 
     // 模式匹配别名：C 标识符 -> 字段路径表达式
-    mut pattern_binding_aliases [String, String]Dict,
+    mut pattern_binding_aliases Dict[String, String],
 
     // Lambda 捕获别名：DefId -> 访问表达式
-    mut captured_var_aliases [UInt, String]Dict,
+    mut captured_var_aliases Dict[UInt, String],
 
     // 全局初始化
-    mut global_initializations [[String, TypedExpr ref]Pair]List,
+    mut global_initializations List[Pair[String, ref TypedExpr]],
 
     // 用户 main 函数
-    mut user_main_function_name [String]Option,
-    mut user_main_return_type [Type]Option,
+    mut user_main_function_name Option[String],
+    mut user_main_return_type Option[Type],
 
     // Vtable 追踪
-    mut generated_vtable_instances [String]Set,
+    mut generated_vtable_instances Set[String],
 
     // 当前正在生成的函数的类型前缀（如 "_k__T_Deque"），用于解析 self 方法调用
-    mut current_function_type_prefix [String]Option,
+    mut current_function_type_prefix Option[String],
     // 当前正在生成函数的 C 名称
-    mut current_function_c_name [String]Option,
+    mut current_function_c_name Option[String],
     // 当前正在生成函数的返回类型
-    mut current_function_return_type [Type]Option,
+    mut current_function_return_type Option[Type],
     // 当前函数实例化时的泛型参数绑定
-    mut current_generic_bindings [String, Type]Dict,
-    mut type_by_c_type_name_cache [String, Type]Dict,
+    mut current_generic_bindings Dict[String, Type],
+    mut type_by_c_type_name_cache Dict[String, Type],
 
     // 已输出函数实现名（避免同名函数重复定义）
-    mut emitted_function_names [String]Set,
+    mut emitted_function_names Set[String],
 )
 
 given CodeGen {
     // ── 构造函数 ──────────────────────────────────────────────────────────────
 
     /// 构造 CodeGen 实例，初始化所有状态并构建 C 标识符映射
-    public new(program MonomorphizedProgram ref, context CompilerContext) CodeGen = {
+    public new(program ref MonomorphizedProgram, context CompilerContext) CodeGen = {
         let mut cg = CodeGen(
             program,
             context,
@@ -155,50 +155,50 @@ given CodeGen {
             // lambda_env_structs
             box(String.new()),
             // local_c_identifier_overrides
-            [UInt, String]Dict.new(),
+            Dict[UInt, String].new(),
             // lifetime_scope_stack
-            [[[String, Type]Pair]List mut ref]List.new(),
+            List[mut ref List[Pair[String, Type]]].new(),
             // defer_scope_stack
-            [[DeferredExpr]List mut ref]List.new(),
+            List[mut ref List[DeferredExpr]].new(),
             // user_defined_drops
-            [String, String]Dict.new(),
+            Dict[String, String].new(),
             // program_scan
             ProgramCodegenScan(
-                ForeignDeclarations([String]List.new(), [String]List.new(), [ForeignFunctionPrototype]List.new()),
-                [EmittableFunction]List.new(),
-                [ForeignGlobalVariable]List.new(),
-                [EmittableGlobalVariable]List.new(),
+                ForeignDeclarations(List[String].new(), List[String].new(), List[ForeignFunctionPrototype].new()),
+                List[EmittableFunction].new(),
+                List[ForeignGlobalVariable].new(),
+                List[EmittableGlobalVariable].new(),
             ),
             // loop_stack
-            [LoopContext]List.new(),
+            List[LoopContext].new(),
             // yield_target_stack
-            [CodegenYieldTarget]List.new(),
+            List[CodegenYieldTarget].new(),
             // escape_context
             EscapeContext.new(),
             // pattern_binding_aliases
-            [String, String]Dict.new(),
+            Dict[String, String].new(),
             // captured_var_aliases
-            [UInt, String]Dict.new(),
+            Dict[UInt, String].new(),
             // global_initializations
-            [[String, TypedExpr ref]Pair]List.new(),
+            List[Pair[String, ref TypedExpr]].new(),
             // user_main_function_name
-            [String]Option.None(),
+            Option[String].None(),
             // user_main_return_type
-            [Type]Option.None(),
+            Option[Type].None(),
             // generated_vtable_instances
-            [String]Set.new(),
+            Set[String].new(),
             // current_function_type_prefix
-            [String]Option.None(),
+            Option[String].None(),
             // current_function_c_name
-            [String]Option.None(),
+            Option[String].None(),
             // current_function_return_type
-            [Type]Option.None(),
+            Option[Type].None(),
             // current_generic_bindings
-            [String, Type]Dict.new(),
+            Dict[String, Type].new(),
             // type_by_c_type_name_cache
-            [String, Type]Dict.new(),
+            Dict[String, Type].new(),
             // emitted_function_names
-            [String]Set.new(),
+            Set[String].new(),
         )
 
         cg.program_scan = cg.scan_program_codegen_inputs()
@@ -246,7 +246,7 @@ given CodeGen {
         return name
     }
 
-    generate_codegen_identifier(self, module_path [String]List, name String, is_private Bool, source_file String) String = {
+    generate_codegen_identifier(self, module_path List[String], name String, is_private Bool, source_file String) String = {
         let mut result = String.new()
         let mut needs_separator = false
 
@@ -275,9 +275,9 @@ given CodeGen {
         return result
     }
 
-    c_identifier_opt(self, def_id DefId) [String]Option = {
+    c_identifier_opt(self, def_id DefId) Option[String] = {
         return when self.local_c_identifier_overrides.get(def_id.id) in {
-            .Some(c_id) then [String]Option.Some(c_id),
+            .Some(c_id) then Option[String].Some(c_id),
             .None() then self.program.c_identifier(def_id),
         }
     }
@@ -290,11 +290,11 @@ given CodeGen {
         return self.c_identifier_opt(def_id).is_some()
     }
 
-    def_ids_named(self, name String) [DefId]List = {
+    def_ids_named(self, name String) List[DefId] = {
         return self.program.def_ids_named(name)
     }
 
-    type_def_ids_named(self, name String) [DefId]List = {
+    type_def_ids_named(self, name String) List[DefId] = {
         return self.program.type_def_ids_named(name)
     }
 
@@ -314,14 +314,14 @@ given CodeGen {
         return if name.starts_with("_k__k__") then name.substring(3..) else name
     }
 
-    method_owner_type(self, method_def_id DefId) [Type]Option = {
+    method_owner_type(self, method_def_id DefId) Option[Type] = {
         return when self.program.codegen_callable(method_def_id) in {
             .Some(info) then info.owner_type,
-            .None() then [Type]Option.None(),
+            .None() then Option[Type].None(),
         }
     }
 
-    callable_c_name(self, symbol Symbol ref) String = {
+    callable_c_name(self, symbol ref Symbol) String = {
         return when self.program.codegen_callable(symbol.def_id) in {
             .Some(info) then info.emitted_c_name,
             .None() then when self.c_identifier_opt(symbol.def_id) in {
@@ -336,7 +336,7 @@ given CodeGen {
                         let raw_name = self.qualified_name(symbol)
                         yield when raw_name.find_last("_") in {
                             .Some(split_index) then {
-                                let prefix = raw_name.substring((UInt)0..<split_index)
+                                let prefix = raw_name.substring(0..<split_index)
                                 let suffix = raw_name.substring(split_index + 1..<raw_name.count())
                                 yield self.compose_method_c_name(prefix, suffix)
                             },
@@ -348,7 +348,7 @@ given CodeGen {
         }
     }
 
-    private codegen_layout_info(self, t Type) [TypeLayoutInfo]Option = {
+    private codegen_layout_info(self, t Type) Option[TypeLayoutInfo] = {
         let canonical_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
         let key = self.concrete_layout_key_for_type(canonical_type)
         return self.program.codegen_layout_by_key(key)
@@ -359,79 +359,79 @@ given CodeGen {
         return self.concrete_layout_key_for_type(canonical_type)
     }
 
-    concrete_type_c_name_fallback(self, t Type) [String]Option = {
+    concrete_type_c_name_fallback(self, t Type) Option[String] = {
         if self.codegen_layout_info(t) is .Some(layout) then {
-            return [String]Option.Some(layout.emitted_type_name)
+            return Option[String].Some(layout.emitted_type_name)
         }
 
         return when t in {
             .StructureType(def_id) then {
                 yield when self.program.c_identifier(def_id) in {
-                    .Some(name) then [String]Option.Some(name),
+                    .Some(name) then Option[String].Some(name),
                     .None() then when self.context.get_name(def_id) in {
-                        .Some(name) then [String]Option.Some(self.sanitize_codegen_identifier(name)),
-                        .None() then [String]Option.None(),
+                        .Some(name) then Option[String].Some(self.sanitize_codegen_identifier(name)),
+                        .None() then Option[String].None(),
                     },
                 }
             },
             .EnumType(def_id) then {
                 yield when self.program.c_identifier(def_id) in {
-                    .Some(name) then [String]Option.Some(name),
+                    .Some(name) then Option[String].Some(name),
                     .None() then when self.context.get_name(def_id) in {
-                        .Some(name) then [String]Option.Some(self.sanitize_codegen_identifier(name)),
-                        .None() then [String]Option.None(),
+                        .Some(name) then Option[String].Some(self.sanitize_codegen_identifier(name)),
+                        .None() then Option[String].None(),
                     },
                 }
             },
             .GenericStruct(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(self.concretize_codegen_type(t))
                 yield when self.program.codegen_layout_by_key(layout_key) in {
-                    .Some(layout) then [String]Option.Some(layout.emitted_type_name),
-                    .None() then [String]Option.Some(self.sanitize_codegen_identifier(layout_key)),
+                    .Some(layout) then Option[String].Some(layout.emitted_type_name),
+                    .None() then Option[String].Some(self.sanitize_codegen_identifier(layout_key)),
                 }
             },
             .GenericEnum(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(self.concretize_codegen_type(t))
                 yield when self.program.codegen_layout_by_key(layout_key) in {
-                    .Some(layout) then [String]Option.Some(layout.emitted_type_name),
-                    .None() then [String]Option.Some(self.sanitize_codegen_identifier(layout_key)),
+                    .Some(layout) then Option[String].Some(layout.emitted_type_name),
+                    .None() then Option[String].Some(self.sanitize_codegen_identifier(layout_key)),
                 }
             },
             .OpaqueType(def_id) then {
                 yield when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.concrete_type_c_name_fallback(mapped_type),
                     .None() then when self.program.c_identifier(def_id) in {
-                        .Some(name) then [String]Option.Some(name),
+                        .Some(name) then Option[String].Some(name),
                         .None() then when self.context.get_cname(def_id) in {
-                            .Some(name) then [String]Option.Some(name),
+                            .Some(name) then Option[String].Some(name),
                             .None() then when self.context.get_name(def_id) in {
-                                .Some(name) then [String]Option.Some(self.sanitize_codegen_identifier(name)),
-                                .None() then [String]Option.None(),
+                                .Some(name) then Option[String].Some(self.sanitize_codegen_identifier(name)),
+                                .None() then Option[String].None(),
                             },
                         },
                     },
                 }
             },
-            .ReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
-            .MutableReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
-            .PointerType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
-            .MutablePointerType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
-            .WeakReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
-            .MutableWeakReferenceType(_) then [String]Option.Some(self.concrete_layout_key_for_type(t)),
-            .IntType() then [String]Option.Some("Int"),
-            .Int8Type() then [String]Option.Some("Int8"),
-            .Int16Type() then [String]Option.Some("Int16"),
-            .Int32Type() then [String]Option.Some("Int32"),
-            .Int64Type() then [String]Option.Some("Int64"),
-            .UIntType() then [String]Option.Some("UInt"),
-            .UInt8Type() then [String]Option.Some("UInt8"),
-            .UInt16Type() then [String]Option.Some("UInt16"),
-            .UInt32Type() then [String]Option.Some("UInt32"),
-            .UInt64Type() then [String]Option.Some("UInt64"),
-            .Float32Type() then [String]Option.Some("Float32"),
-            .Float64Type() then [String]Option.Some("Float64"),
-            .BoolType() then [String]Option.Some("Bool"),
-            _ then [String]Option.None(),
+            .ReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .MutableReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .PointerType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .MutablePointerType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .WeakReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .MutableWeakReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .IntType() then Option[String].Some("Int"),
+            .Int8Type() then Option[String].Some("Int8"),
+            .Int16Type() then Option[String].Some("Int16"),
+            .Int32Type() then Option[String].Some("Int32"),
+            .Int64Type() then Option[String].Some("Int64"),
+            .UIntType() then Option[String].Some("UInt"),
+            .UInt8Type() then Option[String].Some("UInt8"),
+            .UInt16Type() then Option[String].Some("UInt16"),
+            .UInt32Type() then Option[String].Some("UInt32"),
+            .UInt64Type() then Option[String].Some("UInt64"),
+            .Float32Type() then Option[String].Some("Float32"),
+            .Float64Type() then Option[String].Some("Float64"),
+            .BoolType() then Option[String].Some("Bool"),
+            _ then Option[String].None(),
         }
     }
 
@@ -504,12 +504,12 @@ given CodeGen {
     }
 
     /// 查找方法的 DefId（通过方法名和 target_type 的模块路径匹配）
-    find_method_def_id(self, method_name String, target_type Type) [DefId]Option = {
+    find_method_def_id(self, method_name String, target_type Type) Option[DefId] = {
         let target_module_path = self.target_type_module_path(target_type)
 
         // 遍历所有 DefId，找到名称为 method_name 且 DefKind 为 Function 的 DefId
         // 优先找与 target_type 在同一模块的 DefId
-        let mut best_def_id_opt = [DefId]Option.None()
+        let mut best_def_id_opt = Option[DefId].None()
         let mut id UInt = 1
         while id < self.context.next_def_id() then {
             let def_id = DefId(id)
@@ -520,16 +520,16 @@ given CodeGen {
                     // 检查这个 DefId 是否已经有可用的 C 标识符
                     let already_mapped = self.has_c_identifier(def_id)
                     if not already_mapped then {
-                        let method_module_path = self.context.get_module_path(def_id) or else [String]List.new()
+                        let method_module_path = self.context.get_module_path(def_id) or else List[String].new()
                         // 检查模块路径是否匹配
                         let paths_match = self.module_paths_equal(method_module_path, target_module_path)
                         if paths_match then {
-                            return [DefId]Option.Some(def_id)
+                            return Option[DefId].Some(def_id)
                         }
                         // 如果没有找到匹配的，保存第一个找到的作为回退
                         when best_def_id_opt in {
                             .None() then {
-                                best_def_id_opt = [DefId]Option.Some(def_id)
+                                best_def_id_opt = Option[DefId].Some(def_id)
                             },
                             .Some(_) then {},
                         }
@@ -542,7 +542,7 @@ given CodeGen {
     }
 
     /// 比较两个模块路径是否相等
-    module_paths_equal(self, a [String]List, b [String]List) Bool = {
+    module_paths_equal(self, a List[String], b List[String]) Bool = {
         if a.count() <> b.count() then { return false }
         let mut i UInt = 0
         while i < a.count() then {
@@ -553,23 +553,23 @@ given CodeGen {
     }
 
     // 查找类型定义的 DefId（TypeDef 类型，排除函数/变量）
-    find_type_def_id_by_name(self, name String) [DefId]Option = {
+    find_type_def_id_by_name(self, name String) Option[DefId] = {
         let def_ids = self.type_def_ids_named(name)
-        return when def_ids.get((UInt)0) in {
-            .Some(def_id) then [DefId]Option.Some(def_id),
-            .None() then [DefId]Option.None(),
+        return when def_ids.get(0(UInt)) in {
+            .Some(def_id) then Option[DefId].Some(def_id),
+            .None() then Option[DefId].None(),
         }
     }
 
-    target_type_module_path(self, target_type Type) [String]List = {
+    target_type_module_path(self, target_type Type) List[String] = {
         return when target_type in {
-            .StructureType(def_id) then self.context.get_module_path(def_id) or else [String]List.new(),
-            .EnumType(def_id) then self.context.get_module_path(def_id) or else [String]List.new(),
+            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                 .Some(mapped_type) then self.target_type_module_path(mapped_type),
-                .None() then [String]List.new(),
+                .None() then List[String].new(),
             },
-            _ then [String]List.new(),
+            _ then List[String].new(),
         }
     }
 
@@ -615,9 +615,9 @@ given CodeGen {
         }
     }
 
-    concrete_layout_key_for_def_id(self, def_id DefId) [String]Option = {
-        let name = self.context.get_name(def_id) or else { return [String]Option.None() }
-        let module_path = self.context.get_module_path(def_id) or else [String]List.new()
+    concrete_layout_key_for_def_id(self, def_id DefId) Option[String] = {
+        let name = self.context.get_name(def_id) or else { return Option[String].None() }
+        let module_path = self.context.get_module_path(def_id) or else List[String].new()
         let is_private = if self.context.get_access(def_id) is .Some(access) then access is .Private() else false
         let source_file = self.context.get_source_file(def_id) or else ""
 
@@ -633,49 +633,49 @@ given CodeGen {
         if is_private and not source_file.is_empty() then {
             let mut hash UInt32 = 0
             for byte in source_file.bytes() then {
-                hash = hash.wrapping_mul(31).wrapping_add((UInt32)byte)
+                hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32))
             }
             if needs_separator then { out.push_byte('_') }
             out.push_byte('f')
-            out.push_string(((UInt)(hash % 10000)).to_string())
+            out.push_string(((hash % 10000)(UInt)).to_string())
             needs_separator = true
         }
         if needs_separator then { out.push_byte('_') }
         out.push_string(name)
-        return [String]Option.Some(out)
+        return Option[String].Some(out)
     }
 
     // 仅按单态化后的 concrete layout 查找类型 DefId。
-    find_type_def_id_by_layout_or_template(self, t Type, template String) [DefId]Option = {
+    find_type_def_id_by_layout_or_template(self, t Type, template String) Option[DefId] = {
         let layout_name = self.concrete_layout_key_for_type(t)
         if self.find_type_def_id_by_name(layout_name) is .Some(def_id) then {
-            return [DefId]Option.Some(def_id)
+            return Option[DefId].Some(def_id)
         }
 
-        return [DefId]Option.None()
+        return Option[DefId].None()
     }
 
-    private concrete_enum_cases_from_program(self, def_id DefId) [[TypedEnumCase]List]Option = {
-        return [[TypedEnumCase]List]Option.None()
+    private concrete_enum_cases_from_program(self, def_id DefId) Option[List[TypedEnumCase]] = {
+        return Option[List[TypedEnumCase]].None()
     }
 
-    private lookup_enum_case_index_and_params(self, def_id DefId, case_name String) [[UInt, [EnumCaseParam]List]Pair]Option = {
+    private lookup_enum_case_index_and_params(self, def_id DefId, case_name String) Option[Pair[UInt, List[EnumCaseParam]]] = {
         let enum_cases_opt = when self.context.get_enum_cases(def_id) in {
-            .Some(enum_cases) then [[EnumCaseInfo]List]Option.Some(enum_cases),
+            .Some(enum_cases) then Option[List[EnumCaseInfo]].Some(enum_cases),
             .None() then {
                 yield when self.concrete_enum_cases_from_program(def_id) in {
                     .Some(typed_cases) then {
-                        let mut enum_cases = [EnumCaseInfo]List.new()
+                        let mut enum_cases = List[EnumCaseInfo].new()
                         for typed_case in typed_cases then {
-                            let mut params = [EnumCaseParam]List.new()
+                            let mut params = List[EnumCaseParam].new()
                             for field in typed_case.fields then {
                                 params.push(EnumCaseParam(field.name, field.field_type, field.named))
                             }
                             enum_cases.push(EnumCaseInfo(typed_case.name, params))
                         }
-                        yield [[EnumCaseInfo]List]Option.Some(enum_cases)
+                        yield Option[List[EnumCaseInfo]].Some(enum_cases)
                     },
-                    .None() then [[EnumCaseInfo]List]Option.None(),
+                    .None() then Option[List[EnumCaseInfo]].None(),
                 }
             },
         }
@@ -683,7 +683,7 @@ given CodeGen {
         return when enum_cases_opt in {
             .Some(enum_cases) then {
                 let mut found_index UInt = 0
-                let mut found_params = [EnumCaseParam]List.new()
+                let mut found_params = List[EnumCaseParam].new()
                 let mut found = false
                 let mut i UInt = 0
                 for uc in enum_cases then {
@@ -695,12 +695,12 @@ given CodeGen {
                     i += 1
                 }
                 let resolved = when found in {
-                    true then [[UInt, [EnumCaseParam]List]Pair]Option.Some([UInt, [EnumCaseParam]List]Pair(found_index, found_params)),
-                    false then [[UInt, [EnumCaseParam]List]Pair]Option.None(),
+                    true then Option[Pair[UInt, List[EnumCaseParam]]].Some(Pair[UInt, List[EnumCaseParam]](found_index, found_params)),
+                    false then Option[Pair[UInt, List[EnumCaseParam]]].None(),
                 }
                 yield resolved
             },
-            .None() then [[UInt, [EnumCaseParam]List]Pair]Option.None(),
+            .None() then Option[Pair[UInt, List[EnumCaseParam]]].None(),
         }
     }
 
@@ -728,7 +728,7 @@ given CodeGen {
             .TypeSymbol() then true,
             .Module() then true,
             .Variable(_) then {
-                let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
+                let module_path = self.context.get_module_path(symbol.def_id) or else List[String].new()
                 let source_file = self.context.get_source_file(symbol.def_id) or else ""
                 let access = self.context.get_access(symbol.def_id) or else AccessModifier.Protected()
                 let is_private = access is .Private()
@@ -752,7 +752,7 @@ given CodeGen {
         return "\(base)_\(symbol.def_id.id)"
     }
 
-    public qualified_name(self, symbol Symbol ref) String = {
+    public qualified_name(self, symbol ref Symbol) String = {
         return self.qualified_name_value(symbol)
     }
 
@@ -789,7 +789,7 @@ given CodeGen {
         }
     }
 
-    public c_identifier_for_symbol(self, symbol Symbol ref) String = {
+    public c_identifier_for_symbol(self, symbol ref Symbol) String = {
         return self.c_identifier_for_symbol_value(symbol)
     }
 
@@ -813,7 +813,7 @@ given CodeGen {
         }
     }
 
-    private nominal_named_c_type_name(self, t Type) [String]Option = {
+    private nominal_named_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .StructureType(def_id) then {
                 let c_name = when self.c_identifier_opt(def_id) in {
@@ -823,7 +823,7 @@ given CodeGen {
                         .None() then "T_\(def_id.id)",
                     },
                 }
-                yield [String]Option.Some("struct \(c_name)")
+                yield Option[String].Some("struct \(c_name)")
             },
             .EnumType(def_id) then {
                 let c_name = when self.c_identifier_opt(def_id) in {
@@ -835,42 +835,42 @@ given CodeGen {
                         }
                     },
                 }
-                yield [String]Option.Some("struct \(c_name)")
+                yield Option[String].Some("struct \(c_name)")
             },
-            _ then [String]Option.None(),
+            _ then Option[String].None(),
         }
     }
 
-    private opaque_mapped_c_type_name(self, mapped_type Type) [String]Option = {
+    private opaque_mapped_c_type_name(self, mapped_type Type) Option[String] = {
         return when mapped_type in {
             .TraitObject(_, _) then {
-                yield [String]Option.Some("struct __koral_TraitRef")
+                yield Option[String].Some("struct __koral_TraitRef")
             },
             .ReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_, _) then [String]Option.Some("struct __koral_TraitRef"),
-                    _ then [String]Option.None(),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
+                    _ then Option[String].None(),
                 }
             },
             .MutableReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_, _) then [String]Option.Some("struct __koral_TraitRef"),
-                    _ then [String]Option.None(),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
+                    _ then Option[String].None(),
                 }
             },
             .WeakReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_, _) then [String]Option.Some("struct __koral_TraitWeakRef"),
-                    _ then [String]Option.None(),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitWeakRef"),
+                    _ then Option[String].None(),
                 }
             },
             .MutableWeakReferenceType(inner_ref) then {
                 yield when inner_ref.val in {
-                    .TraitObject(_, _) then [String]Option.Some("struct __koral_TraitWeakRef"),
-                    _ then [String]Option.None(),
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitWeakRef"),
+                    _ then Option[String].None(),
                 }
             },
-            _ then [String]Option.None(),
+            _ then Option[String].None(),
         }
     }
 
@@ -886,73 +886,73 @@ given CodeGen {
         }
     }
 
-    private opaque_c_type_name(self, t Type) [String]Option = {
+    private opaque_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .OpaqueType(def_id) then {
                 let mapped_c_type_opt = when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.opaque_mapped_c_type_name(mapped_type),
-                    .None() then [String]Option.None(),
+                    .None() then Option[String].None(),
                 }
                 yield when mapped_c_type_opt in {
-                    .Some(mapped_c_type) then [String]Option.Some(mapped_c_type),
-                    .None() then [String]Option.Some(self.opaque_fallback_c_type_name(def_id)),
+                    .Some(mapped_c_type) then Option[String].Some(mapped_c_type),
+                    .None() then Option[String].Some(self.opaque_fallback_c_type_name(def_id)),
                 }
             },
-            _ then [String]Option.None(),
+            _ then Option[String].None(),
         }
     }
 
-    private generic_nominal_c_type_name(self, t Type) [String]Option = {
+    private generic_nominal_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .GenericStruct(template, _) then {
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_opt(def_id) in {
-                            .Some(name) then [String]Option.Some("struct \(name)"),
-                            .None() then [String]Option.Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
+                            .Some(name) then Option[String].Some("struct \(name)"),
+                            .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
                         }
                     },
-                    .None() then [String]Option.Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
+                    .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
                 }
             },
             .GenericEnum(template, _) then {
                 yield when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
                         yield when self.c_identifier_opt(def_id) in {
-                            .Some(name) then [String]Option.Some("struct \(name)"),
-                            .None() then [String]Option.Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
+                            .Some(name) then Option[String].Some("struct \(name)"),
+                            .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
                         }
                     },
-                    .None() then [String]Option.Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
+                    .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(self.concrete_layout_key_for_type(t)))"),
                 }
             },
-            _ then [String]Option.None(),
+            _ then Option[String].None(),
         }
     }
 
-    private nominal_c_type_name(self, t Type) [String]Option = {
+    private nominal_c_type_name(self, t Type) Option[String] = {
         when self.nominal_named_c_type_name(t) in {
-            .Some(name) then { return [String]Option.Some(name) },
+            .Some(name) then { return Option[String].Some(name) },
             .None() then {},
         }
         when self.opaque_c_type_name(t) in {
-            .Some(name) then { return [String]Option.Some(name) },
+            .Some(name) then { return Option[String].Some(name) },
             .None() then {},
         }
         return self.generic_nominal_c_type_name(t)
     }
 
-    private reference_like_c_type_name(self, t Type) [String]Option = {
+    private reference_like_c_type_name(self, t Type) Option[String] = {
         return when t in {
-            .ReferenceType(inner_ref) then [String]Option.Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
-            .MutableReferenceType(inner_ref) then [String]Option.Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
-            .PointerType(inner) then [String]Option.Some("\(self.c_type_name(inner.val))*"),
-            .MutablePointerType(inner) then [String]Option.Some("\(self.c_type_name(inner.val))*"),
-            .WeakReferenceType(inner_ref) then [String]Option.Some(self.ref_wrapper_c_type_name(inner_ref.val, true)),
-            .MutableWeakReferenceType(inner_ref) then [String]Option.Some(self.ref_wrapper_c_type_name(inner_ref.val, true)),
-            .FunctionType(_, _) then [String]Option.Some("struct __koral_Closure"),
-            .TraitObject(_, _) then [String]Option.Some("struct __koral_TraitRef"),
-            _ then [String]Option.None(),
+            .ReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
+            .MutableReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
+            .PointerType(inner) then Option[String].Some("\(self.c_type_name(inner.val))*"),
+            .MutablePointerType(inner) then Option[String].Some("\(self.c_type_name(inner.val))*"),
+            .WeakReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, true)),
+            .MutableWeakReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, true)),
+            .FunctionType(_, _) then Option[String].Some("struct __koral_Closure"),
+            .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
+            _ then Option[String].None(),
         }
     }
 
@@ -1191,13 +1191,13 @@ given CodeGen {
     }
 
     /// 临时增加缩进，执行 body，然后恢复缩进
-    public with_indent(self mut ref, body [Void]Func) Void = {
+    public with_indent(self mut ref, body Func[Void]) Void = {
         self.indent.push_string("    ")
         body()
         // 移除最后 4 个字符（一级缩进）
         let len = self.indent.count()
         if len >= 4 then {
-            self.indent = self.indent.substring((UInt)0..<(len - 4))
+            self.indent = self.indent.substring(0..<(len - 4))
         }
     }
 

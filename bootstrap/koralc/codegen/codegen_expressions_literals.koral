@@ -78,7 +78,7 @@ given CodeGen {
     /// 生成类型转换表达式的 C 代码
     ///
     /// Requirements: 5.6
-    generate_cast_expr(self mut ref, target_type Type, inner TypedExpr ref) String = {
+    generate_cast_expr(self mut ref, target_type Type, inner ref TypedExpr) String = {
         let inner_result = self.generate_expression_ssa(inner)
         let target_c_type = self.c_type_name(target_type)
 
@@ -382,17 +382,17 @@ given CodeGen {
     /// 创建新作用域，依次生成语句，YieldStmt 的值作为块的返回值。
     ///
     /// Requirements: 5.12
-    public generate_block_scope(self mut ref, statements [TypedStatement]List, block_type Type) String = {
+    public generate_block_scope(self mut ref, statements List[TypedStatement], block_type Type) String = {
         let parent_scope_index = if self.lifetime_scope_stack.is_empty()
-            then (UInt)0
-            else self.lifetime_scope_stack.count() - (UInt)1
+            then 0(UInt)
+            else self.lifetime_scope_stack.count() - 1(UInt)
         self.push_scope()
         let has_result = not self.type_is_void_or_never(block_type)
         let mut result = String.new()
         let yield_target_opt = if has_result then {
             let c_type = self.c_type_name(block_type)
             let result_var = self.next_temp_with_decl(c_type)
-            yield [CodegenYieldTarget]Option.Some(
+            yield Option[CodegenYieldTarget].Some(
                 CodegenYieldTarget(
                     result_var,
                     block_type,
@@ -400,7 +400,7 @@ given CodeGen {
                     parent_scope_index,
                 )
             )
-        } else [CodegenYieldTarget]Option.None()
+        } else Option[CodegenYieldTarget].None()
         when yield_target_opt in {
             .Some(target) then self.yield_target_stack.push(target),
             .None() then {},
@@ -410,7 +410,7 @@ given CodeGen {
             when stmt in {
                 .YieldStmt(_, _) then self.generate_statement(stmt),
                 .IfStmt(condition_ref, then_ref, else_opt, _) then {
-                    let is_final_statement = stmt_index + (UInt)1 == statements.count()
+                    let is_final_statement = stmt_index + 1(UInt) == statements.count()
                     if is_final_statement and not self.type_is_void_or_never(block_type) then {
                         let if_expr = make_typed_expr(TypedExprKind.IfExpr(condition_ref, then_ref, else_opt), block_type)
                         let temp = self.generate_expression_ssa(box(if_expr))
@@ -426,7 +426,7 @@ given CodeGen {
                     }
                 },
                 .WhenStmt(subject_ref, arms, _) then {
-                    let is_final_statement = stmt_index + (UInt)1 == statements.count()
+                    let is_final_statement = stmt_index + 1(UInt) == statements.count()
                     if is_final_statement and not self.type_is_void_or_never(block_type) then {
                         let when_expr = make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), block_type)
                         let temp = self.generate_expression_ssa(box(when_expr))
@@ -469,7 +469,7 @@ given CodeGen {
     /// 遍历成员路径链，处理 ref 类型的解引用（`.ptr` 访问）。
     ///
     /// Requirements: 5.17
-    public generate_member_path(self mut ref, source TypedExpr ref, path [String]List) String = {
+    public generate_member_path(self mut ref, source ref TypedExpr, path List[String]) String = {
         let source_result = self.generate_expression_ssa(source)
         let should_drop_rvalue_source = not self.is_lvalue_expr(source) and self.needs_drop(source.expr_type) and not source_result.is_empty()
         let mut access = source_result
@@ -588,7 +588,7 @@ given CodeGen {
         return Type.Unknown()
     }
 
-    build_ref_components(self mut ref, expr TypedExpr ref) [String, String]Pair = {
+    build_ref_components(self mut ref, expr ref TypedExpr) Pair[String, String] = {
         return when expr.expr_kind in {
             .Variable(symbol) then {
                 // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol
@@ -601,11 +601,11 @@ given CodeGen {
                     .None() then c_name,
                 }
                 yield when symbol.symbol_type in {
-                    .ReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
-                    .MutableReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
-                    .WeakReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
-                    .MutableWeakReferenceType(_) then [String, String]Pair(path, "(\(path)).control"),
-                    _ then [String, String]Pair(path, "NULL"),
+                    .ReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
+                    .MutableReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
+                    .WeakReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
+                    .MutableWeakReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
+                    _ then Pair[String, String](path, "NULL"),
                 }
             },
             .RefExpr(inner_ref) then {
@@ -682,7 +682,7 @@ given CodeGen {
                     }
                     cur_type = self.lookup_field_type(cur_type, member_name_raw)
                 }
-                yield [String, String]Pair(base_path, base_control)
+                yield Pair[String, String](base_path, base_control)
             },
             .DerefExpr(inner_ref) then {
                 let inner = inner_ref
@@ -707,11 +707,11 @@ given CodeGen {
                     .MutableWeakReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
                     _ then "NULL",
                 }
-                yield [String, String]Pair(path, control)
+                yield Pair[String, String](path, control)
             },
             _ then {
                 let result = self.generate_expression_ssa(expr)
-                yield [String, String]Pair(result, "NULL")
+                yield Pair[String, String](result, "NULL")
             },
         }
     }

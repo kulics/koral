@@ -1,5 +1,5 @@
 given TypeChecker {
-    private pattern_binding_symbol(self, name String, mutable Bool, subject_type Type, scope Scope, span SourceSpan) Symbol ref = {
+    private pattern_binding_symbol(self, name String, mutable Bool, subject_type Type, scope Scope, span SourceSpan) ref Symbol = {
         if name == "_" then {
             let kind = if mutable
                 then SymbolKind.Variable(VariableKind.MutableValue())
@@ -33,10 +33,10 @@ given TypeChecker {
             _ then subject_type,
         }
         return when inner_type in {
-            .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id((UInt)def_id, case_name),
+            .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id(def_id(UInt), case_name),
             .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id((UInt)def_id, case_name),
+                    .EnumType(DefId(def_id)) then self.context().enum_case_tag_index_by_raw_id(def_id(UInt), case_name),
                     _ then zero,
                 },
                 .None() then zero,
@@ -45,7 +45,7 @@ given TypeChecker {
         }
     }
 
-    protected lower_typed_pattern(self, pattern PatternNode ref, subject_type Type, scope Scope) TypedPattern = {
+    protected lower_typed_pattern(self, pattern ref PatternNode, subject_type Type, scope Scope) TypedPattern = {
         return when pattern in {
             .Wildcard(_) then TypedPattern.Wildcard(),
             .Variable(name, mutable, span) then {
@@ -79,7 +79,7 @@ given TypeChecker {
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
                 let case_field_types = self.get_enum_case_field_types(subject_type, case_name)
                 let tag_index = self.get_enum_case_tag_index(subject_type, case_name)
-                let mut typed_elements = [TypedPatternElement]List.new()
+                let mut typed_elements = List[TypedPatternElement].new()
                 let mut i UInt = 0
                 for elem in ordered_elements then {
                     let field_type = when case_field_types.get(i) in {
@@ -99,7 +99,7 @@ given TypeChecker {
                 self.validate_named_pattern_arguments(elements, param_specs)
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name)
-                let mut typed_elements = [TypedPatternElement]List.new()
+                let mut typed_elements = List[TypedPatternElement].new()
                 let mut i UInt = 0
                 for elem in ordered_elements then {
                     let field_type = when field_types.get(i) in {
@@ -117,7 +117,7 @@ given TypeChecker {
         }
     }
 
-    private bind_pattern_vars(self, pattern PatternNode ref, subject_type Type, scope Scope) Void = {
+    private bind_pattern_vars(self, pattern ref PatternNode, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, mutable, span) then {
                 if not (name == "_") then {
@@ -173,7 +173,7 @@ given TypeChecker {
         }
     }
 
-    private ensure_pattern_bindings_present(self, pattern PatternNode ref, subject_type Type, scope Scope) Void = {
+    private ensure_pattern_bindings_present(self, pattern ref PatternNode, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, mutable, span) then {
                 if not (name == "_") then {
@@ -235,13 +235,13 @@ given TypeChecker {
         }
     }
 
-    private validate_named_pattern_arguments(self, elements [PatternElement]List, param_specs [FunctionParamSpec]List) Void = {
-        let mut named_spec_names = [String]Set.new()
+    private validate_named_pattern_arguments(self, elements List[PatternElement], param_specs List[FunctionParamSpec]) Void = {
+        let mut named_spec_names = Set[String].new()
         for spec in param_specs then {
             if spec.named then { named_spec_names.insert(spec.name) }
         }
 
-        let mut seen_named_labels = [String]Set.new()
+        let mut seen_named_labels = Set[String].new()
         for element in elements then {
             when element.label in {
                 .Some(label) then {
@@ -285,19 +285,19 @@ given TypeChecker {
         }
     }
 
-    private reorder_pattern_elements(self, elements [PatternElement]List, param_specs [FunctionParamSpec]List) [PatternElement]List = {
-        let mut ordered = [PatternElement]List.new()
-        let mut used_indices = [UInt]Set.new()
+    private reorder_pattern_elements(self, elements List[PatternElement], param_specs List[FunctionParamSpec]) List[PatternElement] = {
+        let mut ordered = List[PatternElement].new()
+        let mut used_indices = Set[UInt].new()
 
         for spec in param_specs then {
             if spec.named then {
-                let mut found = [PatternElement]Option.None()
+                let mut found = Option[PatternElement].None()
                 let mut idx UInt = 0
                 for element in elements then {
                     when element.label in {
                         .Some(label) then {
                             if label == spec.name and not used_indices.contains(idx) then {
-                                found = [PatternElement]Option.Some(element)
+                                found = Option[PatternElement].Some(element)
                                 used_indices.insert(idx)
                             }
                         },
@@ -362,7 +362,7 @@ given TypeChecker {
         return enum_tail == pattern_tail
     }
 
-    private get_enum_case_field_types(self, subject_type Type, case_name String) [Type]List = {
+    private get_enum_case_field_types(self, subject_type Type, case_name String) List[Type] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
@@ -371,17 +371,17 @@ given TypeChecker {
             _ then subject_type,
         }
         let raw_case_params = when inner_type in {
-            .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id((UInt)def_id, case_name),
+            .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id(def_id(UInt), case_name),
             .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id((UInt)def_id, case_name),
-                    _ then [EnumCaseParam]List.new(),
+                    .EnumType(DefId(def_id)) then self.context().enum_case_params_by_raw_id(def_id(UInt), case_name),
+                    _ then List[EnumCaseParam].new(),
                 },
-                .None() then [EnumCaseParam]List.new(),
+                .None() then List[EnumCaseParam].new(),
             },
-            _ then [EnumCaseParam]List.new(),
+            _ then List[EnumCaseParam].new(),
         }
-        let mut bindings = [String, Type]Dict.new()
+        let mut bindings = Dict[String, Type].new()
         when inner_type in {
             .GenericEnum(template_name, args) then {
                 if self.storage.generic_templates.lookup_enum(template_name) is .Some(enum_template) then {
@@ -398,7 +398,7 @@ given TypeChecker {
             },
             _ then {},
         }
-        let mut result = [Type]List.new()
+        let mut result = List[Type].new()
         for p in raw_case_params then {
             let concrete_param_type = self.apply_type_bindings(p.param_type, bindings)
             result.push(concrete_param_type)
@@ -406,7 +406,7 @@ given TypeChecker {
         return result
     }
 
-    private get_enum_case_param_specs(self, subject_type Type, case_name String) [FunctionParamSpec]List = {
+    private get_enum_case_param_specs(self, subject_type Type, case_name String) List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
@@ -415,19 +415,19 @@ given TypeChecker {
             _ then subject_type,
         }
         return when inner_type in {
-            .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id((UInt)def_id, case_name),
+            .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(def_id(UInt), case_name),
             .GenericEnum(template, _) then when self.storage.global_scope.lookup_type(template) in {
                 .Some(t) then when t in {
-                    .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id((UInt)def_id, case_name),
-                    _ then [FunctionParamSpec]List.new(),
+                    .EnumType(DefId(def_id)) then self.context().enum_case_param_specs_by_raw_id(def_id(UInt), case_name),
+                    _ then List[FunctionParamSpec].new(),
                 },
-                .None() then [FunctionParamSpec]List.new(),
+                .None() then List[FunctionParamSpec].new(),
             },
-            _ then [FunctionParamSpec]List.new(),
+            _ then List[FunctionParamSpec].new(),
         }
     }
 
-    private get_struct_pattern_field_types(self, subject_type Type, type_name String) [Type]List = {
+    private get_struct_pattern_field_types(self, subject_type Type, type_name String) List[Type] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
@@ -439,7 +439,7 @@ given TypeChecker {
         return when inner_type in {
             .StructureType(def_id) then {
                 let actual_name = self.context().get_name(def_id) or else self.context().type_display_name(inner_type)
-                let mut result = [Type]List.new()
+                let mut result = List[Type].new()
                 if actual_name == type_name then {
                     when self.context().get_struct_fields(def_id) in {
                         .Some(fields) then {
@@ -453,12 +453,12 @@ given TypeChecker {
                 yield result
             },
             .GenericStruct(template, args) then {
-                let mut result = [Type]List.new()
+                let mut result = List[Type].new()
                 if template == type_name then {
                     when self.storage.generic_templates.lookup_struct(template) in {
                         .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                             .Some(fields) then {
-                                let mut bindings = [String, Type]Dict.new()
+                                let mut bindings = Dict[String, Type].new()
                                 let mut i UInt = 0
                                 let param_count = struct_template.type_parameters.count()
                                 let arg_count = args.count()
@@ -479,11 +479,11 @@ given TypeChecker {
                 }
                 yield result
             },
-            _ then [Type]List.new(),
+            _ then List[Type].new(),
         }
     }
 
-    private get_struct_pattern_owner_def_id(self, subject_type Type, type_name String) [DefId]Option = {
+    private get_struct_pattern_owner_def_id(self, subject_type Type, type_name String) Option[DefId] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
@@ -495,19 +495,19 @@ given TypeChecker {
         return when inner_type in {
             .StructureType(def_id) then {
                 let actual_name = self.context().get_name(def_id) or else self.context().type_display_name(inner_type)
-                yield if actual_name == type_name then [DefId]Option.Some(def_id) else [DefId]Option.None()
+                yield if actual_name == type_name then Option[DefId].Some(def_id) else Option[DefId].None()
             },
             .GenericStruct(template, _) then {
                 yield if template == type_name then when self.storage.generic_templates.lookup_struct(template) in {
-                    .Some(struct_template) then [DefId]Option.Some(struct_template.def_id),
-                    .None() then [DefId]Option.None(),
-                } else [DefId]Option.None()
+                    .Some(struct_template) then Option[DefId].Some(struct_template.def_id),
+                    .None() then Option[DefId].None(),
+                } else Option[DefId].None()
             },
-            _ then [DefId]Option.None(),
+            _ then Option[DefId].None(),
         }
     }
 
-    private check_struct_pattern_field_visibility(self, subject_type Type, type_name String, elements [PatternElement]List) Bool = {
+    private check_struct_pattern_field_visibility(self, subject_type Type, type_name String, elements List[PatternElement]) Bool = {
         let ordered_elements = self.reorder_pattern_elements(elements, self.get_struct_pattern_param_specs(subject_type, type_name))
         return when self.get_struct_pattern_owner_def_id(subject_type, type_name) in {
             .Some(def_id) then when self.context().get_struct_fields(def_id) in {
@@ -544,7 +544,7 @@ given TypeChecker {
         }
     }
 
-    private get_struct_pattern_param_specs(self, subject_type Type, type_name String) [FunctionParamSpec]List = {
+    private get_struct_pattern_param_specs(self, subject_type Type, type_name String) List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
@@ -556,7 +556,7 @@ given TypeChecker {
         return when inner_type in {
             .StructureType(def_id) then {
                 let actual_name = self.context().get_name(def_id) or else self.context().type_display_name(inner_type)
-                let mut specs = [FunctionParamSpec]List.new()
+                let mut specs = List[FunctionParamSpec].new()
                 if actual_name == type_name then {
                     when self.context().get_struct_fields(def_id) in {
                         .Some(fields) then {
@@ -570,7 +570,7 @@ given TypeChecker {
                 yield specs
             },
             .GenericStruct(template, _) then {
-                let mut specs = [FunctionParamSpec]List.new()
+                let mut specs = List[FunctionParamSpec].new()
                 if template == type_name then {
                     when self.storage.generic_templates.lookup_struct(template) in {
                         .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
@@ -586,7 +586,7 @@ given TypeChecker {
                 }
                 yield specs
             },
-            _ then [FunctionParamSpec]List.new(),
+            _ then List[FunctionParamSpec].new(),
         }
     }
 
