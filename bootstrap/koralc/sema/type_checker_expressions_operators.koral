@@ -7,7 +7,7 @@ given TypeChecker {
         }
     }
 
-    private check_arithmetic_expr_ref(self, left Expr ref, op ArithmeticOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_arithmetic_expr_ref(self, left ref Expr, op ArithmeticOperator, right ref Expr, expected Option[Type], scope Scope) TypedExpr = {
 
         let initial_typed_left = when left in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
@@ -55,10 +55,10 @@ given TypeChecker {
         let right_numeric = self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type) or self.is_numeric_literal_expr(typed_right)
         if left_numeric and right_numeric and not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
             if self.is_numeric_type(typed_left.expr_type) or self.is_float_type(typed_left.expr_type) then {
-                typed_right = self.adapt_expr_to_expected_type_at(typed_right, [Type]Option.Some(typed_left.expr_type), [SourceSpan]Option.Some(expr_span(right)))
+                typed_right = self.adapt_expr_to_expected_type_at(typed_right, Option[Type].Some(typed_left.expr_type), Option[SourceSpan].Some(expr_span(right)))
             }
             if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (self.is_numeric_type(typed_right.expr_type) or self.is_float_type(typed_right.expr_type)) then {
-                typed_left = self.adapt_expr_to_expected_type_at(typed_left, [Type]Option.Some(typed_right.expr_type), [SourceSpan]Option.Some(expr_span(left)))
+                typed_left = self.adapt_expr_to_expected_type_at(typed_left, Option[Type].Some(typed_right.expr_type), Option[SourceSpan].Some(expr_span(left)))
             }
         }
         let left_raw_t = typed_left.expr_type
@@ -86,7 +86,7 @@ given TypeChecker {
         }
         if is_non_numeric_candidate then {
             if self.arithmetic_trait_name(op) is .Some(trait_name) then {
-                let mut trait_args = [Type]List.new()
+                let mut trait_args = List[Type].new()
                 if same_type then {
                     trait_args.push(left_t)
                 } else {
@@ -158,18 +158,18 @@ given TypeChecker {
         return result
     }
 
-    private check_bitwise_expr_ref(self, left Expr ref, op BitwiseOperator, right Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_bitwise_expr_ref(self, left ref Expr, op BitwiseOperator, right ref Expr, expected Option[Type], scope Scope) TypedExpr = {
 
         let chain = self.collect_bitwise_chain(left, op, right)
         let operands = chain.first
         let ops = chain.second
 
-        let mut current = self.check_operand_expr_ref(operands[(UInt)0], expected, scope)
+        let mut current = self.check_operand_expr_ref(operands[0(UInt)], expected, scope)
 
         let mut i UInt = 1
         while i < operands.count() then {
             let typed_right = self.check_operand_expr_ref(operands[i], .Some(current.expr_type), scope)
-            let op_i = ops[i - (UInt)1]
+            let op_i = ops[i - 1(UInt)]
             current = make_typed_expr(TypedExprKind.BitwiseExpr(box(current), op_i, box(typed_right)), current.expr_type)
             i += 1
         }
@@ -178,7 +178,7 @@ given TypeChecker {
         return result
     }
 
-    private describe_expr_shallow(self, expr Expr ref) String = {
+    private describe_expr_shallow(self, expr ref Expr) String = {
         return when expr in {
             .Identifier(_, _) then "identifier",
             .IntegerLiteral(_, _) then "int",
@@ -218,7 +218,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_parameter_types(self, params [LambdaParam]List, typed_params [TypedParam]List) Void = {
+    private validate_lambda_parameter_types(self, params List[LambdaParam], typed_params List[TypedParam]) Void = {
         let mut i UInt = 0
         while i < params.count() and i < typed_params.count() then {
             let param = params[i]
@@ -260,17 +260,17 @@ given TypeChecker {
         )
     }
 
-    private validate_lambda_captures(self, params [TypedParam]List, body TypedExpr ref) Void = {
-        let mut local_names = [String]Set.new()
+    private validate_lambda_captures(self, params List[TypedParam], body ref TypedExpr) Void = {
+        let mut local_names = Set[String].new()
         for p in params then {
             local_names.insert(p.name)
         }
-        let mut local_ids = [UInt]Set.new()
-        let mut reported_ids = [UInt]Set.new()
+        let mut local_ids = Set[UInt].new()
+        let mut reported_ids = Set[UInt].new()
         self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids)
     }
 
-    private is_lambda_captured_symbol(self, symbol Symbol ref, local_names [String]Set ref, local_ids [UInt]Set ref) Bool = {
+    private is_lambda_captured_symbol(self, symbol ref Symbol, local_names ref Set[String], local_ids ref Set[UInt]) Bool = {
         let is_variable = when symbol.kind in {
             .Variable(_) then true,
             _ then false,
@@ -282,12 +282,12 @@ given TypeChecker {
         if local_names.contains(symbol_name) or local_ids.contains(symbol.def_id.id) then {
             return false
         }
-        let module_path = self.context().get_module_path(symbol.def_id) or else [String]List.new()
+        let module_path = self.context().get_module_path(symbol.def_id) or else List[String].new()
         let source_file = self.context().get_source_file(symbol.def_id) or else ""
         return module_path.is_empty() and source_file.is_empty()
     }
 
-    private report_mutable_lambda_capture(self, symbol Symbol ref, reported_ids [UInt]Set mut ref) Void = {
+    private report_mutable_lambda_capture(self, symbol ref Symbol, reported_ids mut ref Set[UInt]) Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return
         }
@@ -301,7 +301,7 @@ given TypeChecker {
         )
     }
 
-    private collect_pattern_binding_names(self, pattern TypedPattern ref, names [String]Set mut ref) Void = {
+    private collect_pattern_binding_names(self, pattern ref TypedPattern, names mut ref Set[String]) Void = {
         when pattern in {
             .Variable(symbol) then {
                 let symbol_name = self.context().symbol_name(symbol)
@@ -331,7 +331,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names [String]Set ref, local_ids [UInt]Set ref, reported_ids [UInt]Set mut ref) Void = {
+    private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names ref Set[String], local_ids ref Set[UInt], reported_ids mut ref Set[UInt]) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
@@ -384,7 +384,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_captures_in_expr(self, expr TypedExpr ref, local_names [String]Set ref, local_ids [UInt]Set ref, reported_ids [UInt]Set mut ref) Void = {
+    private validate_lambda_captures_in_expr(self, expr ref TypedExpr, local_names ref Set[String], local_ids ref Set[UInt], reported_ids mut ref Set[UInt]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -395,11 +395,11 @@ given TypeChecker {
                 // Nested lambdas validate captures in their own typing path.
             },
             .Block(statements) then {
-                let mut block_local_names = [String]Set.new()
+                let mut block_local_names = Set[String].new()
                 for name in local_names.iterator() then {
                     block_local_names.insert(name)
                 }
-                let mut block_local_ids = [UInt]Set.new()
+                let mut block_local_ids = Set[UInt].new()
                 for id in local_ids.iterator() then {
                     block_local_ids.insert(id)
                 }
@@ -556,7 +556,7 @@ given TypeChecker {
             .WhenExpr(subject_ref, arms) then {
                 self.validate_lambda_captures_in_expr(subject_ref, local_names, local_ids, reported_ids)
                 for arm in arms then {
-                    let mut arm_local_names = [String]Set.new()
+                    let mut arm_local_names = Set[String].new()
                     for name in local_names.iterator() then {
                         arm_local_names.insert(name)
                     }
@@ -573,7 +573,7 @@ given TypeChecker {
         }
     }
 
-    private is_null_ptr_call_expr(self, expr Expr ref) Bool = {
+    private is_null_ptr_call_expr(self, expr ref Expr) Bool = {
         return when expr in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then name == "null_ptr" and args.is_empty(),
@@ -583,7 +583,7 @@ given TypeChecker {
         }
     }
 
-    private check_comparison_expr_ref(self, left Expr ref, op ComparisonOperator, right Expr ref, scope Scope) TypedExpr = {
+    private check_comparison_expr_ref(self, left ref Expr, op ComparisonOperator, right ref Expr, scope Scope) TypedExpr = {
 
         let mut typed_left = self.check_expr_core_ref(left, .None(), scope)
         let mut typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
@@ -685,46 +685,46 @@ given TypeChecker {
     }
 
     private build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", [Type]List.new())
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "equals")
         let method_symbol = self.make_method_symbol("equals", ret_type)
-        let mut args = [TypedExpr ref]List.new()
+        let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then Type.BoolType(),
             _ then ret_type,
         }
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
             method_symbol.symbol_type,
         )
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", [Type]List.new())
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "compare")
         let method_symbol = self.make_method_symbol("compare", ret_type)
-        let mut args = [TypedExpr ref]List.new()
+        let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then Type.IntType(),
             _ then ret_type,
         }
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
             method_symbol.symbol_type,
         )
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
-    private arithmetic_trait_name(self, op ArithmeticOperator) [String]Option = {
+    private arithmetic_trait_name(self, op ArithmeticOperator) Option[String] = {
         return when op in {
-            .Add() then [String]Option.Some("Add"),
-            .Subtract() then [String]Option.Some("Sub"),
-            .Multiply() then [String]Option.Some("Mul"),
-            .Divide() then [String]Option.Some("Div"),
-            .Remainder() then [String]Option.Some("Rem"),
+            .Add() then Option[String].Some("Add"),
+            .Subtract() then Option[String].Some("Sub"),
+            .Multiply() then Option[String].Some("Mul"),
+            .Divide() then Option[String].Some("Div"),
+            .Remainder() then Option[String].Some("Rem"),
         }
     }
 
@@ -766,50 +766,50 @@ given TypeChecker {
     }
 
     private build_arithmetic_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, [Type]List.new())
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
         let method_symbol = self.make_method_symbol(method_name, ret_type)
-        let mut args = [TypedExpr ref]List.new()
+        let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
             method_symbol.symbol_type,
         )
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, [Type]List.new())
+        self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
         let method_symbol = self.make_method_symbol(method_name, ret_type)
-        let mut args = [TypedExpr ref]List.new()
+        let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            TypedExprKind.MethodReference(box(lhs), lhs.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
             method_symbol.symbol_type,
         )
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(operand.expr_type, method_name, [Type]List.new())
+        self.maybe_record_extension_method_instantiation(operand.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(operand.expr_type, method_name)
         let method_symbol = self.make_method_symbol(method_name, ret_type)
-        let args = [TypedExpr ref]List.new()
+        let args = List[ref TypedExpr].new()
         let call_ret_type = when ret_type in {
             .Unknown() then fallback_type,
             _ then ret_type,
         }
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(operand), operand.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+            TypedExprKind.MethodReference(box(operand), operand.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
             method_symbol.symbol_type,
         )
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
@@ -823,7 +823,7 @@ given TypeChecker {
                 yield when typed.expr_type in {
                     _ then if self.is_string_type(typed.expr_type) then typed else {
                         let _ = self.enforce_explicit_trait_requirement(typed.expr_type, "ToString")
-                        self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", [Type]List.new())
+                        self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", List[Type].new())
                         let ret_type = self.resolve_method_return_type(typed.expr_type, "to_string")
                         let method_symbol = self.make_method_symbol("to_string", ret_type)
                         let call_ret_type = when ret_type in {
@@ -831,17 +831,17 @@ given TypeChecker {
                             _ then ret_type,
                         }
                         let callee = make_typed_expr(
-                            TypedExprKind.MethodReference(box(typed), typed.expr_type, box(method_symbol), [Type]List.new(), [Type]List.new(), .None()),
+                            TypedExprKind.MethodReference(box(typed), typed.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
                             method_symbol.symbol_type,
                         )
-                        yield make_typed_expr(TypedExprKind.Call(box(callee), [TypedExpr ref]List.new()), call_ret_type)
+                        yield make_typed_expr(TypedExprKind.Call(box(callee), List[ref TypedExpr].new()), call_ret_type)
                     },
                 }
             },
         }
     }
 
-    private lower_interpolated_string(self, parts [InterpolatedStringPart]List, scope Scope) TypedExpr = {
+    private lower_interpolated_string(self, parts List[InterpolatedStringPart], scope Scope) TypedExpr = {
         if parts.is_empty() then {
             return make_typed_expr(TypedExprKind.StringLiteral(""), self.builtin_string_type())
         }

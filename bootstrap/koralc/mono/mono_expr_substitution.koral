@@ -15,14 +15,14 @@
 //   - Recurse into all sub-expressions, statements, and patterns
 //
 public let substitute_types_in_expression(
-    mono Monomorphizer ref,
-    expr TypedExpr ref,
-    substitution [String, Type]Dict,
-) TypedExpr ref = {
+    mono ref Monomorphizer,
+    expr ref TypedExpr,
+    substitution Dict[String, Type],
+) ref TypedExpr = {
     let new_type = when expr.expr_kind in {
         .CastExpr(target_type, _) then when target_type in {
             .TraitObject(original_trait_name, original_type_args) then {
-                let mut substituted_type_args = [Type ref]List.new()
+                let mut substituted_type_args = List[ref Type].new()
                 for original_type_arg in original_type_args then {
                     substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
                 }
@@ -41,8 +41,8 @@ public let substitute_types_in_expression(
 }
 
 private let recover_unknown_expr_type(
-    mono Monomorphizer ref,
-    kind TypedExprKind ref,
+    mono ref Monomorphizer,
+    kind ref TypedExprKind,
     fallback Type,
 ) Type = {
     let recovered = when kind in {
@@ -66,7 +66,7 @@ private let recover_unknown_expr_type(
         .MemberPath(base, path) then recover_member_path_type(mono, base.expr_type, path, fallback),
         .MethodReference(_, _, method, _, _, _) then resolve_parameterized_type(mono, method.symbol_type),
         .LambdaExpr(params, return_type, _) then {
-            let mut param_entries = [FunctionParamEntry ref]List.new()
+            let mut param_entries = List[ref FunctionParamEntry].new()
             for param in params then {
                 param_entries.push(box(make_function_param_entry(resolve_parameterized_type(mono, param.param_type))))
             }
@@ -98,8 +98,8 @@ private let recover_unknown_expr_type(
     return resolve_parameterized_type(mono, recovered)
 }
 
-private let box_each_type(types [Type]List) [Type ref]List = {
-    let mut out = [Type ref]List.with_capacity(types.count())
+private let box_each_type(types List[Type]) List[ref Type] = {
+    let mut out = List[ref Type].with_capacity(types.count())
     for t in types then {
         out.push(box(t))
     }
@@ -107,8 +107,8 @@ private let box_each_type(types [Type]List) [Type ref]List = {
 }
 
 private let recover_method_return_type(
-    mono Monomorphizer ref,
-    method Symbol ref,
+    mono ref Monomorphizer,
+    method ref Symbol,
     fallback Type,
 ) Type = {
     let method_type = resolve_parameterized_type(mono, method.symbol_type)
@@ -120,7 +120,7 @@ private let recover_method_return_type(
 }
 
 private let recover_member_field_type(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     base_type Type,
     member_name String,
     fallback Type,
@@ -146,20 +146,20 @@ private let recover_member_field_type(
             return recover_member_field_type(mono, inner.val, member_name, fallback)
         },
         .GenericStruct(template_name, args) then {
-            if template_name == "Pair" and args.count() == (UInt)2 then {
+            if template_name == "Pair" and args.count() == 2(UInt) then {
                 when member_name in {
                     "first" then {
-                        return resolve_parameterized_type(mono, args[(UInt)0].val)
+                        return resolve_parameterized_type(mono, args[0(UInt)].val)
                     },
                     "second" then {
-                        return resolve_parameterized_type(mono, args[(UInt)1].val)
+                        return resolve_parameterized_type(mono, args[1(UInt)].val)
                     },
                     _ then {},
                 }
             }
             when mono.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(template) then {
-                    let mut subst = [String, Type]Dict.new()
+                    let mut subst = Dict[String, Type].new()
                     let mut i UInt = 0
                     while i < template.type_parameters.count() and i < args.count() then {
                         subst.insert(template.type_parameters[i].name, args[i].val)
@@ -192,9 +192,9 @@ private let recover_member_field_type(
 }
 
 private let recover_member_path_type(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     base_type Type,
-    path [String]List,
+    path List[String],
     fallback Type,
 ) Type = {
     let mut current = resolve_parameterized_type(mono, base_type)
@@ -208,11 +208,11 @@ private let recover_member_path_type(
 
 // Substitute types in a TypedExprKind, recursing into sub-expressions.
 private let substitute_expr_kind(
-    mono Monomorphizer ref,
-    kind TypedExprKind ref,
-    substitution [String, Type]Dict,
+    mono ref Monomorphizer,
+    kind ref TypedExprKind,
+    substitution Dict[String, Type],
     substituted_expr_type Type,
-) TypedExprKind ref = {
+) ref TypedExprKind = {
     return when kind in {
         // Variable: remap DefId if it's a generic function that was instantiated.
         .Variable(symbol) then box(TypedExprKind.Variable(box(substitute_symbol(mono, symbol, substitution)))),
@@ -227,7 +227,7 @@ private let substitute_expr_kind(
         .CastExpr(target_type, e) then {
             let new_target = when target_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = [Type ref]List.new()
+                    let mut substituted_type_args = List[ref Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
                     }
@@ -245,7 +245,7 @@ private let substitute_expr_kind(
             let mut new_trait_type = resolved_substituted_trait_type
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = [Type ref]List.new()
+                    let mut substituted_type_args = List[ref Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
                     }
@@ -331,7 +331,7 @@ private let substitute_expr_kind(
         // Call: substitute callee and all arguments.
         .Call(callee, args) then {
             let mut new_callee = substitute_types_in_expression(mono, callee, substitution)
-            let mut new_args = [TypedExpr ref]List.new()
+            let mut new_args = List[ref TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -353,7 +353,7 @@ private let substitute_expr_kind(
                         if rebound_method.def_id.id > 0 then {
                             let adjusted_base = align_method_reference_base_for_bound_method(mono, base, rebound_method)
                             new_callee = box(TypedExpr(
-                                box(TypedExprKind.MethodReference(adjusted_base, adjusted_base.expr_type, box(rebound_method), [Type]List.new(), method_type_args, dispatch_callsite)),
+                                box(TypedExprKind.MethodReference(adjusted_base, adjusted_base.expr_type, box(rebound_method), List[Type].new(), method_type_args, dispatch_callsite)),
                                 rebound_method.symbol_type,
                             ))
                         }
@@ -365,11 +365,11 @@ private let substitute_expr_kind(
         },
         .GenericCall(function_symbol, type_args, args) then {
             let new_function_symbol = substitute_symbol(mono, function_symbol, substitution)
-            let mut new_type_args = [Type]List.new()
+            let mut new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
             }
-            let mut new_args = [TypedExpr ref]List.new()
+            let mut new_args = List[ref TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -384,11 +384,11 @@ private let substitute_expr_kind(
             let mut new_base = substitute_types_in_expression(mono, base, substitution)
             let mut new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let mut new_method = substitute_symbol(mono, method, substitution)
-            let mut new_type_args = [Type]List.new()
+            let mut new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
             }
-            let mut new_method_type_args = [Type]List.new()
+            let mut new_method_type_args = List[Type].new()
             for method_type_arg in method_type_args then {
                 new_method_type_args.push(mono.substitute_type_impl(method_type_arg, substitution))
             }
@@ -396,7 +396,7 @@ private let substitute_expr_kind(
             let resolved_method_symbol_type = resolve_parameterized_type(mono, new_method.symbol_type)
             let should_delay_method_binding = new_method_type_args.is_empty() and has_generic_parameter(resolved_method_symbol_type)
             if not has_generic_parameter(binding_receiver_type) and not should_delay_method_binding then {
-                new_method = bind_receiver_method_symbol(mono, binding_receiver_type, new_method, [Type]Option.Some(substituted_expr_type))
+                new_method = bind_receiver_method_symbol(mono, binding_receiver_type, new_method, Option[Type].Some(substituted_expr_type))
                 new_base = align_method_reference_base_for_bound_method(mono, new_base, new_method)
                 new_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
             }
@@ -405,7 +405,7 @@ private let substitute_expr_kind(
 
         // Block: substitute all statements.
         .Block(statements) then {
-            let mut new_stmts = [TypedStatement]List.new()
+            let mut new_stmts = List[TypedStatement].new()
             for stmt in statements then {
                 new_stmts.push(substitute_statement(mono, stmt, substitution))
             }
@@ -418,9 +418,9 @@ private let substitute_expr_kind(
             let new_then = substitute_types_in_expression(mono, then_branch, substitution)
             let new_else = when else_branch in {
                 .Some(e) then {
-                    yield [TypedExpr ref]Option.Some(substitute_types_in_expression(mono, e, substitution))
+                    yield Option[ref TypedExpr].Some(substitute_types_in_expression(mono, e, substitution))
                 },
-                .None() then [TypedExpr ref]Option.None(),
+                .None() then Option[ref TypedExpr].None(),
             }
             yield box(TypedExprKind.IfExpr(new_cond, new_then, new_else))
         },
@@ -428,7 +428,7 @@ private let substitute_expr_kind(
         // WhenExpr: substitute subject and all arms.
         .WhenExpr(subject, arms) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
-            let mut new_arms = [TypedWhenArm]List.new()
+            let mut new_arms = List[TypedWhenArm].new()
             for arm in arms then {
                 let new_pattern  = substitute_pattern(mono, arm.pattern, substitution)
                 let new_body     = substitute_types_in_expression(mono, arm.body, substitution)
@@ -440,7 +440,7 @@ private let substitute_expr_kind(
 
         // LambdaExpr: substitute param types, return type, and body.
         .LambdaExpr(params, return_type, body) then {
-            let mut new_params = [TypedParam]List.new()
+            let mut new_params = List[TypedParam].new()
             for p in params then {
                 let new_pt = mono.substitute_type_impl(p.param_type, substitution)
                 new_params.push(TypedParam(p.name, p.mutable, new_pt, p.named))
@@ -454,15 +454,15 @@ private let substitute_expr_kind(
         .StaticMethodCall(receiver_type, method_name, method, type_args, method_type_args, args) then {
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
             let mut method_after_subst = substitute_symbol(mono, method, substitution)
-            let mut new_type_args = [Type]List.new()
+            let mut new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
             }
-            let mut new_method_type_args = [Type]List.new()
+            let mut new_method_type_args = List[Type].new()
             for method_type_arg in method_type_args then {
                 new_method_type_args.push(mono.substitute_type_impl(method_type_arg, substitution))
             }
-            let mut new_args = [TypedExpr ref]List.new()
+            let mut new_args = List[ref TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -477,7 +477,7 @@ private let substitute_expr_kind(
             let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = [Type ref]List.new()
+                    let mut substituted_type_args = List[ref Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
                     }
@@ -487,7 +487,7 @@ private let substitute_expr_kind(
             }
             let substituted_method = substitute_symbol(mono, method, substitution)
             let new_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
-            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), [Type]List.new(), dispatch_callsite))
+            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), List[Type].new(), dispatch_callsite))
         },
 
         .TraitMethodCall(receiver, trait_type, method, args, method_index, dispatch_callsite) then {
@@ -495,7 +495,7 @@ private let substitute_expr_kind(
             let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = [Type ref]List.new()
+                    let mut substituted_type_args = List[ref Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(original_type_arg.val, substitution)))
                     }
@@ -505,7 +505,7 @@ private let substitute_expr_kind(
             }
             let substituted_method = substitute_symbol(mono, method, substitution)
             let new_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
-            let mut new_args = [TypedExpr ref]List.new()
+            let mut new_args = List[ref TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -538,7 +538,7 @@ private let substitute_expr_kind(
         // GenericInstantiation: substitute each type arg.
         .GenericInstantiation(base_type, type_args) then {
             let new_base_type = mono.substitute_type_impl(base_type, substitution)
-            let mut new_type_args = [Type]List.new()
+            let mut new_type_args = List[Type].new()
             for ta in type_args then {
                 new_type_args.push(mono.substitute_type_impl(ta, substitution))
             }
@@ -552,9 +552,9 @@ private let substitute_expr_kind(
 // Substitute the type in a Symbol and remap its DefId if it was a generic
 // function that has been instantiated.
 private let substitute_symbol(
-    mono Monomorphizer ref,
-    symbol Symbol ref,
-    substitution [String, Type]Dict,
+    mono ref Monomorphizer,
+    symbol ref Symbol,
+    substitution Dict[String, Type],
 ) Symbol = {
     let substituted_type = mono.substitute_type_impl(symbol.symbol_type, substitution)
     let new_type = resolve_parameterized_type(mono, substituted_type)
@@ -601,7 +601,7 @@ private let static_method_receiver_key(t Type) String = {
     }
 }
 
-private let push_static_method_receiver_alias(alias_list [String]List, alias String) [String]List = {
+private let push_static_method_receiver_alias(alias_list List[String], alias String) List[String] = {
     if alias.is_empty() then { return alias_list }
     for existing in alias_list then {
         if existing == alias then { return alias_list }
@@ -611,8 +611,8 @@ private let push_static_method_receiver_alias(alias_list [String]List, alias Str
     return updated
 }
 
-private let static_method_receiver_aliases(mono Monomorphizer ref, t Type) [String]List = {
-    let mut aliases = [String]List.new()
+private let static_method_receiver_aliases(mono ref Monomorphizer, t Type) List[String] = {
+    let mut aliases = List[String].new()
     aliases = push_static_method_receiver_alias(aliases, static_method_receiver_key(t))
 
     when t in {
@@ -687,7 +687,7 @@ private let static_method_receiver_aliases(mono Monomorphizer ref, t Type) [Stri
 }
 
 private let bind_static_method_symbol(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     receiver_type Type,
     method Symbol,
 ) Symbol = {
@@ -707,7 +707,7 @@ private let bind_static_method_symbol(
     }
 
     let method_name = mono.storage.context.symbol_name(method)
-    instantiate_trait_placeholder_method(mono, receiver_type, method_name, [Type ref]List.new())
+    instantiate_trait_placeholder_method(mono, receiver_type, method_name, List[ref Type].new())
 
     let instantiated_aliases = static_method_receiver_aliases(mono, receiver_type)
     for receiver_key in instantiated_aliases then {
@@ -728,7 +728,7 @@ private let bind_static_method_symbol(
 }
 
 private let method_type_matches_expected_pattern(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     actual Type,
     expected Type,
 ) Bool = {
@@ -777,9 +777,9 @@ private let method_type_matches_expected_pattern(
 }
 
 private let method_type_matches_expected(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     candidate Type,
-    expected_opt [Type]Option,
+    expected_opt Option[Type],
 ) Bool = {
     return when expected_opt in {
         .None() then true,
@@ -798,11 +798,11 @@ private let method_type_matches_expected(
 }
 
 private let lookup_exact_receiver_method_symbol(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     receiver_type Type,
     method Symbol,
-    expected_method_type_opt [Type]Option,
-) [Symbol]Option = {
+    expected_method_type_opt Option[Type],
+) Option[Symbol] = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type)
     let method_name = mono.storage.context.symbol_name(method)
     for entry in mono.storage.concrete_callables_by_def_id.iterator() then {
@@ -823,7 +823,7 @@ private let lookup_exact_receiver_method_symbol(
             .Some(return_type) then return_type,
             .None() then method.symbol_type,
         }
-        return [Symbol]Option.Some(Symbol(def_id, bound_return_type, method.kind))
+        return Option[Symbol].Some(Symbol(def_id, bound_return_type, method.kind))
     }
 
     let direct_lookup_key = "\(layout_key(resolved_receiver_type)).\(method_name)"
@@ -835,20 +835,20 @@ private let lookup_exact_receiver_method_symbol(
                     .Some(return_type) then return_type,
                     .None() then method.symbol_type,
                 }
-                return [Symbol]Option.Some(Symbol(def_id, bound_return_type, method.kind))
+                return Option[Symbol].Some(Symbol(def_id, bound_return_type, method.kind))
             }
         },
         .None() then {},
     }
 
-    return [Symbol]Option.None()
+    return Option[Symbol].None()
 }
 
 let bind_receiver_method_symbol(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     receiver_type Type,
     method Symbol,
-    expected_method_type_opt [Type]Option,
+    expected_method_type_opt Option[Type],
 ) Symbol = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type)
     when resolved_receiver_type in {
@@ -888,7 +888,7 @@ let bind_receiver_method_symbol(
                     mono,
                     resolved_receiver_type,
                     method,
-                    [TypedExpr ref]List.new(),
+                    List[ref TypedExpr].new(),
                     expected_return_type,
                 ).val
                 yield if rebound.def_id.id > 0 then rebound else bind_receiver_method_symbol(mono, inner.val, method, expected_method_type_opt)
@@ -901,7 +901,7 @@ let bind_receiver_method_symbol(
                     mono,
                     resolved_receiver_type,
                     method,
-                    [TypedExpr ref]List.new(),
+                    List[ref TypedExpr].new(),
                     expected_return_type,
                 ).val
                 if rebound.def_id.id > 0 then {
@@ -915,7 +915,7 @@ let bind_receiver_method_symbol(
                             mono,
                             shared_ref_type,
                             method,
-                            [TypedExpr ref]List.new(),
+                            List[ref TypedExpr].new(),
                             expected_return_type,
                         ).val
                         yield if shared_rebound.def_id.id > 0 then shared_rebound else bind_receiver_method_symbol(mono, inner.val, method, expected_method_type_opt)
@@ -930,7 +930,7 @@ let bind_receiver_method_symbol(
                     mono,
                     resolved_receiver_type,
                     method,
-                    [TypedExpr ref]List.new(),
+                    List[ref TypedExpr].new(),
                     expected_return_type,
                 ).val,
             }
@@ -942,7 +942,7 @@ let bind_receiver_method_symbol(
                     mono,
                     resolved_receiver_type,
                     method,
-                    [TypedExpr ref]List.new(),
+                    List[ref TypedExpr].new(),
                     expected_return_type,
                 ).val
                 if rebound.def_id.id > 0 then {
@@ -955,7 +955,7 @@ let bind_receiver_method_symbol(
                         mono,
                         shared_weakref_type,
                         method,
-                        [TypedExpr ref]List.new(),
+                        List[ref TypedExpr].new(),
                         expected_return_type,
                     ).val,
                 }
@@ -968,7 +968,7 @@ let bind_receiver_method_symbol(
                     mono,
                     resolved_receiver_type,
                     method,
-                    [TypedExpr ref]List.new(),
+                    List[ref TypedExpr].new(),
                     expected_return_type,
                 ).val,
             }
@@ -977,10 +977,10 @@ let bind_receiver_method_symbol(
 }
 
 let align_method_reference_base_for_bound_method(
-    mono Monomorphizer ref,
-    receiver_expr TypedExpr ref,
+    mono ref Monomorphizer,
+    receiver_expr ref TypedExpr,
     method Symbol,
-) TypedExpr ref = {
+) ref TypedExpr = {
     let current_expr = when receiver_expr.expr_kind in {
         .TraitObjectConversion(inner, _, _) then inner,
         _ then receiver_expr,
@@ -990,12 +990,12 @@ let align_method_reference_base_for_bound_method(
         .FunctionType(fn_params, _) then {
             let param_types = param_entry_types(fn_params)
             yield if param_types.count() == 0 then {
-                yield [Type]Option.None()
+                yield Option[Type].None()
             } else {
-                yield [Type]Option.Some(resolve_parameterized_type(mono, param_types[(UInt)0].val))
+                yield Option[Type].Some(resolve_parameterized_type(mono, param_types[0(UInt)].val))
             }
         },
-        _ then [Type]Option.None(),
+        _ then Option[Type].None(),
     }
 
     return when expected_self_type_opt in {
@@ -1072,9 +1072,9 @@ let align_method_reference_base_for_bound_method(
 
 // Substitute types in a TypedStatement node.
 public let substitute_statement(
-    mono Monomorphizer ref,
+    mono ref Monomorphizer,
     stmt TypedStatement,
-    substitution [String, Type]Dict,
+    substitution Dict[String, Type],
 ) TypedStatement = {
     return when stmt in {
         // LetStmt: substitute symbol type and value expression.
@@ -1086,12 +1086,12 @@ public let substitute_statement(
 
         .PairLetStmt(first_symbol, second_symbol, value, span) then {
             let new_first_symbol = when first_symbol in {
-                .Some(symbol) then [Symbol ref]Option.Some(box(substitute_symbol(mono, symbol, substitution))),
-                .None() then [Symbol ref]Option.None(),
+                .Some(symbol) then Option[ref Symbol].Some(box(substitute_symbol(mono, symbol, substitution))),
+                .None() then Option[ref Symbol].None(),
             }
             let new_second_symbol = when second_symbol in {
-                .Some(symbol) then [Symbol ref]Option.Some(box(substitute_symbol(mono, symbol, substitution))),
-                .None() then [Symbol ref]Option.None(),
+                .Some(symbol) then Option[ref Symbol].Some(box(substitute_symbol(mono, symbol, substitution))),
+                .None() then Option[ref Symbol].None(),
             }
             let new_val = substitute_types_in_expression(mono, value, substitution)
             yield TypedStatement.PairLetStmt(new_first_symbol, new_second_symbol, new_val, span)
@@ -1111,8 +1111,8 @@ public let substitute_statement(
         },
         .IfStmt(condition, then_branch, else_branch, span) then {
             let new_else = when else_branch in {
-                .Some(expr) then [TypedExpr ref]Option.Some(substitute_types_in_expression(mono, expr, substitution)),
-                .None() then [TypedExpr ref]Option.None(),
+                .Some(expr) then Option[ref TypedExpr].Some(substitute_types_in_expression(mono, expr, substitution)),
+                .None() then Option[ref TypedExpr].None(),
             }
             yield TypedStatement.IfStmt(
                 substitute_types_in_expression(mono, condition, substitution),
@@ -1129,7 +1129,7 @@ public let substitute_statement(
         },
         .WhenStmt(subject, arms, span) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
-            let mut new_arms = [TypedWhenArm]List.new()
+            let mut new_arms = List[TypedWhenArm].new()
             for arm in arms then {
                 let new_body = substitute_types_in_expression(mono, arm.body, substitution)
                 let new_arm_type = mono.substitute_type_impl(arm.arm_type, substitution)
@@ -1142,9 +1142,9 @@ public let substitute_statement(
         .ReturnStmt(value, span) then {
             let new_value = when value in {
                 .Some(e) then {
-                    yield [TypedExpr ref]Option.Some(substitute_types_in_expression(mono, e, substitution))
+                    yield Option[ref TypedExpr].Some(substitute_types_in_expression(mono, e, substitution))
                 },
-                .None() then [TypedExpr ref]Option.None(),
+                .None() then Option[ref TypedExpr].None(),
             }
             yield TypedStatement.ReturnStmt(new_value, span)
         },
@@ -1173,14 +1173,14 @@ public let substitute_statement(
 // Most patterns carry no type annotations directly, but struct/enum patterns
 // may contain nested patterns that need substitution.
 public let substitute_pattern(
-    mono Monomorphizer ref,
-    pattern TypedPattern ref,
-    substitution [String, Type]Dict,
+    mono ref Monomorphizer,
+    pattern ref TypedPattern,
+    substitution Dict[String, Type],
 ) TypedPattern = {
     return when pattern in {
         // StructPattern: recurse into each element pattern.
         .StructPattern(type_name, elements) then {
-            let mut new_elements = [TypedPatternElement]List.new()
+            let mut new_elements = List[TypedPatternElement].new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
                 new_elements.push(TypedPatternElement(elem.label, box(new_sub)))
@@ -1190,7 +1190,7 @@ public let substitute_pattern(
 
         // EnumCase: recurse into each element pattern.
         .EnumCase(case_name, tag_index, elements) then {
-            let mut new_elements = [TypedPatternElement]List.new()
+            let mut new_elements = List[TypedPatternElement].new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
                 new_elements.push(TypedPatternElement(elem.label, box(new_sub)))

@@ -15,7 +15,7 @@ public let run_driver() Int = {
 
     // Parse flags from remaining args
     let mut no_std = false
-    let mut out_dir = [String]Option.None()
+    let mut out_dir = Option[String].None()
     let mut i UInt = 3
     while i < argv.count() then {
         let arg = argv[i]
@@ -24,7 +24,7 @@ public let run_driver() Int = {
         } else if arg == "-o" then {
             i += 1
             if i < argv.count() then {
-                out_dir = [String]Option.Some(argv[i])
+                out_dir = Option[String].Some(argv[i])
             }
         }
         i += 1
@@ -54,27 +54,27 @@ private let print_usage() Void = {
 
 // Shared: lex + parse source text.
 // On error, prints a diagnostic and returns None.
-private let parse_source(file_path String, source String) [Program]Option = {
+private let parse_source(file_path String, source String) Option[Program] = {
     let tokens = lex(source) or else {
         eprintln(format_cli_diagnostic(make_diagnostic(DiagnosticStage.Lexer(), file_path, it.message()), file_path))
-        return [Program]Option.None()
+        return Option[Program].None()
     }
 
     let program = parse(tokens) or else {
         eprintln(format_cli_diagnostic(make_diagnostic(DiagnosticStage.Parser(), file_path, it.message()), file_path))
-        return [Program]Option.None()
+        return Option[Program].None()
     }
 
-    return [Program]Option.Some(program)
+    return Option[Program].Some(program)
 }
 
 // Shared: read file from disk.
-private let read_source(file_path String) [String]Option = {
+private let read_source(file_path String) Option[String] = {
     let source = read_text_file(file_path.into_path()) or else {
         eprintln("failed to read file: \(file_path): \(it.message())")
-        return [String]Option.None()
+        return Option[String].None()
     }
-    return [String]Option.Some(source)
+    return Option[String].Some(source)
 }
 
 private let debug_phase(message String) Void = {
@@ -128,14 +128,28 @@ private let diagnostic_record_severity_label(severity DiagnosticSeverity) String
     }
 }
 
+private let strip_duplicate_cli_prefix(message String) String = {
+    when message.find(": error: ") in {
+        .Some(index) then {
+            let prefix = message.substring(0..<index)
+            if prefix.contains(":") then {
+                return message.substring(index + 9..)
+            }
+        },
+        .None() then {},
+    }
+    return message
+}
+
 private let format_cli_diagnostic_record(record DiagnosticRecord, user_file_path String) String = {
     let diag = record.diagnostic
     let render_path = if diag.file_path.is_empty() then user_file_path else diag.file_path
+    let rendered_message = strip_duplicate_cli_prefix(diag.message)
     let mut header = when diag.span in {
         .Some(span) then if is_known_span(span)
-            then "\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_record_severity_label(record.severity)): \(diag.message)"
-            else "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(diag.message)",
-        .None() then "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(diag.message)",
+            then "\(render_path):\(span.start.line):\(span.start.column): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)"
+            else "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
+        .None() then "\(render_path): \(diagnostic_record_severity_label(record.severity)): \(rendered_message)",
     }
     for note in record.notes then {
         header.push_string("\n  note: ")
@@ -265,7 +279,7 @@ private let find_clang() String = {
 private let run_clang(c_file String, exe_file String) Bool = {
     let clang = find_clang()
 
-    let mut clang_args = [String]List.new()
+    let mut clang_args = List[String].new()
     clang_args.push(c_file)
 
     // Include koral_runtime.c and header if available
@@ -304,7 +318,7 @@ private let run_clang(c_file String, exe_file String) Bool = {
     return true
 }
 
-private let build_c_output_path(file_path String, out_dir [String]Option) Path = {
+private let build_c_output_path(file_path String, out_dir Option[String]) Path = {
     return if out_dir is .Some(dir) then {
         let src_path = file_path.into_path()
         let base = src_path.base_name()
@@ -316,7 +330,7 @@ private let build_c_output_path(file_path String, out_dir [String]Option) Path =
     }
 }
 
-private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_prefix String, profile_total_phase Bool) [Path]Option = {
+private let emit_c(file_path String, no_std Bool, out_dir Option[String], phase_prefix String, profile_total_phase Bool) Option[Path] = {
     let total_start = MonoTime.now()
 
     debug_phase("\(phase_prefix): type check")
@@ -332,10 +346,10 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
         if profile_total_phase then {
             profile_phase("\(phase_prefix): total", total_start)
         }
-        return [Path]Option.None()
+        return Option[Path].None()
     }
 
-    let typed_program = if result.typed_program is .Some(program) then program else { return [Path]Option.None() }
+    let typed_program = if result.typed_program is .Some(program) then program else { return Option[Path].None() }
     let context = result.context
 
     debug_phase("\(phase_prefix): monomorphize")
@@ -348,7 +362,7 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
     )
     let mut mono_program = mono.monomorphize()
     profile_phase("\(phase_prefix): monomorphize", mono_start)
-    let mono_output = [CompilerContext, MonomorphizedProgram]Pair(context, mono_program)
+    let mono_output = Pair[CompilerContext, MonomorphizedProgram](context, mono_program)
 
     let output_path = build_c_output_path(file_path, out_dir)
 
@@ -357,7 +371,7 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
         if profile_total_phase then {
             profile_phase("\(phase_prefix): total", total_start)
         }
-        return [Path]Option.None()
+        return Option[Path].None()
     }
 
     {
@@ -374,7 +388,7 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
             if profile_total_phase then {
                 profile_phase("\(phase_prefix): total", total_start)
             }
-            return [Path]Option.None()
+            return Option[Path].None()
         }
     }
 
@@ -382,17 +396,17 @@ private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_
     if profile_total_phase then {
         profile_phase("\(phase_prefix): total", total_start)
     }
-    return [Path]Option.Some(output_path)
+    return Option[Path].Some(output_path)
 }
 
-private let run_emit_c(file_path String, no_std Bool, out_dir [String]Option) Int = {
+private let run_emit_c(file_path String, no_std Bool, out_dir Option[String]) Int = {
     return when emit_c(file_path, no_std, out_dir, "emit-c", true) in {
         .Some(_) then 0,
         .None() then 1,
     }
 }
 
-private let run_build(file_path String, no_std Bool, out_dir [String]Option) Int = {
+private let run_build(file_path String, no_std Bool, out_dir Option[String]) Int = {
     let total_start = MonoTime.now()
     let output_path = emit_c(file_path, no_std, out_dir, "build", false) or else { return 1 }
 

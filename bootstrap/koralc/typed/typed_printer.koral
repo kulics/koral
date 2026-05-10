@@ -18,13 +18,13 @@ private let access_text(access AccessModifier) String = {
     }
 }
 
-private let typed_param_text_named(p TypedParam, type_names [UInt, String]Dict) String = {
+private let typed_param_text_named(p TypedParam, type_names Dict[UInt, String]) String = {
     let mut_prefix = if p.mutable then "mut " else ""
     let separator = if p.named then ": " else " "
     return "\(mut_prefix)\(p.name)\(separator)\(type_display(p.param_type, type_names))"
 }
 
-private let typed_params_text_named(params [TypedParam]List, type_names [UInt, String]Dict) String = {
+private let typed_params_text_named(params List[TypedParam], type_names Dict[UInt, String]) String = {
     let mut out = String.new()
     let mut first = true
     for p in params then {
@@ -35,7 +35,7 @@ private let typed_params_text_named(params [TypedParam]List, type_names [UInt, S
     return out
 }
 
-private let typed_field_text_named(f TypedField, level UInt, type_names [UInt, String]Dict) String = {
+private let typed_field_text_named(f TypedField, level UInt, type_names Dict[UInt, String]) String = {
     let mut_prefix = if f.mutable then "mut " else ""
     let separator = if f.named then ": " else " "
     return "\(indent(level))\(access_text(f.access))\(mut_prefix)\(f.name)\(separator)\(type_display(f.field_type, type_names))"
@@ -45,7 +45,7 @@ private let printed_symbol_name(symbol Symbol) String = {
     return "sym#\(symbol.def_id.id)"
 }
 
-private let typed_enum_case_text_named(c TypedEnumCase, level UInt, type_names [UInt, String]Dict) String = {
+private let typed_enum_case_text_named(c TypedEnumCase, level UInt, type_names Dict[UInt, String]) String = {
     if c.fields.is_empty() then {
         return "\(indent(level))\(c.name)()"
     }
@@ -67,12 +67,12 @@ public let print_typed_program(program TypedProgram) Void = {
     }
 }
 
-private let type_display(t Type, type_names [UInt, String]Dict) String = {
-    return type_display_with_depth(t, type_names, (UInt)0)
+private let type_display(t Type, type_names Dict[UInt, String]) String = {
+    return type_display_with_depth(t, type_names, 0)
 }
 
-private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth UInt) String = {
-    if depth >= (UInt)12 then {
+private let type_display_with_depth(t Type, type_names Dict[UInt, String], depth UInt) String = {
+    if depth >= 12 then {
         return when t in {
             .StructureType(def_id) then when type_names.get(def_id.id) in {
                 .Some(name) then name,
@@ -83,14 +83,15 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
                 .None() then "enum#\(def_id.id)",
             },
             .OpaqueType(def_id) then "opaque#\(def_id.id)",
-            .GenericStruct(template, _) then "[...]\(template)",
-            .GenericEnum(template, _) then "[...]\(template)",
-            .FunctionType(_, _) then "[...]Func",
-            .ReferenceType(_) then "... ref",
-            .MutableReferenceType(_) then "... mut ref",
-            .PointerType(_) then "... ptr",
-            .MutablePointerType(_) then "... mut ptr",
-            .WeakReferenceType(_) then "... weakref",
+            .GenericStruct(template, _) then "\(template)[...]",
+            .GenericEnum(template, _) then "\(template)[...]",
+            .FunctionType(_, _) then "Func[...]",
+            .ReferenceType(_) then "ref ...",
+            .MutableReferenceType(_) then "mut ref ...",
+            .PointerType(_) then "ptr ...",
+            .MutablePointerType(_) then "mut ptr ...",
+            .WeakReferenceType(_) then "weakref ...",
+            .MutableWeakReferenceType(_) then "mut weakref ...",
             .TraitObject(trait_name, _) then trait_name,
             .TypeVar(tv) then tv.val.display(),
             .Unknown() then "?",
@@ -115,15 +116,16 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
         .VoidType() then "Void",
         .NeverType() then "Never",
         .FunctionType(params, return_type) then {
-            let mut out = "["
+            let mut out = "Func["
             let mut first = true
             for entry in params then {
                 if not first then { out.push_string(", ") }
-                out.push_string(type_display_with_depth(entry.param_type, type_names, depth + (UInt)1))
+                out.push_string(type_display_with_depth(entry.param_type, type_names, depth + 1))
                 first = false
             }
-            out.push_string("]Func -> ")
-            out.push_string(type_display_with_depth(return_type.val, type_names, depth + (UInt)1))
+            if not params.is_empty() then { out.push_string(", ") }
+            out.push_string(type_display_with_depth(return_type.val, type_names, depth + 1))
+            out.push_byte(']')
             yield out
         },
         .StructureType(def_id) then when type_names.get(def_id.id) in {
@@ -134,36 +136,34 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
             .Some(name) then name,
             .None() then "enum#\(def_id.id)",
         },
-        .ReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) ref",
-        .MutableReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) mut ref",
-        .PointerType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) ptr",
-        .MutablePointerType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) mut ptr",
-        .WeakReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) weakref",
-        .MutableWeakReferenceType(inner) then "\(type_display_with_depth(inner.val, type_names, depth + (UInt)1)) mut weakref",
+        .ReferenceType(inner) then "ref \(type_display_with_depth(inner.val, type_names, depth + 1))",
+        .MutableReferenceType(inner) then "mut ref \(type_display_with_depth(inner.val, type_names, depth + 1))",
+        .PointerType(inner) then "ptr \(type_display_with_depth(inner.val, type_names, depth + 1))",
+        .MutablePointerType(inner) then "mut ptr \(type_display_with_depth(inner.val, type_names, depth + 1))",
+        .WeakReferenceType(inner) then "weakref \(type_display_with_depth(inner.val, type_names, depth + 1))",
+        .MutableWeakReferenceType(inner) then "mut weakref \(type_display_with_depth(inner.val, type_names, depth + 1))",
         .OpaqueType(def_id) then "opaque#\(def_id.id)",
         .GenericParameter(name) then name,
         .GenericStruct(template, args) then {
-            let mut out = "["
+            let mut out = "\(template)["
             let mut first = true
             for arg in args then {
                 if not first then { out.push_string(", ") }
-                out.push_string(type_display_with_depth(arg.val, type_names, depth + (UInt)1))
+                out.push_string(type_display_with_depth(arg.val, type_names, depth + 1))
                 first = false
             }
             out.push_byte(']')
-            out.push_string(template)
             yield out
         },
         .GenericEnum(template, args) then {
-            let mut out = "["
+            let mut out = "\(template)["
             let mut first = true
             for arg in args then {
                 if not first then { out.push_string(", ") }
-                out.push_string(type_display_with_depth(arg.val, type_names, depth + (UInt)1))
+                out.push_string(type_display_with_depth(arg.val, type_names, depth + 1))
                 first = false
             }
             out.push_byte(']')
-            out.push_string(template)
             yield out
         },
         .ModuleType(info) then {
@@ -175,7 +175,7 @@ private let type_display_with_depth(t Type, type_names [UInt, String]Dict, depth
     }
 }
 
-private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt, String]Dict) Void = {
+private let print_typed_decl_named(decl TypedDecl, level UInt, type_names Dict[UInt, String]) Void = {
     when decl in {
         .LetDecl(access, name, mutable, decl_type, initializer, span, _) then {
             let mut_kw = if mutable then "mut " else ""
@@ -292,7 +292,7 @@ private let print_typed_decl_named(decl TypedDecl, level UInt, type_names [UInt,
     }
 }
 
-private let print_given_members_named(members [TypedGivenMember]List, level UInt, type_names [UInt, String]Dict) Void = {
+private let print_given_members_named(members List[TypedGivenMember], level UInt, type_names Dict[UInt, String]) Void = {
     for m in members then {
         when m.body in {
             .Some(b) then {
@@ -306,7 +306,7 @@ private let print_given_members_named(members [TypedGivenMember]List, level UInt
     }
 }
 
-private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [UInt, String]Dict) Void = {
+private let print_typed_expr_named(expr ref TypedExpr, level UInt, type_names Dict[UInt, String]) Void = {
     let prefix = indent(level)
     let type_ann = " :: \(type_display(expr.expr_type, type_names))"
     when expr.expr_kind in {
@@ -555,7 +555,7 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
     }
 }
 
-private let print_typed_stmt_named(stmt TypedStatement, level UInt, type_names [UInt, String]Dict) Void = {
+private let print_typed_stmt_named(stmt TypedStatement, level UInt, type_names Dict[UInt, String]) Void = {
     let prefix = indent(level)
     when stmt in {
         .LetStmt(symbol, value, span) then {
@@ -620,7 +620,7 @@ private let print_typed_stmt_named(stmt TypedStatement, level UInt, type_names [
     }
 }
 
-private let typed_pair_binding_text(binding [Symbol ref]Option, type_names [UInt, String]Dict) String = {
+private let typed_pair_binding_text(binding Option[ref Symbol], type_names Dict[UInt, String]) String = {
     return when binding in {
         .Some(symbol) then {
             let mut_kw = if symbol.is_mutable() then "mut " else ""

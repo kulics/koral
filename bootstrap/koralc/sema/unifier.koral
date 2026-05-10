@@ -45,27 +45,27 @@ given UnificationError as Error {
 }
 
 private let unification_type_summary(t Type) String = {
-    return unification_type_summary_with_depth(t, (UInt)0)
+    return unification_type_summary_with_depth(t, 0(UInt))
 }
 
 private let unification_type_summary_with_depth(t Type, depth UInt) String = {
-    if depth >= (UInt)8 then {
+    if depth >= 8(UInt) then {
         return when t in {
-            .FunctionType(_, _) then "[...]Func",
-            .ReferenceType(_) then "... ref",
-            .MutableReferenceType(_) then "... mut ref",
-            .PointerType(_) then "... ptr",
-            .MutablePointerType(_) then "... mut ptr",
-            .WeakReferenceType(_) then "... weakref",
-            .MutableWeakReferenceType(_) then "... mut weakref",
+            .FunctionType(_, _) then "Func[...]",
+            .ReferenceType(_) then "ref ...",
+            .MutableReferenceType(_) then "mut ref ...",
+            .PointerType(_) then "ptr ...",
+            .MutablePointerType(_) then "mut ptr ...",
+            .WeakReferenceType(_) then "weakref ...",
+            .MutableWeakReferenceType(_) then "mut weakref ...",
             .GenericStruct(template, _) then {
-                let mut out = "[...]"
-                out.push_string(template)
+                let mut out = template
+                out.push_string("[...]")
                 yield out
             },
             .GenericEnum(template, _) then {
-                let mut out = "[...]"
-                out.push_string(template)
+                let mut out = template
+                out.push_string("[...]")
                 yield out
             },
             .StructureType(def_id) then {
@@ -107,15 +107,16 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
         .VoidType() then "Void",
         .NeverType() then "Never",
         .FunctionType(params, ret) then {
-            let mut out = "["
+            let mut out = "Func["
             let mut first = true
             for entry in params then {
                 if not first then { out.push_string(", ") }
-                out.push_string(unification_type_summary_with_depth(entry.param_type, depth + (UInt)1))
+                out.push_string(unification_type_summary_with_depth(entry.param_type, depth + 1(UInt)))
                 first = false
             }
-            out.push_string("]Func -> ")
-            out.push_string(unification_type_summary_with_depth(ret.val, depth + (UInt)1))
+            if not params.is_empty() then { out.push_string(", ") }
+            out.push_string(unification_type_summary_with_depth(ret.val, depth + 1(UInt)))
+            out.push_byte(']')
             yield out
         },
         .StructureType(def_id) then {
@@ -129,33 +130,33 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
             yield out
         },
         .ReferenceType(inner) then {
-            let mut out = unification_type_summary_with_depth(inner.val, depth + (UInt)1)
-            out.push_string(" ref")
+            let mut out = "ref "
+            out.push_string(unification_type_summary_with_depth(inner.val, depth + 1(UInt)))
             yield out
         },
         .MutableReferenceType(inner) then {
-            let mut out = unification_type_summary_with_depth(inner.val, depth + (UInt)1)
-            out.push_string(" mut ref")
+            let mut out = "mut ref "
+            out.push_string(unification_type_summary_with_depth(inner.val, depth + 1(UInt)))
             yield out
         },
         .PointerType(inner) then {
-            let mut out = unification_type_summary_with_depth(inner.val, depth + (UInt)1)
-            out.push_string(" ptr")
+            let mut out = "ptr "
+            out.push_string(unification_type_summary_with_depth(inner.val, depth + 1(UInt)))
             yield out
         },
         .MutablePointerType(inner) then {
-            let mut out = unification_type_summary_with_depth(inner.val, depth + (UInt)1)
-            out.push_string(" mut ptr")
+            let mut out = "mut ptr "
+            out.push_string(unification_type_summary_with_depth(inner.val, depth + 1(UInt)))
             yield out
         },
         .WeakReferenceType(inner) then {
-            let mut out = unification_type_summary_with_depth(inner.val, depth + (UInt)1)
-            out.push_string(" weakref")
+            let mut out = "weakref "
+            out.push_string(unification_type_summary_with_depth(inner.val, depth + 1(UInt)))
             yield out
         },
         .MutableWeakReferenceType(inner) then {
-            let mut out = unification_type_summary_with_depth(inner.val, depth + (UInt)1)
-            out.push_string(" mut weakref")
+            let mut out = "mut weakref "
+            out.push_string(unification_type_summary_with_depth(inner.val, depth + 1(UInt)))
             yield out
         },
         .OpaqueType(def_id) then {
@@ -165,27 +166,27 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
         },
         .GenericParameter(name) then name,
         .GenericStruct(template, args) then {
-            let mut out = "["
+            let mut out = template
+            out.push_byte('[')
             let mut first = true
             for arg in args then {
                 if not first then { out.push_string(", ") }
-                out.push_string(unification_type_summary_with_depth(arg.val, depth + (UInt)1))
+                out.push_string(unification_type_summary_with_depth(arg.val, depth + 1(UInt)))
                 first = false
             }
             out.push_byte(']')
-            out.push_string(template)
             yield out
         },
         .GenericEnum(template, args) then {
-            let mut out = "["
+            let mut out = template
+            out.push_byte('[')
             let mut first = true
             for arg in args then {
                 if not first then { out.push_string(", ") }
-                out.push_string(unification_type_summary_with_depth(arg.val, depth + (UInt)1))
+                out.push_string(unification_type_summary_with_depth(arg.val, depth + 1(UInt)))
                 first = false
             }
             out.push_byte(']')
-            out.push_string(template)
             yield out
         },
         .ModuleType(info) then {
@@ -211,51 +212,51 @@ given Unifier {
     // 核心合一方法。
     // 前置条件：lhs 和 rhs 是需要合一的两个类型。
     // 后置条件：成功时 union_find 中记录了等价关系；失败时返回 Error。
-    public unify(self mut ref, lhs Type, rhs Type, span SourceSpan) [Void]Result = {
+    public unify(self mut ref, lhs Type, rhs Type, span SourceSpan) Result[Void] = {
         let lhs_r = self.resolve(lhs)
         let rhs_r = self.resolve(rhs)
 
         // 相同类型直接返回 Ok
         if types_equal(lhs_r, rhs_r) then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         // lhs 是类型变量
         if lhs_r is .TypeVar(tv_ref) then {
             let tv = tv_ref.val
             if self.occurs_check(tv.id, rhs_r) then {
-                return [Void]Result.Error(box(UnificationError.OccursCheck(tv, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.OccursCheck(tv, rhs_r, span)))
             }
             self.union_find.bind(tv.id, rhs_r)
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         // rhs 是类型变量
         if rhs_r is .TypeVar(tv_ref) then {
             let tv = tv_ref.val
             if self.occurs_check(tv.id, lhs_r) then {
-                return [Void]Result.Error(box(UnificationError.OccursCheck(tv, lhs_r, span)))
+                return Result[Void].Error(box(UnificationError.OccursCheck(tv, lhs_r, span)))
             }
             self.union_find.bind(tv.id, lhs_r)
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         // 两边都是 FunctionType
         if lhs_r is .FunctionType(lhs_params, lhs_ret) then {
             if rhs_r is .FunctionType(rhs_params, rhs_ret) then {
                 if not (lhs_params.count() == rhs_params.count()) then {
-                    return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
+                    return Result[Void].Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                 }
-                let mut i = (UInt)0
+                let mut i = 0(UInt)
                 while i < lhs_params.count() then {
                     let lp = lhs_params[i].val.param_type
                     let rp = rhs_params[i].val.param_type
                     let _ = self.unify(lp, rp, span) or return
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 return self.unify(lhs_ret.val, rhs_ret.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -263,21 +264,21 @@ given Unifier {
         if lhs_r is .GenericStruct(lhs_tmpl, lhs_args) then {
             if rhs_r is .GenericStruct(rhs_tmpl, rhs_args) then {
                 if not (lhs_tmpl == rhs_tmpl) then {
-                    return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
+                    return Result[Void].Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
                 }
                 if not (lhs_args.count() == rhs_args.count()) then {
-                    return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
+                    return Result[Void].Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                 }
-                let mut i = (UInt)0
+                let mut i = 0(UInt)
                 while i < lhs_args.count() then {
                     let la = lhs_args[i].val
                     let ra = rhs_args[i].val
                     let _ = self.unify(la, ra, span) or return
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -285,21 +286,21 @@ given Unifier {
         if lhs_r is .GenericEnum(lhs_tmpl, lhs_args) then {
             if rhs_r is .GenericEnum(rhs_tmpl, rhs_args) then {
                 if not (lhs_tmpl == rhs_tmpl) then {
-                    return [Void]Result.Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
+                    return Result[Void].Error(box(UnificationError.TemplateMismatch(lhs_tmpl, rhs_tmpl, span)))
                 }
                 if not (lhs_args.count() == rhs_args.count()) then {
-                    return [Void]Result.Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
+                    return Result[Void].Error(box(UnificationError.ArityMismatch(lhs_r, rhs_r, span)))
                 }
-                let mut i = (UInt)0
+                let mut i = 0(UInt)
                 while i < lhs_args.count() then {
                     let la = lhs_args[i].val
                     let ra = rhs_args[i].val
                     let _ = self.unify(la, ra, span) or return
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -311,7 +312,7 @@ given Unifier {
             if rhs_r is .MutableReferenceType(rhs_inner) then {
                 return self.unify(lhs_inner.val, rhs_inner.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -320,7 +321,7 @@ given Unifier {
             if rhs_r is .MutableReferenceType(rhs_inner) then {
                 return self.unify(lhs_inner.val, rhs_inner.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -332,7 +333,7 @@ given Unifier {
             if rhs_r is .MutablePointerType(rhs_inner) then {
                 return self.unify(lhs_inner.val, rhs_inner.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -341,7 +342,7 @@ given Unifier {
             if rhs_r is .MutablePointerType(rhs_inner) then {
                 return self.unify(lhs_inner.val, rhs_inner.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -350,7 +351,7 @@ given Unifier {
             if rhs_r is .WeakReferenceType(rhs_inner) then {
                 return self.unify(lhs_inner.val, rhs_inner.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
@@ -359,20 +360,20 @@ given Unifier {
             if rhs_r is .MutableWeakReferenceType(rhs_inner) then {
                 return self.unify(lhs_inner.val, rhs_inner.val, span)
             } else {
-                return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+                return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
             }
         }
 
         // 两边都是 GenericParameter
         if lhs_r is .GenericParameter(lhs_name) then {
             if rhs_r is .GenericParameter(rhs_name) and lhs_name == rhs_name then {
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             }
-            return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+            return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
         }
 
         // 其他不兼容类型
-        return [Void]Result.Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
+        return Result[Void].Error(box(UnificationError.TypeMismatch(lhs_r, rhs_r, span)))
     }
 
     // 解析类型：将类型变量替换为已绑定的类型。
@@ -392,21 +393,21 @@ given Unifier {
                 }
             },
             .FunctionType(params, ret) then {
-                let mut new_params = [Type ref]List.new()
+                let mut new_params = List[ref Type].new()
                 for entry in params then {
                     new_params.push(box(self.resolve(entry.param_type)))
                 }
                 yield Type.FunctionType(types_to_param_entries(new_params), box(self.resolve(ret.val)))
             },
             .GenericStruct(template, args) then {
-                let mut new_args = [Type ref]List.new()
+                let mut new_args = List[ref Type].new()
                 for a in args then {
                     new_args.push(box(self.resolve(a.val)))
                 }
                 yield Type.GenericStruct(template, new_args)
             },
             .GenericEnum(template, args) then {
-                let mut new_args = [Type ref]List.new()
+                let mut new_args = List[ref Type].new()
                 for a in args then {
                     new_args.push(box(self.resolve(a.val)))
                 }
@@ -423,7 +424,7 @@ given Unifier {
     }
 
     // 获取当前所有绑定（TypeVariable.id -> Type）。
-    public current_bindings(self) [UInt, Type]Dict = {
+    public current_bindings(self) Dict[UInt, Type] = {
         return self.union_find.bindings
     }
 
@@ -443,7 +444,7 @@ given Unifier {
                 }
             },
             .FunctionType(params, ret) then {
-                let mut new_params = [Type ref]List.new()
+                let mut new_params = List[ref Type].new()
                 for entry in params then {
                     new_params.push(box(self.resolve_deep(entry.param_type)))
                 }
@@ -456,14 +457,14 @@ given Unifier {
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.resolve_deep(inner.val))),
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.resolve_deep(inner.val))),
             .GenericStruct(template, args) then {
-                let mut new_args = [Type ref]List.new()
+                let mut new_args = List[ref Type].new()
                 for a in args then {
                     new_args.push(box(self.resolve_deep(a.val)))
                 }
                 yield Type.GenericStruct(template, new_args)
             },
             .GenericEnum(template, args) then {
-                let mut new_args = [Type ref]List.new()
+                let mut new_args = List[ref Type].new()
                 for a in args then {
                     new_args.push(box(self.resolve_deep(a.val)))
                 }
@@ -482,12 +483,12 @@ given Unifier {
                 return tv_ref.val.id == tv_id
             },
             .FunctionType(params, ret) then {
-                let mut i = (UInt)0
+                let mut i = 0(UInt)
                 while i < params.count() then {
                     if self.occurs_check(tv_id, params[i].val.param_type) then {
                         return true
                     }
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 return self.occurs_check(tv_id, ret.val)
             },
@@ -510,22 +511,22 @@ given Unifier {
                 return self.occurs_check(tv_id, inner.val)
             },
             .GenericStruct(_, args) then {
-                let mut i = (UInt)0
+                let mut i = 0(UInt)
                 while i < args.count() then {
                     if self.occurs_check(tv_id, args[i].val) then {
                         return true
                     }
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 return false
             },
             .GenericEnum(_, args) then {
-                let mut i = (UInt)0
+                let mut i = 0(UInt)
                 while i < args.count() then {
                     if self.occurs_check(tv_id, args[i].val) then {
                         return true
                     }
-                    i += (UInt)1
+                    i += 1(UInt)
                 }
                 return false
             },

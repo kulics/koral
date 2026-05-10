@@ -8,12 +8,12 @@ given TypeChecker {
         }
     }
 
-    private trait_object_dispatch_type(self, receiver_type Type) [Type]Option = {
+    private trait_object_dispatch_type(self, receiver_type Type) Option[Type] = {
         return when receiver_type in {
-            .TraitObject(_, _) then [Type]Option.Some(receiver_type),
+            .TraitObject(_, _) then Option[Type].Some(receiver_type),
             .ReferenceType(inner) then self.trait_object_dispatch_type(inner.val),
             .MutableReferenceType(inner) then self.trait_object_dispatch_type(inner.val),
-            _ then [Type]Option.None(),
+            _ then Option[Type].None(),
         }
     }
 
@@ -29,7 +29,7 @@ given TypeChecker {
         }
     }
 
-    private check_option_flow_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_option_flow_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .OrElseExpr(operand, default_expr, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
@@ -89,34 +89,34 @@ given TypeChecker {
                     _ then success_type,
                 }
                 let result_span = unknown_span()
-                let mut arms = [TypedWhenArm]List.new()
+                let mut arms = List[TypedWhenArm].new()
 
                 if is_result then {
                     let ok_def_id = self.allocate_unindexed_def_id("__val", DefKind.Variable())
                     let ok_sym = Symbol(ok_def_id, result_type, SymbolKind.Variable(VariableKind.Value()))
-                    let mut ok_elems = [PatternElement]List.new()
-                    ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
+                    let mut ok_elems = List[PatternElement].new()
+                    ok_elems.push(PatternElement(Option[String].None(), box(PatternNode.Variable("__val", false, result_span))))
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
                     let ok_body = make_typed_expr(TypedExprKind.Variable(box(ok_sym)), result_type)
                     let mut ok_scope = Scope.new_child(scope)
                     arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(ok_pattern), typed_op.expr_type, ok_scope)), box(ok_body), ok_body.expr_type))
 
-                    let mut err_elems = [PatternElement]List.new()
-                    err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
+                    let mut err_elems = List[PatternElement].new()
+                    err_elems.push(PatternElement(Option[String].None(), box(PatternNode.Variable("it", false, result_span))))
                     let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
                     let mut err_scope = Scope.new_child(scope)
                     arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(err_pattern), typed_op.expr_type, err_scope)), box(typed_def), typed_def.expr_type))
                 } else {
                     let some_def_id = self.allocate_unindexed_def_id("__val", DefKind.Variable())
                     let some_sym = Symbol(some_def_id, result_type, SymbolKind.Variable(VariableKind.Value()))
-                    let mut some_elems = [PatternElement]List.new()
-                    some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__val", false, result_span))))
+                    let mut some_elems = List[PatternElement].new()
+                    some_elems.push(PatternElement(Option[String].None(), box(PatternNode.Variable("__val", false, result_span))))
                     let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     let some_body = make_typed_expr(TypedExprKind.Variable(box(some_sym)), result_type)
                     let mut some_scope = Scope.new_child(scope)
                     arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(some_pattern), typed_op.expr_type, some_scope)), box(some_body), some_body.expr_type))
 
-                    let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
+                    let none_pattern = PatternNode.EnumCase("None", List[PatternElement].new(), result_span)
                     let mut none_scope = Scope.new_child(scope)
                     arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(none_pattern), typed_op.expr_type, none_scope)), box(typed_def), typed_def.expr_type))
                 }
@@ -173,15 +173,15 @@ given TypeChecker {
                     }
 
                     let return_value = if is_result then {
-                        let mut args = [Expr ref]List.new()
+                        let mut args = List[ref Expr].new()
                         args.push(box(Expr.Identifier("it", span)))
                         yield Expr.ImplicitMemberExpr("Error", args, span)
                     } else {
-                        yield Expr.ImplicitMemberExpr("None", [Expr ref]List.new(), span)
+                        yield Expr.ImplicitMemberExpr("None", List[ref Expr].new(), span)
                     }
 
-                    let mut stmts = [Statement]List.new()
-                    stmts.push(Statement.ReturnStmt([Expr ref]Option.Some(box(return_value)), span))
+                    let mut stmts = List[Statement].new()
+                    stmts.push(Statement.ReturnStmt(Option[ref Expr].Some(box(return_value)), span))
                     let default_expr = box(Expr.Block(stmts, span))
                     let lowered = box(Expr.OrElseExpr(operand, default_expr, span))
                     yield self.check_expr_scoped_ref(lowered, expected, scope)
@@ -207,17 +207,17 @@ given TypeChecker {
                     yield self.is_option_result_wrapper(typed_tr.expr_type, "Option")
                 }
 
-                let mut arms = [TypedWhenArm]List.new()
+                let mut arms = List[TypedWhenArm].new()
                 let result_span = unknown_span()
                 if has_ok and has_error then {
-                    let mut ok_elems = [PatternElement]List.new()
-                    ok_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
+                    let mut ok_elems = List[PatternElement].new()
+                    ok_elems.push(PatternElement(Option[String].None(), box(PatternNode.Variable("it", false, result_span))))
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span)
 
                     if flattened then {
                         arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(ok_pattern), typed_op.expr_type, tr_scope)), box(typed_tr), typed_tr.expr_type))
                     } else {
-                        let mut ok_args = [TypedExpr ref]List.new()
+                        let mut ok_args = List[ref TypedExpr].new()
                         ok_args.push(box(typed_tr))
                         let ok_body = self.lower_enum_constructor_expr(final_type, "Ok", ok_args)
                         arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(ok_pattern), typed_op.expr_type, tr_scope)), box(ok_body), ok_body.expr_type))
@@ -226,29 +226,29 @@ given TypeChecker {
                     let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
                     let err_def_id = self.allocate_unindexed_def_id("__err", DefKind.Variable())
                     let err_sym = Symbol(err_def_id, err_type, SymbolKind.Variable(VariableKind.Value()))
-                    let mut err_elems = [PatternElement]List.new()
-                    err_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("__err", false, result_span))))
+                    let mut err_elems = List[PatternElement].new()
+                    err_elems.push(PatternElement(Option[String].None(), box(PatternNode.Variable("__err", false, result_span))))
                     let err_pattern = PatternNode.EnumCase("Error", err_elems, result_span)
-                    let mut err_args = [TypedExpr ref]List.new()
+                    let mut err_args = List[ref TypedExpr].new()
                     err_args.push(box(make_typed_expr(TypedExprKind.Variable(box(err_sym)), err_type)))
                     let err_body = self.lower_enum_constructor_expr(final_type, "Error", err_args)
                     let mut err_scope = Scope.new_child(scope)
                     arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(err_pattern), typed_op.expr_type, err_scope)), box(err_body), err_body.expr_type))
                 } else {
-                    let mut some_elems = [PatternElement]List.new()
-                    some_elems.push(PatternElement([String]Option.None(), box(PatternNode.Variable("it", false, result_span))))
+                    let mut some_elems = List[PatternElement].new()
+                    some_elems.push(PatternElement(Option[String].None(), box(PatternNode.Variable("it", false, result_span))))
                     let some_pattern = PatternNode.EnumCase("Some", some_elems, result_span)
                     if flattened then {
                         arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(some_pattern), typed_op.expr_type, tr_scope)), box(typed_tr), typed_tr.expr_type))
                     } else {
-                        let mut some_args = [TypedExpr ref]List.new()
+                        let mut some_args = List[ref TypedExpr].new()
                         some_args.push(box(typed_tr))
                         let some_body = self.lower_enum_constructor_expr(final_type, "Some", some_args)
                         arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(some_pattern), typed_op.expr_type, tr_scope)), box(some_body), some_body.expr_type))
                     }
 
-                    let none_pattern = PatternNode.EnumCase("None", [PatternElement]List.new(), result_span)
-                    let none_body = self.lower_enum_constructor_expr(final_type, "None", [TypedExpr ref]List.new())
+                    let none_pattern = PatternNode.EnumCase("None", List[PatternElement].new(), result_span)
+                    let none_body = self.lower_enum_constructor_expr(final_type, "None", List[ref TypedExpr].new())
                     let mut none_scope = Scope.new_child(scope)
                     arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(none_pattern), typed_op.expr_type, none_scope)), box(none_body), none_body.expr_type))
                 }
@@ -259,7 +259,7 @@ given TypeChecker {
         }
     }
 
-    private check_when_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_when_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .WhenExpr(subject, arms, span) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
@@ -271,12 +271,12 @@ given TypeChecker {
                     _ then typed_subj.expr_type,
                 }
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
-                let mut checked_arms = [WhenArm]List.new()
+                let mut checked_arms = List[WhenArm].new()
                 for arm in arms then {
                     let arm_body = arm.body
                     checked_arms.push(WhenArm(arm.pattern, arm_body))
                 }
-                let mut typed_arms = [TypedWhenArm]List.new()
+                let mut typed_arms = List[TypedWhenArm].new()
                 let mut result_type = Type.Unknown()
                 self.push_yield_target(span)
                 let mut running_expected = expected
@@ -286,20 +286,20 @@ given TypeChecker {
                     self.bind_pattern_vars(arm_pattern_ref, pattern_subject_type, arm_scope)
                     self.ensure_pattern_bindings_present(arm_pattern_ref, pattern_subject_type, arm_scope)
                     let hard_arm_expected = when expected in {
-                        .Some(et) then [Type]Option.Some(et),
+                        .Some(et) then Option[Type].Some(et),
                         .None() then if self.branch_needs_expected_type_for_implicit_member(arm.body)
                             then running_expected
-                            else [Type]Option.None(),
+                            else Option[Type].None(),
                     }
                     let soft_arm_expected = when expected in {
-                        .Some(_) then [Type]Option.None(),
+                        .Some(_) then Option[Type].None(),
                         .None() then if self.branch_needs_expected_type_for_implicit_member(arm.body)
-                            then [Type]Option.None()
+                            then Option[Type].None()
                             else when result_type in {
-                                .Unknown() then [Type]Option.None(),
-                                .TypeVar(_) then [Type]Option.None(),
-                                .NeverType() then [Type]Option.None(),
-                                _ then [Type]Option.Some(result_type),
+                                .Unknown() then Option[Type].None(),
+                                .TypeVar(_) then Option[Type].None(),
+                                .NeverType() then Option[Type].None(),
+                                _ then Option[Type].Some(result_type),
                             },
                     }
                     let raw_typed_body = self.check_expr_in_yield_body_context(arm.body, hard_arm_expected, arm_scope)
@@ -307,7 +307,7 @@ given TypeChecker {
                         .Some(_) then self.adapt_expr_to_expected_type_at(
                             raw_typed_body,
                             hard_arm_expected,
-                            [SourceSpan]Option.Some(expr_span(arm.body))
+                            Option[SourceSpan].Some(expr_span(arm.body))
                         ),
                         .None() then when soft_arm_expected in {
                             .Some(soft_expected) then if self.should_skip_soft_branch_adaptation(raw_typed_body.expr_type, soft_expected)
@@ -315,7 +315,7 @@ given TypeChecker {
                                 else self.adapt_expr_to_expected_type_at(
                                     raw_typed_body,
                                     soft_arm_expected,
-                                    [SourceSpan]Option.Some(expr_span(arm.body))
+                                    Option[SourceSpan].Some(expr_span(arm.body))
                                 ),
                             .None() then raw_typed_body,
                         },
@@ -325,14 +325,14 @@ given TypeChecker {
                         and self.is_implicit_member_context_type(typed_arm_type)
                     then {
                         running_expected = when running_expected in {
-                            .Some(current_expected) then [Type]Option.Some(
+                            .Some(current_expected) then Option[Type].Some(
                                 self.choose_conditional_result_type(
-                                    [Type]Option.None(),
+                                    Option[Type].None(),
                                     current_expected,
-                                    [Type]Option.Some(typed_arm_type)
+                                    Option[Type].Some(typed_arm_type)
                                 )
                             ),
-                            .None() then [Type]Option.Some(typed_arm_type),
+                            .None() then Option[Type].Some(typed_arm_type),
                         }
                     }
                     when result_type in {
@@ -360,7 +360,7 @@ given TypeChecker {
                     typed_arms.push(TypedWhenArm(box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope)), box(typed_body), typed_arm_type))
                 }
                 let _ = self.pop_yield_target()
-                let mut patterns = [TypedPattern ref]List.new()
+                let mut patterns = List[ref TypedPattern].new()
                 for typed_arm in typed_arms then {
                     patterns.push(typed_arm.pattern)
                 }
@@ -383,7 +383,7 @@ given TypeChecker {
         }
     }
 
-    private check_lambda_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_lambda_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .LambdaExpr(params, return_type, body, _) then {
                 let use_bidi = when expected in {
@@ -398,7 +398,7 @@ given TypeChecker {
                     let lambda_fn_type = self.build_lambda_function_type(box(bidi_result))
                     yield make_typed_expr_ref(bidi_result.expr_kind, lambda_fn_type)
                 } else {
-                    let mut typed_params = [TypedParam]List.new()
+                    let mut typed_params = List[TypedParam].new()
                     for p in params then {
                         let pt = when p.type_annotation in {
                             .Some(ta) then self.resolve_type_in_scope(ta, scope),
@@ -429,25 +429,25 @@ given TypeChecker {
                     self.storage.in_function = true
                     self.storage.in_loop = false
                     self.storage.in_finally = false
-                    self.storage.yield_targets = [YieldTarget mut ref]List.new()
+                    self.storage.yield_targets = List[mut ref YieldTarget].new()
                     let infer_return_type_from_block_returns = return_type is .None() and body is .Block(_, _)
                     if infer_return_type_from_block_returns then {
-                        self.storage.current_function_return_type = [Type]Option.None()
-                        self.storage.inferred_function_return_type = [Type]Option.None()
+                        self.storage.current_function_return_type = Option[Type].None()
+                        self.storage.inferred_function_return_type = Option[Type].None()
                         self.storage.is_inferring_function_return_type = true
                     } else {
                         let lambda_return_type_for_body_check = if self.is_unresolved_expr_type(ret)
                             then Type.VoidType()
                             else ret
-                        self.storage.current_function_return_type = [Type]Option.Some(lambda_return_type_for_body_check)
-                        self.storage.inferred_function_return_type = [Type]Option.None()
+                        self.storage.current_function_return_type = Option[Type].Some(lambda_return_type_for_body_check)
+                        self.storage.inferred_function_return_type = Option[Type].None()
                         self.storage.is_inferring_function_return_type = false
                     }
                     let body_expected = if body is .Block(_, _)
-                        then [Type]Option.None()
+                        then Option[Type].None()
                         else if self.is_unresolved_expr_type(ret)
-                            then [Type]Option.None()
-                            else [Type]Option.Some(ret)
+                            then Option[Type].None()
+                            else Option[Type].Some(ret)
                     let typed_body = self.check_expr_in_yield_body_context(body, body_expected, lambda_scope)
                     let inferred_return_type = self.storage.inferred_function_return_type
                     self.storage.yield_targets = prev_yield_targets
@@ -476,46 +476,46 @@ given TypeChecker {
         }
     }
 
-    private resolve_implicit_static_receiver_type(self, expected [Type]Option, member_name String) [Type]Option = {
+    private resolve_implicit_static_receiver_type(self, expected Option[Type], member_name String) Option[Type] = {
         return when expected in {
             .Some(et) then when et in {
                 .GenericStruct(template_name, _) then if self.lookup_method_signature(template_name, member_name) is .Some(_)
-                    then [Type]Option.Some(et)
-                    else [Type]Option.None(),
+                    then Option[Type].Some(et)
+                    else Option[Type].None(),
                 .StructureType(def_id) then {
                     let type_name = self.context().get_name(def_id) or else ""
                     yield if self.lookup_method_signature(type_name, member_name) is .Some(_)
-                        then [Type]Option.Some(et)
-                        else [Type]Option.None()
+                        then Option[Type].Some(et)
+                        else Option[Type].None()
                 },
-                .IntType() then if self.lookup_method_signature("Int", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .Int8Type() then if self.lookup_method_signature("Int8", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .Int16Type() then if self.lookup_method_signature("Int16", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .Int32Type() then if self.lookup_method_signature("Int32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .Int64Type() then if self.lookup_method_signature("Int64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .UIntType() then if self.lookup_method_signature("UInt", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .UInt8Type() then if self.lookup_method_signature("UInt8", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .UInt16Type() then if self.lookup_method_signature("UInt16", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .UInt32Type() then if self.lookup_method_signature("UInt32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .UInt64Type() then if self.lookup_method_signature("UInt64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .Float32Type() then if self.lookup_method_signature("Float32", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .Float64Type() then if self.lookup_method_signature("Float64", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .BoolType() then if self.lookup_method_signature("Bool", member_name) is .Some(_) then [Type]Option.Some(et) else [Type]Option.None(),
-                .EnumType(_) then [Type]Option.None(),
-                .GenericEnum(_, _) then [Type]Option.None(),
+                .IntType() then if self.lookup_method_signature("Int", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .Int8Type() then if self.lookup_method_signature("Int8", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .Int16Type() then if self.lookup_method_signature("Int16", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .Int32Type() then if self.lookup_method_signature("Int32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .Int64Type() then if self.lookup_method_signature("Int64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .UIntType() then if self.lookup_method_signature("UInt", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .UInt8Type() then if self.lookup_method_signature("UInt8", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .UInt16Type() then if self.lookup_method_signature("UInt16", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .UInt32Type() then if self.lookup_method_signature("UInt32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .UInt64Type() then if self.lookup_method_signature("UInt64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .Float32Type() then if self.lookup_method_signature("Float32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .Float64Type() then if self.lookup_method_signature("Float64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .BoolType() then if self.lookup_method_signature("Bool", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
+                .EnumType(_) then Option[Type].None(),
+                .GenericEnum(_, _) then Option[Type].None(),
                 _ then {
                     let implicit_type_name = if self.is_string_type(et) then "String" else if self.is_rune_type(et) then "Rune" else ""
-                    yield if implicit_type_name.is_empty() then [Type]Option.None()
+                    yield if implicit_type_name.is_empty() then Option[Type].None()
                         else if self.lookup_method_signature(implicit_type_name, member_name) is .Some(_)
-                            then [Type]Option.Some(et)
-                            else [Type]Option.None()
+                            then Option[Type].Some(et)
+                            else Option[Type].None()
                 },
             },
-            .None() then [Type]Option.None(),
+            .None() then Option[Type].None(),
         }
     }
 
-    private implicit_static_receiver_type_name(self, receiver_opt [Type]Option) String = {
+    private implicit_static_receiver_type_name(self, receiver_opt Option[Type]) String = {
         return when receiver_opt in {
             .Some(receiver_type) then when receiver_type in {
                 .GenericStruct(template_name, _) then template_name,
@@ -541,27 +541,27 @@ given TypeChecker {
 
     private implicit_member_param_types(
         self,
-        implicit_static_receiver_opt [Type]Option,
+        implicit_static_receiver_opt Option[Type],
         implicit_static_type_name String,
-        expected [Type]Option,
+        expected Option[Type],
         member_name String
-    ) [Type]List = {
+    ) List[Type] = {
         return when implicit_static_receiver_opt in {
             .Some(_) then self.resolve_static_method_param_types(implicit_static_type_name, member_name),
             .None() then when expected in {
                 .Some(et) then self.get_enum_case_field_types(et, member_name),
-                .None() then [Type]List.new(),
+                .None() then List[Type].new(),
             },
         }
     }
 
-    private check_implicit_member_args(self, args [Expr ref]List ref, param_types [Type]List, scope Scope) [TypedExpr ref]List = {
-        let mut typed_args = [TypedExpr ref]List.new()
+    private check_implicit_member_args(self, args ref List[ref Expr], param_types List[Type], scope Scope) List[ref TypedExpr] = {
+        let mut typed_args = List[ref TypedExpr].new()
         let mut arg_idx UInt = 0
         for a in args then {
             let arg_expected = when param_types.get(arg_idx) in {
-                .Some(ft) then [Type]Option.Some(ft),
-                .None() then [Type]Option.None(),
+                .Some(ft) then Option[Type].Some(ft),
+                .None() then Option[Type].None(),
             }
             typed_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
             arg_idx += 1
@@ -571,16 +571,16 @@ given TypeChecker {
 
     private lower_implicit_member_expr_from_typed_args(
         self,
-        implicit_static_receiver_opt [Type]Option,
+        implicit_static_receiver_opt Option[Type],
         member_name String,
-        typed_args [TypedExpr ref]List,
-        expected [Type]Option
+        typed_args List[ref TypedExpr],
+        expected Option[Type]
     ) TypedExpr = {
         let typed_implicit_static_call_opt = when implicit_static_receiver_opt in {
             .Some(receiver_type) then {
-                yield [TypedExpr]Option.Some(self.lower_static_method_call_expr(receiver_type, member_name, typed_args, receiver_type))
+                yield Option[TypedExpr].Some(self.lower_static_method_call_expr(receiver_type, member_name, typed_args, receiver_type))
             },
-            .None() then [TypedExpr]Option.None(),
+            .None() then Option[TypedExpr].None(),
         }
         let inferred_enum_type = when expected in {
             .Some(et) then et,
@@ -594,7 +594,7 @@ given TypeChecker {
         }
     }
 
-    private check_implicit_member_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_implicit_member_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .ImplicitMemberExpr(member_name, args, _) then {
                 if expected is .None() then {
@@ -617,7 +617,7 @@ given TypeChecker {
         }
     }
 
-    private branch_needs_expected_type_for_implicit_member(self, expr Expr ref) Bool = {
+    private branch_needs_expected_type_for_implicit_member(self, expr ref Expr) Bool = {
         let _ = self
         return when expr in {
             .ImplicitMemberExpr(_, _, _) then true,
@@ -636,45 +636,45 @@ given TypeChecker {
         }
     }
 
-    private common_branch_supertype(self, lhs Type, rhs Type) [Type]Option = {
-        return if self.same_expr_type(lhs, rhs) then [Type]Option.Some(lhs) else when lhs in {
+    private common_branch_supertype(self, lhs Type, rhs Type) Option[Type] = {
+        return if self.same_expr_type(lhs, rhs) then Option[Type].Some(lhs) else when lhs in {
             .ReferenceType(left_inner) then when rhs in {
                 .MutableReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
-                    then [Type]Option.Some(Type.ReferenceType(left_inner))
-                    else [Type]Option.None(),
-                _ then [Type]Option.None(),
+                    then Option[Type].Some(Type.ReferenceType(left_inner))
+                    else Option[Type].None(),
+                _ then Option[Type].None(),
             },
             .MutableReferenceType(left_inner) then when rhs in {
                 .ReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
-                    then [Type]Option.Some(Type.ReferenceType(right_inner))
-                    else [Type]Option.None(),
-                _ then [Type]Option.None(),
+                    then Option[Type].Some(Type.ReferenceType(right_inner))
+                    else Option[Type].None(),
+                _ then Option[Type].None(),
             },
             .PointerType(left_inner) then when rhs in {
                 .MutablePointerType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
-                    then [Type]Option.Some(Type.PointerType(left_inner))
-                    else [Type]Option.None(),
-                _ then [Type]Option.None(),
+                    then Option[Type].Some(Type.PointerType(left_inner))
+                    else Option[Type].None(),
+                _ then Option[Type].None(),
             },
             .MutablePointerType(left_inner) then when rhs in {
                 .PointerType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
-                    then [Type]Option.Some(Type.PointerType(right_inner))
-                    else [Type]Option.None(),
-                _ then [Type]Option.None(),
+                    then Option[Type].Some(Type.PointerType(right_inner))
+                    else Option[Type].None(),
+                _ then Option[Type].None(),
             },
             .WeakReferenceType(left_inner) then when rhs in {
                 .MutableWeakReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
-                    then [Type]Option.Some(Type.WeakReferenceType(left_inner))
-                    else [Type]Option.None(),
-                _ then [Type]Option.None(),
+                    then Option[Type].Some(Type.WeakReferenceType(left_inner))
+                    else Option[Type].None(),
+                _ then Option[Type].None(),
             },
             .MutableWeakReferenceType(left_inner) then when rhs in {
                 .WeakReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
-                    then [Type]Option.Some(Type.WeakReferenceType(right_inner))
-                    else [Type]Option.None(),
-                _ then [Type]Option.None(),
+                    then Option[Type].Some(Type.WeakReferenceType(right_inner))
+                    else Option[Type].None(),
+                _ then Option[Type].None(),
             },
-            _ then [Type]Option.None(),
+            _ then Option[Type].None(),
         }
     }
 
@@ -698,7 +698,7 @@ given TypeChecker {
 
     private report_expected_void_branch_mismatch(
         self,
-        expected [Type]Option,
+        expected Option[Type],
         then_type Type,
         else_type Type,
         span SourceSpan,
@@ -721,7 +721,7 @@ given TypeChecker {
         }
     }
 
-    private check_conditional_loop_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_conditional_loop_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .IfExpr(condition, then_branch, else_branch, _) then {
                 let lowered_opt = self.lower_if_condition_with_bindings(condition, then_branch, else_branch, unknown_span())
@@ -733,7 +733,7 @@ given TypeChecker {
                                 when typed_lowered.expr_kind in {
                                     .WhenExpr(_, arms) then {
                                         if not arms.is_empty() then {
-                                            let single_branch_then_type = self.concretize_default_literal_type(arms[(UInt)0].body.expr_type)
+                                            let single_branch_then_type = self.concretize_default_literal_type(arms[0(UInt)].body.expr_type)
                                             let then_is_valid_single_branch = when single_branch_then_type in {
                                                 .VoidType() then true,
                                                 .NeverType() then true,
@@ -760,7 +760,7 @@ given TypeChecker {
                     .None() then {
                         let chain = self.collect_if_chain(condition, then_branch, else_branch)
 
-                        let mut typed_arms = [[TypedExpr ref, TypedExpr ref]Pair]List.new()
+                        let mut typed_arms = List[Pair[ref TypedExpr, ref TypedExpr]].new()
                         self.push_yield_target(expr_span(expr))
                         for arm in chain.arms then {
                             let typed_cond = when arm.first in {
@@ -768,16 +768,16 @@ given TypeChecker {
                                 _ then self.check_expr_core_ref(arm.first, .Some(Type.BoolType()), scope),
                             }
                             let typed_then = self.check_expr_in_yield_body_context(arm.second, expected, scope)
-                            typed_arms.push([TypedExpr ref, TypedExpr ref]Pair(box(typed_cond), box(typed_then)))
+                            typed_arms.push(Pair[ref TypedExpr, ref TypedExpr](box(typed_cond), box(typed_then)))
                         }
 
                         let final_else_expected = when chain.final_else in {
                             .Some(eb) then if expected is .None()
                                 and self.branch_needs_expected_type_for_implicit_member(eb)
                                 and not typed_arms.is_empty()
-                                and typed_arms[typed_arms.count() - (UInt)1].second.val.expr_type is not .NeverType()
-                                and self.is_implicit_member_context_type(typed_arms[typed_arms.count() - (UInt)1].second.val.expr_type)
-                            then [Type]Option.Some(typed_arms[typed_arms.count() - (UInt)1].second.val.expr_type)
+                                and typed_arms[typed_arms.count() - 1(UInt)].second.val.expr_type is not .NeverType()
+                                and self.is_implicit_member_context_type(typed_arms[typed_arms.count() - 1(UInt)].second.val.expr_type)
+                            then Option[Type].Some(typed_arms[typed_arms.count() - 1(UInt)].second.val.expr_type)
                             else expected,
                             .None() then expected,
                         }
@@ -785,9 +785,9 @@ given TypeChecker {
                         let mut current_else = when chain.final_else in {
                             .Some(eb) then {
                                 let typed_else = self.check_expr_in_yield_body_context(eb, final_else_expected, scope)
-                                yield [TypedExpr ref]Option.Some(box(typed_else))
+                                yield Option[ref TypedExpr].Some(box(typed_else))
                             },
-                            .None() then [TypedExpr ref]Option.None(),
+                            .None() then Option[ref TypedExpr].None(),
                         }
 
                         let mut i = typed_arms.count()
@@ -845,9 +845,9 @@ given TypeChecker {
                             }
                             let result_type = when current_else in {
                                 .Some(typed_else_ref) then self.choose_conditional_result_type(
-                                    [Type]Option.None(),
+                                    Option[Type].None(),
                                     typed_then.expr_type,
-                                    [Type]Option.Some(typed_else_ref.expr_type)
+                                    Option[Type].Some(typed_else_ref.expr_type)
                                 ),
                                 .None() then Type.VoidType(),
                             }
@@ -856,7 +856,7 @@ given TypeChecker {
                                 result_type
                             )
                             final_if_expr = node
-                            current_else = [TypedExpr ref]Option.Some(box(node))
+                            current_else = Option[ref TypedExpr].Some(box(node))
                         }
                         let _ = self.pop_yield_target()
                         yield final_if_expr
@@ -867,7 +867,7 @@ given TypeChecker {
         }
     }
 
-    private check_control_flow_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_control_flow_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .Block(statements, _) then self.check_block(statements, expected, scope),
             .IfExpr(_, _, _, _) then self.check_conditional_loop_expr_ref(expr, expected, scope),
@@ -880,12 +880,12 @@ given TypeChecker {
         }
     }
 
-    private check_member_dispatch_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_member_dispatch_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .MemberPath(base, path, _) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 let mut current_type = typed_base.expr_type
-                let mut copied_path = [String]List.new()
+                let mut copied_path = List[String].new()
                 for seg in path then {
                     copied_path.push(seg)
                 }
@@ -929,7 +929,7 @@ given TypeChecker {
                 yield self.adapt_expr_to_expected_type_at(
                     member_expr,
                     expected,
-                    [SourceSpan]Option.Some(expr_span(expr))
+                    Option[SourceSpan].Some(expr_span(expr))
                 )
             },
             .GenericMethodCall(base, method_type_args, method_name, args, _) then {
@@ -937,24 +937,24 @@ given TypeChecker {
                 let trait_constraint_opt = self.find_trait_constraint_for_method(initial_typed_base.expr_type, method_name)
                 let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
-                let mut resolved_method_type_args = [Type]List.new()
+                let mut resolved_method_type_args = List[Type].new()
                 for method_type_arg in method_type_args then {
                     resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
                 }
                 let gmc_param_types = self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args)
                 let gmc_param_specs = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
                     .Some(sig) then self.drop_receiver_param_specs(sig),
-                    .None() then [FunctionParamSpec]List.new(),
+                    .None() then List[FunctionParamSpec].new(),
                 }
-                let mut typed_args = [TypedExpr ref]List.new()
+                let mut typed_args = List[ref TypedExpr].new()
                 let mut gmc_arg_idx UInt = 0
                 for a in args then {
                     let gmc_param_expected = when gmc_param_types.get(gmc_arg_idx) in {
-                        .Some(pt) then [Type]Option.Some(pt),
-                        .None() then [Type]Option.None(),
+                        .Some(pt) then Option[Type].Some(pt),
+                        .None() then Option[Type].None(),
                     }
                     let typed_arg = self.check_expr_scoped_ref(a, gmc_param_expected, scope)
-                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, gmc_param_expected, [SourceSpan]Option.Some(expr_span(a)))))
+                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, gmc_param_expected, Option[SourceSpan].Some(expr_span(a)))))
                     gmc_arg_idx += 1
                 }
                 let effective_method_type_args = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
@@ -1004,11 +1004,11 @@ given TypeChecker {
                     _ then false,
                 }
                 yield if should_use_static_dispatch and static_receiver_is_type_symbol then {
-                    let mut static_args = [TypedExpr ref]List.new()
+                    let mut static_args = List[ref TypedExpr].new()
                     for arg in typed_args then {
                         static_args.push(arg)
                     }
-                    yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, self.context().symbol_name(method_symbol), box(method_symbol), [Type]List.new(), [Type]List.new(), static_args), final_ret_type)
+                    yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, self.context().symbol_name(method_symbol), box(method_symbol), List[Type].new(), List[Type].new(), static_args), final_ret_type)
                 } else {
                     let callee = when trait_constraint_opt in {
                         .Some(trait_name) then if trait_dispatch_requires_object then {
@@ -1023,7 +1023,7 @@ given TypeChecker {
                             )
                         } else {
                             yield make_typed_expr(
-                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
+                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), List[Type].new(), effective_method_type_args, .None()),
                                 method_symbol.symbol_type,
                             )
                         },
@@ -1033,7 +1033,7 @@ given TypeChecker {
                                 method_symbol.symbol_type,
                             ),
                             .None() then make_typed_expr(
-                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), [Type]List.new(), effective_method_type_args, .None()),
+                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), List[Type].new(), effective_method_type_args, .None()),
                                 method_symbol.symbol_type,
                             ),
                         },
@@ -1047,28 +1047,28 @@ given TypeChecker {
                     or initial_typed_base.expr_type is .GenericParameter(_)
                 let expected_self_type = if trait_dispatch_requires_object
                     then self.resolve_trait_method_self_type(trait_name, method_name, initial_typed_base.expr_type)
-                    else [Type]Option.None()
+                    else Option[Type].None()
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let qmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
                 let qmc_param_specs = self.resolve_qualified_method_param_specs(trait_name, method_name)
-                let mut typed_args = [TypedExpr ref]List.new()
+                let mut typed_args = List[ref TypedExpr].new()
                 let mut qmc_arg_idx UInt = 0
                 for a in args then {
                     let qmc_param_expected = when qmc_param_types.get(qmc_arg_idx) in {
-                        .Some(pt) then [Type]Option.Some(pt),
-                        .None() then [Type]Option.None(),
+                        .Some(pt) then Option[Type].Some(pt),
+                        .None() then Option[Type].None(),
                     }
                     let typed_arg = self.check_expr_scoped_ref(a, qmc_param_expected, scope)
-                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, qmc_param_expected, [SourceSpan]Option.Some(expr_span(a)))))
+                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, qmc_param_expected, Option[SourceSpan].Some(expr_span(a)))))
                     qmc_arg_idx += 1
                 }
-                self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, [Type]List.new())
+                self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, List[Type].new())
                 let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
                 let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
                 let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type)) else typed_base
                 let callee = make_typed_expr(
-                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), [Type]List.new(), .None()),
+                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), List[Type].new(), .None()),
                     method_symbol.symbol_type,
                 )
                 yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), qmc_ret_type)
@@ -1079,23 +1079,23 @@ given TypeChecker {
                     or initial_typed_base.expr_type is .GenericParameter(_)
                 let expected_self_type = if trait_dispatch_requires_object
                     then self.resolve_trait_method_self_type(trait_name, method_name, initial_typed_base.expr_type)
-                    else [Type]Option.None()
+                    else Option[Type].None()
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
-                let mut resolved_method_type_args = [Type]List.new()
+                let mut resolved_method_type_args = List[Type].new()
                 for method_type_arg in method_type_args then {
                     resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
                 }
                 let qgmc_param_types = self.resolve_trait_method_param_types(trait_name, method_name, typed_base.expr_type)
                 let qgmc_param_specs = self.resolve_qualified_method_param_specs(trait_name, method_name)
-                let mut typed_args = [TypedExpr ref]List.new()
+                let mut typed_args = List[ref TypedExpr].new()
                 let mut qgmc_arg_idx UInt = 0
                 for a in args then {
                     let qgmc_param_expected = when qgmc_param_types.get(qgmc_arg_idx) in {
-                        .Some(pt) then [Type]Option.Some(pt),
-                        .None() then [Type]Option.None(),
+                        .Some(pt) then Option[Type].Some(pt),
+                        .None() then Option[Type].None(),
                     }
                     let typed_arg = self.check_expr_scoped_ref(a, qgmc_param_expected, scope)
-                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, qgmc_param_expected, [SourceSpan]Option.Some(expr_span(a)))))
+                    typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, qgmc_param_expected, Option[SourceSpan].Some(expr_span(a)))))
                     qgmc_arg_idx += 1
                 }
                 self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, resolved_method_type_args)
@@ -1110,12 +1110,12 @@ given TypeChecker {
                 yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), qgmc_ret_type)
             },
             .GenericInstantiation(base, type_args, _) then {
-                let mut resolved_args = [Type]List.new()
+                let mut resolved_args = List[Type].new()
                 for ta in type_args then {
                     resolved_args.push(self.resolve_type_in_scope(ta.val, scope))
                 }
                 let base_type_opt = when self.lookup_current_file_type_symbol(base) in {
-                    .Some(t) then [Type]Option.Some(t),
+                    .Some(t) then Option[Type].Some(t),
                     .None() then self.storage.global_scope.lookup_type(base),
                 }
                 if base_type_opt is .Some(base_type) then {
@@ -1123,8 +1123,8 @@ given TypeChecker {
                         .EnumType(_) then true,
                         _ then false,
                     }
-                    let mut type_refs_u = [Type ref]List.new()
-                    let mut type_refs_s = [Type ref]List.new()
+                    let mut type_refs_u = List[ref Type].new()
+                    let mut type_refs_s = List[ref Type].new()
                     for t in resolved_args then {
                         type_refs_u.push(box(t))
                         type_refs_s.push(box(t))
@@ -1140,7 +1140,7 @@ given TypeChecker {
                     .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
                     .None() then {
                         self.push_expr_diagnostic(expr, "Undefined type: \(base)")
-                        yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, [Type ref]List.new()), resolved_args), Type.Unknown())
+                        yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, List[ref Type].new()), resolved_args), Type.Unknown())
                     },
                 }
             },
@@ -1156,7 +1156,7 @@ given TypeChecker {
                 yield when base_inner_type in {
                     .PointerType(element_ref) then {
                         let element = element_ref.val
-                        let typed_index = self.check_expr_scoped_ref(args[0], [Type]Option.Some(Type.UIntType()), scope)
+                        let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
                         let ptr_expr = box(typed_base)
                         let offset_expr = make_typed_expr(
                             TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
@@ -1166,7 +1166,7 @@ given TypeChecker {
                     },
                     .MutablePointerType(element_ref) then {
                         let element = element_ref.val
-                        let typed_index = self.check_expr_scoped_ref(args[0], [Type]Option.Some(Type.UIntType()), scope)
+                        let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
                         let ptr_expr = box(typed_base)
                         let offset_expr = make_typed_expr(
                             TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
@@ -1176,12 +1176,12 @@ given TypeChecker {
                     },
                     _ then {
                         let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "ref_at")
-                        let mut typed_args = [TypedExpr ref]List.new()
+                        let mut typed_args = List[ref TypedExpr].new()
                         let mut sub_arg_idx UInt = 0
                         for a in args then {
                             let sub_param_expected = when subscript_param_types.get(sub_arg_idx) in {
-                                .Some(pt) then [Type]Option.Some(pt),
-                                .None() then [Type]Option.None(),
+                                .Some(pt) then Option[Type].Some(pt),
+                                .None() then Option[Type].None(),
                             }
                             typed_args.push(box(self.check_expr_scoped_ref(a, sub_param_expected, scope)))
                             sub_arg_idx += 1
@@ -1207,7 +1207,7 @@ given TypeChecker {
         }
     }
 
-    private check_literal_pattern_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_literal_pattern_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .IntegerLiteral(value, _) then {
@@ -1315,18 +1315,18 @@ given TypeChecker {
         }
     }
 
-    private ref_expr_inner_expected(self, expected [Type]Option) [Type]Option = {
+    private ref_expr_inner_expected(self, expected Option[Type]) Option[Type] = {
         return when expected in {
             .Some(et) then when et in {
-                .ReferenceType(inner_t) then [Type]Option.Some(inner_t.val),
-                .MutableReferenceType(inner_t) then [Type]Option.Some(inner_t.val),
-                _ then [Type]Option.None(),
+                .ReferenceType(inner_t) then Option[Type].Some(inner_t.val),
+                .MutableReferenceType(inner_t) then Option[Type].Some(inner_t.val),
+                _ then Option[Type].None(),
             },
-            .None() then [Type]Option.None(),
+            .None() then Option[Type].None(),
         }
     }
 
-    private finish_ref_expr(self, expr Expr ref, inner Expr ref, typed_inner TypedExpr, expected [Type]Option) TypedExpr = {
+    private finish_ref_expr(self, expr ref Expr, inner ref Expr, typed_inner TypedExpr, expected Option[Type]) TypedExpr = {
         let typed_inner_ref = box(typed_inner)
         let is_addressable = self.is_implicit_ref_candidate_shape(typed_inner_ref) or inner is .DerefExpr(_, _)
         if not is_addressable then {
@@ -1363,16 +1363,16 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.RefExpr(typed_inner_ref), ref_type)
     }
 
-    private check_ref_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_ref_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .RefExpr(inner, _) then {
-                let mut inner_expected = [Type]Option.None()
+                let mut inner_expected = Option[Type].None()
                 let mut expected_mutable = false
                 when expected in {
                     .Some(et) then when et in {
-                        .ReferenceType(inner_t) then { inner_expected = [Type]Option.Some(inner_t.val) },
+                        .ReferenceType(inner_t) then { inner_expected = Option[Type].Some(inner_t.val) },
                         .MutableReferenceType(inner_t) then {
-                            inner_expected = [Type]Option.Some(inner_t.val)
+                            inner_expected = Option[Type].Some(inner_t.val)
                             expected_mutable = true
                         },
                         _ then {},
@@ -1425,7 +1425,7 @@ given TypeChecker {
         }
     }
 
-    private check_weakref_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_weakref_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         let _ = expected
         return when expr in {
             .WeakrefExpr(inner, _) then {
@@ -1451,7 +1451,7 @@ given TypeChecker {
         }
     }
 
-    private check_ptr_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_ptr_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         let _ = expected
         return when expr in {
             .PtrExpr(inner, _) then {
@@ -1476,7 +1476,7 @@ given TypeChecker {
         }
     }
 
-    private check_deref_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_deref_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         let _ = expected
         let _ = scope
         return when expr in {
@@ -1557,7 +1557,7 @@ given TypeChecker {
                         if has_deref_bound then {
                             checked_type = inner_t
                         } else {
-                            let ptr_type_name = self.display_type_name(typed_inner.expr_type)
+                            let ptr_type_name = "\(param_name) ptr"
                             self.push_expr_diagnostic(
                                 expr,
                                 "Cannot use .val on '\(ptr_type_name)': type parameter '\(param_name)' does not have 'Deref' bound. Add 'Deref' constraint: [\(param_name) Deref]"
@@ -1575,7 +1575,7 @@ given TypeChecker {
         }
     }
 
-    private check_reference_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_reference_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .RefExpr(_, _) then self.check_ref_expr_ref(expr, expected, scope),
             .WeakrefExpr(_, _) then self.check_weakref_expr_ref(expr, expected, scope),
@@ -1585,7 +1585,7 @@ given TypeChecker {
         }
     }
 
-    private check_basic_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_basic_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .Identifier(_, _) then self.check_literal_pattern_expr_ref(expr, expected, scope),
             .IntegerLiteral(_, _) then self.check_literal_pattern_expr_ref(expr, expected, scope),
@@ -1606,7 +1606,7 @@ given TypeChecker {
         }
     }
 
-    private check_expr_core_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_expr_core_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         let result = when expr in {
             .Identifier(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .IntegerLiteral(_, _) then self.check_basic_expr_ref(expr, expected, scope),

@@ -8,28 +8,28 @@
 
 // 模式条件生成的结果
 public type PatternConditionResult(
-    prelude String mut ref,
-    prelude_vars [[String, Type]Pair]List,
+    prelude mut ref String,
+    prelude_vars List[Pair[String, Type]],
     condition String,
-    bindings String mut ref,
-    vars [[String, Type]Pair]List,
-    aliases [[String, String]Pair]List,
+    bindings mut ref String,
+    vars List[Pair[String, Type]],
+    aliases List[Pair[String, String]],
 )
 
 given CodeGen {
     private variable_pattern_condition_result(self mut ref, name String, path String, subject_type Type) PatternConditionResult = {
-        let aliases = if not self.type_is_void(subject_type) then self.pattern_binding_aliases_for_name(name, path) else [[String, String]Pair]List.new()
+        let aliases = if not self.type_is_void(subject_type) then self.pattern_binding_aliases_for_name(name, path) else List[Pair[String, String]].new()
         return PatternConditionResult(
             box(String.new()),
-            [[String, Type]Pair]List.new(),
+            List[Pair[String, Type]].new(),
             "1",
             box(String.new()),
-            [[String, Type]Pair]List.new(),
+            List[Pair[String, Type]].new(),
             aliases,
         )
     }
 
-    private pattern_subject_access(self mut ref, subject_value String, subject_type Type) [String, Type]Pair = {
+    private pattern_subject_access(self mut ref, subject_value String, subject_type Type) Pair[String, Type] = {
         return when subject_type in {
             .ReferenceType(inner_ref) then {
                 let inner = inner_ref.val
@@ -37,7 +37,7 @@ given CodeGen {
                 let deref_ptr = self.next_temp() + "_deref"
                 self.add_indent()
                 self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_value).ptr;\n")
-                yield [String, Type]Pair("(*\(deref_ptr))", inner)
+                yield Pair[String, Type]("(*\(deref_ptr))", inner)
             },
             .MutableReferenceType(inner_ref) then {
                 let inner = inner_ref.val
@@ -45,7 +45,7 @@ given CodeGen {
                 let deref_ptr = self.next_temp() + "_deref"
                 self.add_indent()
                 self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_value).ptr;\n")
-                yield [String, Type]Pair("(*\(deref_ptr))", inner)
+                yield Pair[String, Type]("(*\(deref_ptr))", inner)
             },
             .WeakReferenceType(inner_ref) then {
                 let inner = inner_ref.val
@@ -53,7 +53,7 @@ given CodeGen {
                 let deref_ptr = self.next_temp() + "_deref"
                 self.add_indent()
                 self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_value).ptr;\n")
-                yield [String, Type]Pair("(*\(deref_ptr))", inner)
+                yield Pair[String, Type]("(*\(deref_ptr))", inner)
             },
             .MutableWeakReferenceType(inner_ref) then {
                 let inner = inner_ref.val
@@ -61,9 +61,9 @@ given CodeGen {
                 let deref_ptr = self.next_temp() + "_deref"
                 self.add_indent()
                 self.buffer.push_string("const \(inner_c_type)* \(deref_ptr) = (const \(inner_c_type)*)\(subject_value).ptr;\n")
-                yield [String, Type]Pair("(*\(deref_ptr))", inner)
+                yield Pair[String, Type]("(*\(deref_ptr))", inner)
             },
-            _ then [String, Type]Pair(subject_value, subject_type),
+            _ then Pair[String, Type](subject_value, subject_type),
         }
     }
 
@@ -107,14 +107,14 @@ given CodeGen {
     }
 
     // 为 pattern 变量构造别名列表：直接使用变量名作为 key（匹配 Swift 实现）。
-    pattern_binding_aliases_for_name(self mut ref, name String, path String) [[String, String]Pair]List = {
-        let mut aliases = [[String, String]Pair]List.new()
+    pattern_binding_aliases_for_name(self mut ref, name String, path String) List[Pair[String, String]] = {
+        let mut aliases = List[Pair[String, String]].new()
         let base_name = self.sanitize_codegen_identifier(name)
-        aliases.push([String, String]Pair(base_name, path))
+        aliases.push(Pair[String, String](base_name, path))
         return aliases
     }
 
-    private with_pattern_binding_aliases(self mut ref, aliases [[String, String]Pair]List, callback [Void]Func) Void = {
+    private with_pattern_binding_aliases(self mut ref, aliases List[Pair[String, String]], callback Func[Void]) Void = {
         let saved_aliases = self.pattern_binding_aliases
         let mut scoped_aliases = saved_aliases
         for alias in aliases then {
@@ -128,11 +128,11 @@ given CodeGen {
     private simple_pattern_condition_result(self, condition String) PatternConditionResult = {
         return PatternConditionResult(
             box(String.new()),
-            [[String, Type]Pair]List.new(),
+            List[Pair[String, Type]].new(),
             condition,
             box(String.new()),
-            [[String, Type]Pair]List.new(),
-            [[String, String]Pair]List.new(),
+            List[Pair[String, Type]].new(),
+            List[Pair[String, String]].new(),
         )
     }
 
@@ -161,7 +161,7 @@ given CodeGen {
         byte_literals.push_string("0x00")
 
         let prelude = box(String.new())
-        let mut prelude_vars = [[String, Type]Pair]List.new()
+        let mut prelude_vars = List[Pair[String, Type]].new()
 
         prelude.push_string("static const uint8_t \(bytes_var)[] = { \(byte_literals) };\n")
 
@@ -192,22 +192,22 @@ given CodeGen {
 
         let c_type = self.c_type_name(subject_type)
         prelude.push_string("\(c_type) \(literal_var) = (\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var), NULL } };\n")
-        prelude_vars.push([String, Type]Pair(literal_var, subject_type))
+        prelude_vars.push(Pair[String, Type](literal_var, subject_type))
 
         let receiver_lookup_name = self.receiver_type_lookup_name_fallback(subject_type)
         let type_name = self.c_name_for_type(subject_type) or else self.sanitize_codegen_identifier(receiver_lookup_name)
         let equals_name = self.compose_method_c_name(type_name, "equals")
         let condition = "\(equals_name)(__koral_\(type_name)_copy(&\(path)), __koral_\(type_name)_copy(&\(literal_var)))"
 
-        return PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+        return PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), List[Pair[String, Type]].new(), List[Pair[String, String]].new())
     }
 
-    private generate_enum_case_pattern_condition(self mut ref, case_name String, tag_index UInt, elements [TypedPatternElement]List, path String, subject_type Type) PatternConditionResult = {
+    private generate_enum_case_pattern_condition(self mut ref, case_name String, tag_index UInt, elements List[TypedPatternElement], path String, subject_type Type) PatternConditionResult = {
         let prelude = box(String.new())
-        let mut prelude_vars = [[String, Type]Pair]List.new()
+        let mut prelude_vars = List[Pair[String, Type]].new()
         let bindings = box(String.new())
-        let mut vars = [[String, Type]Pair]List.new()
-        let mut aliases = [[String, String]Pair]List.new()
+        let mut vars = List[Pair[String, Type]].new()
+        let mut aliases = List[Pair[String, String]].new()
 
         let case_name_tail = when case_name.split_last_once(".") in {
             .Some(parts) then parts.second,
@@ -217,7 +217,7 @@ given CodeGen {
             .EnumType(def_id) then {
                 yield when self.context.get_enum_cases(def_id) in {
                     .Some(enum_cases) then {
-                        let mut by_tag = [EnumCaseParam]List.new()
+                        let mut by_tag = List[EnumCaseParam].new()
                         let mut idx UInt = 0
                         for enum_case in enum_cases then {
                             if idx == tag_index then {
@@ -228,7 +228,7 @@ given CodeGen {
                         let resolved_params = if by_tag.is_empty() then {
                             yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
                                 .Some(tag_and_params) then tag_and_params.second,
-                                .None() then [EnumCaseParam]List.new(),
+                                .None() then List[EnumCaseParam].new(),
                             }
                         } else {
                             yield by_tag
@@ -238,7 +238,7 @@ given CodeGen {
                     .None() then {
                         yield when self.lookup_enum_case_index_and_params(def_id, case_name) in {
                             .Some(tag_and_params) then tag_and_params.second,
-                            .None() then [EnumCaseParam]List.new(),
+                            .None() then List[EnumCaseParam].new(),
                         }
                     },
                 }
@@ -247,12 +247,12 @@ given CodeGen {
                 yield when self.find_type_def_id_by_layout_or_template(subject_type, template) in {
                     .Some(def_id) then when self.lookup_enum_case_index_and_params(def_id, case_name) in {
                         .Some(tag_and_params) then tag_and_params.second,
-                        .None() then [EnumCaseParam]List.new(),
+                        .None() then List[EnumCaseParam].new(),
                     },
-                    .None() then [EnumCaseParam]List.new(),
+                    .None() then List[EnumCaseParam].new(),
                 }
             },
-            _ then [EnumCaseParam]List.new(),
+            _ then List[EnumCaseParam].new(),
         }
         let elem_count = elements.count()
         if case_params.count() == 0 and elem_count > 0 then {
@@ -289,27 +289,27 @@ given CodeGen {
         return PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
     }
 
-    private generate_struct_pattern_condition(self mut ref, elements [TypedPatternElement]List, path String, subject_type Type) PatternConditionResult = {
+    private generate_struct_pattern_condition(self mut ref, elements List[TypedPatternElement], path String, subject_type Type) PatternConditionResult = {
         let prelude = box(String.new())
-        let mut prelude_vars = [[String, Type]Pair]List.new()
+        let mut prelude_vars = List[Pair[String, Type]].new()
         let bindings = box(String.new())
-        let mut vars = [[String, Type]Pair]List.new()
-        let mut aliases = [[String, String]Pair]List.new()
+        let mut vars = List[Pair[String, Type]].new()
+        let mut aliases = List[Pair[String, String]].new()
         let mut condition = "1"
 
         let fields = when subject_type in {
             .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
                 .Some(found_fields) then found_fields,
-                .None() then [StructField]List.new(),
+                .None() then List[StructField].new(),
             },
             .GenericStruct(template, _) then when self.find_type_def_id_by_layout_or_template(subject_type, template) in {
                 .Some(def_id) then when self.context.get_struct_fields(def_id) in {
                     .Some(found_fields) then found_fields,
-                    .None() then [StructField]List.new(),
+                    .None() then List[StructField].new(),
                 },
-                .None() then [StructField]List.new(),
+                .None() then List[StructField].new(),
             },
-            _ then [StructField]List.new(),
+            _ then List[StructField].new(),
         }
 
         let elem_count = elements.count()
@@ -336,14 +336,14 @@ given CodeGen {
         return PatternConditionResult(prelude, prelude_vars, condition, bindings, vars, aliases)
     }
 
-    private emit_when_arm_case(self mut ref, arm_pattern TypedPattern ref, arm_body TypedExpr ref, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
+    private emit_when_arm_case(self mut ref, arm_pattern ref TypedPattern, arm_body ref TypedExpr, subject_var String, subject_type Type, final_result_type Type, result_var String, end_label String) Void = {
         self.add_indent()
         self.buffer.push_string("{\n")
         self.with_indent(() -> {
             let case_scope_index = self.lifetime_scope_stack.count()
             let base_scope_index = if self.lifetime_scope_stack.is_empty()
-                then (UInt)0
-                else self.lifetime_scope_stack.count() - (UInt)1
+                then 0(UInt)
+                else self.lifetime_scope_stack.count() - 1(UInt)
             self.push_scope()
 
             let cond_result = self.generate_pattern_condition_and_bindings(arm_pattern, subject_var, subject_type)
@@ -400,7 +400,7 @@ given CodeGen {
     /// - 整数/布尔/字符串：使用 if/else if 链
     ///
     /// Requirements: 5.18, 9.1, 9.2
-    public generate_when_expression(self mut ref, subject TypedExpr ref, arms [TypedWhenArm]List, result_type Type) String = {
+    public generate_when_expression(self mut ref, subject ref TypedExpr, arms List[TypedWhenArm], result_type Type) String = {
         // 为 subject 推入专用作用域，使其生命周期自包含
         self.push_scope()
 
@@ -461,7 +461,7 @@ given CodeGen {
     /// - vars: 绑定中声明的需要 drop 的变量
     ///
     /// Requirements: 9.3, 9.4, 9.5, 9.6, 9.7, 9.8
-    public generate_pattern_condition_and_bindings(self mut ref, pattern TypedPattern ref, path String, subject_type Type) PatternConditionResult = {
+    public generate_pattern_condition_and_bindings(self mut ref, pattern ref TypedPattern, path String, subject_type Type) PatternConditionResult = {
         return when pattern in {
 
             // ── Wildcard ──────────────────────────────────────────────────────
@@ -536,10 +536,10 @@ given CodeGen {
                 let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
                 let prelude = box(String.new())
-                let mut prelude_vars = [[String, Type]Pair]List.new()
+                let mut prelude_vars = List[Pair[String, Type]].new()
                 let bindings = box(String.new())
-                let mut vars = [[String, Type]Pair]List.new()
-                let mut aliases = [[String, String]Pair]List.new()
+                let mut vars = List[Pair[String, Type]].new()
+                let mut aliases = List[Pair[String, String]].new()
 
                 if not left_result.prelude.is_empty() then { prelude.push_string(left_result.prelude) }
                 if not right_result.prelude.is_empty() then { prelude.push_string(right_result.prelude) }
@@ -562,7 +562,7 @@ given CodeGen {
                 let right_result = self.generate_pattern_condition_and_bindings(right_ref, path, subject_type)
 
                 let prelude = box(String.new())
-                let mut prelude_vars = [[String, Type]Pair]List.new()
+                let mut prelude_vars = List[Pair[String, Type]].new()
 
                 if not left_result.prelude.is_empty() then { prelude.push_string(left_result.prelude) }
                 if not right_result.prelude.is_empty() then { prelude.push_string(right_result.prelude) }
@@ -570,14 +570,14 @@ given CodeGen {
                 for pv in right_result.prelude_vars then { prelude_vars.push(pv) }
 
                 let condition = "(\(left_result.condition)) || (\(right_result.condition))"
-                yield PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+                yield PatternConditionResult(prelude, prelude_vars, condition, box(String.new()), List[Pair[String, Type]].new(), List[Pair[String, String]].new())
             },
 
             // ── NotPattern ────────────────────────────────────────────────────
             .NotPattern(inner_ref) then {
                 let inner_result = self.generate_pattern_condition_and_bindings(inner_ref, path, subject_type)
                 let condition = "!(\(inner_result.condition))"
-                yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, box(String.new()), [[String, Type]Pair]List.new(), [[String, String]Pair]List.new())
+                yield PatternConditionResult(inner_result.prelude, inner_result.prelude_vars, condition, box(String.new()), List[Pair[String, Type]].new(), List[Pair[String, String]].new())
             },
         }
     }

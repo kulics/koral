@@ -1,24 +1,24 @@
 public let type_check(program Program, file_path String) BodyCheckerOutput = {
-    let mut collector = NameCollector.new_with_context([String]List.new(), file_path)
+    let mut collector = NameCollector.new_with_context(List[String].new(), file_path)
     collector.collect(program)
 
     let mut diagnostics = DiagnosticCollector.new()
 
     if collector.diagnostics.has_errors() then {
         diagnostics.merge(collector.diagnostics)
-        return BodyCheckerOutput([TypedProgram]Option.None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
     }
 
     let mut checker = TypeChecker.new(collector.global_scope, collector.context, file_path)
     let typed = checker.check_program(program)
 
     if checker.has_errors() then {
-        return BodyCheckerOutput([TypedProgram]Option.None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
+        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
     }
 
     let context = checker.compiler_context()
     return BodyCheckerOutput(
-        [TypedProgram]Option.Some(typed),
+        Option[TypedProgram].Some(typed),
         context,
         diagnostics,
         checker.storage.generic_templates,
@@ -37,20 +37,20 @@ private let build_module_resolver_output(graph ResolvedModuleGraph) ModuleResolv
 }
 
 private type NameCollectorPassResult(
-    output [NameCollectorOutput]Option,
+    output Option[NameCollectorOutput],
     diagnostics DiagnosticCollector,
 )
 
 private let run_name_collector_pass(input NameCollectorInput) NameCollectorPassResult = {
-    let mut collector = NameCollector.new_with_context([String]List.new(), input.user_file_path)
+    let mut collector = NameCollector.new_with_context(List[String].new(), input.user_file_path)
     collector.collect_loaded_nodes_with_path(input.resolver_output.loaded_nodes_with_path)
 
     if collector.diagnostics.has_errors() then {
-        return NameCollectorPassResult([NameCollectorOutput]Option.None(), collector.diagnostics)
+        return NameCollectorPassResult(Option[NameCollectorOutput].None(), collector.diagnostics)
     }
 
     return NameCollectorPassResult(
-        [NameCollectorOutput]Option.Some(
+        Option[NameCollectorOutput].Some(
             NameCollectorOutput(
                 collector.global_scope,
                 collector.context,
@@ -71,7 +71,7 @@ private let run_body_checker_pass(input BodyCheckerInput) BodyCheckerOutput = {
         input.type_resolver_output.collector_output.context,
         input.user_file_path,
     )
-    checker.storage.import_graph = [ImportGraph]Option.Some(input.type_resolver_output.resolver_output.import_graph)
+    checker.storage.import_graph = Option[ImportGraph].Some(input.type_resolver_output.resolver_output.import_graph)
 
     // 注入 enum 类型名称到 constraint solver，用于 Instantiate 约束判断。
     for type_entry in input.type_resolver_output.collector_output.global_scope.all_types() then {
@@ -84,7 +84,7 @@ private let run_body_checker_pass(input BodyCheckerInput) BodyCheckerOutput = {
     let typed = checker.check_loaded_nodes(input.type_resolver_output.resolver_output.loaded_nodes_with_path)
 
     if checker.has_errors() then {
-        return BodyCheckerOutput([TypedProgram]Option.None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
+        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
     }
 
     let mut diagnostics = DiagnosticCollector.new()
@@ -97,11 +97,11 @@ private let run_body_checker_pass(input BodyCheckerInput) BodyCheckerOutput = {
     }
 
     if diagnostics.has_errors() then {
-        return BodyCheckerOutput([TypedProgram]Option.None(), context, diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
+        return BodyCheckerOutput(Option[TypedProgram].None(), context, diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
     }
 
     return BodyCheckerOutput(
-        [TypedProgram]Option.Some(typed),
+        Option[TypedProgram].Some(typed),
         context,
         diagnostics,
         checker.storage.generic_templates,
@@ -113,7 +113,7 @@ private let type_check_resolver_output(resolver_output ModuleResolverOutput, use
     let name_input = NameCollectorInput(resolver_output, user_file_path)
     let name_pass = run_name_collector_pass(name_input)
     if name_pass.output is .None() then {
-        return BodyCheckerOutput([TypedProgram]Option.None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
     }
 
     let type_input = TypeResolverInput(
@@ -134,7 +134,7 @@ public let type_check_entry_file(user_file_path String, no_std Bool) BodyChecker
         .Error(err) then {
             let mut diagnostics = DiagnosticCollector.new()
             diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, err.message()))
-            return BodyCheckerOutput([TypedProgram]Option.None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), [InstantiationRequest]List.new())
+            return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
         },
     }
     return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path)

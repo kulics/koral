@@ -6,16 +6,16 @@ public type NameCollector(
     mut context CompilerContext,
     mut global_scope Scope,
     mut diagnostics DiagnosticCollector,
-    mut module_path [String]List,
+    mut module_path List[String],
     mut source_file String,
 )
 
 given NameCollector {
     public new() NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), [String]List.new(), "")
+        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), List[String].new(), "")
     }
 
-    public new_with_context(module_path [String]List, source_file String) NameCollector = {
+    public new_with_context(module_path List[String], source_file String) NameCollector = {
         return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), module_path, source_file)
     }
 
@@ -28,7 +28,7 @@ given NameCollector {
 
     // Register all top-level names from a list of LoadedNodes (multi-module compilation).
     // Each node carries its own source_file; module_path is provided per-node via pairs.
-    public collect_loaded_nodes_with_path(self mut ref, pairs [[LoadedNode, [String]List]Pair]List) Void = {
+    public collect_loaded_nodes_with_path(self mut ref, pairs List[Pair[LoadedNode, List[String]]]) Void = {
         let saved_module_path = self.module_path
         let saved_source_file = self.source_file
         for pair in pairs then {
@@ -68,22 +68,22 @@ given NameCollector {
 
     private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
         let source_file = when access in {
-            .Private() then [String]Option.Some(self.source_file),
-            _ then [String]Option.None(),
+            .Private() then Option[String].Some(self.source_file),
+            _ then Option[String].None(),
         }
         return self.context.lookup_def_id(self.module_path, name, source_file) is .Some(_)
     }
 
     private has_conflicting_top_level_type_name(self, name String, access AccessModifier) Bool = {
         let source_file = when access in {
-            .Private() then [String]Option.Some(self.source_file),
-            _ then [String]Option.None(),
+            .Private() then Option[String].Some(self.source_file),
+            _ then Option[String].None(),
         }
         let local_conflict = self.context.lookup_def_id(self.module_path, name, source_file) is .Some(_)
         if local_conflict then {
             return true
         }
-        if self.module_path.count() > (UInt)0 and self.module_path[(UInt)0] <> "Std" then {
+        if self.module_path.count() > 0(UInt) and self.module_path[0(UInt)] <> "Std" then {
             if self.global_scope.lookup_type(name) is .Some(existing_type) then {
                 return self.type_name_conflicts_with_std_prelude(existing_type)
             }
@@ -102,7 +102,7 @@ given NameCollector {
 
     private def_id_is_in_std_module(self, def_id DefId) Bool = {
         return when self.context.get_module_path(def_id) in {
-            .Some(module_path) then module_path.count() > (UInt)0 and module_path[(UInt)0] == "Std",
+            .Some(module_path) then module_path.count() > 0(UInt) and module_path[0(UInt)] == "Std",
             .None() then false,
         }
     }
@@ -177,7 +177,7 @@ given NameCollector {
                 }
                 let mut context = self.context
                 let def_id = context.allocate_full(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, access, span)
-                let mut trait_type_args = [Type ref]List.new()
+                let mut trait_type_args = List[ref Type].new()
                 for type_param in type_params then {
                     trait_type_args.push(box(Type.GenericParameter(type_param.name)))
                 }

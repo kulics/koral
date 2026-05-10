@@ -8,53 +8,53 @@
 /// A simple parent like `Ord` is ParentTraitConstraint("Ord", []).
 public type ParentTraitConstraint(
     name String,
-    type_arg_nodes [TypeNode]List,
+    type_arg_nodes List[TypeNode],
 )
 
 // ── TraitInfo ─────────────────────────────────────────────────────────────────
 
 public type TraitInfo(
     name String,
-    type_params [String]List,
-    parent_traits [ParentTraitConstraint]List,
-    methods [TypedTraitMember]List,
-    module_path [String]List,
+    type_params List[String],
+    parent_traits List[ParentTraitConstraint],
+    methods List[TypedTraitMember],
+    module_path List[String],
 )
 
 // ── TraitRegistry ─────────────────────────────────────────────────────────────
 
 public type TraitRegistry(
-    mut traits [String, TraitInfo]Dict,
-    mut flattened_cache [String, [String, TypedTraitMember]Dict]Dict,
-    mut object_safety_cache [String, Bool]Dict,
+    mut traits Dict[String, TraitInfo],
+    mut flattened_cache Dict[String, Dict[String, TypedTraitMember]],
+    mut object_safety_cache Dict[String, Bool],
 )
 
 given TraitRegistry {
 
     public new() TraitRegistry = {
         return TraitRegistry(
-            [String, TraitInfo]Dict.new(),
-            [String, [String, TypedTraitMember]Dict]Dict.new(),
-            [String, Bool]Dict.new()
+            Dict[String, TraitInfo].new(),
+            Dict[String, Dict[String, TypedTraitMember]].new(),
+            Dict[String, Bool].new()
         )
     }
 
     public register(self mut ref, info TraitInfo) Void = {
         self.traits.insert(info.name, info)
-        self.flattened_cache = [String, [String, TypedTraitMember]Dict]Dict.new()
-        self.object_safety_cache = [String, Bool]Dict.new()
+        self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new()
+        self.object_safety_cache = Dict[String, Bool].new()
     }
 
-    public get(self, name String) [TraitInfo]Option = {
+    public get(self, name String) Option[TraitInfo] = {
         return self.traits.get(name)
     }
 
     // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
     // 同名方法以最近定义的 Trait 为准
-    public flatten_methods(self mut ref, trait_name String) [[String, TypedTraitMember]Dict]Result = {
+    public flatten_methods(self mut ref, trait_name String) Result[Dict[String, TypedTraitMember]] = {
         // 检查缓存
         if self.flattened_cache.get(trait_name) is .Some(cached) then {
-            return [[String, TypedTraitMember]Dict]Result.Ok(cached)
+            return Result[Dict[String, TypedTraitMember]].Ok(cached)
         }
 
         when self.traits.get(trait_name) in {
@@ -62,10 +62,10 @@ given TraitRegistry {
                 let mut message = "Trait '"
                 message.push_string(trait_name)
                 message.push_string("' not found")
-                return [[String, TypedTraitMember]Dict]Result.Error(box(message))
+                return Result[Dict[String, TypedTraitMember]].Error(box(message))
             },
             .Some(info) then {
-                let mut result = [String, TypedTraitMember]Dict.new()
+                let mut result = Dict[String, TypedTraitMember].new()
 
                 // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
                 for parent_name in info.parent_traits then {
@@ -85,16 +85,16 @@ given TraitRegistry {
                 }
 
                 self.flattened_cache.insert(trait_name, result)
-                return [[String, TypedTraitMember]Dict]Result.Ok(result)
+                return Result[Dict[String, TypedTraitMember]].Ok(result)
             },
         }
     }
 
     // 检查 Trait 是否对象安全
     // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
-    public check_object_safety(self mut ref, trait_name String) [Bool]Result = {
+    public check_object_safety(self mut ref, trait_name String) Result[Bool] = {
         if self.object_safety_cache.get(trait_name) is .Some(cached) then {
-            return [Bool]Result.Ok(cached)
+            return Result[Bool].Ok(cached)
         }
 
         let methods = self.flatten_methods(trait_name) or return
@@ -102,7 +102,7 @@ given TraitRegistry {
         for entry in methods then {
             let m = entry.second
             if not m.params.is_empty() then {
-                let receiver = m.params[(UInt)0]
+                let receiver = m.params[0(UInt)]
                 if receiver.name == "self" and not self.is_object_safe_receiver_type(receiver.param_type) then {
                     is_safe = false
                 }
@@ -124,7 +124,7 @@ given TraitRegistry {
             }
         }
         self.object_safety_cache.insert(trait_name, is_safe)
-        return [Bool]Result.Ok(is_safe)
+        return Result[Bool].Ok(is_safe)
     }
 
     private is_object_safe_receiver_type(self, t Type) Bool = {
@@ -189,13 +189,13 @@ given TraitRegistry {
 // ── TraitChecker ──────────────────────────────────────────────────────────────
 
 public type TraitChecker(
-    registry TraitRegistry ref,
-    method_table MethodTable ref,
+    registry ref TraitRegistry,
+    method_table ref MethodTable,
 )
 
 given TraitChecker {
 
-    public new(registry TraitRegistry ref, method_table MethodTable ref) TraitChecker = {
+    public new(registry ref TraitRegistry, method_table ref MethodTable) TraitChecker = {
         return TraitChecker(registry, method_table)
     }
 
@@ -205,17 +205,17 @@ given TraitChecker {
         self,
         target_type Type,
         trait_name String,
-        members [TypedGivenMember]List,
+        members List[TypedGivenMember],
         span SourceSpan,
-    ) [Void]Result = {
+    ) Result[Void] = {
         // 仅检查当前 trait 自身的方法 requirement。
         // 父 trait 的显式实现在 TypeChecker 中单独检查。
         let required_methods = when self.registry.get(trait_name) in {
             .None() then {
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             },
             .Some(info) then {
-                let mut own = [String, TypedTraitMember]Dict.new()
+                let mut own = Dict[String, TypedTraitMember].new()
                 for m in info.methods then {
                     own.insert(m.name, m)
                 }
@@ -224,7 +224,7 @@ given TraitChecker {
         }
 
         // 构建已实现方法的名称集合
-        let mut implemented = [String, TypedGivenMember]Dict.new()
+        let mut implemented = Dict[String, TypedGivenMember].new()
         for m in members then {
             implemented.insert(m.name, m)
         }
@@ -239,7 +239,7 @@ given TraitChecker {
                 message.push_string("' is not a requirement of trait '")
                 message.push_string(trait_name)
                 message.push_byte('\'')
-                return [Void]Result.Error(box(message))
+                return Result[Void].Error(box(message))
             }
         }
 
@@ -257,7 +257,7 @@ given TraitChecker {
                     message.push_string("' required by trait '")
                     message.push_string(trait_name)
                     message.push_byte('\'')
-                    return [Void]Result.Error(box(message))
+                    return Result[Void].Error(box(message))
                 },
                 .Some(actual) then {
                     // 检查参数数量（跳过 self 参数）
@@ -275,7 +275,7 @@ given TraitChecker {
                         message.push_string(required_param_count.to_string())
                         message.push_string(" params, got ")
                         message.push_string(actual_param_count.to_string())
-                        return [Void]Result.Error(box(message))
+                        return Result[Void].Error(box(message))
                     }
 
                     let mut idx UInt = 1
@@ -292,14 +292,14 @@ given TraitChecker {
                                 message.push_string("' at position ")
                                 message.push_string(idx.to_string())
                                 message.push_string(", but implementation uses positional parameter")
-                                return [Void]Result.Error(box(message))
+                                return Result[Void].Error(box(message))
                             }
                             let mut message = "Trait method '"
                             message.push_string(method_name)
                             message.push_string("' requires positional parameter at position ")
                             message.push_string(idx.to_string())
                             message.push_string(", but implementation uses named parameter")
-                            return [Void]Result.Error(box(message))
+                            return Result[Void].Error(box(message))
                         }
                         if trait_param.named and impl_param.named and trait_param.name <> impl_param.name then {
                             let mut message = "Trait method '"
@@ -311,7 +311,7 @@ given TraitChecker {
                             message.push_string(", but implementation uses '")
                             message.push_string(impl_param.name)
                             message.push_byte('\'')
-                            return [Void]Result.Error(box(message))
+                            return Result[Void].Error(box(message))
                         }
                         idx += 1
                     }
@@ -319,7 +319,7 @@ given TraitChecker {
             }
         }
 
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     // 检查父 Trait 是否已被实现
@@ -327,11 +327,11 @@ given TraitChecker {
         self,
         target_type Type,
         trait_name String,
-        all_given_traits [String]List,
+        all_given_traits List[String],
         span SourceSpan,
-    ) [Void]Result = {
+    ) Result[Void] = {
         when self.registry.get(trait_name) in {
-            .None() then { return [Void]Result.Ok({}) },
+            .None() then { return Result[Void].Ok({}) },
             .Some(info) then {
                 for parent in info.parent_traits then {
                     let mut found = false
@@ -348,10 +348,10 @@ given TraitChecker {
                         message.push_string("' but not parent trait '")
                         message.push_string(parent.name)
                         message.push_byte('\'')
-                        return [Void]Result.Error(box(message))
+                        return Result[Void].Error(box(message))
                     }
                 }
-                return [Void]Result.Ok({})
+                return Result[Void].Ok({})
             },
         }
     }

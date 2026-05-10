@@ -24,24 +24,24 @@ public type ParameterEscapeState {
 }
 
 public type FunctionEscapeSummary(
-    parameter_states [ParameterEscapeState]List,
+    parameter_states List[ParameterEscapeState],
 )
 
 public type GlobalEscapeResult(
-    summaries [UInt, FunctionEscapeSummary]Dict,
-    escaped_variables_per_function [UInt, [String, EscapeResult]Dict]Dict,
+    summaries Dict[UInt, FunctionEscapeSummary],
+    escaped_variables_per_function Dict[UInt, Dict[String, EscapeResult]],
 )
 
 type EscapeFunctionInfo(
     def_id DefId,
-    params [TypedParam]List,
+    params List[TypedParam],
     return_type Type,
-    body TypedExpr ref,
+    body ref TypedExpr,
 )
 
 type EscapeFunctionAnalysis(
     summary FunctionEscapeSummary,
-    escaped_variables [String, EscapeResult]Dict,
+    escaped_variables Dict[String, EscapeResult],
 )
 
 /// 代码生成时的逃逸分析上下文
@@ -50,27 +50,27 @@ type EscapeFunctionAnalysis(
 /// 用于在生成引用相关代码时决定栈/堆分配策略。
 public type EscapeContext(
     /// 变量名 -> 作用域层级
-    mut variable_scopes [String, UInt]Dict,
+    mut variable_scopes Dict[String, UInt],
     /// 当前作用域层级
     mut current_scope_level UInt,
     /// 已标记为逃逸的变量及其逃逸原因
-    mut escaped_variables [String, EscapeResult]Dict,
+    mut escaped_variables Dict[String, EscapeResult],
     /// 引用变量 -> 其最终来源变量名列表
-    mut reference_origins [String, [String]List]Dict,
+    mut reference_origins Dict[String, List[String]],
     /// 作用域栈，用于追踪每个作用域中声明的变量
-    mut scope_stack [[String]List mut ref]List,
+    mut scope_stack List[mut ref List[String]],
     /// 当前函数的返回类型
-    mut return_type [Type]Option,
+    mut return_type Option[Type],
     /// 当前是否在返回语句上下文中
     mut in_return_context Bool,
     /// 当前是否在结构体字段赋值上下文中
     mut in_field_assignment_context Bool,
     /// 全局函数参数逃逸摘要
-    mut global_summaries [UInt, FunctionEscapeSummary]Dict,
+    mut global_summaries Dict[UInt, FunctionEscapeSummary],
     /// 单态化后的程序，用于静态方法查找
-    mut program [MonomorphizedProgram ref]Option,
+    mut program Option[ref MonomorphizedProgram],
     /// 编译上下文，用于与单态化阶段一致的 receiver 布局 key 查找
-    mut compiler_context [CompilerContext]Option,
+    mut compiler_context Option[CompilerContext],
 )
 
 private let escape_symbol_name(ctx EscapeContext, symbol Symbol) String = {
@@ -83,29 +83,29 @@ private let escape_symbol_name(ctx EscapeContext, symbol Symbol) String = {
 given EscapeContext {
     /// 构造函数：创建一个空的逃逸分析上下文
     public new() EscapeContext = EscapeContext(
-        [String, UInt]Dict.new(),
+        Dict[String, UInt].new(),
         0,
-        [String, EscapeResult]Dict.new(),
-        [String, [String]List]Dict.new(),
-        [[String]List mut ref]List.new(),
-        [Type]Option.None(),
+        Dict[String, EscapeResult].new(),
+        Dict[String, List[String]].new(),
+        List[mut ref List[String]].new(),
+        Option[Type].None(),
         false,
         false,
-        [UInt, FunctionEscapeSummary]Dict.new(),
-        [MonomorphizedProgram ref]Option.None(),
-        [CompilerContext]Option.None(),
+        Dict[UInt, FunctionEscapeSummary].new(),
+        Option[ref MonomorphizedProgram].None(),
+        Option[CompilerContext].None(),
     )
 
-    public set_global_analysis(self mut ref, program MonomorphizedProgram ref, summaries [UInt, FunctionEscapeSummary]Dict, context CompilerContext) Void = {
-        self.program = [MonomorphizedProgram ref]Option.Some(program)
+    public set_global_analysis(self mut ref, program ref MonomorphizedProgram, summaries Dict[UInt, FunctionEscapeSummary], context CompilerContext) Void = {
+        self.program = Option[ref MonomorphizedProgram].Some(program)
         self.global_summaries = summaries
-        self.compiler_context = [CompilerContext]Option.Some(context)
+        self.compiler_context = Option[CompilerContext].Some(context)
     }
 
     /// 进入新作用域
     public enter_scope(self mut ref) Void = {
         self.current_scope_level += 1
-        self.scope_stack.push(box([String]List.new()))
+        self.scope_stack.push(box(List[String].new()))
     }
 
     /// 离开作用域，清理当前作用域中的变量
@@ -124,14 +124,14 @@ given EscapeContext {
 
     /// 注册变量到当前作用域
     public register_variable(self mut ref, name String) Void = {
-        self.register_variable_with_initial_value_opt(name, [TypedExpr ref]Option.None())
+        self.register_variable_with_initial_value_opt(name, Option[ref TypedExpr].None())
     }
 
-    private register_variable_with_initial_value(self mut ref, name String, value TypedExpr ref) Void = {
-        self.register_variable_with_initial_value_opt(name, [TypedExpr ref]Option.Some(value))
+    private register_variable_with_initial_value(self mut ref, name String, value ref TypedExpr) Void = {
+        self.register_variable_with_initial_value_opt(name, Option[ref TypedExpr].Some(value))
     }
 
-    private register_variable_with_initial_value_opt(self mut ref, name String, value_opt [TypedExpr ref]Option) Void = {
+    private register_variable_with_initial_value_opt(self mut ref, name String, value_opt Option[ref TypedExpr]) Void = {
         self.variable_scopes.insert(name, self.current_scope_level)
         let scope_count = self.scope_stack.count()
         if scope_count > 0 then {
@@ -186,7 +186,7 @@ given EscapeContext {
         return self.escaped_variables.contains_key(name)
     }
 
-    private needs_return_escape_check_for_expr(self, expr TypedExpr ref) Bool = {
+    private needs_return_escape_check_for_expr(self, expr ref TypedExpr) Bool = {
         if self.return_type is .Some(rt) and (rt is .ReferenceType(_) or rt is .MutableReferenceType(_)) then {
             return true
         }
@@ -275,7 +275,7 @@ given EscapeContext {
     /// - 返回上下文 + 引用返回类型 + 局部变量 => EscapeToReturn
     /// - 字段赋值上下文 + 局部变量 => EscapeToField
     /// - 无法提取变量名 => Unknown（保守）
-    public analyze_escape(self mut ref, inner TypedExpr ref) EscapeResult = {
+    public analyze_escape(self mut ref, inner ref TypedExpr) EscapeResult = {
         let var_name = extract_variable_name(self, inner)
         return when var_name in {
             .Some(name) then {
@@ -294,7 +294,7 @@ given EscapeContext {
     }
 
     /// 检查表达式是否引用了局部变量（作用域层级 > 0）
-    public references_local_variable(self, expr TypedExpr ref) Bool = {
+    public references_local_variable(self, expr ref TypedExpr) Bool = {
         let var_name = extract_variable_name(self, expr)
         return when var_name in {
             .Some(name) then when self.variable_scopes.get(name) in {
@@ -311,7 +311,7 @@ given EscapeContext {
     ///
     /// - Parameter inner: 被引用的表达式
     /// - Returns: 如果应该使用堆分配返回 true，否则返回 false（使用栈分配）
-    public should_use_heap_allocation(self mut ref, inner TypedExpr ref) Bool = {
+    public should_use_heap_allocation(self mut ref, inner ref TypedExpr) Bool = {
         let result = self.analyze_escape(inner)
         return when result in {
             .NoEscape() then false,
@@ -335,7 +335,7 @@ given EscapeContext {
     }
 
     /// 重置上下文（用于新函数）
-    public reset(self mut ref, ret_type [Type]Option) Void = {
+    public reset(self mut ref, ret_type Option[Type]) Void = {
         self.variable_scopes.clear()
         self.current_scope_level = 0
         self.escaped_variables.clear()
@@ -356,7 +356,7 @@ given EscapeContext {
     /// - Parameters:
     ///   - body: 函数体表达式
     ///   - params: 函数参数列表
-    public pre_analyze(self mut ref, body TypedExpr ref, params [TypedParam]List) Void = {
+    public pre_analyze(self mut ref, body ref TypedExpr, params List[TypedParam]) Void = {
         // 首先注册参数（作用域层级 0，不会逃逸）
         for param in params then {
             self.variable_scopes.insert(param.name, 0)
@@ -373,7 +373,7 @@ given EscapeContext {
     }
 
     /// 预分析表达式，识别逃逸变量
-    pre_analyze_expr(self mut ref, expr TypedExpr ref) Void = {
+    pre_analyze_expr(self mut ref, expr ref TypedExpr) Void = {
         when expr.expr_kind in {
             .IntegerLiteral(_) then {},
             .FloatLiteral(_) then {},
@@ -493,7 +493,7 @@ given EscapeContext {
                 } else {
                     // Inter-procedural escape propagation (matches Swift .call handler)
                     let mut callee_def_id_opt = extract_callee_def_id(callee)
-                    let mut self_arg_opt = [TypedExpr ref]Option.None()
+                    let mut self_arg_opt = Option[ref TypedExpr].None()
                     // MethodReference may carry def_id = 0 in bootstrap; mirror the
                     // dedicated method-call fallback so we do not conservatively mark
                     // the receiver as escaping when the summary is actually available.
@@ -510,7 +510,7 @@ given EscapeContext {
                                 },
                                 .None() then def_id_option(method.def_id),
                             }
-                            self_arg_opt = [TypedExpr ref]Option.Some(base)
+                            self_arg_opt = Option[ref TypedExpr].Some(base)
                         },
                         _ then {},
                     }
@@ -530,7 +530,7 @@ given EscapeContext {
                     .Some(context) then context.symbol_name(method),
                     .None() then "",
                 }
-                self.propagate_method_escape(method.def_id, receiver_type, method_name, [TypedExpr ref]Option.None(), args)
+                self.propagate_method_escape(method.def_id, receiver_type, method_name, Option[ref TypedExpr].None(), args)
             },
 
             .TraitObjectConversion(inner, _, _) then {
@@ -754,7 +754,7 @@ given EscapeContext {
         }
     }
 
-    check_return_escape(self mut ref, expr TypedExpr ref) Void = {
+    check_return_escape(self mut ref, expr ref TypedExpr) Void = {
         when expr.expr_kind in {
             .RefExpr(_) then {
                 self.mark_escaped_references_in_expr(expr, EscapeResult.EscapeToReturn())
@@ -800,7 +800,7 @@ given EscapeContext {
     }
 
     /// 检查字段赋值是否导致引用逃逸（与 Swift checkFieldAssignmentEscape 对齐）
-    check_field_assignment_escape(self mut ref, target TypedExpr ref, value TypedExpr ref) Void = {
+    check_field_assignment_escape(self mut ref, target ref TypedExpr, value ref TypedExpr) Void = {
         // 只对结构体/枚举字段赋值触发（与 Swift isStructFieldTarget 对齐）
         when target.expr_kind in {
             .MemberPath(source, path) then {
@@ -819,13 +819,13 @@ given EscapeContext {
     }
 
     /// 检查类型构造是否导致引用逃逸（与 Swift checkTypeConstructionEscape 对齐）
-    check_type_construction_escape(self mut ref, arg TypedExpr ref) Void = {
+    check_type_construction_escape(self mut ref, arg ref TypedExpr) Void = {
         self.mark_escaped_references_in_expr(arg, EscapeResult.EscapeToField())
     }
 
     /// 当值通过指针写入外部存储时，值中的引用需要视为逃逸。
     /// 这覆盖 List.push、Set.insert、Map.set 等最终走到 init_memory 的路径。
-    check_pointer_store_escape(self mut ref, value TypedExpr ref) Void = {
+    check_pointer_store_escape(self mut ref, value ref TypedExpr) Void = {
         self.mark_escaped_references_in_expr(value, EscapeResult.EscapeToParameter())
     }
 
@@ -834,8 +834,8 @@ given EscapeContext {
     /// 扫描 Lambda 体中引用的变量，如果变量在当前作用域中已注册
     /// （即是外部局部变量），则标记为 EscapeToField。
     /// 这与 Swift 版本中对 captures 列表的显式标记等价。
-    private mark_lambda_captured_variables_escaped(self mut ref, params [TypedParam]List, body TypedExpr ref) Void = {
-        let mut param_names = [String]Set.new()
+    private mark_lambda_captured_variables_escaped(self mut ref, params List[TypedParam], body ref TypedExpr) Void = {
+        let mut param_names = Set[String].new()
         for p in params then {
             param_names.insert(p.name)
         }
@@ -843,7 +843,7 @@ given EscapeContext {
     }
 
     /// 递归扫描 Lambda 体，标记捕获的外部变量为逃逸
-    private scan_lambda_body_for_captures(self mut ref, expr TypedExpr ref, param_names [String]Set) Void = {
+    private scan_lambda_body_for_captures(self mut ref, expr ref TypedExpr, param_names Set[String]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 let is_local_var = when symbol.kind in {
@@ -979,7 +979,7 @@ given EscapeContext {
     }
 
     /// 递归扫描 Lambda 体中的语句，标记捕获的外部变量
-    private scan_lambda_stmt_for_captures(self mut ref, stmt TypedStatement, param_names [String]Set) Void = {
+    private scan_lambda_stmt_for_captures(self mut ref, stmt TypedStatement, param_names Set[String]) Void = {
         when stmt in {
             .LetStmt(_, value, _) then self.scan_lambda_body_for_captures(value, param_names),
             .PairLetStmt(_, _, value, _) then self.scan_lambda_body_for_captures(value, param_names),
@@ -1019,13 +1019,13 @@ given EscapeContext {
     /// 普通函数调用的逃逸传播（与 Swift .call handler 对齐）
     propagate_call_escape(
         self mut ref,
-        callee_def_id_opt [DefId]Option,
-        receiver_opt [TypedExpr ref]Option,
-        args [TypedExpr ref]List,
+        callee_def_id_opt Option[DefId],
+        receiver_opt Option[ref TypedExpr],
+        args List[ref TypedExpr],
     ) Void = {
         let summary_opt = when callee_def_id_opt in {
             .Some(def_id) then self.global_summaries.get(def_id.id),
-            .None() then [FunctionEscapeSummary]Option.None(),
+            .None() then Option[FunctionEscapeSummary].None(),
         }
         self.apply_escape_summary_or_fallback(summary_opt, receiver_opt, args)
     }
@@ -1037,14 +1037,14 @@ given EscapeContext {
         method_def_id DefId,
         receiver_type Type,
         method_name String,
-        receiver_opt [TypedExpr ref]Option,
-        args [TypedExpr ref]List,
+        receiver_opt Option[ref TypedExpr],
+        args List[ref TypedExpr],
     ) Void = {
         // Level 1: 直接用 method.def_id
         let mut summary_opt = if method_def_id.id > 0 then {
             yield self.global_summaries.get(method_def_id.id)
         } else {
-            yield [FunctionEscapeSummary]Option.None()
+            yield Option[FunctionEscapeSummary].None()
         }
         // Level 2: 用 mono_type_simple_name 查找（与 build_static_method_lookup 的 key 一致）
         if summary_opt is .None() then {
@@ -1072,15 +1072,15 @@ given EscapeContext {
     /// 根据 summary 精确标记或保守 fallback（与 Swift 对齐）
     private apply_escape_summary_or_fallback(
         self mut ref,
-        summary_opt [FunctionEscapeSummary]Option,
-        receiver_opt [TypedExpr ref]Option,
-        args [TypedExpr ref]List,
+        summary_opt Option[FunctionEscapeSummary],
+        receiver_opt Option[ref TypedExpr],
+        args List[ref TypedExpr],
     ) Void = {
         when summary_opt in {
             .Some(summary) then {
                 when receiver_opt in {
                     .Some(receiver) then {
-                        if summary.parameter_states.count() > 0 and parameter_escape_state_is_escape(summary.parameter_states[(UInt)0]) then {
+                        if summary.parameter_states.count() > 0 and parameter_escape_state_is_escape(summary.parameter_states[0(UInt)]) then {
                             self.mark_ref_argument_as_escaping(receiver)
                         }
                         let mut arg_index UInt = 0
@@ -1120,13 +1120,13 @@ given EscapeContext {
     }
 
     /// 将引用类型参数标记为逃逸（与 Swift markRefArgumentAsEscaping 对齐）
-    mark_ref_argument_as_escaping(self mut ref, arg TypedExpr ref) Void = {
+    mark_ref_argument_as_escaping(self mut ref, arg ref TypedExpr) Void = {
         self.mark_escaped_references_in_expr(arg, EscapeResult.EscapeToParameter())
     }
 
     /// 递归扫描表达式中的引用，并按需要标记为逃逸
     /// 与 Swift markEscapedReferences 完全对齐
-    mark_escaped_references_in_expr(self mut ref, expr TypedExpr ref, reason EscapeResult) Void = {
+    mark_escaped_references_in_expr(self mut ref, expr ref TypedExpr, reason EscapeResult) Void = {
         when expr.expr_kind in {
             .RefExpr(inner_expr) then {
                 let var_name = extract_variable_name(self, inner_expr)
@@ -1210,13 +1210,13 @@ given EscapeContext {
 ///
 /// - Parameter expr: 表达式
 /// - Returns: 变量名，如果无法提取则返回 None
-public let extract_variable_name(ctx EscapeContext ref, expr TypedExpr ref) [String]Option = {
+public let extract_variable_name(ctx ref EscapeContext, expr ref TypedExpr) Option[String] = {
     return when expr.expr_kind in {
-        .Variable(symbol) then [String]Option.Some(escape_symbol_name(ctx.val, symbol)),
+        .Variable(symbol) then Option[String].Some(escape_symbol_name(ctx.val, symbol)),
         .MemberPath(base, _) then extract_variable_name(ctx, base),
         .DerefExpr(inner) then extract_variable_name(ctx, inner),
         .PtrExpr(inner) then extract_variable_name(ctx, inner),
-        _ then [String]Option.None(),
+        _ then Option[String].None(),
     }
 }
 
@@ -1237,17 +1237,17 @@ private let parameter_escape_state_is_escape(state ParameterEscapeState) Bool = 
     }
 }
 
-private let def_id_option(def_id DefId) [DefId]Option = {
-    return if def_id.id > 0 then [DefId]Option.Some(def_id) else [DefId]Option.None()
+private let def_id_option(def_id DefId) Option[DefId] = {
+    return if def_id.id > 0 then Option[DefId].Some(def_id) else Option[DefId].None()
 }
 
-private let extract_callee_def_id(callee TypedExpr ref) [DefId]Option = {
+private let extract_callee_def_id(callee ref TypedExpr) Option[DefId] = {
     return when callee.expr_kind in {
         .Variable(symbol) then when symbol.kind in {
             .Function() then def_id_option(symbol.def_id),
-            _ then [DefId]Option.None(),
+            _ then Option[DefId].None(),
         },
-        _ then [DefId]Option.None(),
+        _ then Option[DefId].None(),
     }
 }
 
@@ -1255,7 +1255,7 @@ private let extract_callee_def_id(callee TypedExpr ref) [DefId]Option = {
 ///
 /// 当赋值目标是 `deref ptr_expr` 且 ptr_expr 的类型是 PointerType 时，
 /// 值会被写入外部存储，其中的引用可能逃逸。
-private let is_pointer_store_target(target TypedExpr ref) Bool = {
+private let is_pointer_store_target(target ref TypedExpr) Bool = {
     return when target.expr_kind in {
         .DerefExpr(inner) then when inner.expr_type in {
             .PointerType(_) then true,
@@ -1269,31 +1269,31 @@ private let is_pointer_store_target(target TypedExpr ref) Bool = {
 /// 解析方法 DefId：先用 symbol 自带的 def_id，如果为 0 则通过
 /// mono_type_simple_name + method_name 查找（与 build_static_method_lookup 的 key 一致）
 private let resolve_escape_method_def_id(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
+    program ref MonomorphizedProgram,
+    context_opt Option[CompilerContext],
     method_def_id DefId,
     receiver_type Type,
     method_name String,
-) [DefId]Option = {
+) Option[DefId] = {
     if method_def_id.id > 0 and program.lookup_concrete_callable(method_def_id) is .Some(_) then {
-        return [DefId]Option.Some(method_def_id)
+        return Option[DefId].Some(method_def_id)
     }
     return when context_opt in {
         .Some(context) then {
             let type_name = mono_type_simple_name(context, receiver_type)
             yield when program.lookup_static_method(type_name, method_name) in {
-                .Some(resolved_def_id) then [DefId]Option.Some(resolved_def_id),
-                .None() then [DefId]Option.None(),
+                .Some(resolved_def_id) then Option[DefId].Some(resolved_def_id),
+                .None() then Option[DefId].None(),
             }
         },
-        .None() then [DefId]Option.None(),
+        .None() then Option[DefId].None(),
     }
 }
 
-private let resolve_reference_origins(ctx EscapeContext ref, name String) [String]List = {
-    let mut result = [String]List.new()
-    let mut visited = [String]Set.new()
-    let mut worklist = [String]List.new()
+private let resolve_reference_origins(ctx ref EscapeContext, name String) List[String] = {
+    let mut result = List[String].new()
+    let mut visited = Set[String].new()
+    let mut worklist = List[String].new()
     worklist.push(name)
 
     while not worklist.is_empty() then {
@@ -1322,19 +1322,19 @@ private let resolve_reference_origins(ctx EscapeContext ref, name String) [Strin
     return result
 }
 
-private let append_unique_origin(origins [String]List mut ref, name String) Void = {
+private let append_unique_origin(origins mut ref List[String], name String) Void = {
     if not origins.contains(name) then {
         origins.push(name)
     }
 }
 
-private let extend_origins_unique(target [String]List mut ref, incoming [String]List) Void = {
+private let extend_origins_unique(target mut ref List[String], incoming List[String]) Void = {
     for origin in incoming then {
         append_unique_origin(target, origin)
     }
 }
 
-private let extract_reference_origins_from_statement(ctx EscapeContext ref, stmt TypedStatement) [String]List = {
+private let extract_reference_origins_from_statement(ctx ref EscapeContext, stmt TypedStatement) List[String] = {
     return when stmt in {
         .YieldStmt(expr, _) then extract_reference_origins(ctx, expr),
         .ExprStmt(expr, _) then extract_reference_origins(ctx, expr),
@@ -1349,30 +1349,30 @@ private let extract_reference_origins_from_statement(ctx EscapeContext ref, stmt
             yield origins
         },
         .WhenStmt(_, arms, _) then {
-            let mut origins = [String]List.new()
+            let mut origins = List[String].new()
             for arm in arms then {
                 extend_origins_unique(origins.ref, extract_reference_origins(ctx, arm.body))
             }
             yield origins
         },
-        _ then [String]List.new(),
+        _ then List[String].new(),
     }
 }
 
-private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref) [String]List = {
+private let extract_reference_origins(ctx ref EscapeContext, expr ref TypedExpr) List[String] = {
     return when expr.expr_kind in {
         .RefExpr(inner) then {
             let source_name = extract_variable_name(ctx, inner)
             yield when source_name in {
                 .Some(name) then resolve_reference_origins(ctx, name),
-                .None() then [String]List.new(),
+                .None() then List[String].new(),
             }
         },
         .Variable(symbol) then {
             yield when symbol.symbol_type in {
                 .ReferenceType(_) then resolve_reference_origins(ctx, escape_symbol_name(ctx, symbol)),
                 .MutableReferenceType(_) then resolve_reference_origins(ctx, escape_symbol_name(ctx, symbol)),
-                _ then [String]List.new(),
+                _ then List[String].new(),
             }
         },
         .MemberPath(base, _) then extract_reference_origins(ctx, base),
@@ -1389,25 +1389,25 @@ private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref)
             yield origins
         },
         .Block(statements) then {
-            let mut origins = [String]List.new()
+            let mut origins = List[String].new()
             for stmt in statements then {
                 extend_origins_unique(origins.ref, extract_reference_origins_from_statement(ctx, stmt))
             }
             yield origins
         },
         .WhenExpr(_, arms) then {
-            let mut origins = [String]List.new()
+            let mut origins = List[String].new()
             for arm in arms then {
                 extend_origins_unique(origins.ref, extract_reference_origins(ctx, arm.body))
             }
             yield origins
         },
-        _ then [String]List.new(),
+        _ then List[String].new(),
     }
 }
 
 private let make_no_escape_summary(param_count UInt) FunctionEscapeSummary = {
-    let mut states = [ParameterEscapeState]List.new()
+    let mut states = List[ParameterEscapeState].new()
     let mut idx UInt = 0
     while idx < param_count then {
         states.push(ParameterEscapeState.NoEscape())
@@ -1430,17 +1430,17 @@ private let escape_summary_equals(left FunctionEscapeSummary, right FunctionEsca
     return true
 }
 
-private let escape_summary_return_type(return_type Type) [Type]Option = {
+private let escape_summary_return_type(return_type Type) Option[Type] = {
     return when return_type in {
-        .VoidType() then [Type]Option.None(),
-        .NeverType() then [Type]Option.None(),
-        _ then [Type]Option.Some(return_type),
+        .VoidType() then Option[Type].None(),
+        .NeverType() then Option[Type].None(),
+        _ then Option[Type].Some(return_type),
     }
 }
 
-private let filter_non_parameter_escaped_variables(ctx EscapeContext ref, params [TypedParam]List) [String, EscapeResult]Dict = {
-    let mut escaped_variables = [String, EscapeResult]Dict.new()
-    let mut param_names = [String]Set.new()
+private let filter_non_parameter_escaped_variables(ctx ref EscapeContext, params List[TypedParam]) Dict[String, EscapeResult] = {
+    let mut escaped_variables = Dict[String, EscapeResult].new()
+    let mut param_names = Set[String].new()
     for param in params then {
         param_names.insert(param.name)
     }
@@ -1452,8 +1452,8 @@ private let filter_non_parameter_escaped_variables(ctx EscapeContext ref, params
     return escaped_variables
 }
 
-private let build_escape_param_states(ctx EscapeContext ref, params [TypedParam]List) [ParameterEscapeState]List = {
-    let mut param_states = [ParameterEscapeState]List.new()
+private let build_escape_param_states(ctx ref EscapeContext, params List[TypedParam]) List[ParameterEscapeState] = {
+    let mut param_states = List[ParameterEscapeState].new()
     for param in params then {
         if ctx.escaped_variables.contains_key(param.name) then {
             param_states.push(ParameterEscapeState.Escapes())
@@ -1465,9 +1465,9 @@ private let build_escape_param_states(ctx EscapeContext ref, params [TypedParam]
 }
 
 private let analyze_escape_function_summary(
-    program MonomorphizedProgram ref,
+    program ref MonomorphizedProgram,
     context CompilerContext,
-    summaries [UInt, FunctionEscapeSummary]Dict,
+    summaries Dict[UInt, FunctionEscapeSummary],
     info EscapeFunctionInfo,
 ) EscapeFunctionAnalysis = {
     let mut ctx = EscapeContext.new()
@@ -1480,8 +1480,8 @@ private let analyze_escape_function_summary(
     return EscapeFunctionAnalysis(FunctionEscapeSummary(param_states), escaped_variables)
 }
 
-private let collect_escape_function_infos(program MonomorphizedProgram ref) [EscapeFunctionInfo]List = {
-    let mut infos = [EscapeFunctionInfo]List.new()
+private let collect_escape_function_infos(program ref MonomorphizedProgram) List[EscapeFunctionInfo] = {
+    let mut infos = List[EscapeFunctionInfo].new()
     let mut node_index UInt = 0
     let program_nodes = program.semantic_global_nodes()
     while node_index < program_nodes.count() then {
@@ -1513,8 +1513,8 @@ private let collect_escape_function_infos(program MonomorphizedProgram ref) [Esc
     return infos
 }
 
-private let build_escape_function_info_index(infos [EscapeFunctionInfo]List) [UInt, EscapeFunctionInfo]Dict = {
-    let mut index = [UInt, EscapeFunctionInfo]Dict.new()
+private let build_escape_function_info_index(infos List[EscapeFunctionInfo]) Dict[UInt, EscapeFunctionInfo] = {
+    let mut index = Dict[UInt, EscapeFunctionInfo].new()
     for info in infos then {
         index.insert(info.def_id.id, info)
     }
@@ -1522,10 +1522,10 @@ private let build_escape_function_info_index(infos [EscapeFunctionInfo]List) [UI
 }
 
 private let extract_escape_calls_from_statement(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
+    program ref MonomorphizedProgram,
+    context_opt Option[CompilerContext],
     stmt TypedStatement,
-    callees [UInt]Set mut ref,
+    callees mut ref Set[UInt],
 ) Void = {
     when stmt in {
         .LetStmt(_, value, _) then extract_escape_calls_from_expr(program, context_opt, value, callees),
@@ -1564,10 +1564,10 @@ private let extract_escape_calls_from_statement(
 }
 
 private let extract_escape_calls_from_expr(
-    program MonomorphizedProgram ref,
-    context_opt [CompilerContext]Option,
-    expr TypedExpr ref,
-    callees [UInt]Set mut ref,
+    program ref MonomorphizedProgram,
+    context_opt Option[CompilerContext],
+    expr ref TypedExpr,
+    callees mut ref Set[UInt],
 ) Void = {
     when expr.expr_kind in {
         .IntegerLiteral(_) then {},
@@ -1737,14 +1737,14 @@ private let extract_escape_calls_from_expr(
 }
 
 private let build_escape_call_graph(
-    program MonomorphizedProgram ref,
+    program ref MonomorphizedProgram,
     context CompilerContext,
-    infos [EscapeFunctionInfo]List,
-) [UInt, [UInt]Set]Dict = {
-    let mut graph = [UInt, [UInt]Set]Dict.new()
+    infos List[EscapeFunctionInfo],
+) Dict[UInt, Set[UInt]] = {
+    let mut graph = Dict[UInt, Set[UInt]].new()
     for info in infos then {
-        let mut callees = [UInt]Set.new()
-        extract_escape_calls_from_expr(program, [CompilerContext]Option.Some(context), info.body, callees.ref)
+        let mut callees = Set[UInt].new()
+        extract_escape_calls_from_expr(program, Option[CompilerContext].Some(context), info.body, callees.ref)
         graph.insert(info.def_id.id, callees)
     }
     return graph
@@ -1753,13 +1753,13 @@ private let build_escape_call_graph(
 /// DFS 栈帧，用于迭代 Kosaraju SCC 算法
 private type EscapeDfsFrame(
     node UInt,
-    neighbors [UInt]List,
+    neighbors List[UInt],
     mut next_index UInt,
 )
 
 /// 将 Set 转换为 List（用于迭代 DFS）
-private let set_to_list(s [UInt]Set) [UInt]List = {
-    let mut result = [UInt]List.new()
+private let set_to_list(s Set[UInt]) List[UInt] = {
+    let mut result = List[UInt].new()
     for item in s.iterator() then {
         result.push(item)
     }
@@ -1767,7 +1767,7 @@ private let set_to_list(s [UInt]Set) [UInt]List = {
 }
 
 public let analyze_global_escape_summaries(
-    program MonomorphizedProgram ref,
+    program ref MonomorphizedProgram,
     context CompilerContext,
 ) GlobalEscapeResult = {
     let infos = collect_escape_function_infos(program)
@@ -1775,15 +1775,15 @@ public let analyze_global_escape_summaries(
     let call_graph = build_escape_call_graph(program, context, infos)
 
     // Step 1: 收集所有函数 DefId
-    let mut all_ids = [UInt]List.new()
+    let mut all_ids = List[UInt].new()
     for info in infos then {
         all_ids.push(info.def_id.id)
     }
 
     // Step 2: 构建反向调用图（仅包含已知函数）
-    let mut reverse_graph = [UInt, [UInt]List]Dict.new()
+    let mut reverse_graph = Dict[UInt, List[UInt]].new()
     for id in all_ids then {
-        reverse_graph.insert(id, [UInt]List.new())
+        reverse_graph.insert(id, List[UInt].new())
     }
     for id in all_ids then {
         when call_graph.get(id) in {
@@ -1793,7 +1793,7 @@ public let analyze_global_escape_summaries(
                         .Some(_) then {
                             let existing = when reverse_graph.get(callee) in {
                                 .Some(list) then list,
-                                .None() then [UInt]List.new(),
+                                .None() then List[UInt].new(),
                             }
                             let mut updated = existing
                             updated.push(id)
@@ -1808,15 +1808,15 @@ public let analyze_global_escape_summaries(
     }
 
     // Step 3: 迭代 Kosaraju 第一遍 — 在反向图上 DFS，记录完成顺序
-    let mut visited = [UInt]Set.new()
-    let mut finish_order = [UInt]List.new()
+    let mut visited = Set[UInt].new()
+    let mut finish_order = List[UInt].new()
 
     for start in all_ids then {
         if not visited.try_insert(start) then { continue }
 
         // 迭代 DFS 栈：(node, neighbors_list, next_index)
-        let mut stack = [EscapeDfsFrame]List.new()
-        let start_neighbors = reverse_graph.get(start) or else [UInt]List.new()
+        let mut stack = List[EscapeDfsFrame].new()
+        let start_neighbors = reverse_graph.get(start) or else List[UInt].new()
         stack.push(EscapeDfsFrame(start, start_neighbors, 0))
 
         while not stack.is_empty() then {
@@ -1828,7 +1828,7 @@ public let analyze_global_escape_summaries(
                 stack[stack.count() - 1] = updated_frame
 
                 if visited.try_insert(next_node) then {
-                    let next_neighbors = reverse_graph.get(next_node) or else [UInt]List.new()
+                    let next_neighbors = reverse_graph.get(next_node) or else List[UInt].new()
                     stack.push(EscapeDfsFrame(next_node, next_neighbors, 0))
                 }
             } else {
@@ -1839,8 +1839,8 @@ public let analyze_global_escape_summaries(
     }
 
     // Step 4: Kosaraju 第二遍 — 在正向图上按 finish_order 逆序 DFS，得到 SCC 分组
-    let mut assigned = [UInt]Set.new()
-    let mut scc_groups = [[UInt]List]List.new()
+    let mut assigned = Set[UInt].new()
+    let mut scc_groups = List[List[UInt]].new()
 
     let mut fo_idx = finish_order.count()
     while fo_idx > 0 then {
@@ -1848,14 +1848,14 @@ public let analyze_global_escape_summaries(
         let start = finish_order[fo_idx]
         if not assigned.try_insert(start) then { continue }
 
-        let mut component = [UInt]List.new()
-        let mut dfs_stack = [UInt]List.new()
+        let mut component = List[UInt].new()
+        let mut dfs_stack = List[UInt].new()
         dfs_stack.push(start)
 
         while not dfs_stack.is_empty() then {
             let current = dfs_stack.pop() or else { break }
             component.push(current)
-            let forward_neighbors = call_graph.get(current) or else [UInt]Set.new()
+            let forward_neighbors = call_graph.get(current) or else Set[UInt].new()
             for neighbor in forward_neighbors.iterator() then {
                 when info_index.get(neighbor) in {
                     .Some(_) then {
@@ -1872,13 +1872,13 @@ public let analyze_global_escape_summaries(
     }
 
     // Step 5: 按 SCC 分组顺序分析（被调用者先于调用者）
-    let mut summaries = [UInt, FunctionEscapeSummary]Dict.new()
-    let mut escaped_variables_per_function = [UInt, [String, EscapeResult]Dict]Dict.new()
+    let mut summaries = Dict[UInt, FunctionEscapeSummary].new()
+    let mut escaped_variables_per_function = Dict[UInt, Dict[String, EscapeResult]].new()
     for scc in scc_groups then {
         // 检查 SCC 是否有循环（包括自递归）
         let has_cycle = if scc.count() == 1 then {
             let def_id = scc[0]
-            let callees = call_graph.get(def_id) or else [UInt]Set.new()
+            let callees = call_graph.get(def_id) or else Set[UInt].new()
             yield callees.contains(def_id)
         } else {
             yield true

@@ -8,7 +8,7 @@ given TypeChecker {
         }
     }
 
-    private check_expr_scoped_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_expr_scoped_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         // Use bidirectional inference for literals, lambdas, and collection expressions
         // when an expected type is available, to improve type inference.
         if expected is .Some(et) then {
@@ -47,7 +47,7 @@ given TypeChecker {
                     }
                 },
                 .EmptyLiteral(_) then {
-                    return self.lower_empty_literal_expr([Type]Option.Some(et))
+                    return self.lower_empty_literal_expr(Option[Type].Some(et))
                 },
                 .Call(callee, args, _) then when callee in {
                     .Identifier(name, _) then {
@@ -63,8 +63,8 @@ given TypeChecker {
         return self.check_expr_core_ref(expr, expected, scope)
     }
 
-    private flatten_left_assoc_and_operands(self, expr Expr ref) [Expr ref]List = {
-        let mut reversed_tail = [Expr ref]List.new()
+    private flatten_left_assoc_and_operands(self, expr ref Expr) List[ref Expr] = {
+        let mut reversed_tail = List[ref Expr].new()
         let mut current = expr
         while true then {
             when current in {
@@ -75,7 +75,7 @@ given TypeChecker {
                 _ then { break },
             }
         }
-        let mut operands = [Expr ref]List.new()
+        let mut operands = List[ref Expr].new()
         operands.push(current)
         let mut i = reversed_tail.count()
         while i > 0 then {
@@ -85,8 +85,8 @@ given TypeChecker {
         return operands
     }
 
-    private flatten_left_assoc_or_operands(self, expr Expr ref) [Expr ref]List = {
-        let mut reversed_tail = [Expr ref]List.new()
+    private flatten_left_assoc_or_operands(self, expr ref Expr) List[ref Expr] = {
+        let mut reversed_tail = List[ref Expr].new()
         let mut current = expr
         while true then {
             when current in {
@@ -97,7 +97,7 @@ given TypeChecker {
                 _ then { break },
             }
         }
-        let mut operands = [Expr ref]List.new()
+        let mut operands = List[ref Expr].new()
         operands.push(current)
         let mut i = reversed_tail.count()
         while i > 0 then {
@@ -107,16 +107,16 @@ given TypeChecker {
         return operands
     }
 
-    private check_and_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
+    private check_and_expr_iterative(self, expr ref Expr, scope Scope) TypedExpr = {
         let operands = self.flatten_left_assoc_and_operands(expr)
-        let mut typed_operands = [TypedExpr ref]List.new()
+        let mut typed_operands = List[ref TypedExpr].new()
         for operand in operands then {
             typed_operands.push(box(self.check_expr_scoped_ref(operand, .Some(Type.BoolType()), scope)))
         }
         if typed_operands.is_empty() then {
             return make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
         }
-        let mut current = typed_operands[(UInt)0].val
+        let mut current = typed_operands[0(UInt)].val
         let mut i UInt = 1
         while i < typed_operands.count() then {
             let right = typed_operands[i].val
@@ -126,16 +126,16 @@ given TypeChecker {
         return current
     }
 
-    private check_or_expr_iterative(self, expr Expr ref, scope Scope) TypedExpr = {
+    private check_or_expr_iterative(self, expr ref Expr, scope Scope) TypedExpr = {
         let operands = self.flatten_left_assoc_or_operands(expr)
-        let mut typed_operands = [TypedExpr ref]List.new()
+        let mut typed_operands = List[ref TypedExpr].new()
         for operand in operands then {
             typed_operands.push(box(self.check_expr_scoped_ref(operand, .Some(Type.BoolType()), scope)))
         }
         if typed_operands.is_empty() then {
             return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
         }
-        let mut current = typed_operands[(UInt)0].val
+        let mut current = typed_operands[0(UInt)].val
         let mut i UInt = 1
         while i < typed_operands.count() then {
             let right = typed_operands[i].val
@@ -145,9 +145,9 @@ given TypeChecker {
         return current
     }
 
-    private collect_bitwise_chain(self, left Expr ref, op BitwiseOperator, right Expr ref) [[Expr ref]List, [BitwiseOperator]List]Pair = {
-        let mut ops_rev = [BitwiseOperator]List.new()
-        let mut rhs_rev = [Expr ref]List.new()
+    private collect_bitwise_chain(self, left ref Expr, op BitwiseOperator, right ref Expr) Pair[List[ref Expr], List[BitwiseOperator]] = {
+        let mut ops_rev = List[BitwiseOperator].new()
+        let mut rhs_rev = List[ref Expr].new()
         let mut current_left = left
 
         ops_rev.push(op)
@@ -164,7 +164,7 @@ given TypeChecker {
             }
         }
 
-        let mut operands = [Expr ref]List.new()
+        let mut operands = List[ref Expr].new()
         operands.push(current_left)
         let mut i = rhs_rev.count()
         while i > 0 then {
@@ -172,44 +172,44 @@ given TypeChecker {
             operands.push(rhs_rev[i])
         }
 
-        let mut ops = [BitwiseOperator]List.new()
+        let mut ops = List[BitwiseOperator].new()
         let mut j = ops_rev.count()
         while j > 0 then {
             j -= 1
             ops.push(ops_rev[j])
         }
 
-        return [[Expr ref]List, [BitwiseOperator]List]Pair(operands, ops)
+        return Pair[List[ref Expr], List[BitwiseOperator]](operands, ops)
     }
 
-    private collect_if_chain(self, condition Expr ref, then_branch Expr ref, else_branch [Expr ref]Option) IfChain = {
-        let mut arms = [[Expr ref, Expr ref]Pair]List.new()
-        arms.push([Expr ref, Expr ref]Pair(condition, then_branch))
+    private collect_if_chain(self, condition ref Expr, then_branch ref Expr, else_branch Option[ref Expr]) IfChain = {
+        let mut arms = List[Pair[ref Expr, ref Expr]].new()
+        arms.push(Pair[ref Expr, ref Expr](condition, then_branch))
         let mut current_else = else_branch
         while true then {
             when current_else in {
                 .Some(e) then {
                     when e in {
                         .IfExpr(next_cond, next_then, next_else, _) then {
-                            arms.push([Expr ref, Expr ref]Pair(next_cond, next_then))
+                            arms.push(Pair[ref Expr, ref Expr](next_cond, next_then))
                             current_else = next_else
                         },
                         _ then {
-                            return IfChain(arms, [Expr ref]Option.Some(e))
+                            return IfChain(arms, Option[ref Expr].Some(e))
                         },
                     }
                 },
                 .None() then {
-                    return IfChain(arms, [Expr ref]Option.None())
+                    return IfChain(arms, Option[ref Expr].None())
                 },
             }
         }
-        return IfChain(arms, [Expr ref]Option.None())
+        return IfChain(arms, Option[ref Expr].None())
     }
 
-    private pattern_contains_bindings(self, pattern PatternNode ref) Bool = {
-        let mut names = [String]Set.new()
-        let mut stack = [PatternNode ref]List.new()
+    private pattern_contains_bindings(self, pattern ref PatternNode) Bool = {
+        let mut names = Set[String].new()
+        let mut stack = List[ref PatternNode].new()
         stack.push(pattern)
         while not stack.is_empty() then {
             let node = stack.pop() or else pattern
@@ -243,7 +243,7 @@ given TypeChecker {
         return not names.is_empty()
     }
 
-    private check_for_loop_pattern_exhaustiveness(self, pattern PatternNode ref, element_type Type) Void = {
+    private check_for_loop_pattern_exhaustiveness(self, pattern ref PatternNode, element_type Type) Void = {
         when pattern in {
             .Variable(_, _, _) then { return },
             .Wildcard(_) then { return },
@@ -283,7 +283,7 @@ given TypeChecker {
         }
     }
 
-    private condition_contains_is_with_bindings(self, expr Expr ref) Bool = {
+    private condition_contains_is_with_bindings(self, expr ref Expr) Bool = {
         return when expr in {
             .IsExpr(_, pattern, _) then self.pattern_contains_bindings(box(pattern)),
             .AndExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right),
@@ -296,7 +296,7 @@ given TypeChecker {
         }
     }
 
-    private condition_contains_is_expression(self, expr Expr ref) Bool = {
+    private condition_contains_is_expression(self, expr ref Expr) Bool = {
         return when expr in {
             .IsExpr(_, _, _) then true,
             .AndExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(right),
@@ -309,7 +309,7 @@ given TypeChecker {
         }
     }
 
-    private condition_requires_pattern_lowering(self, expr Expr ref) Bool = {
+    private condition_requires_pattern_lowering(self, expr ref Expr) Bool = {
         return when expr in {
             .IsExpr(_, _, _) then true,
             .AndExpr(left, right, _) then self.condition_requires_pattern_lowering(left) or self.condition_requires_pattern_lowering(right),
@@ -320,7 +320,7 @@ given TypeChecker {
         }
     }
 
-    private check_or_branches_for_bindings(self, expr Expr ref) Bool = {
+    private check_or_branches_for_bindings(self, expr ref Expr) Bool = {
         return when expr in {
             .OrExpr(left, right, _) then {
                 let has_invalid_bindings = self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right)
@@ -356,7 +356,7 @@ given TypeChecker {
         }
     }
 
-    private flatten_and_chain_into(self, expr Expr ref, out [Expr ref]List mut ref) Void = {
+    private flatten_and_chain_into(self, expr ref Expr, out mut ref List[ref Expr]) Void = {
         when expr in {
             .AndExpr(left, right, _) then {
                 self.flatten_and_chain_into(left, out)
@@ -366,7 +366,7 @@ given TypeChecker {
         }
     }
 
-    private expr_condition_span(self, expr Expr ref) SourceSpan = {
+    private expr_condition_span(self, expr ref Expr) SourceSpan = {
         return when expr in {
             .IsExpr(_, _, span) then span,
             .IsNotExpr(_, _, span) then span,
@@ -374,15 +374,15 @@ given TypeChecker {
         }
     }
 
-    private make_if_expr_from_condition(self, condition Expr ref, then_expr Expr ref, else_expr [Expr ref]Option, fallback_span SourceSpan) Expr ref = {
+    private make_if_expr_from_condition(self, condition ref Expr, then_expr ref Expr, else_expr Option[ref Expr], fallback_span SourceSpan) ref Expr = {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
-                let mut arms = [WhenArm]List.new()
+                let mut arms = List[WhenArm].new()
                 arms.push(WhenArm(pattern, then_expr))
                 let else_body = when else_expr in {
                     .Some(else_ref) then box(else_ref.val),
-                    .None() then box(Expr.Block([Statement]List.new(), actual_span)),
+                    .None() then box(Expr.Block(List[Statement].new(), actual_span)),
                 }
                 arms.push(WhenArm(PatternNode.Wildcard(unknown_span()), else_body))
                 yield box(Expr.WhenExpr(subject, arms, actual_span))
@@ -391,11 +391,11 @@ given TypeChecker {
         }
     }
 
-    private make_while_expr_from_condition(self, condition Expr ref, body Expr ref, fallback_span SourceSpan) Expr ref = {
+    private make_while_expr_from_condition(self, condition ref Expr, body ref Expr, fallback_span SourceSpan) ref Expr = {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
-                let mut arms = [WhenArm]List.new()
+                let mut arms = List[WhenArm].new()
                 arms.push(WhenArm(pattern, body))
                 arms.push(WhenArm(PatternNode.Wildcard(unknown_span()), self.make_break_block_expr(actual_span)))
                 let when_expr = box(Expr.WhenExpr(subject, arms, actual_span))
@@ -405,35 +405,35 @@ given TypeChecker {
         }
     }
 
-    private lower_if_condition_with_bindings(self, condition Expr ref, then_expr Expr ref, else_expr [Expr ref]Option, outer_span SourceSpan) [Expr ref]Option = {
+    private lower_if_condition_with_bindings(self, condition ref Expr, then_expr ref Expr, else_expr Option[ref Expr], outer_span SourceSpan) Option[ref Expr] = {
         if self.check_or_branches_for_bindings(condition) then {
-            return [Expr ref]Option.Some(box(Expr.IfExpr(box(Expr.BoolLiteral(false, outer_span)), then_expr, else_expr, outer_span)))
+            return Option[ref Expr].Some(box(Expr.IfExpr(box(Expr.BoolLiteral(false, outer_span)), then_expr, else_expr, outer_span)))
         }
 
         if not self.condition_requires_pattern_lowering(condition) then {
-            return [Expr ref]Option.None()
+            return Option[ref Expr].None()
         }
 
         if not self.condition_contains_is_expression(condition) then {
-            return [Expr ref]Option.None()
+            return Option[ref Expr].None()
         }
 
         when condition in {
             .IsExpr(_, _, _) then {
-                return [Expr ref]Option.Some(self.make_if_expr_from_condition(condition, then_expr, else_expr, outer_span))
+                return Option[ref Expr].Some(self.make_if_expr_from_condition(condition, then_expr, else_expr, outer_span))
             },
             _ then {},
         }
 
-        let mut clauses = [Expr ref]List.new()
+        let mut clauses = List[ref Expr].new()
         self.flatten_and_chain_into(condition, clauses.ref)
         if clauses.is_empty() then {
-            return [Expr ref]Option.None()
+            return Option[ref Expr].None()
         }
 
         let mut lowered = self.make_if_expr_from_condition(clauses[clauses.count() - 1], then_expr, else_expr, outer_span)
         if clauses.count() == 1 then {
-            return [Expr ref]Option.Some(lowered)
+            return Option[ref Expr].Some(lowered)
         }
 
         let mut i = clauses.count() - 1
@@ -443,33 +443,33 @@ given TypeChecker {
             lowered = self.make_if_expr_from_condition(clauses[i], lowered, else_expr, fallback_span)
         }
 
-        return [Expr ref]Option.Some(lowered)
+        return Option[ref Expr].Some(lowered)
     }
 
-    private lower_while_condition_with_bindings(self, condition Expr ref, body Expr ref, outer_span SourceSpan) [Expr ref]Option = {
+    private lower_while_condition_with_bindings(self, condition ref Expr, body ref Expr, outer_span SourceSpan) Option[ref Expr] = {
         if self.check_or_branches_for_bindings(condition) then {
-            return [Expr ref]Option.Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(false, outer_span)), body, outer_span)))
+            return Option[ref Expr].Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(false, outer_span)), body, outer_span)))
         }
 
         if not self.condition_requires_pattern_lowering(condition) then {
-            return [Expr ref]Option.None()
+            return Option[ref Expr].None()
         }
 
         if not self.condition_contains_is_expression(condition) then {
-            return [Expr ref]Option.None()
+            return Option[ref Expr].None()
         }
 
         when condition in {
             .IsExpr(_, _, _) then {
-                return [Expr ref]Option.Some(self.make_while_expr_from_condition(condition, body, outer_span))
+                return Option[ref Expr].Some(self.make_while_expr_from_condition(condition, body, outer_span))
             },
             _ then {},
         }
 
-        let mut clauses = [Expr ref]List.new()
+        let mut clauses = List[ref Expr].new()
         self.flatten_and_chain_into(condition, clauses.ref)
 
-        let mut first_pattern_idx [UInt]Option = .None()
+        let mut first_pattern_idx Option[UInt] = .None()
         let mut idx UInt = 0
         while idx < clauses.count() then {
             when clauses[idx] in {
@@ -485,13 +485,13 @@ given TypeChecker {
         }
 
         when first_pattern_idx in {
-            .None() then { return [Expr ref]Option.None() },
+            .None() then { return Option[ref Expr].None() },
             _ then {},
         }
 
         let first_idx = when first_pattern_idx in {
             .Some(v) then v,
-            .None() then (UInt)0,
+            .None() then 0(UInt),
         }
 
         let mut lowered_body = body
@@ -507,22 +507,22 @@ given TypeChecker {
             lowered_body = self.make_if_expr_from_condition(
                 clause,
                 lowered_body,
-                [Expr ref]Option.Some(break_block),
+                Option[ref Expr].Some(break_block),
                 clause_span
             )
         }
 
-        return [Expr ref]Option.Some(self.make_while_expr_from_condition(clauses[first_idx], lowered_body, outer_span))
+        return Option[ref Expr].Some(self.make_while_expr_from_condition(clauses[first_idx], lowered_body, outer_span))
     }
 
-    private make_break_block_expr(self, span SourceSpan) Expr ref = {
-        let mut statements = [Statement]List.new()
+    private make_break_block_expr(self, span SourceSpan) ref Expr = {
+        let mut statements = List[Statement].new()
         statements.push(Statement.BreakStmt(span))
         return box(Expr.Block(statements, span))
     }
 
-    private lower_range_expr_from_typed(self, op RangeOperator, typed_left [TypedExpr ref]Option, typed_right [TypedExpr ref]Option, range_type Type) TypedExpr = {
-        let mut args = [TypedExpr ref]List.new()
+    private lower_range_expr_from_typed(self, op RangeOperator, typed_left Option[ref TypedExpr], typed_right Option[ref TypedExpr], range_type Type) TypedExpr = {
+        let mut args = List[ref TypedExpr].new()
         let case_name = when op in {
             .Closed() then {
                 when typed_left in { .Some(left_ref) then args.push(left_ref), .None() then {} }
@@ -565,24 +565,24 @@ given TypeChecker {
         return self.lower_enum_constructor_expr(range_type, case_name, args)
     }
 
-    private check_range_expr_ref(self, op RangeOperator, left [Expr ref]Option, right [Expr ref]Option, expected [Type]Option, scope Scope) TypedExpr = {
+    private check_range_expr_ref(self, op RangeOperator, left Option[ref Expr], right Option[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
                 .GenericEnum(template, args) then {
-                    yield if template == "Range" and args.count() > (UInt)0 then [Type]Option.Some(args[(UInt)0].val) else [Type]Option.None()
+                    yield if template == "Range" and args.count() > 0(UInt) then Option[Type].Some(args[0(UInt)].val) else Option[Type].None()
                 },
-                _ then [Type]Option.None(),
+                _ then Option[Type].None(),
             },
-            .None() then [Type]Option.None(),
+            .None() then Option[Type].None(),
         }
 
         let mut typed_left = when left in {
-            .Some(l) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(l, expected_element_type, scope))),
-            .None() then [TypedExpr ref]Option.None(),
+            .Some(l) then Option[ref TypedExpr].Some(box(self.check_expr_scoped_ref(l, expected_element_type, scope))),
+            .None() then Option[ref TypedExpr].None(),
         }
         let mut typed_right = when right in {
-            .Some(r) then [TypedExpr ref]Option.Some(box(self.check_expr_scoped_ref(r, expected_element_type, scope))),
-            .None() then [TypedExpr ref]Option.None(),
+            .Some(r) then Option[ref TypedExpr].Some(box(self.check_expr_scoped_ref(r, expected_element_type, scope))),
+            .None() then Option[ref TypedExpr].None(),
         }
 
         let element_type = when typed_left in {
@@ -631,7 +631,7 @@ given TypeChecker {
         let range_type = when concrete_element_type in {
             .Unknown() then Type.Unknown(),
             _ then {
-                let mut range_args = [Type ref]List.new()
+                let mut range_args = List[ref Type].new()
                 range_args.push(box(concrete_element_type))
                 yield Type.GenericEnum("Range", range_args)
             },

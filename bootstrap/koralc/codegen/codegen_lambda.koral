@@ -30,17 +30,17 @@ given CodeGen {
     /// 扫描 Lambda 体，收集所有被捕获的变量（不在参数列表中的外部变量）
     ///
     /// 返回捕获变量的 Symbol 列表（去重）
-    collect_captured_variables(self mut ref, params [TypedParam]List, body TypedExpr ref) [Symbol]List = {
+    collect_captured_variables(self mut ref, params List[TypedParam], body ref TypedExpr) List[Symbol] = {
         // 收集参数的 def_id 集合（用于排除）
-        let mut param_def_ids = [UInt]Set.new()
+        let mut param_def_ids = Set[UInt].new()
         for p in params then {
             // 参数的 def_id 在 lambda scope 中分配，通过名称匹配
             // 我们通过扫描 body 中的 Variable 节点来找到捕获变量
         }
 
-        let mut captured = [Symbol]List.new()
-        let mut seen_ids = [UInt]Set.new()
-        let mut param_names = [String]Set.new()
+        let mut captured = List[Symbol].new()
+        let mut seen_ids = Set[UInt].new()
+        let mut param_names = Set[String].new()
         for p in params then {
             param_names.insert(p.name)
         }
@@ -49,7 +49,7 @@ given CodeGen {
         return captured
     }
 
-    collect_pattern_binding_names(self, pattern TypedPattern ref, names [String]Set mut ref) Void = {
+    collect_pattern_binding_names(self, pattern ref TypedPattern, names mut ref Set[String]) Void = {
         when pattern in {
             .Variable(symbol) then {
                 names.insert(self.context.symbol_name(symbol))
@@ -84,7 +84,7 @@ given CodeGen {
     /// seen_ids 同时用于：
     /// 1. 避免重复捕获同一变量
     /// 2. 标记在 lambda 体内部声明的局部变量（不应被捕获）
-    collect_captured_in_expr(self, expr TypedExpr ref, param_names [String]Set, seen_ids [UInt]Set mut ref, captured [Symbol]List mut ref) Void = {
+    collect_captured_in_expr(self, expr ref TypedExpr, param_names Set[String], seen_ids mut ref Set[UInt], captured mut ref List[Symbol]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 // 只捕获局部变量（非函数、非类型符号）
@@ -95,7 +95,7 @@ given CodeGen {
                 let symbol_name = self.context.symbol_name(symbol)
                 if is_local_var and not param_names.contains(symbol_name) and not seen_ids.contains(symbol.def_id.id) then {
                     // 检查是否为全局变量（全局变量不需要捕获）
-                    let module_path = self.context.get_module_path(symbol.def_id) or else [String]List.new()
+                    let module_path = self.context.get_module_path(symbol.def_id) or else List[String].new()
                     let source_file = self.context.get_source_file(symbol.def_id) or else ""
                     let is_global = not module_path.is_empty() or not source_file.is_empty()
                     if not is_global then {
@@ -284,7 +284,7 @@ given CodeGen {
     }
 
     /// 递归扫描语句，收集捕获变量
-    collect_captured_in_stmt(self, stmt TypedStatement, param_names [String]Set, seen_ids [UInt]Set mut ref, captured [Symbol]List mut ref) Void = {
+    collect_captured_in_stmt(self, stmt TypedStatement, param_names Set[String], seen_ids mut ref Set[UInt], captured mut ref List[Symbol]) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.collect_captured_in_expr(value_ref, param_names, seen_ids, captured)
@@ -341,7 +341,7 @@ given CodeGen {
 
     /// 获取 Symbol 的原始 C 标识符，绕过 captured_var_aliases
     /// 用于 env struct 字段名和 env 初始化
-    raw_c_identifier_for_symbol(self mut ref, symbol Symbol ref) String = {
+    raw_c_identifier_for_symbol(self mut ref, symbol ref Symbol) String = {
         // 临时移除别名以获取基础名称
         let saved_opt = self.captured_var_aliases.get(symbol.def_id.id)
         self.captured_var_aliases.remove(symbol.def_id.id)
@@ -370,9 +370,9 @@ given CodeGen {
 
     private capture_moves_trivial_drop_struct(self, symbol_type Type) Bool = {
         let def_id_opt = when symbol_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
+            .StructureType(def_id) then Option[DefId].Some(def_id),
             .GenericStruct(template, _) then self.find_type_def_id_by_layout_or_template(symbol_type, template),
-            _ then [DefId]Option.None(),
+            _ then Option[DefId].None(),
         }
         return when def_id_opt in {
             .Some(def_id) then when self.context.get_struct_fields(def_id) in {
@@ -415,7 +415,7 @@ given CodeGen {
     /// 4. 如果非 Never：声明结果变量，copy/move body 结果
     /// 5. pop_scope
     /// 6. 如果非 void：生成 return 语句
-    generate_lambda_body(self mut ref, params [TypedParam]List, body TypedExpr ref) Void = {
+    generate_lambda_body(self mut ref, params List[TypedParam], body ref TypedExpr) Void = {
         self.push_scope()
         let is_explicit_drop_function = when self.current_function_c_name in {
             .Some(name) then {
@@ -483,7 +483,7 @@ given CodeGen {
     /// - 有捕获：生成 env struct、lambda 函数（首参 void* __env）、env drop 函数
     ///
     /// Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
-    public generate_lambda_expression(self mut ref, params [TypedParam]List, return_type Type, body TypedExpr ref) String = {
+    public generate_lambda_expression(self mut ref, params List[TypedParam], return_type Type, body ref TypedExpr) String = {
         let lambda_name = self.next_lambda_name()
 
         // 检测捕获变量
@@ -555,11 +555,11 @@ given CodeGen {
     /// 生成 static 函数定义，追加到 lambda_functions 缓冲区
     ///
     /// Requirements: 8.2
-    public generate_no_capture_lambda(self mut ref, name String, params [TypedParam]List, return_type Type, body TypedExpr ref) Void = {
+    public generate_no_capture_lambda(self mut ref, name String, params List[TypedParam], return_type Type, body ref TypedExpr) Void = {
         let return_c_type = self.c_type_name(return_type)
 
         // 构建参数列表
-        let mut param_parts = [String]List.new()
+        let mut param_parts = List[String].new()
         for p in params then {
             let p_c_type = self.c_type_name(p.param_type)
             let p_c_name = self.c_identifier_for_param(p)
@@ -583,12 +583,12 @@ given CodeGen {
         self.buffer = box(String.new())
         self.indent = "  "
         self.lambda_functions = box(String.new())
-        self.lifetime_scope_stack = [[[String, Type]Pair]List mut ref]List.new()
-        self.defer_scope_stack = [[DeferredExpr]List mut ref]List.new()
-        self.loop_stack = [LoopContext]List.new()
-        self.current_function_type_prefix = [String]Option.None()
-        self.current_function_c_name = [String]Option.Some(name)
-        self.current_function_return_type = [Type]Option.Some(return_type)
+        self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
+        self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
+        self.loop_stack = List[LoopContext].new()
+        self.current_function_type_prefix = Option[String].None()
+        self.current_function_c_name = Option[String].Some(name)
+        self.current_function_return_type = Option[Type].Some(return_type)
 
         // 生成函数体
         self.generate_lambda_body(params, body)
@@ -624,11 +624,11 @@ given CodeGen {
     /// 生成带 void* __env 首参的 static 函数，追加到 lambda_functions 缓冲区
     ///
     /// Requirements: 8.3, 8.5
-    public generate_capture_lambda(self mut ref, name String, env_struct_name String, params [TypedParam]List, return_type Type, captures [Symbol]List, body TypedExpr ref) Void = {
+    public generate_capture_lambda(self mut ref, name String, env_struct_name String, params List[TypedParam], return_type Type, captures List[Symbol], body ref TypedExpr) Void = {
         let return_c_type = self.c_type_name(return_type)
 
         // 构建参数列表（env 作为第一个参数）
-        let mut param_parts = [String]List.new()
+        let mut param_parts = List[String].new()
         param_parts.push("void* __env")
         for p in params then {
             let p_c_type = self.c_type_name(p.param_type)
@@ -654,12 +654,12 @@ given CodeGen {
         self.buffer = box(String.new())
         self.indent = "  "
         self.lambda_functions = box(String.new())
-        self.lifetime_scope_stack = [[[String, Type]Pair]List mut ref]List.new()
-        self.defer_scope_stack = [[DeferredExpr]List mut ref]List.new()
-        self.loop_stack = [LoopContext]List.new()
-        self.current_function_type_prefix = [String]Option.None()
-        self.current_function_c_name = [String]Option.Some(name)
-        self.current_function_return_type = [Type]Option.Some(return_type)
+        self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
+        self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
+        self.loop_stack = List[LoopContext].new()
+        self.current_function_type_prefix = Option[String].None()
+        self.current_function_c_name = Option[String].Some(name)
+        self.current_function_return_type = Option[Type].Some(return_type)
 
         // 设置捕获别名：qualifiedName() 将捕获变量解析为 __captured->field
         for sym in captures then {
@@ -703,7 +703,7 @@ given CodeGen {
     /// 包含 __refcount 和所有捕获变量，以及 drop 函数
     ///
     /// Requirements: 8.4
-    public generate_lambda_env_struct(self mut ref, name String, captures [Symbol]List) Void = {
+    public generate_lambda_env_struct(self mut ref, name String, captures List[Symbol]) Void = {
         self.lambda_env_structs.push_string("\n// Lambda environment struct\n")
         self.lambda_env_structs.push_string("struct \(name) {\n")
         self.lambda_env_structs.push_string("  _Atomic intptr_t __refcount;\n")

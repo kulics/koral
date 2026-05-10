@@ -27,8 +27,8 @@ given TypeChecker {
                 self.storage.in_function = true
                 self.storage.in_loop = false
                 self.storage.in_finally = false
-                self.storage.yield_targets = [YieldTarget mut ref]List.new()
-                self.storage.inferred_function_return_type = [Type]Option.None()
+                self.storage.yield_targets = List[mut ref YieldTarget].new()
+                self.storage.inferred_function_return_type = Option[Type].None()
                 self.storage.is_inferring_function_return_type = false
                 let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
@@ -36,7 +36,7 @@ given TypeChecker {
                 }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
-                    self.storage.current_function_return_type = [Type]Option.Some(resolved_ret)
+                    self.storage.current_function_return_type = Option[Type].Some(resolved_ret)
                     let typed_params = self.check_params(params)
                     let mut fn_scope = self.make_fn_scope(typed_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
@@ -66,7 +66,7 @@ given TypeChecker {
                     }
                     let typed_params = self.check_params_in_scope(params, generic_type_scope)
                     let resolved_ret = self.resolve_type_in_scope(return_type, generic_type_scope)
-                    self.storage.current_function_return_type = [Type]Option.Some(resolved_ret)
+                    self.storage.current_function_return_type = Option[Type].Some(resolved_ret)
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     self.register_generic_function_template(
@@ -74,8 +74,8 @@ given TypeChecker {
                         type_params,
                         params,
                         return_type,
-                        self.template_checked_body([TypedExpr ref]Option.Some(box(typed_body))),
-                        [Type]Option.Some(resolved_ret),
+                        self.template_checked_body(Option[ref TypedExpr].Some(box(typed_body))),
+                        Option[Type].Some(resolved_ret),
                     )
                     yield TypedDecl.GenericFunctionDecl(
                         access,
@@ -231,13 +231,13 @@ given TypeChecker {
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 let typed_fields = when fields in {
                     .Some(raw_fields) then {
-                        let mut out = [TypedField]List.new()
+                        let mut out = List[TypedField].new()
                         for f in raw_fields then {
                             out.push(TypedField(f.access, f.name, true, self.resolve_type(f.type_name), f.named))
                         }
-                        yield [[TypedField]List]Option.Some(out)
+                        yield Option[List[TypedField]].Some(out)
                     },
-                    .None() then [[TypedField]List]Option.None(),
+                    .None() then Option[List[TypedField]].None(),
                 }
                 yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, when self.lookup_current_file_type_symbol(name) in {
                     .Some(t) then when t in {
@@ -261,7 +261,7 @@ given TypeChecker {
                 yield TypedDecl.UsingDecl(access, path_segments, span)
             },
             .FileUsingDecl(access, file_name, alias, span) then {
-                let mut path_segments = [String]List.new()
+                let mut path_segments = List[String].new()
                 path_segments.push(file_name)
                 yield TypedDecl.UsingDecl(access, path_segments, span)
             },
@@ -278,24 +278,24 @@ given TypeChecker {
                 self.validate_trait_parent_type_arguments(parents)
                 self.restore_type_bindings(type_binding_snapshot)
                 // 注册 Trait 到 TraitRegistry
-                let mut parent_constraints = [ParentTraitConstraint]List.new()
-                let mut parent_names = [String]List.new()
+                let mut parent_constraints = List[ParentTraitConstraint].new()
+                let mut parent_names = List[String].new()
                 for p in parents then {
                     let pname = self.type_node_name(p)
                     parent_names.push(pname)
                     let type_arg_nodes = when p in {
                         .Generic(_, args) then {
-                            let mut nodes = [TypeNode]List.new()
+                            let mut nodes = List[TypeNode].new()
                             for arg in args then {
                                 nodes.push(arg.val)
                             }
                             yield nodes
                         },
-                        _ then [TypeNode]List.new(),
+                        _ then List[TypeNode].new(),
                     }
                     parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes))
                 }
-                let mut param_names = [String]List.new()
+                let mut param_names = List[String].new()
                 for tp in type_params then {
                     param_names.push(tp.name)
                 }
@@ -310,7 +310,7 @@ given TypeChecker {
             },
             .GivenDecl(target_type, type_params, members, span) then {
                 yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.GivenDecl(Type.Unknown(), [TypedGivenMember]List.new(), span)
+                then TypedDecl.GivenDecl(Type.Unknown(), List[TypedGivenMember].new(), span)
                 else {
                     let type_binding_snapshot = self.snapshot_type_bindings()
                     for tp in type_params then {
@@ -328,14 +328,14 @@ given TypeChecker {
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.None())
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None())
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
                 }
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
                 yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), [Type]List.new(), [TypedGivenMember]List.new(), span)
+                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), List[Type].new(), List[TypedGivenMember].new(), span)
                 else {
                     let type_binding_snapshot = self.snapshot_type_bindings()
                     for tp in type_params then {
@@ -359,7 +359,7 @@ given TypeChecker {
                     // 注入 trait 类型参数：如 given Duration [Int]Mul，把 Mul 的 R 绑定为 Int
                     let resolved_trait_args = self.trait_type_args(trait_type)
                     self.inject_trait_type_args(trait_type, trait_name)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.Some(trait_name))
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].Some(trait_name))
                     // 检查 Trait 一致性
                     let checker = TraitChecker.new(self.storage.trait_registry.ref, self.storage.method_table.ref)
                     when self.storage.trait_registry.get(trait_name) in {
@@ -376,7 +376,7 @@ given TypeChecker {
                                     }
                                 } else {
                                     // Generic parent trait — resolve args with explicit substitution.
-                                    let mut parent_bindings = [String, Type]Dict.new()
+                                    let mut parent_bindings = Dict[String, Type].new()
                                     parent_bindings.insert("Self", resolved_target)
                                     when self.storage.trait_registry.get(trait_name) in {
                                         .Some(ti) then {
@@ -389,7 +389,7 @@ given TypeChecker {
                                         },
                                         .None() then {},
                                     }
-                                    let mut resolved_parent_args = [Type]List.new()
+                                    let mut resolved_parent_args = List[Type].new()
                                     for arg_node in parent.type_arg_nodes then {
                                         resolved_parent_args.push(self.resolve_type_with_bindings(arg_node, parent_bindings))
                                     }
@@ -425,21 +425,21 @@ given TypeChecker {
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
                 yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), [TypedGivenMember]List.new(), span)
+                then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), List[TypedGivenMember].new(), span)
                 else {
                     let type_binding_snapshot = self.snapshot_type_bindings()
                     for tp in type_params then {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, [String]Option.None())
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None())
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
                 }
             },
             .GivenNotTraitDecl(_, _, _, span) then {
                 // Reached only if a not-Deref declaration was not filtered by the pass driver.
-                yield TypedDecl.UsingDecl(AccessModifier.Private(), [String]List.new(), span)
+                yield TypedDecl.UsingDecl(AccessModifier.Private(), List[String].new(), span)
             },
         }
     }
@@ -457,7 +457,7 @@ given TypeChecker {
         return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
     }
 
-    private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params [TypeParameter]List) Bool = {
+    private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
         if not type_params.is_empty() then {
             return false
         }
@@ -469,7 +469,7 @@ given TypeChecker {
         }
     }
 
-    private reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params [TypeParameter]List) Bool = {
+    private reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
         if self.is_concrete_type_modifier_given_target(target_type, type_params) then {
             self.storage.diagnostics.push(
                 make_diagnostic(
@@ -484,7 +484,7 @@ given TypeChecker {
     }
 
     private validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
-        if actual_count == (UInt)0 then {
+        if actual_count == 0(UInt) then {
             return
         }
         when self.storage.trait_registry.get(trait_name) in {
@@ -504,14 +504,14 @@ given TypeChecker {
         }
     }
 
-    private validate_trait_parent_type_arguments(self, parents [TypeNode]List) Void = {
+    private validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
         for parent in parents then {
             when parent in {
                 .Identifier(name) then {
-                    self.validate_trait_parent_arity(name, (UInt)0)
+                    self.validate_trait_parent_arity(name, 0(UInt))
                 },
                 .ModuleQualified(_, name) then {
-                    self.validate_trait_parent_arity(name, (UInt)0)
+                    self.validate_trait_parent_arity(name, 0(UInt))
                 },
                 .Generic(base, args) then {
                     self.validate_trait_parent_arity(base, args.count())

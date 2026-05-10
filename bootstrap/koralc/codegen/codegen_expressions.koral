@@ -18,7 +18,7 @@
 given CodeGen {
     private emit_if_value_branch(
         self mut ref,
-        branch TypedExpr ref,
+        branch ref TypedExpr,
         final_type Type,
         result_var String,
         end_label String,
@@ -52,14 +52,14 @@ given CodeGen {
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
             .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.concretize_codegen_type(inner_ref.val))),
             .GenericStruct(template, args) then {
-                let mut concrete_args = [Type ref]List.new()
+                let mut concrete_args = List[ref Type].new()
                 for arg_ref in args then {
                     concrete_args.push(box(self.concretize_codegen_type(arg_ref.val)))
                 }
                 yield Type.GenericStruct(template, concrete_args)
             },
             .GenericEnum(template, args) then {
-                let mut concrete_args = [Type ref]List.new()
+                let mut concrete_args = List[ref Type].new()
                 for arg_ref in args then {
                     concrete_args.push(box(self.concretize_codegen_type(arg_ref.val)))
                 }
@@ -67,7 +67,7 @@ given CodeGen {
             },
             .FunctionType(fn_params, return_type_ref) then {
                 let param_types = param_entry_types(fn_params)
-                let mut concrete_params = [Type ref]List.new()
+                let mut concrete_params = List[ref Type].new()
                 for pt in param_types then {
                     concrete_params.push(box(self.concretize_codegen_type(pt.val)))
                 }
@@ -77,7 +77,7 @@ given CodeGen {
         }
     }
 
-    apply_codegen_type_bindings(self, t Type, bindings [String, Type]Dict) Type = {
+    apply_codegen_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
         return when t in {
             .GenericParameter(name) then {
                 yield when bindings.get(name) in {
@@ -92,14 +92,14 @@ given CodeGen {
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .GenericStruct(template, args) then {
-                let mut bound_args = [Type ref]List.new()
+                let mut bound_args = List[ref Type].new()
                 for arg_ref in args then {
                     bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
                 }
                 yield Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
-                let mut bound_args = [Type ref]List.new()
+                let mut bound_args = List[ref Type].new()
                 for arg_ref in args then {
                     bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings)))
                 }
@@ -107,7 +107,7 @@ given CodeGen {
             },
             .FunctionType(fn_params, ret_ref) then {
                 let param_types = param_entry_types(fn_params)
-                let mut bound_params = [Type ref]List.new()
+                let mut bound_params = List[ref Type].new()
                 for p in param_types then {
                     bound_params.push(box(self.apply_codegen_type_bindings(p.val, bindings)))
                 }
@@ -117,7 +117,7 @@ given CodeGen {
         }
     }
 
-    private append_generic_parameter_bindings(self, mut bindings [String, Type]Dict, target_args [Type ref]List, base_args [Type ref]List) Void = {
+    private append_generic_parameter_bindings(self, mut bindings Dict[String, Type], target_args List[ref Type], base_args List[ref Type]) Void = {
         let mut i UInt = 0
         let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
         while i < n then {
@@ -133,8 +133,8 @@ given CodeGen {
         }
     }
 
-    build_receiver_bindings(self, target_type Type, base_type Type) [String, Type]Dict = {
-        let mut bindings = [String, Type]Dict.new()
+    build_receiver_bindings(self, target_type Type, base_type Type) Dict[String, Type] = {
+        let mut bindings = Dict[String, Type].new()
         let concrete_base_type = self.concretize_codegen_type(base_type)
         let effective_base_type = when concrete_base_type in {
             .StructureType(def_id) then when self.context.lookup_type(def_id) in {
@@ -142,7 +142,7 @@ given CodeGen {
                 .None() then when self.context.get_template_name(def_id) in {
                     .Some(template_name) then when self.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
-                            let mut type_arg_refs = [Type ref]List.new()
+                            let mut type_arg_refs = List[ref Type].new()
                             for type_arg in type_args then {
                                 type_arg_refs.push(box(type_arg))
                             }
@@ -158,7 +158,7 @@ given CodeGen {
                 .None() then when self.context.get_template_name(def_id) in {
                     .Some(template_name) then when self.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
-                            let mut type_arg_refs = [Type ref]List.new()
+                            let mut type_arg_refs = List[ref Type].new()
                             for type_arg in type_args then {
                                 type_arg_refs.push(box(type_arg))
                             }
@@ -189,17 +189,17 @@ given CodeGen {
         return bindings
     }
 
-    private method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) [String, Type]Dict = {
+    private method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) Dict[String, Type] = {
         return when self.method_owner_type(method_def_id) in {
             .Some(target_type) then self.build_receiver_bindings(target_type, concrete_receiver_type),
-            .None() then [String, Type]Dict.new(),
+            .None() then Dict[String, Type].new(),
         }
     }
 
-    private bind_function_type(self, fn_type Type, receiver_bindings [String, Type]Dict) Type = {
+    private bind_function_type(self, fn_type Type, receiver_bindings Dict[String, Type]) Type = {
         return when fn_type in {
             .FunctionType(fn_params, return_type_ref) then {
-                let mut bound_param_types = [Type ref]List.new()
+                let mut bound_param_types = List[ref Type].new()
                 for entry in fn_params then {
                     bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, receiver_bindings)))
                 }
@@ -218,17 +218,17 @@ given CodeGen {
     private function_type_param_count(self, fn_type Type) UInt = {
         return when fn_type in {
             .FunctionType(fn_params, _) then fn_params.count(),
-            _ then (UInt)0,
+            _ then 0(UInt),
         }
     }
 
-    private function_type_param_type(self, fn_type Type, index UInt) [Type]Option = {
+    private function_type_param_type(self, fn_type Type, index UInt) Option[Type] = {
         return when fn_type in {
             .FunctionType(fn_params, _) then
                 if index < fn_params.count()
-                then [Type]Option.Some(fn_params[index].val.param_type)
-                else [Type]Option.None(),
-            _ then [Type]Option.None(),
+                then Option[Type].Some(fn_params[index].val.param_type)
+                else Option[Type].None(),
+            _ then Option[Type].None(),
         }
     }
 
@@ -239,13 +239,13 @@ given CodeGen {
         }
     }
 
-    private function_param_specs(self, def_id DefId) [FunctionParamSpec]List = {
-        return self.context.get_param_specs(def_id) or else [FunctionParamSpec]List.new()
+    private function_param_specs(self, def_id DefId) List[FunctionParamSpec] = {
+        return self.context.get_param_specs(def_id) or else List[FunctionParamSpec].new()
     }
 
-    private function_param_spec(self, def_id DefId, index UInt) [FunctionParamSpec]Option = {
+    private function_param_spec(self, def_id DefId, index UInt) Option[FunctionParamSpec] = {
         let specs = self.function_param_specs(def_id)
-        return if index < specs.count() then [FunctionParamSpec]Option.Some(specs[index]) else [FunctionParamSpec]Option.None()
+        return if index < specs.count() then Option[FunctionParamSpec].Some(specs[index]) else Option[FunctionParamSpec].None()
     }
 
     // function_signature_from_type and bind_method_signature deleted (dead code).
@@ -279,7 +279,7 @@ given CodeGen {
         }
     }
 
-    private adapt_expression_result_to_type(self mut ref, expr TypedExpr ref, expr_value String, target_type Type) String = {
+    private adapt_expression_result_to_type(self mut ref, expr ref TypedExpr, expr_value String, target_type Type) String = {
         let target_is_ref = target_type is .ReferenceType(_)
             or target_type is .MutableReferenceType(_)
             or target_type is .WeakReferenceType(_)
@@ -333,19 +333,19 @@ given CodeGen {
 
     private struct_layout_compatible(self, actual_type Type, expected_type Type) Bool = {
         let actual_def_id_opt = when actual_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
-            _ then [DefId]Option.None(),
+            .StructureType(def_id) then Option[DefId].Some(def_id),
+            _ then Option[DefId].None(),
         }
         let expected_def_id_opt = when expected_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
-            _ then [DefId]Option.None(),
+            .StructureType(def_id) then Option[DefId].Some(def_id),
+            _ then Option[DefId].None(),
         }
         if actual_def_id_opt is .Some(actual_def_id) and expected_def_id_opt is .Some(expected_def_id) then {
             let actual_fields_opt = self.context.get_struct_fields(actual_def_id)
             let expected_fields_opt = self.context.get_struct_fields(expected_def_id)
             if actual_fields_opt is .Some(actual_fields) and expected_fields_opt is .Some(expected_fields) then {
                 let mut compatible = actual_fields.count() == expected_fields.count()
-                let mut idx = (UInt)0
+                let mut idx = 0(UInt)
                 while compatible and idx < actual_fields.count() then {
                     let actual_field = actual_fields[idx]
                     let expected_field = expected_fields[idx]
@@ -355,7 +355,7 @@ given CodeGen {
                     if compatible and not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
                         compatible = false
                     }
-                    idx = idx + (UInt)1
+                    idx = idx + 1(UInt)
                 }
                 return compatible
             }
@@ -363,36 +363,36 @@ given CodeGen {
         return false
     }
 
-    private build_layout_compatible_struct_init(self, value String, actual_fields [StructField]List, expected_fields [StructField]List, expected_type Type) [String]Option = {
+    private build_layout_compatible_struct_init(self, value String, actual_fields List[StructField], expected_fields List[StructField], expected_type Type) Option[String] = {
         if not (actual_fields.count() == expected_fields.count()) then {
-            return [String]Option.None()
+            return Option[String].None()
         }
-        let mut inits = [String]List.new()
-        let mut idx = (UInt)0
+        let mut inits = List[String].new()
+        let mut idx = 0(UInt)
         while idx < actual_fields.count() then {
             let actual_field = actual_fields[idx]
             let expected_field = expected_fields[idx]
             if not (actual_field.name == expected_field.name) then {
-                return [String]Option.None()
+                return Option[String].None()
             }
             if not self.codegen_types_equal(actual_field.field_type, expected_field.field_type) then {
-                return [String]Option.None()
+                return Option[String].None()
             }
             inits.push(".\(expected_field.name) = \(value).\(actual_field.name)")
-            idx = idx + (UInt)1
+            idx = idx + 1(UInt)
         }
         let expected_c_type = self.c_type_name(expected_type)
-        return [String]Option.Some("(\(expected_c_type)){ \(inits.join_to_string(", ")) }")
+        return Option[String].Some("(\(expected_c_type)){ \(inits.join_to_string(", ")) }")
     }
 
-    private try_build_layout_compatible_struct_expr(self, value String, actual_type Type, expected_type Type) [String]Option = {
+    private try_build_layout_compatible_struct_expr(self, value String, actual_type Type, expected_type Type) Option[String] = {
         let actual_def_id_opt = when actual_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
-            _ then [DefId]Option.None(),
+            .StructureType(def_id) then Option[DefId].Some(def_id),
+            _ then Option[DefId].None(),
         }
         let expected_def_id_opt = when expected_type in {
-            .StructureType(def_id) then [DefId]Option.Some(def_id),
-            _ then [DefId]Option.None(),
+            .StructureType(def_id) then Option[DefId].Some(def_id),
+            _ then Option[DefId].None(),
         }
         if actual_def_id_opt is .Some(actual_def_id) and expected_def_id_opt is .Some(expected_def_id) then {
             let actual_fields_opt = self.context.get_struct_fields(actual_def_id)
@@ -401,10 +401,10 @@ given CodeGen {
                 return self.build_layout_compatible_struct_init(value, actual_fields, expected_fields, expected_type)
             }
         }
-        return [String]Option.None()
+        return Option[String].None()
     }
 
-    private coerce_argument_value(self mut ref, arg TypedExpr ref, arg_value String, expected_type Type) String = {
+    private coerce_argument_value(self mut ref, arg ref TypedExpr, arg_value String, expected_type Type) String = {
         if self.expects_erased_payload(expected_type) then {
             return when arg.expr_type in {
                 .GenericParameter(_) then arg_value,
@@ -513,7 +513,7 @@ given CodeGen {
         return self.transfer_owned_rvalue_cleanup(original_value, final_value, value_type, is_lvalue)
     }
 
-    copy_expr_if_lvalue_owned(self mut ref, expr TypedExpr ref, value String, value_type Type) String = {
+    copy_expr_if_lvalue_owned(self mut ref, expr ref TypedExpr, value String, value_type Type) String = {
         return self.copy_owned_value_if_lvalue(self.is_lvalue_expr(expr), value, value_type)
     }
 
@@ -538,7 +538,7 @@ given CodeGen {
         return deref_value
     }
 
-    assign_expr_result(self mut ref, expr TypedExpr ref, value String, value_type Type, target String) = {
+    assign_expr_result(self mut ref, expr ref TypedExpr, value String, value_type Type, target String) Void = {
         self.append_copy_or_move_assignment(value_type, value, target, self.is_lvalue_expr(expr))
     }
 
@@ -588,7 +588,7 @@ given CodeGen {
         return ref_var
     }
 
-    public generate_owned_heap_ref(self mut ref, inner_expr TypedExpr ref, ref_type Type) String = {
+    public generate_owned_heap_ref(self mut ref, inner_expr ref TypedExpr, ref_type Type) String = {
         let inner_type = inner_expr.expr_type
         let inner_c_type = self.c_type_name(inner_type)
         let result = self.next_temp_with_decl(self.c_type_name(ref_type))
@@ -630,7 +630,7 @@ given CodeGen {
         return result
     }
 
-    private lowered_call_argument(self, arg TypedExpr ref, expected_type_opt [Type]Option) TypedExpr ref = {
+    private lowered_call_argument(self, arg ref TypedExpr, expected_type_opt Option[Type]) ref TypedExpr = {
         return when expected_type_opt in {
             .Some(expected_type) then when expected_type in {
                 .TraitObject(_, _) then arg,
@@ -643,7 +643,7 @@ given CodeGen {
         }
     }
 
-    public prepare_call_argument(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
+    public prepare_call_argument(self mut ref, arg ref TypedExpr, expected_type_opt Option[Type]) String = {
         when self.try_prepare_ref_call_argument(arg, expected_type_opt, false) in {
             .Some(prepared_arg) then {
                 return prepared_arg
@@ -654,7 +654,7 @@ given CodeGen {
         return self.prepare_call_argument_fallback(arg, expected_type_opt)
     }
 
-    public prepare_call_argument_for_parameter(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option, callee_def_id DefId, param_index UInt) String = {
+    public prepare_call_argument_for_parameter(self mut ref, arg ref TypedExpr, expected_type_opt Option[Type], callee_def_id DefId, param_index UInt) String = {
         let allow_nonescaping_alias = not self.escape_context.parameter_escapes(callee_def_id, param_index)
         when self.try_prepare_ref_call_argument(arg, expected_type_opt, allow_nonescaping_alias) in {
             .Some(prepared_arg) then {
@@ -666,16 +666,16 @@ given CodeGen {
         return self.prepare_call_argument_fallback(arg, expected_type_opt)
     }
 
-    private try_prepare_ref_call_argument(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option, allow_nonescaping_alias Bool) [String]Option = {
+    private try_prepare_ref_call_argument(self mut ref, arg ref TypedExpr, expected_type_opt Option[Type], allow_nonescaping_alias Bool) Option[String] = {
         let effective_expected_type_opt = when expected_type_opt in {
             .Some(_) then expected_type_opt,
             .None() then if allow_nonescaping_alias then when arg.expr_type in {
-                    .ReferenceType(_) then [Type]Option.Some(arg.expr_type),
-                    .MutableReferenceType(_) then [Type]Option.Some(arg.expr_type),
-                    .WeakReferenceType(_) then [Type]Option.Some(arg.expr_type),
-                    .MutableWeakReferenceType(_) then [Type]Option.Some(arg.expr_type),
-                    _ then [Type]Option.None(),
-                } else [Type]Option.None(),
+                    .ReferenceType(_) then Option[Type].Some(arg.expr_type),
+                    .MutableReferenceType(_) then Option[Type].Some(arg.expr_type),
+                    .WeakReferenceType(_) then Option[Type].Some(arg.expr_type),
+                    .MutableWeakReferenceType(_) then Option[Type].Some(arg.expr_type),
+                    _ then Option[Type].None(),
+                } else Option[Type].None(),
         }
 
         when effective_expected_type_opt in {
@@ -702,7 +702,7 @@ given CodeGen {
                         self.buffer.push_string("\(ref_result).control = \(components.second);\n")
                         self.add_indent()
                         self.buffer.push_string("__koral_retain(\(ref_result).control);\n")
-                        return [String]Option.Some(ref_result)
+                        return Option[String].Some(ref_result)
                     }
                 },
                 _ then {},
@@ -710,10 +710,10 @@ given CodeGen {
             .None() then {},
         }
 
-        return [String]Option.None()
+        return Option[String].None()
     }
 
-    private prepare_call_argument_fallback(self mut ref, arg TypedExpr ref, expected_type_opt [Type]Option) String = {
+    private prepare_call_argument_fallback(self mut ref, arg ref TypedExpr, expected_type_opt Option[Type]) String = {
         let lowered_arg = self.lowered_call_argument(arg, expected_type_opt)
         let is_lvalue = self.is_lvalue_expr(lowered_arg)
         let arg_type = lowered_arg.expr_type
@@ -738,7 +738,7 @@ given CodeGen {
         return self.finish_prepared_call_argument(result, arg_value, effective_arg_type, is_lvalue, copied_source)
     }
 
-    private is_subscript_borrow_alias_expr(self, expr TypedExpr ref) Bool = {
+    private is_subscript_borrow_alias_expr(self, expr ref TypedExpr) Bool = {
         return when expr.expr_kind in {
             .Variable(symbol) then when symbol.kind in {
                 .Variable(variable_kind) then variable_kind is .SubscriptBaseBorrowAlias(),
@@ -752,7 +752,7 @@ given CodeGen {
         }
     }
 
-    private adapt_call_argument_to_expected_type(self mut ref, arg TypedExpr ref, arg_value String, expected_type Type, is_lvalue Bool) String = {
+    private adapt_call_argument_to_expected_type(self mut ref, arg ref TypedExpr, arg_value String, expected_type Type, is_lvalue Bool) String = {
         let preadapted_value = self.adapt_expression_result_to_type(arg, arg_value, expected_type)
         let expected_is_ref = expected_type is .ReferenceType(_) or expected_type is .MutableReferenceType(_)
         if expected_is_ref then {
@@ -819,19 +819,19 @@ given CodeGen {
                                     let bridge_temp = self.next_temp_with_decl(expected_c_type)
                                     self.add_indent()
                                     self.buffer.push_string("memcpy((void*)&(\(bridge_temp)), (void*)&(\(actual_temp)), sizeof(\(expected_c_type)));\n")
-                                    yield [String]Option.Some(bridge_temp)
+                                    yield Option[String].Some(bridge_temp)
                                 },
-                                _ then [String]Option.None(),
+                                _ then Option[String].None(),
                             },
-                            _ then [String]Option.None(),
+                            _ then Option[String].None(),
                         }
-                        let mut aggregate_bridge_arg = [String]Option.None()
+                        let mut aggregate_bridge_arg = Option[String].None()
                         if self.struct_layout_compatible(arg.expr_type, expected_type) and actual_c_type.starts_with("struct ") and expected_c_type.starts_with("struct ") and actual_c_type <> expected_c_type then {
                             let actual_temp = self.next_temp_with_init(actual_c_type, arg_value)
                             let bridge_temp = self.next_temp_with_decl(expected_c_type)
                             self.add_indent()
                             self.buffer.push_string("memcpy((void*)&(\(bridge_temp)), (void*)&(\(actual_temp)), sizeof(\(expected_c_type)));\n")
-                            aggregate_bridge_arg = [String]Option.Some(bridge_temp)
+                            aggregate_bridge_arg = Option[String].Some(bridge_temp)
                         }
                         adapted_value = when bridged_struct_arg in {
                             .Some(bridge_value) then bridge_value,
@@ -850,7 +850,7 @@ given CodeGen {
     private static_dispatch_type_name(self, receiver_type Type) String = {
         return when receiver_type in {
             .StructureType(def_id) then {
-                let module_path = self.context.get_module_path(def_id) or else [String]List.new()
+                let module_path = self.context.get_module_path(def_id) or else List[String].new()
                 let type_name = self.context.get_name(def_id) or else self.context.type_display_name(receiver_type)
                 let mut display = String.new()
                 let mut needs_separator = false
@@ -864,7 +864,7 @@ given CodeGen {
                 yield display
             },
             .EnumType(def_id) then {
-                let module_path = self.context.get_module_path(def_id) or else [String]List.new()
+                let module_path = self.context.get_module_path(def_id) or else List[String].new()
                 let type_name = self.context.get_name(def_id) or else self.context.type_display_name(receiver_type)
                 let mut display = String.new()
                 let mut needs_separator = false
@@ -878,7 +878,7 @@ given CodeGen {
                 yield display
             },
             .OpaqueType(def_id) then {
-                let module_path = self.context.get_module_path(def_id) or else [String]List.new()
+                let module_path = self.context.get_module_path(def_id) or else List[String].new()
                 let type_name = self.context.get_name(def_id) or else self.context.type_display_name(receiver_type)
                 let mut display = String.new()
                 let mut needs_separator = false
@@ -899,9 +899,9 @@ given CodeGen {
 
     private nominal_type_is_std_named(self, def_id DefId, expected_name String) Bool = {
         let actual_name = self.context.get_name(def_id) or else { return false }
-        let module_path = self.context.get_module_path(def_id) or else [String]List.new()
+        let module_path = self.context.get_module_path(def_id) or else List[String].new()
         if module_path.is_empty() then { return false }
-        return module_path[(UInt)0] == "Std" and actual_name == expected_name
+        return module_path[0(UInt)] == "Std" and actual_name == expected_name
     }
 
     private nominal_type_simple_name_matches(self, def_id DefId, expected_name String) Bool = {
@@ -996,7 +996,7 @@ given CodeGen {
     }
 
     private trait_object_type_from_name(self, trait_name String) Type = {
-        let mut trait_type_args = [Type ref]List.new()
+        let mut trait_type_args = List[ref Type].new()
         when self.program.semantic_traits().get(trait_name) in {
             .Some(info) then {
                 for type_param in info.type_params then {
@@ -1014,37 +1014,37 @@ given CodeGen {
     }
 
 
-    monomorphized_token_to_type(self, token String) [Type]Option = {
+    monomorphized_token_to_type(self, token String) Option[Type] = {
         return when token in {
-            "Int" then [Type]Option.Some(Type.IntType()),
-            "Int8" then [Type]Option.Some(Type.Int8Type()),
-            "Int16" then [Type]Option.Some(Type.Int16Type()),
-            "Int32" then [Type]Option.Some(Type.Int32Type()),
-            "Int64" then [Type]Option.Some(Type.Int64Type()),
-            "UInt" then [Type]Option.Some(Type.UIntType()),
-            "UInt8" then [Type]Option.Some(Type.UInt8Type()),
-            "UInt16" then [Type]Option.Some(Type.UInt16Type()),
-            "UInt32" then [Type]Option.Some(Type.UInt32Type()),
-            "UInt64" then [Type]Option.Some(Type.UInt64Type()),
-            "Bool" then [Type]Option.Some(Type.BoolType()),
+            "Int" then Option[Type].Some(Type.IntType()),
+            "Int8" then Option[Type].Some(Type.Int8Type()),
+            "Int16" then Option[Type].Some(Type.Int16Type()),
+            "Int32" then Option[Type].Some(Type.Int32Type()),
+            "Int64" then Option[Type].Some(Type.Int64Type()),
+            "UInt" then Option[Type].Some(Type.UIntType()),
+            "UInt8" then Option[Type].Some(Type.UInt8Type()),
+            "UInt16" then Option[Type].Some(Type.UInt16Type()),
+            "UInt32" then Option[Type].Some(Type.UInt32Type()),
+            "UInt64" then Option[Type].Some(Type.UInt64Type()),
+            "Bool" then Option[Type].Some(Type.BoolType()),
             _ then when self.find_type_def_id_by_name(token) in {
                 .Some(def_id) then when self.context.get_kind(def_id) in {
                     .Some(kind) then when kind in {
                         .TypeDef(type_kind) then when type_kind in {
-                            .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
-                            .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
-                            _ then [Type]Option.None(),
+                            .Structure() then Option[Type].Some(Type.StructureType(def_id)),
+                            .Enum() then Option[Type].Some(Type.EnumType(def_id)),
+                            _ then Option[Type].None(),
                         },
                         .GenericTemplate(template_kind) then when template_kind in {
-                            .Structure() then [Type]Option.Some(Type.StructureType(def_id)),
-                            .Enum() then [Type]Option.Some(Type.EnumType(def_id)),
-                            _ then [Type]Option.None(),
+                            .Structure() then Option[Type].Some(Type.StructureType(def_id)),
+                            .Enum() then Option[Type].Some(Type.EnumType(def_id)),
+                            _ then Option[Type].None(),
                         },
-                        _ then [Type]Option.None(),
+                        _ then Option[Type].None(),
                     },
-                    .None() then [Type]Option.None(),
+                    .None() then Option[Type].None(),
                 },
-                .None() then [Type]Option.None(),
+                .None() then Option[Type].None(),
             },
         }
     }
@@ -1078,7 +1078,7 @@ given CodeGen {
         }
     }
 
-    expr_looks_float_for_codegen(self, expr TypedExpr ref) Bool = {
+    expr_looks_float_for_codegen(self, expr ref TypedExpr) Bool = {
         return when expr.expr_kind in {
             .FloatLiteral(_) then true,
             .Unary(_, inner_ref) then {
@@ -1106,13 +1106,13 @@ given CodeGen {
         }
     }
 
-    lookup_field_type_by_name(self, struct_name String, field_name String) [Type]Option = {
+    lookup_field_type_by_name(self, struct_name String, field_name String) Option[Type] = {
         for def_id in self.type_def_ids_named(struct_name) then {
             when self.context.get_struct_fields(def_id) in {
                 .Some(fields) then {
                     for f in fields then {
                         if f.name == field_name then {
-                            return [Type]Option.Some(f.field_type)
+                            return Option[Type].Some(f.field_type)
                         }
                     }
                 },
@@ -1126,7 +1126,7 @@ given CodeGen {
                     .Some(fields) then {
                         for f in fields then {
                             if f.name == field_name then {
-                                return [Type]Option.Some(f.field_type)
+                                return Option[Type].Some(f.field_type)
                             }
                         }
                     },
@@ -1136,7 +1136,7 @@ given CodeGen {
             .None() then {},
         }
 
-        return [Type]Option.None()
+        return Option[Type].None()
     }
     private sanitize_c_numeric_literal(self, value String) String = {
         let cleaned = value.replace_all("_", with: "")
@@ -1151,7 +1151,7 @@ given CodeGen {
     /// 将 TypedExpr 转换为 SSA 风格的 C 代码，返回持有结果的变量名（或字面量字符串）
     ///
     /// Requirements: 5.1–5.11
-    public generate_expression_ssa(self mut ref, expr TypedExpr ref) String = {
+    public generate_expression_ssa(self mut ref, expr ref TypedExpr) String = {
         return when expr.expr_kind in {
 
             // ── 整数字面量 ────────────────────────────────────────────────────
@@ -1212,9 +1212,9 @@ given CodeGen {
                                                 if ch < '0' or ch > '9' then { is_digits = false }
                                             }
                                         }
-                                        yield if is_digits then [String]Option.Some(parts.first) else [String]Option.None()
+                                        yield if is_digits then Option[String].Some(parts.first) else Option[String].None()
                                     },
-                                    .None() then [String]Option.None(),
+                                    .None() then Option[String].None(),
                                 }
                                 yield when base_name_opt in {
                                     .Some(base_name) then {
@@ -1330,9 +1330,9 @@ given CodeGen {
                         let vtable_struct = self.vtable_anonymous_struct_type(trait_name)
                         let compare_expr = "((\(vtable_struct)*)\(left_result).vtable)->compare((struct __koral_Ref){ .ptr = \(left_result).ptr, .control = \(left_result).control }, (void*)&(\(right_result)))"
                         let compare_result = self.next_temp_with_init("intptr_t", compare_expr)
-                        yield [String]Option.Some(compare_result)
+                        yield Option[String].Some(compare_result)
                     },
-                    _ then [String]Option.None(),
+                    _ then Option[String].None(),
                 }
                 yield when trait_object_compare in {
                     .Some(compare_result) then {
@@ -1551,8 +1551,8 @@ given CodeGen {
                     let result_var = self.next_temp()
                     let end_label = "\(self.next_temp())_yield_end"
                     let base_scope_index = if self.lifetime_scope_stack.is_empty()
-                        then (UInt)0
-                        else self.lifetime_scope_stack.count() - (UInt)1
+                        then 0(UInt)
+                        else self.lifetime_scope_stack.count() - 1(UInt)
                     if not self.type_is_never(final_if_expr_type) then {
                         self.push_indented_decl(c_type, result_var)
                     }
@@ -1706,7 +1706,7 @@ given CodeGen {
 }
 
 given CodeGen {
-    private intrinsic_ref_value(self mut ref, ref_expr TypedExpr ref) String = {
+    private intrinsic_ref_value(self mut ref, ref_expr ref TypedExpr) String = {
         return when ref_expr.expr_type in {
             .ReferenceType(_) then if self.is_addressable_lvalue_expr(ref_expr)
                 then self.build_ref_components_path(ref_expr)
@@ -1733,7 +1733,7 @@ given CodeGen {
         }
     }
 
-    private try_generate_trait_downgrade_ref(self mut ref, ref_expr TypedExpr ref, arg_value String, result_type Type) String = {
+    private try_generate_trait_downgrade_ref(self mut ref, ref_expr ref TypedExpr, arg_value String, result_type Type) String = {
         return when ref_expr.expr_type in {
             .ReferenceType(inner_ref) then when inner_ref.val in {
                 .TraitObject(_, _) then {
@@ -1794,7 +1794,7 @@ given CodeGen {
         self.buffer.push_string("}\n")
     }
 
-    private try_generate_trait_upgrade_ref(self mut ref, weak_expr TypedExpr ref, arg_value String, result_type Type, success_var String) String = {
+    private try_generate_trait_upgrade_ref(self mut ref, weak_expr ref TypedExpr, arg_value String, result_type Type, success_var String) String = {
         return when weak_expr.expr_type in {
             .WeakReferenceType(inner_ref) then when inner_ref.val in {
                 .TraitObject(_, _) then {

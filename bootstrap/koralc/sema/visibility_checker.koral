@@ -4,15 +4,15 @@
 // ── VisibilityChecker ─────────────────────────────────────────────────────────
 
 public type VisibilityChecker(
-    import_graph ImportGraph ref,
-    current_module_path [String]List,
+    import_graph ref ImportGraph,
+    current_module_path List[String],
     current_source_file String,
 )
 
 given VisibilityChecker {
     public new(
-        import_graph ImportGraph ref,
-        current_module_path [String]List,
+        import_graph ref ImportGraph,
+        current_module_path List[String],
         current_source_file String,
     ) VisibilityChecker = {
         return VisibilityChecker(import_graph, current_module_path, current_source_file)
@@ -22,17 +22,17 @@ given VisibilityChecker {
     // 返回 Ok 或 Error(建议前缀消息)
     public check_symbol(
         self,
-        symbol_module_path [String]List,
+        symbol_module_path List[String],
         symbol_name String,
         is_generic_param Bool,
-    ) [Void]Result = {
+    ) Result[Void] = {
         // 泛型参数跳过验证
         if is_generic_param then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
-        if self.can_access_directly(symbol_module_path, [String]Option.Some(symbol_name)) then {
-            return [Void]Result.Ok({})
+        if self.can_access_directly(symbol_module_path, Option[String].Some(symbol_name)) then {
+            return Result[Void].Ok({})
         }
 
         let prefix = self.required_prefix(symbol_module_path)
@@ -43,7 +43,7 @@ given VisibilityChecker {
             module_path_text.push_string(seg)
             first = false
         }
-        return [Void]Result.Error(box(
+        return Result[Void].Error(box(
             "'\(symbol_name)' is defined in module '\(module_path_text)'. Use '\(prefix).\(symbol_name)' to access it."
         ))
     }
@@ -56,10 +56,10 @@ given VisibilityChecker {
         context CompilerContext,
         is_local_binding Bool,
         is_generic_param Bool,
-    ) [Void]Result = {
+    ) Result[Void] = {
         // 局部绑定或泛型参数跳过验证
         if is_local_binding or is_generic_param then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
 
         // 获取类型的模块路径
@@ -67,30 +67,30 @@ given VisibilityChecker {
             .StructureType(def_id) then {
                 yield when context.get_module_path(def_id) in {
                     .Some(p) then p,
-                    .None() then [String]List.new(),
+                    .None() then List[String].new(),
                 }
             },
             .EnumType(def_id) then {
                 yield when context.get_module_path(def_id) in {
                     .Some(p) then p,
-                    .None() then [String]List.new(),
+                    .None() then List[String].new(),
                 }
             },
             .OpaqueType(def_id) then {
                 yield when context.get_module_path(def_id) in {
                     .Some(p) then p,
-                    .None() then [String]List.new(),
+                    .None() then List[String].new(),
                 }
             },
-            .GenericParameter(_) then { return [Void]Result.Ok({}) },
-            _ then { return [Void]Result.Ok({}) },
+            .GenericParameter(_) then { return Result[Void].Ok({}) },
+            _ then { return Result[Void].Ok({}) },
         }
 
         return self.check_symbol(module_path, type_name, false)
     }
 
     // 计算访问符号所需的模块前缀字符串
-    public required_prefix(self, symbol_module_path [String]List) String = {
+    public required_prefix(self, symbol_module_path List[String]) String = {
         if symbol_module_path.count() == 0 then {
             return ""
         }
@@ -114,7 +114,7 @@ given VisibilityChecker {
             }
         }
 
-        if symbol_module_path.count() >= (UInt)2 and self.current_module_path.count() >= (UInt)2 then {
+        if symbol_module_path.count() >= 2(UInt) and self.current_module_path.count() >= 2(UInt) then {
             let mut common_prefix_length UInt = 0
             let min_len = if symbol_module_path.count() < self.current_module_path.count()
                 then symbol_module_path.count()
@@ -126,19 +126,19 @@ given VisibilityChecker {
                     break
                 }
             }
-            if common_prefix_length > (UInt)0 and common_prefix_length < symbol_module_path.count() then {
+            if common_prefix_length > 0(UInt) and common_prefix_length < symbol_module_path.count() then {
                 return symbol_module_path[common_prefix_length]
             }
         }
 
-        return symbol_module_path[symbol_module_path.count() - (UInt)1]
+        return symbol_module_path[symbol_module_path.count() - 1(UInt)]
     }
 
     // 判断是否可以直接访问（不需要模块前缀）
     private can_access_directly(
         self,
-        symbol_module_path [String]List,
-        symbol_name [String]Option,
+        symbol_module_path List[String],
+        symbol_name Option[String],
     ) Bool = {
         // 空路径：局部变量，总是可访问
         if symbol_module_path.count() == 0 then {
@@ -151,8 +151,8 @@ given VisibilityChecker {
         }
 
         // 标准库内部子模块之间允许直接访问
-        if symbol_module_path.count() > (UInt)0 and self.current_module_path.count() > (UInt)0 and
-           symbol_module_path[(UInt)0] == "Std" and self.current_module_path[(UInt)0] == "Std" then {
+        if symbol_module_path.count() > 0(UInt) and self.current_module_path.count() > 0(UInt) and
+           symbol_module_path[0(UInt)] == "Std" and self.current_module_path[0(UInt)] == "Std" then {
             return true
         }
 
@@ -166,7 +166,7 @@ given VisibilityChecker {
             symbol_module_path,
             symbol_name,
             self.current_module_path,
-            [String]Option.Some(self.current_source_file)
+            Option[String].Some(self.current_source_file)
         )
 
         return when kind in {

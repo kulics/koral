@@ -5,11 +5,11 @@ public type LexError(
 )
 
 public type Lexer(
-    source_runes [Rune]List,
+    source_runes List[Rune],
     mut index UInt,
     mut line UInt,
     mut column UInt,
-    mut tokens [Token]List,
+    mut tokens List[Token],
     mut has_newline_before Bool,
     mut newline_count_before UInt,
 )
@@ -39,26 +39,26 @@ given Lexer {
     }
 
     public new(source String) Lexer = {
-        return Lexer(source.to_runes(), 0, 1, 1, [Token]List.new(), false, (UInt)0)
+        return Lexer(source.to_runes(), 0, 1, 1, List[Token].new(), false, 0(UInt))
     }
 
     private is_at_end(self) Bool = self.index >= self.source_runes.count()
 
-    private peek(self) [Rune]Option = {
+    private peek(self) Option[Rune] = {
         if self.index < self.source_runes.count() then {
             return .Some(self.source_runes[self.index])
         }
         return .None()
     }
 
-    private peek_next(self) [Rune]Option = {
+    private peek_next(self) Option[Rune] = {
         if self.index + 1 < self.source_runes.count() then {
             return .Some(self.source_runes[self.index + 1])
         }
         return .None()
     }
 
-    private advance(self mut ref) [Rune]Option = {
+    private advance(self mut ref) Option[Rune] = {
         if self.is_at_end() then {
             return .None()
         }
@@ -90,10 +90,10 @@ given Lexer {
     private add(self mut ref, kind TokenKind, line UInt, column UInt) Void = {
         self.tokens.push(Token(kind, line, column, self.has_newline_before, self.newline_count_before))
         self.has_newline_before = false
-        self.newline_count_before = (UInt)0
+        self.newline_count_before = 0(UInt)
     }
 
-    private fail(self, line UInt, column UInt, message String) [[Token]List]Result = {
+    private fail(self, line UInt, column UInt, message String) Result[List[Token]] = {
         let mut text = "Lex error at "
         text.push_string(self.format_position(line, column))
         text.push_string(": ")
@@ -138,7 +138,7 @@ given Lexer {
         }
     }
 
-    private read_duration_suffix_if_present(self mut ref) [String]Option = {
+    private read_duration_suffix_if_present(self mut ref) Option[String] = {
         let first = self.peek() or else {
             return .None()
         }
@@ -181,7 +181,7 @@ given Lexer {
         return .None()
     }
 
-    private read_number(self mut ref, start_line UInt, start_col UInt, first Rune) [Void]Result = {
+    private read_number(self mut ref, start_line UInt, start_col UInt, first Rune) Result[Void] = {
         let mut text = String.new()
         text.push_rune(first)
 
@@ -366,7 +366,7 @@ given Lexer {
     }
 
     // 将 hex 字符串转为 UInt32
-    private parse_hex_to_uint32(self, hex String) [UInt32]Result = {
+    private parse_hex_to_uint32(self, hex String) Result[UInt32] = {
         let runes = hex.to_runes()
         if runes.is_empty() then {
             return .Error(box("empty hex string"))
@@ -382,7 +382,7 @@ given Lexer {
     }
 
     // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
-    private read_escape(self mut ref, start_line UInt, start_col UInt) [String]Result = {
+    private read_escape(self mut ref, start_line UInt, start_col UInt) Result[String] = {
         let next = self.peek() or else {
             return .Error(box("Unterminated escape sequence"))
         }
@@ -504,7 +504,7 @@ given Lexer {
         return .Error(box("Unknown escape sequence"))
     }
 
-    private read_string(self mut ref, start_line UInt, start_col UInt) [Void]Result = {
+    private read_string(self mut ref, start_line UInt, start_col UInt) Result[Void] = {
         let mut text = String.new()
 
         while self.peek() is .Some(ch) then {
@@ -549,7 +549,7 @@ given Lexer {
         return .Error(box("Unterminated string literal"))
     }
 
-    private read_rune(self mut ref, start_line UInt, start_col UInt) [Void]Result = {
+    private read_rune(self mut ref, start_line UInt, start_col UInt) Result[Void] = {
         let mut text = String.new()
 
         while self.peek() is .Some(ch) then {
@@ -583,7 +583,7 @@ given Lexer {
         return count
     }
 
-    private append_backslashes(self, text String mut ref, count UInt) Void = {
+    private append_backslashes(self, text mut ref String, count UInt) Void = {
         let mut i UInt = 0
         while i < count then {
             text.push_rune('\\')
@@ -614,7 +614,7 @@ given Lexer {
         return line.substring(indent_count..)
     }
 
-    private read_escape_from_runes(self, runes [Rune]List, index UInt) [[String, UInt]Pair]Result = {
+    private read_escape_from_runes(self, runes List[Rune], index UInt) Result[Pair[String, UInt]] = {
         let mut cur_index = index
         if cur_index >= runes.count() then {
             return .Error(box("Unterminated escape sequence"))
@@ -626,37 +626,37 @@ given Lexer {
         if next == 'n' then {
             let mut s = String.new()
             s.push_rune('\n')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 't' then {
             let mut s = String.new()
             s.push_rune('\t')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'r' then {
             let mut s = String.new()
             s.push_rune('\r')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '0' then {
             let mut s = String.new()
             s.push_rune('\0')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '"' then {
             let mut s = String.new()
             s.push_rune('"')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '\'' then {
             let mut s = String.new()
             s.push_rune('\'')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '\\' then {
             let mut s = String.new()
             s.push_rune('\\')
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'v' then {
             let r = Rune.from_uint32(11) or else {
@@ -664,7 +664,7 @@ given Lexer {
             }
             let mut s = String.new()
             s.push_rune(r)
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'f' then {
             let r = Rune.from_uint32(12) or else {
@@ -672,7 +672,7 @@ given Lexer {
             }
             let mut s = String.new()
             s.push_rune(r)
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'x' then {
             let mut hex = String.new()
@@ -695,7 +695,7 @@ given Lexer {
             }
             let mut s = String.new()
             s.push_rune(r)
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'u' then {
             if cur_index >= runes.count() or runes[cur_index] <> '{' then {
@@ -727,13 +727,13 @@ given Lexer {
             }
             let mut s = String.new()
             s.push_rune(r)
-            return .Ok([String, UInt]Pair(s, cur_index))
+            return .Ok(Pair[String, UInt](s, cur_index))
         }
 
         return .Error(box("Unknown escape sequence"))
     }
 
-    private process_string_content(self, content String) [String]Result = {
+    private process_string_content(self, content String) Result[String] = {
         let runes = content.to_runes()
         let total = runes.count()
         let mut i UInt = 0
@@ -794,7 +794,7 @@ given Lexer {
         return .Ok(text)
     }
 
-    private read_multiline_string(self mut ref, start_line UInt, start_col UInt) [Void]Result = {
+    private read_multiline_string(self mut ref, start_line UInt, start_col UInt) Result[Void] = {
         // Caller has consumed the first quote; consume the remaining two of opening delimiter.
         self.advance()
         self.advance()
@@ -816,7 +816,7 @@ given Lexer {
             }
         }
 
-        let mut raw_lines = [String]List.new()
+        let mut raw_lines = List[String].new()
         let mut current_line = String.new()
         let mut closing_indent = String.new()
         let mut found_closing = false
@@ -852,7 +852,7 @@ given Lexer {
         }
 
         let closing_indent_count = closing_indent.count()
-        let mut stripped_lines = [String]List.new()
+        let mut stripped_lines = List[String].new()
         for line in raw_lines then {
             if not line.is_empty() and not line.starts_with(closing_indent) then {
                 return .Error(box("insufficient indentation in multiline string literal: each line must be indented at least as much as the closing \"\"\""))
@@ -870,7 +870,7 @@ given Lexer {
         return .Ok({})
     }
 
-    private append_interpolation_tail(self mut ref, text String mut ref) [Void]Result = {
+    private append_interpolation_tail(self mut ref, text mut ref String) Result[Void] = {
         let mut depth UInt = 1
 
         while self.peek() is .Some(ch) then {
@@ -901,7 +901,7 @@ given Lexer {
         }
     }
 
-    private skip_block_comment(self mut ref) [Void]Result = {
+    private skip_block_comment(self mut ref) Result[Void] = {
         while self.peek() is .Some(ch) then {
             if ch == '*' then {
                 let next = self.peek_next() or else {
@@ -919,7 +919,7 @@ given Lexer {
         return .Error(box("Unterminated block comment"))
     }
 
-    public run(self mut ref) [[Token]List]Result = {
+    public run(self mut ref) Result[List[Token]] = {
         while not self.is_at_end() then {
             let start_line = self.line
             let start_col = self.column
@@ -1202,7 +1202,7 @@ given Lexer {
     }
 }
 
-private let keyword_kind(text String) [TokenKind]Option = {
+private let keyword_kind(text String) Option[TokenKind] = {
     return when text in {
         "let" then .Some(TokenKind.KwLet()),
         "mut" then .Some(TokenKind.KwMut()),
@@ -1246,7 +1246,7 @@ private let keyword_kind(text String) [TokenKind]Option = {
     }
 }
 
-public let lex(source String) [[Token]List]Result = {
+public let lex(source String) Result[List[Token]] = {
     let mut lexer = Lexer.new(source)
     return lexer.run()
 }
