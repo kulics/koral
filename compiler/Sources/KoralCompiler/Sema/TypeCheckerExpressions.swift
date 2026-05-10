@@ -547,6 +547,171 @@ extension TypeChecker {
     .blockExpression(statements: [.break(span: span)])
   }
 
+  func createYieldTarget(
+    kind: YieldTargetKind,
+    span: SourceSpan,
+    preferredType: Type?
+  ) -> YieldTargetId {
+    let id = YieldTargetId(rawValue: nextYieldTargetId)
+    nextYieldTargetId += 1
+    yieldTargets.append(YieldTarget(
+      id: id,
+      kind: kind,
+      span: span,
+      preferredType: preferredType,
+      resultType: nil,
+      didExplicitYield: false
+    ))
+    return id
+  }
+
+  func activeYieldTargetIndex(_ id: YieldTargetId? = nil) -> Int? {
+    if let id {
+      return yieldTargets.lastIndex(where: { $0.id == id })
+    }
+    guard !yieldTargets.isEmpty else { return nil }
+    return yieldTargets.count - 1
+  }
+
+  func activeYieldTarget(_ id: YieldTargetId? = nil) -> YieldTarget? {
+    guard let index = activeYieldTargetIndex(id) else { return nil }
+    return yieldTargets[index]
+  }
+
+  func expectedTypeForYieldTarget(_ id: YieldTargetId?, fallback: Type?) -> Type? {
+    guard let target = activeYieldTarget(id) else { return fallback }
+    return target.resultType ?? target.preferredType ?? fallback
+  }
+
+  func markExplicitYield(on id: YieldTargetId) {
+    guard let index = activeYieldTargetIndex(id) else {
+      fatalError("markExplicitYield called for inactive yield target")
+    }
+    yieldTargets[index].didExplicitYield = true
+  }
+
+  func popYieldTarget(_ id: YieldTargetId) -> YieldTarget {
+    guard let popped = yieldTargets.popLast() else {
+      fatalError("yield target stack underflow")
+    }
+    guard popped.id == id else {
+      fatalError("yield target stack mismatch")
+    }
+    return popped
+  }
+
+  func mergeBranchResultTypes(_ current: Type?, _ incoming: Type, span: SourceSpan) throws -> Type {
+    if incoming == .never {
+      return current ?? .never
+    }
+    guard let current else { return incoming }
+    if current == .never {
+      return incoming
+    }
+    if current == incoming {
+      return current
+    }
+    if let mergedType = commonBranchSupertype(current, incoming) {
+      return mergedType
+    }
+    throw SemanticError.typeMismatch(expected: current.description, got: incoming.description)
+  }
+
+  func mergeYieldTargetResult(type: Type, span: SourceSpan) throws {
+    guard !yieldTargets.isEmpty else {
+      fatalError("mergeYieldTargetResult called without an active yield target")
+    }
+    let index = yieldTargets.count - 1
+    let current = yieldTargets[index]
+    let preferredBaseType: Type? = {
+      guard let preferredType = current.preferredType else { return nil }
+      return context.containsGenericParameter(preferredType) ? nil : preferredType
+    }()
+    let baseType = current.resultType ?? preferredBaseType
+    let merged = try mergeBranchResultTypes(baseType, type, span: span)
+    yieldTargets[index].resultType = merged
+  }
+
+  func mergeBranchContribution(_ expr: TypedExpressionNode, span: SourceSpan) throws {
+    guard !yieldTargets.isEmpty else { return }
+    switch expr {
+    case .blockExpression:
+      if expr.type == .void {
+        try mergeYieldTargetResult(type: .void, span: span)
+      }
+    default:
+      if expr.type != .never {
+        try mergeYieldTargetResult(type: expr.type, span: span)
+      }
+    }
+  }
+
+  func branchNeedsExpectedTypeForImplicitMember(_ expr: ExpressionNode) -> Bool {
+    if case .implicitMemberExpression = expr {
+      return true
+    }
+    return false
+  }
+
+  func isImplicitMemberContextType(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .`enum`, .genericStruct, .genericEnum:
+      return true
+    default:
+      return false
+    }
+  }
+
+  func normalizeBranchExpression(
+    _ expr: TypedExpressionNode,
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    guard let expectedType else { return expr }
+    if case .blockExpression = expr {
+      return expr
+    }
+    if expr.type == .never {
+      return expr
+    }
+
+    var normalized = expr
+    if normalized.type != expectedType,
+       let implicitDeref = makeImplicitDereference(normalized, expectedType: expectedType) {
+      normalized = implicitDeref
+    }
+    normalized = try coerceLiteral(normalized, to: expectedType)
+
+    if normalized.type == expectedType || canWidenMutableReference(normalized, expectedType: expectedType) {
+      return normalized
+    }
+
+    // When the branch is being checked against an unresolved generic context
+    // (for example a lambda return type flowing into a method-level generic),
+    // keep the concrete branch type and let outer unification bind the generic.
+    if context.containsGenericParameter(expectedType) {
+      return normalized
+    }
+
+    throw SemanticError.typeMismatch(expected: expectedType.description, got: normalized.type.description)
+  }
+
+  func materializeExplicitYieldBlockValue(
+    _ expr: TypedExpressionNode,
+    resultType: Type,
+    didExplicitYield: Bool
+  ) -> TypedExpressionNode {
+    guard didExplicitYield,
+          resultType != .void,
+          resultType != .never,
+          case .blockExpression(let statements, _) = expr else {
+      return expr
+    }
+    // Internal lowering helper: preserve source-level "blocks do not produce
+    // values" while still letting desugarings such as `or else` / `and then`
+    // carry the explicit-yield result as an ordinary typed expression.
+    return .blockExpression(statements: statements, type: resultType)
+  }
+
   // Pick a read-only common supertype when branches differ only by mutability.
   private func commonBranchSupertype(_ lhs: Type, _ rhs: Type) -> Type? {
     if lhs == rhs { return lhs }
@@ -652,12 +817,116 @@ extension TypeChecker {
     )
   }
 
+  private func mergeWhenCaseBodies(
+    _ typedCases: [TypedMatchCase],
+    sourceCases: [MatchCaseNode],
+    expectedType: Type?
+  ) throws -> ([TypedMatchCase], Type) {
+    guard !typedCases.isEmpty else { return (typedCases, .void) }
+
+    var normalizedCases = typedCases
+    var mergedType: Type? = nil
+    for index in normalizedCases.indices {
+      let body = normalizedCases[index].body
+      if body.type == .never {
+        mergedType = mergedType ?? .never
+        continue
+      }
+
+      guard let currentType = mergedType else {
+        mergedType = body.type
+        continue
+      }
+
+      if currentType == .never || currentType == body.type {
+        mergedType = currentType == .never ? body.type : currentType
+        continue
+      }
+
+      do {
+        let bodyAsCurrent = try normalizeBranchExpression(body, expectedType: currentType)
+        if bodyAsCurrent.type == currentType || canWidenMutableReference(bodyAsCurrent, expectedType: currentType) {
+          normalizedCases[index] = TypedMatchCase(pattern: normalizedCases[index].pattern, body: bodyAsCurrent)
+          continue
+        }
+      } catch {
+        // Fall through to common-supertype and reverse-coercion checks below.
+      }
+
+      if let supertype = commonBranchSupertype(currentType, body.type) {
+        for previousIndex in normalizedCases.indices where previousIndex <= index {
+          let previousBody = normalizedCases[previousIndex].body
+          if previousBody.type == .never { continue }
+          let coerced = try normalizeBranchExpression(previousBody, expectedType: supertype)
+          normalizedCases[previousIndex] = TypedMatchCase(
+            pattern: normalizedCases[previousIndex].pattern,
+            body: coerced
+          )
+        }
+        mergedType = supertype
+        continue
+      }
+
+      let candidateType = body.type
+      var candidateCases = normalizedCases
+      var canUseCandidateType = true
+      for previousIndex in normalizedCases.indices where previousIndex < index {
+        let previousBody = normalizedCases[previousIndex].body
+        if previousBody.type == .never { continue }
+        do {
+          let coerced = try normalizeBranchExpression(previousBody, expectedType: candidateType)
+          if coerced.type == candidateType || canWidenMutableReference(coerced, expectedType: candidateType) {
+            candidateCases[previousIndex] = TypedMatchCase(
+              pattern: candidateCases[previousIndex].pattern,
+              body: coerced
+            )
+          } else {
+            canUseCandidateType = false
+            break
+          }
+        } catch {
+          canUseCandidateType = false
+          break
+        }
+      }
+      if canUseCandidateType {
+        normalizedCases = candidateCases
+        mergedType = candidateType
+        continue
+      }
+
+      throw SemanticError.typeMismatch(expected: currentType.description, got: body.type.description)
+    }
+
+    let resultType = mergedType ?? .void
+    normalizedCases = try zip(normalizedCases, sourceCases).map { typedCase, sourceCase in
+      let branchExpectedType = expectedType ?? resultType
+      let normalizedBody = try normalizeBranchExpression(
+        typedCase.body,
+        expectedType: branchExpectedType
+      )
+      if normalizedBody.type != .never,
+         normalizedBody.type != resultType,
+         !canWidenMutableReference(normalizedBody, expectedType: resultType) {
+        throw SemanticError.typeMismatch(
+          expected: resultType.description,
+          got: normalizedBody.type.description
+        )
+      }
+      _ = sourceCase
+      return TypedMatchCase(pattern: typedCase.pattern, body: normalizedBody)
+    }
+
+    return (normalizedCases, resultType)
+  }
+
   private func inferTypedIfPatternExpression(
     subject: ExpressionNode,
     pattern: PatternNode,
-    thenBuilder: () throws -> TypedExpressionNode,
+    thenBuilder: (ExpressionUsage) throws -> TypedExpressionNode,
     elseBranch: ExpressionNode?,
-    expectedType: Type?
+    expectedType: Type?,
+    usage: ExpressionUsage
   ) throws -> TypedExpressionNode {
     let typedSubject = try inferTypedExpression(subject)
 
@@ -667,38 +936,103 @@ extension TypeChecker {
     }
 
     let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
+    let targetId: YieldTargetId? = (usage != .statement && elseBranch != nil)
+      ? createYieldTarget(kind: .ifPatternExpression, span: subject.span, preferredType: expectedType)
+      : nil
+
+    let branchUsage: ExpressionUsage = targetId.map { .branchBody(target: $0) } ?? .statement
     let typedThen = try withNewScope {
       for symbol in extractPatternSymbols(from: typedPattern) {
         if let name = context.getName(symbol.defId) {
           try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
         }
       }
-      return try thenBuilder()
+      return try normalizeBranchExpression(
+        try thenBuilder(branchUsage),
+        expectedType: expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      )
     }
 
-    let elseExpectedType = expectedType ?? (typedThen.type == .never ? nil : typedThen.type)
-    let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: elseExpectedType) }
-    let (mergedThen, mergedElse, resultType) = try mergeConditionalBranches(
-      thenBranch: typedThen,
-      elseBranch: typedElse,
-      expectedType: elseExpectedType
-    )
+    let typedElse: TypedExpressionNode?
+    if let elseBranch {
+      var elseExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      if elseExpectedType == nil,
+         typedThen.type != .never,
+         isImplicitMemberContextType(typedThen.type),
+         branchNeedsExpectedTypeForImplicitMember(elseBranch) {
+        elseExpectedType = typedThen.type
+      }
+      let elseUsage: ExpressionUsage = targetId.map { .branchBody(target: $0) } ?? .statement
+      typedElse = try normalizeBranchExpression(
+        try inferTypedExpression(elseBranch, expectedType: elseExpectedType, usage: elseUsage),
+        expectedType: elseExpectedType
+      )
+    } else {
+      typedElse = nil
+    }
+
+    let resultType: Type
+    if let targetId {
+      guard let targetState = activeYieldTarget(targetId) else {
+        fatalError("if-pattern yield target disappeared before completion")
+      }
+      if !targetState.didExplicitYield {
+        _ = popYieldTarget(targetId)
+        let (mergedThen, mergedElse, mergedType) = try mergeConditionalBranches(
+          thenBranch: typedThen,
+          elseBranch: typedElse,
+          expectedType: expectedType
+        )
+
+        return .ifPatternExpression(
+          subject: typedSubject,
+          pattern: typedPattern,
+          bindings: bindings,
+          thenBranch: mergedThen,
+          elseBranch: mergedElse,
+          type: mergedType
+        )
+      }
+
+      try mergeBranchContribution(typedThen, span: subject.span)
+      if let typedElse {
+        try mergeBranchContribution(typedElse, span: elseBranch?.span ?? subject.span)
+      }
+
+      let target = popYieldTarget(targetId)
+      resultType = target.resultType ?? ((typedThen.type == .never && typedElse?.type == .never) ? .never : .void)
+    } else {
+      let (mergedThen, mergedElse, mergedType) = try mergeConditionalBranches(
+        thenBranch: typedThen,
+        elseBranch: typedElse,
+        expectedType: nil
+      )
+
+      return .ifPatternExpression(
+        subject: typedSubject,
+        pattern: typedPattern,
+        bindings: bindings,
+        thenBranch: mergedThen,
+        elseBranch: mergedElse,
+        type: mergedType
+      )
+    }
 
     return .ifPatternExpression(
       subject: typedSubject,
       pattern: typedPattern,
       bindings: bindings,
-      thenBranch: mergedThen,
-      elseBranch: mergedElse,
+      thenBranch: typedThen,
+      elseBranch: typedElse,
       type: resultType
     )
   }
 
-  private func inferTypedWhilePatternExpression(
+  private func inferTypedWhilePatternStatement(
     subject: ExpressionNode,
     pattern: PatternNode,
     bodyBuilder: () throws -> TypedExpressionNode
-  ) throws -> TypedExpressionNode {
+  ) throws -> TypedStatementNode {
     let typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
@@ -720,12 +1054,11 @@ extension TypeChecker {
       return try bodyBuilder()
     }
 
-    return .whilePatternExpression(
+    return .whilePatternStatement(
       subject: typedSubject,
       pattern: typedPattern,
       bindings: bindings,
-      body: typedBody,
-      type: .void
+      body: typedBody
     )
   }
 
@@ -826,11 +1159,12 @@ extension TypeChecker {
 
   /// Lower an `if` condition that contains `isExpression` with bindings.
   /// Returns the lowered typed expression, or nil if no lowering is needed.
-  private func lowerIfConditionWithBindings(
+  func lowerIfConditionWithBindings(
     condition: ExpressionNode,
     thenBranch: ExpressionNode,
     elseBranch: ExpressionNode?,
-    expectedType: Type?
+    expectedType: Type?,
+    usage: ExpressionUsage
   ) throws -> TypedExpressionNode? {
     // First check for illegal uses in `or` and `not`
     try checkOrBranchesForBindings(condition)
@@ -846,11 +1180,12 @@ extension TypeChecker {
       return try inferTypedIfPatternExpression(
         subject: subject,
         pattern: pattern,
-        thenBuilder: {
-          try self.inferTypedExpression(thenBranch, expectedType: expectedType)
+        thenBuilder: { branchUsage in
+          try self.inferTypedExpression(thenBranch, expectedType: expectedType, usage: branchUsage)
         },
         elseBranch: elseBranch,
-        expectedType: expectedType
+        expectedType: expectedType,
+        usage: usage
       )
     }
 
@@ -859,7 +1194,7 @@ extension TypeChecker {
 
     func buildClauseChain(from index: Int) throws -> TypedExpressionNode {
       if index == clauses.count {
-        return try inferTypedExpression(thenBranch, expectedType: expectedType)
+        return try inferTypedExpression(thenBranch, expectedType: expectedType, usage: usage)
       }
 
       let clause = clauses[index]
@@ -868,9 +1203,10 @@ extension TypeChecker {
         return try inferTypedIfPatternExpression(
           subject: subject,
           pattern: pattern,
-          thenBuilder: { try buildClauseChain(from: index + 1) },
+          thenBuilder: { _ in try buildClauseChain(from: index + 1) },
           elseBranch: elseBranch,
-          expectedType: expectedType
+          expectedType: expectedType,
+          usage: usage
         )
       }
 
@@ -881,7 +1217,7 @@ extension TypeChecker {
       }
       let typedThen = try buildClauseChain(from: index + 1)
       let branchExpectedType = expectedType ?? (typedThen.type == .never ? nil : typedThen.type)
-      let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: branchExpectedType) }
+      let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: branchExpectedType, usage: usage == .statement ? .statement : .value) }
       return try buildTypedIfExpression(
         condition: typedCondition,
         thenBranch: typedThen,
@@ -895,10 +1231,10 @@ extension TypeChecker {
 
   /// Lower a `while` condition that contains `isExpression` with bindings.
   /// Returns the lowered typed expression, or nil if no lowering is needed.
-  private func lowerWhileConditionWithBindings(
+  func lowerWhileConditionWithBindings(
     condition: ExpressionNode,
     body: ExpressionNode
-  ) throws -> TypedExpressionNode? {
+  ) throws -> TypedStatementNode? {
     // First check for illegal uses in `or` and `not`
     try checkOrBranchesForBindings(condition)
 
@@ -910,11 +1246,11 @@ extension TypeChecker {
 
     // Case 1: Direct `isExpression` with bindings
     if case .isExpression(let subject, let pattern, _) = condition {
-      return try inferTypedWhilePatternExpression(
+      return try inferTypedWhilePatternStatement(
         subject: subject,
         pattern: pattern,
         bodyBuilder: {
-          try self.inferTypedExpression(body)
+          try self.inferTypedExpression(body, usage: .statement)
         }
       )
     }
@@ -951,7 +1287,7 @@ extension TypeChecker {
 
     // The first `is` with bindings becomes the whilePatternExpression
     if case .isExpression(let subject, let pattern, _) = clauses[firstIsIndex] {
-      return try inferTypedWhilePatternExpression(
+      return try inferTypedWhilePatternStatement(
         subject: subject,
         pattern: pattern,
         bodyBuilder: {
@@ -959,7 +1295,7 @@ extension TypeChecker {
 
           func buildGuardChain(from index: Int) throws -> TypedExpressionNode {
             if index == remainingClauses.count {
-              return try self.inferTypedExpression(body)
+              return try self.inferTypedExpression(body, usage: .statement)
             }
 
             let clause = remainingClauses[index]
@@ -969,9 +1305,10 @@ extension TypeChecker {
               return try self.inferTypedIfPatternExpression(
                 subject: nextSubject,
                 pattern: nextPattern,
-                thenBuilder: { try buildGuardChain(from: index + 1) },
+                thenBuilder: { _ in try buildGuardChain(from: index + 1) },
                 elseBranch: breakExpr,
-                expectedType: nil
+                expectedType: nil,
+                usage: .statement
               )
             }
 
@@ -1008,7 +1345,11 @@ extension TypeChecker {
   ///   - expr: 要推导类型的表达式节点
   ///   - expectedType: 可选的期望类型，用于隐式成员表达式等需要上下文类型的场景
   /// - Returns: 带类型信息的表达式节点
-  func inferTypedExpression(_ expr: ExpressionNode, expectedType: Type? = nil) throws -> TypedExpressionNode {
+  func inferTypedExpression(
+    _ expr: ExpressionNode,
+    expectedType: Type? = nil,
+    usage: ExpressionUsage = .value
+  ) throws -> TypedExpressionNode {
     switch expr {
     case .castExpression(let typeNode, let innerExpr):
       let targetType = try resolveTypeNode(typeNode)
@@ -1065,7 +1406,13 @@ extension TypeChecker {
     case .dictLiteral(let entries, let span):
       return try inferDictLiteral(entries: entries, span: span, expectedType: expectedType)
 
-    case .whenExpression(let subject, let cases, _):
+    case .whenExpression(let subject, let cases, let span):
+      if usage == .statement {
+        let stmt = try inferStatementExpression(expr)
+        let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
+        return .blockExpression(statements: [stmt], type: blockType)
+      }
+
       let typedSubject = try inferTypedExpression(subject)
       // Auto-deref subject type for pattern matching
       var subjectType = typedSubject.type
@@ -1079,61 +1426,57 @@ extension TypeChecker {
         break
       }
 
+      let targetId: YieldTargetId? = usage == .statement
+        ? nil
+        : createYieldTarget(kind: .whenExpression, span: span, preferredType: expectedType)
+
       var typedCases: [TypedMatchCase] = []
-      var resultType: Type?
+      var sawFallthrough = false
+      var allNever = true
+      var runningExpectedType = expectedType
 
       for c in cases {
-        try withNewScope {
+        let typedCase = try withNewScope {
           let (pattern, _) = try checkPattern(c.pattern, subjectType: subjectType)
           for symbol in extractPatternSymbols(from: pattern) {
             if let name = context.getName(symbol.defId) {
               try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
             }
           }
-          // Pass expected type for implicit member expression support
-          // Use already-determined resultType as expectedType for subsequent arms
-          let armExpectedType = expectedType ?? (resultType.flatMap { $0 == .never ? nil : $0 })
-          var typedBody = try inferTypedExpression(c.body, expectedType: armExpectedType)
-          if let rt = resultType {
-            if typedBody.type != .never {
-              if rt == .never {
-                // Previous cases were all Never, this is the first concrete type
-                resultType = typedBody.type
-              } else if typedBody.type != rt {
-                if let mergedType = commonBranchSupertype(rt, typedBody.type) {
-                  var normalizedCases: [TypedMatchCase] = []
-                  for existingCase in typedCases {
-                    var normalizedBody = existingCase.body
-                    normalizedBody = try coerceLiteral(normalizedBody, to: mergedType)
-                    if normalizedBody.type != mergedType && normalizedBody.type != .never {
-                      throw SemanticError.typeMismatch(
-                        expected: mergedType.description,
-                        got: normalizedBody.type.description)
-                    }
-                    normalizedCases.append(TypedMatchCase(pattern: existingCase.pattern, body: normalizedBody))
-                  }
-                  typedCases = normalizedCases
-                  typedBody = try coerceLiteral(typedBody, to: mergedType)
-                  if typedBody.type != mergedType {
-                    throw SemanticError.typeMismatch(
-                      expected: mergedType.description, got: typedBody.type.description)
-                  }
-                  resultType = mergedType
-                } else {
-                  // Try literal coercion before reporting mismatch
-                  typedBody = try coerceLiteral(typedBody, to: rt)
-                  if typedBody.type != rt {
-                    throw SemanticError.typeMismatch(
-                      expected: rt.description, got: typedBody.type.description)
-                  }
-                }
-              }
+          // Use the current target's evolving type, if any, for subsequent arms.
+          var branchExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+          if branchExpectedType == nil,
+             branchNeedsExpectedTypeForImplicitMember(c.body) {
+            branchExpectedType = runningExpectedType
+          }
+          let branchUsage: ExpressionUsage = targetId.map { .branchBody(target: $0) } ?? .statement
+          let typedBody: TypedExpressionNode
+          if let branchExpectedType {
+            do {
+              typedBody = try normalizeBranchExpression(
+                try inferTypedExpression(c.body, expectedType: branchExpectedType, usage: branchUsage),
+                expectedType: branchExpectedType
+              )
+            } catch {
+              typedBody = try inferTypedExpression(c.body, usage: branchUsage)
             }
           } else {
-            resultType = typedBody.type
+            typedBody = try inferTypedExpression(c.body, usage: branchUsage)
           }
-          typedCases.append(TypedMatchCase(pattern: pattern, body: typedBody))
+          return TypedMatchCase(pattern: pattern, body: typedBody)
         }
+        if typedCase.body.type == .void {
+          sawFallthrough = true
+        }
+        if typedCase.body.type != .never {
+          allNever = false
+        }
+        if typedCase.body.type != .never,
+           isImplicitMemberContextType(typedCase.body.type),
+           activeYieldTarget(targetId)?.didExplicitYield != true {
+          runningExpectedType = try mergeBranchResultTypes(runningExpectedType, typedCase.body.type, span: c.body.span)
+        }
+        typedCases.append(typedCase)
       }
       
       // Exhaustiveness checking
@@ -1148,7 +1491,37 @@ extension TypeChecker {
       )
       try checker.check()
       
-      return .whenExpression(subject: typedSubject, cases: typedCases, type: resultType ?? .void)
+      let resultType: Type
+      if let targetId {
+        if activeYieldTarget(targetId)?.didExplicitYield == true {
+          for (typedCase, sourceCase) in zip(typedCases, cases) {
+            try mergeBranchContribution(typedCase.body, span: sourceCase.body.span)
+          }
+          let target = popYieldTarget(targetId)
+          if let mergedType = target.resultType {
+            resultType = mergedType
+          } else if allNever {
+            resultType = .never
+          } else if sawFallthrough {
+            resultType = .void
+          } else {
+            resultType = .never
+          }
+        } else {
+          let (mergedCases, mergedType) = try mergeWhenCaseBodies(
+            typedCases,
+            sourceCases: cases,
+            expectedType: expectedType
+          )
+          typedCases = mergedCases
+          _ = popYieldTarget(targetId)
+          resultType = mergedType
+        }
+      } else {
+        resultType = allNever ? .never : .void
+      }
+
+      return .whenExpression(subject: typedSubject, cases: typedCases, type: resultType)
 
     case .identifier(let name):
       if currentScope.isMoved(name) {
@@ -1218,38 +1591,35 @@ extension TypeChecker {
       return .variable(identifier: symbol)
 
     case .blockExpression(let statements):
+      currentBlockExpressionDepth += 1
+      defer { currentBlockExpressionDepth -= 1 }
       return try withNewScope {
         var typedStatements: [TypedStatementNode] = []
         var blockType: Type = .void
-        var foundNever = false
+        var controlFlowTerminator: String? = nil
 
-        for (index, stmt) in statements.enumerated() {
-          // yield position check: only allowed as last statement
-          if case .yield = stmt, index != statements.count - 1 {
+        for stmt in statements {
+          if let controlFlowTerminator {
             throw SemanticError(
-              .generic("yield must be the last statement in a block expression"),
+              .generic("unreachable statement after \(controlFlowTerminator)"),
               span: stmt.span
             )
           }
 
-          let typedStmt = try checkStatement(stmt, expectedYieldType: expectedType)
+          let typedStmt = try checkStatement(stmt)
           typedStatements.append(typedStmt)
 
-          switch typedStmt {
-          case .yield(let typedExpr):
-            blockType = typedExpr.type
-          case .expression(let expr):
-            if expr.type == .never {
-              foundNever = true
-            }
-          case .return, .break, .continue:
-            foundNever = true
-          default:
-            break
+          if let terminator = statementTerminatorName(typedStmt) {
+            controlFlowTerminator = terminator
           }
         }
 
-        if foundNever && blockType == .void { blockType = .never }
+        // Ordinary blocks always evaluate to Void or Never. Branch-expression
+        // yields contribute to the enclosing target directly; a block that can
+        // still fall through must remain Void even if some inner path yields.
+        if controlFlowTerminator != nil {
+          blockType = .never
+        }
 
         return .blockExpression(
           statements: typedStatements, type: blockType)
@@ -1361,12 +1731,19 @@ extension TypeChecker {
         left: typedLeft, op: op, right: typedRight, type: resultType)
 
     case .ifExpression(let condition, let thenBranch, let elseBranch):
+      if usage == .statement {
+        let stmt = try inferStatementExpression(expr)
+        let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
+        return .blockExpression(statements: [stmt], type: blockType)
+      }
+
       // Check if condition contains `isExpression` with bindings → lower to ifPatternExpression
       if let lowered = try lowerIfConditionWithBindings(
         condition: condition,
         thenBranch: thenBranch,
         elseBranch: elseBranch,
-        expectedType: expectedType
+        expectedType: expectedType,
+        usage: usage
       ) {
         return lowered
       }
@@ -1376,39 +1753,66 @@ extension TypeChecker {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
-      // Pass expected type to branches for implicit member expression support
-      let typedThen = try inferTypedExpression(thenBranch, expectedType: expectedType)
+      guard let elseBranch else {
+        let typedThen = try inferTypedExpression(thenBranch, usage: .statement)
+        return try buildTypedIfExpression(
+          condition: typedCondition,
+          thenBranch: typedThen,
+          elseBranch: nil,
+          expectedType: nil
+        )
+      }
 
-      let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: expectedType) }
-      return try buildTypedIfExpression(
+      let targetId = createYieldTarget(kind: .ifExpression, span: expr.span, preferredType: expectedType)
+      let branchExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      let typedThen = try normalizeBranchExpression(
+        try inferTypedExpression(thenBranch, expectedType: branchExpectedType, usage: .branchBody(target: targetId)),
+        expectedType: branchExpectedType
+      )
+
+      var nextExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      if nextExpectedType == nil,
+         typedThen.type != .never,
+         isImplicitMemberContextType(typedThen.type),
+         branchNeedsExpectedTypeForImplicitMember(elseBranch) {
+        nextExpectedType = typedThen.type
+      }
+      let typedElse = try normalizeBranchExpression(
+        try inferTypedExpression(elseBranch, expectedType: nextExpectedType, usage: .branchBody(target: targetId)),
+        expectedType: nextExpectedType
+      )
+      guard let targetState = activeYieldTarget(targetId) else {
+        fatalError("if-expression yield target disappeared before completion")
+      }
+      if !targetState.didExplicitYield {
+        _ = popYieldTarget(targetId)
+        return try buildTypedIfExpression(
+          condition: typedCondition,
+          thenBranch: typedThen,
+          elseBranch: typedElse,
+          expectedType: expectedType
+        )
+      }
+
+      try mergeBranchContribution(typedThen, span: thenBranch.span)
+      try mergeBranchContribution(typedElse, span: elseBranch.span)
+
+      let target = popYieldTarget(targetId)
+      let resultType = target.resultType ?? ((typedThen.type == .never && typedElse.type == .never) ? .never : .void)
+      return .ifExpression(
         condition: typedCondition,
         thenBranch: typedThen,
         elseBranch: typedElse,
-        expectedType: expectedType
+        type: resultType
       )
 
-    case .whileExpression(let condition, let body):
-      // Check if condition contains `isExpression` with bindings → lower to whilePatternExpression
-      if let lowered = try lowerWhileConditionWithBindings(
-        condition: condition,
-        body: body
-      ) {
-        return lowered
+    case .whileExpression:
+      if usage != .statement {
+        throw SemanticError(.generic("'while' can only be used as a statement"), span: expr.span)
       }
-
-      let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
-      if typedCondition.type != .bool {
-        throw SemanticError.typeMismatch(
-          expected: "Bool", got: typedCondition.type.description)
-      }
-      loopDepth += 1
-      defer { loopDepth -= 1 }
-      let typedBody = try inferTypedExpression(body)
-      return .whileExpression(
-        condition: typedCondition,
-        body: typedBody,
-        type: .void
-      )
+      let stmt = try inferStatementExpression(expr)
+      let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
+      return .blockExpression(statements: [stmt], type: blockType)
 
     case .call(let callee, let arguments):
       return try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType)
@@ -1616,6 +2020,9 @@ extension TypeChecker {
       )
 
     case .forExpression(let pattern, let iterable, let body):
+      if usage != .statement {
+        throw SemanticError(.generic("'for' can only be used as a statement"), span: expr.span)
+      }
       return try inferForExpression(pattern: pattern, iterable: iterable, body: body)
 
     case .rangeExpression(let op, let left, let right):
@@ -1936,7 +2343,7 @@ extension TypeChecker {
       statements.append(.expression(typedCall))
     }
 
-    statements.append(.yield(value: .variable(identifier: temp)))
+    statements.append(.expression(.variable(identifier: temp)))
     return .blockExpression(statements: statements, type: targetType)
   }
 
@@ -1988,7 +2395,7 @@ extension TypeChecker {
       statements.append(.expression(typedCall))
     }
 
-    statements.append(.yield(value: .variable(identifier: temp)))
+    statements.append(.expression(.variable(identifier: temp)))
     return .blockExpression(statements: statements, type: targetType)
   }
 
@@ -4357,11 +4764,13 @@ extension TypeChecker {
 
       // Substitute inferred method-level type parameters into return type
       var finalReturns = returns
+      var finalMethodType = methodType
       // Convert bindings to array of types in order (for methodTypeArgs)
       var inferredMethodTypeArgs: [Type]? = nil
       if hasMethodLevelGenerics {
         if !methodTypeParamBindings.isEmpty {
           finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings, context: context)
+          finalMethodType = SemaUtils.substituteType(methodType, substitution: methodTypeParamBindings, context: context)
         }
 
         if methodTypeParamBindings.isEmpty,
@@ -4371,6 +4780,7 @@ extension TypeChecker {
           _ = unifyTypes(returns, expectedReturnType, bindings: &methodTypeParamBindings)
           if !methodTypeParamBindings.isEmpty {
             finalReturns = SemaUtils.substituteType(returns, substitution: methodTypeParamBindings, context: context)
+            finalMethodType = SemaUtils.substituteType(methodType, substitution: methodTypeParamBindings, context: context)
           }
         }
 
@@ -4392,7 +4802,7 @@ extension TypeChecker {
       
       // Create final callee with inferred method type args
       let finalCallee: TypedExpressionNode = .methodReference(
-        base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: methodType)
+        base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: finalMethodType)
 
       let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
       return wrapReceiverMaterialization(materializedReceiver, body: call, type: finalReturns)
@@ -7221,20 +7631,16 @@ extension TypeChecker {
         body: body
       )
       
-      // Build: while true then match
-      loopDepth += 1
-      let whileExpr = TypedExpressionNode.whileExpression(
+      let whileStmt = TypedStatementNode.whileStatement(
         condition: .booleanLiteral(value: true, type: .bool),
-        body: whenExpr,
-        type: .void
+        body: whenExpr
       )
-      loopDepth -= 1
-      
-      // Build: let mut __iter = iterator() then while ...
-      return .makeLetBlock(
-        identifier: iterSymbol,
-        value: iteratorInit,
-        body: whileExpr,
+
+      return .blockExpression(
+        statements: [
+          .variableDeclaration(identifier: iterSymbol, value: iteratorInit, mutable: true),
+          whileStmt,
+        ],
         type: .void
       )
     }
@@ -7323,7 +7729,7 @@ extension TypeChecker {
 
       // Type check body
       loopDepth += 1
-      let result = try inferTypedExpression(body)
+      let result = try inferTypedExpression(body, usage: .statement)
       loopDepth -= 1
       return result
     }
@@ -7489,6 +7895,7 @@ extension TypeChecker {
     span: SourceSpan
   ) throws -> TypedExpressionNode {
     let innerType = kind.innerType
+    let targetId = createYieldTarget(kind: .whenExpression, span: span, preferredType: innerType)
 
     // Type-check defaultExpr, injecting `it` for Result's error value.
     let typedDefault: TypedExpressionNode
@@ -7500,22 +7907,31 @@ extension TypeChecker {
       underscoreSymbol = sym
       typedDefault = try withNewScope {
         currentScope.define("it", defId: sym.defId)
-        return try inferTypedExpression(defaultExpr, expectedType: innerType)
+        return try normalizeBranchExpression(
+          try inferTypedExpression(defaultExpr, expectedType: innerType, usage: .branchBody(target: targetId)),
+          expectedType: innerType
+        )
       }
     case .option:
       underscoreSymbol = nil
-      typedDefault = try inferTypedExpression(defaultExpr, expectedType: innerType)
-    }
-
-    // Verify type compatibility: defaultExpr must be T or Never.
-    if typedDefault.type != innerType && typedDefault.type != .never {
-      throw SemanticError(
-        .typeMismatch(expected: innerType.description, got: typedDefault.type.description),
-        span: span
+      typedDefault = try normalizeBranchExpression(
+        try inferTypedExpression(defaultExpr, expectedType: innerType, usage: .branchBody(target: targetId)),
+        expectedType: innerType
       )
     }
 
+    try mergeYieldTargetResult(type: innerType, span: span)
+    try mergeBranchContribution(typedDefault, span: span)
+
     // Build the lowered whenExpression.
+    let targetState = activeYieldTarget(targetId)
+    let didExplicitYield = targetState?.didExplicitYield == true
+    let resultType = popYieldTarget(targetId).resultType ?? innerType
+    let materializedDefault = materializeExplicitYieldBlockValue(
+      typedDefault,
+      resultType: resultType,
+      didExplicitYield: didExplicitYield
+    )
     switch kind {
     case .option:
       let valSym = makeLocalSymbol(name: "__val", type: innerType, kind: .variable(.Value))
@@ -7526,9 +7942,9 @@ extension TypeChecker {
         subject: typedOperand,
         cases: [
           TypedMatchCase(pattern: somePattern, body: .variable(identifier: valSym)),
-          TypedMatchCase(pattern: nonePattern, body: typedDefault),
+          TypedMatchCase(pattern: nonePattern, body: materializedDefault),
         ],
-        type: innerType
+        type: resultType
       )
 
     case .result(let okType, _):
@@ -7543,9 +7959,9 @@ extension TypeChecker {
         subject: typedOperand,
         cases: [
           TypedMatchCase(pattern: okPattern, body: .variable(identifier: valSym)),
-          TypedMatchCase(pattern: errPattern, body: typedDefault),
+          TypedMatchCase(pattern: errPattern, body: materializedDefault),
         ],
-        type: innerType
+        type: resultType
       )
     }
   }
@@ -7649,31 +8065,31 @@ extension TypeChecker {
 
     // Derive an expected type for the transform expression from the outer expectedType.
     // e.g. if expectedType is [U]Option, the transform should produce U or [U]Option.
-    let transformExpectedType: Type? = expectedType.flatMap { outer in
-      switch outer {
-      case .genericEnum(let template, let args) where args.count == 1:
-        switch kind {
-        case .option where template == "Option":
-          return args[0]
-        case .result where template == "Result":
-          return args[0]
-        default:
-          return nil
-        }
-      default:
-        return nil
-      }
-    }
+    let transformExpectedType: Type? = nil
+
+    let targetId = createYieldTarget(kind: .whenExpression, span: span, preferredType: transformExpectedType)
 
     // Create it symbol, type-check transformExpr in child scope with it injected.
     let underscoreSymbol = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
     let typedTransform = try withNewScope {
       currentScope.define("it", defId: underscoreSymbol.defId)
-      return try inferTypedExpression(transformExpr, expectedType: transformExpectedType)
+      return try normalizeBranchExpression(
+        try inferTypedExpression(transformExpr, expectedType: transformExpectedType, usage: .branchBody(target: targetId)),
+        expectedType: transformExpectedType
+      )
     }
+    try mergeBranchContribution(typedTransform, span: span)
+    let targetState = activeYieldTarget(targetId)
+    let didExplicitYield = targetState?.didExplicitYield == true
+    let transformType = popYieldTarget(targetId).resultType ?? typedTransform.type
+    let materializedTransform = materializeExplicitYieldBlockValue(
+      typedTransform,
+      resultType: transformType,
+      didExplicitYield: didExplicitYield
+    )
 
     let (finalType, flattened) = computeAndThenResultType(
-      operandKind: kind, transformResultType: typedTransform.type)
+      operandKind: kind, transformResultType: transformType)
 
     // Build the lowered whenExpression.
     switch kind {
@@ -7685,10 +8101,10 @@ extension TypeChecker {
 
       let someBody: TypedExpressionNode
       if flattened {
-        someBody = typedTransform
+        someBody = materializedTransform
       } else {
         someBody = .enumConstruction(type: finalType, caseName: "Some",
-                                      arguments: [typedTransform])
+                                      arguments: [materializedTransform])
       }
       let noneBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "None", arguments: [])
@@ -7712,10 +8128,10 @@ extension TypeChecker {
 
       let okBody: TypedExpressionNode
       if flattened {
-        okBody = typedTransform
+        okBody = materializedTransform
       } else {
         okBody = .enumConstruction(type: finalType, caseName: "Ok",
-                                    arguments: [typedTransform])
+                                    arguments: [materializedTransform])
       }
       let errBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "Error",

@@ -5,6 +5,141 @@ import Foundation
 
 extension TypeChecker {
 
+  func statementCanFallThrough(_ stmt: TypedStatementNode) -> Bool {
+    switch stmt {
+    case .return, .break, .continue, .yield:
+      return false
+    case .expression(let expr):
+      return expr.type != .never
+    case .ifStatement(_, let thenBranch, let elseBranch):
+      guard let elseBranch else { return true }
+      return thenBranch.type != .never || elseBranch.type != .never
+    case .ifPatternStatement(_, _, _, let thenBranch, let elseBranch):
+      guard let elseBranch else { return true }
+      return thenBranch.type != .never || elseBranch.type != .never
+    case .whenStatement(_, let cases):
+      return cases.contains { $0.body.type != .never }
+    case .whileStatement, .whilePatternStatement:
+      return true
+    case .variableDeclaration, .pairVariableDeclaration, .assignment, .finally:
+      return true
+    }
+  }
+
+  func statementTerminatorName(_ stmt: TypedStatementNode) -> String? {
+    switch stmt {
+    case .return:
+      return "return"
+    case .break:
+      return "break"
+    case .continue:
+      return "continue"
+    case .yield:
+      return "yield"
+    case .expression(let expr):
+      return expr.type == .never ? "control flow terminator" : nil
+    case .ifStatement, .ifPatternStatement, .whenStatement:
+      return statementCanFallThrough(stmt) ? nil : "control flow terminator"
+    default:
+      return nil
+    }
+  }
+
+  private func inferStatementBodyExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
+    switch expr {
+    case .ifExpression, .whenExpression, .whileExpression, .forExpression:
+      let stmt = try inferStatementExpression(expr)
+      let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
+      return .blockExpression(statements: [stmt], type: blockType)
+    default:
+      return try inferTypedExpression(expr, usage: .statement)
+    }
+  }
+
+  func inferStatementExpression(_ expr: ExpressionNode) throws -> TypedStatementNode {
+    switch expr {
+    case .ifExpression(let condition, let thenBranch, let elseBranch):
+      if let lowered = try lowerIfConditionWithBindings(
+        condition: condition,
+        thenBranch: thenBranch,
+        elseBranch: elseBranch,
+        expectedType: nil,
+        usage: .statement
+      ) {
+        return .expression(lowered)
+      }
+
+      let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
+      if typedCondition.type != .bool {
+        throw SemanticError.typeMismatch(
+          expected: "Bool", got: typedCondition.type.description)
+      }
+      let typedThen = try inferStatementBodyExpression(thenBranch)
+      let typedElse = try elseBranch.map { try inferStatementBodyExpression($0) }
+      return .ifStatement(condition: typedCondition, thenBranch: typedThen, elseBranch: typedElse)
+
+    case .whenExpression(let subject, let cases, _):
+      let typedSubject = try inferTypedExpression(subject)
+      var subjectType = typedSubject.type
+      if case .reference(let inner) = subjectType {
+        subjectType = inner
+      }
+
+      var typedCases: [TypedStatementMatchCase] = []
+      for c in cases {
+        let (pattern, _) = try withNewScope {
+          try checkPattern(c.pattern, subjectType: subjectType)
+        }
+
+        let typedBody = try withNewScope {
+          for symbol in extractPatternSymbols(from: pattern) {
+            if let name = context.getName(symbol.defId) {
+              try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
+            }
+          }
+          return try inferStatementBodyExpression(c.body)
+        }
+        typedCases.append(TypedStatementMatchCase(pattern: pattern, body: typedBody))
+      }
+
+      let patterns = typedCases.map { $0.pattern }
+      let resolvedCases = resolveEnumCasesForExhaustiveness(subjectType)
+      let checker = ExhaustivenessChecker(
+        subjectType: subjectType,
+        patterns: patterns,
+        currentLine: currentLine,
+        resolvedEnumCases: resolvedCases,
+        context: context
+      )
+      try checker.check()
+      return .whenStatement(subject: typedSubject, cases: typedCases)
+
+    case .whileExpression(let condition, let body):
+      if let lowered = try lowerWhileConditionWithBindings(
+        condition: condition,
+        body: body
+      ) {
+        return lowered
+      }
+
+      let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
+      if typedCondition.type != .bool {
+        throw SemanticError.typeMismatch(
+          expected: "Bool", got: typedCondition.type.description)
+      }
+      loopDepth += 1
+      defer { loopDepth -= 1 }
+      let typedBody = try inferStatementBodyExpression(body)
+      return .whileStatement(condition: typedCondition, body: typedBody)
+
+    case .forExpression:
+      return .expression(try inferTypedExpression(expr, usage: .statement))
+
+    default:
+      return .expression(try inferTypedExpression(expr, usage: .statement))
+    }
+  }
+
   /// For subscript assignment targets, recursively infer base expressions in writable context.
   ///
   /// If the base itself is a subscript expression, lower it through `mut_ref_at` and keep
@@ -46,15 +181,15 @@ extension TypeChecker {
   }
 
   // 新增用于返回带类型的语句的检查函数
-  func checkStatement(_ stmt: StatementNode, expectedYieldType: Type? = nil) throws -> TypedStatementNode {
+  func checkStatement(_ stmt: StatementNode) throws -> TypedStatementNode {
     do {
-      return try checkStatementInternal(stmt, expectedYieldType: expectedYieldType)
+      return try checkStatementInternal(stmt)
     } catch let e as SemanticError {
       throw e
     }
   }
 
-  private func checkStatementInternal(_ stmt: StatementNode, expectedYieldType: Type?) throws -> TypedStatementNode {
+  private func checkStatementInternal(_ stmt: StatementNode) throws -> TypedStatementNode {
     switch stmt {
     case .variableDeclaration(let name, let typeNode, let value, let mutable, let span):
       self.currentSpan = span
@@ -523,7 +658,7 @@ extension TypeChecker {
 
     case .expression(let expr, let span):
       self.currentSpan = span
-      return .expression(try inferTypedExpression(expr))
+      return try inferStatementExpression(expr)
 
     case .return(let value, let span):
       self.currentSpan = span
@@ -532,6 +667,29 @@ extension TypeChecker {
           "control flow statement 'return' is not allowed in finally expression"))
       }
       guard let returnType = currentFunctionReturnType else {
+        if isInferringFunctionReturnType {
+          if let value = value {
+            let expectedType = inferredFunctionReturnType
+            var typedValue = try inferTypedExpression(value, expectedType: expectedType)
+            if let expectedType {
+              typedValue = try coerceLiteral(typedValue, to: expectedType)
+              if typedValue.type != .never && typedValue.type != expectedType {
+                throw SemanticError.typeMismatch(
+                  expected: expectedType.description, got: typedValue.type.description)
+              }
+            } else if typedValue.type != .never {
+              inferredFunctionReturnType = typedValue.type
+            }
+            return .return(value: typedValue)
+          }
+
+          if let inferredFunctionReturnType, inferredFunctionReturnType != .void {
+            throw SemanticError.typeMismatch(
+              expected: inferredFunctionReturnType.description, got: "Void")
+          }
+          inferredFunctionReturnType = .void
+          return .return(value: nil)
+        }
         throw SemanticError.invalidOperation(op: "return outside of function", type1: "", type2: "")
       }
 
@@ -586,13 +744,41 @@ extension TypeChecker {
       let previousInsideFinally = insideFinally
       insideFinally = true
       defer { insideFinally = previousInsideFinally }
-      let typedExpr = try inferTypedExpression(expression)
+      let typedExpr = try inferTypedExpression(expression, usage: .statement)
       return .finally(expression: typedExpr)
 
     case .yield(let value, let span):
       self.currentSpan = span
-      let typedValue = try inferTypedExpression(value, expectedType: expectedYieldType)
-      return .yield(value: typedValue)
+      if insideFinally {
+        throw SemanticError(.generic(
+          "control flow statement 'yield' is not allowed in finally expression"))
+      }
+      if let currentTarget = yieldTargets.last {
+        let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
+        var typedValueOpt: TypedExpressionNode?
+        for expectedType in candidateExpectedTypes {
+          do {
+            typedValueOpt = try normalizeBranchExpression(
+              try inferTypedExpression(value, expectedType: expectedType),
+              expectedType: expectedType
+            )
+            break
+          } catch {
+            continue
+          }
+        }
+        let typedValue: TypedExpressionNode
+        if let inferredValue = typedValueOpt {
+          typedValue = inferredValue
+        } else {
+          typedValue = try inferTypedExpression(value)
+        }
+        markExplicitYield(on: currentTarget.id)
+        try mergeYieldTargetResult(type: typedValue.type, span: span)
+        return .yield(target: currentTarget.id, value: typedValue)
+      }
+
+      throw SemanticError(.generic("yield outside of branch expression body"), span: span)
     }
   }
 }

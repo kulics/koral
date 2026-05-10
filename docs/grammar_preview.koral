@@ -314,21 +314,34 @@ let named_func_type() = {
 foreign let fclose(file FILE ptr) Int32          // 正确：位置参数
 
 // ============================================================
-// yield（块表达式的显式返回值）
+// yield（仅用于 if / when 分支表达式的分支 body）
 // ============================================================
 
-let value Int = {
+let value = if ready() then {
     yield 42
+} else {
+    yield 0
 }
 
-// 嵌套 yield
-let nested(flag Bool) Int = {
-    yield if flag then {
-        yield 10
+// early yield：在分支 body 内提前产出当前分支表达式的值
+let classify(score Int) String =
+    if score >= 90 then {
+        if score == 100 then yield "perfect"
+        yield "A"
     } else {
-        yield 20
+        yield "other"
     }
-}
+
+// 嵌套 when 表达式拥有自己的 yield 目标
+let nested(flag Bool) Int =
+    if flag then {
+        yield when input() in {
+            .Some(v) then { yield v },
+            .None then { yield 0 },
+        }
+    } else {
+        yield -1
+    }
 
 
 // ============================================================
@@ -355,7 +368,7 @@ let control_flow() = {
     if ready() and has_permission() and feature_enabled() then run() else deny()
     if input is .Some(x) and x > 0 and validate(x) then accept(x) else reject()
 
-    // while-then（单分支）
+    // while-then（语句）
     while a < b then {
         todo()
     }
@@ -363,7 +376,7 @@ let control_flow() = {
     // while 条件逻辑组合
     while iter.next() is .Some(v) and v < 10 then println(v)
 
-    // for-in-then
+    // for-in-then（语句）
     for item in list then println(item)
     for i in 0..10 then println(i)
     for i in 0..10 then if i % 2 == 0 then println(i)
@@ -382,6 +395,19 @@ let control_flow() = {
         i += 1
         if i == 5 then { continue }
         if i == 8 then { break }
+    }
+
+    // loop 里的 yield：指向外层 if / when 分支表达式
+    let first_even = when list.count() in {
+        0 then { yield -1 },
+        _ then {
+            let mut i = 0
+            while i < list.count() then {
+                if list[i] % 2 == 0 then yield list[i]
+                i += 1
+            }
+            yield -1
+        },
     }
 
     // finally（LIFO 顺序，作用域退出前执行）

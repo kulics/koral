@@ -341,6 +341,9 @@ given CodeGen {
         self.buffer.push_string("{\n")
         self.with_indent(() -> {
             let case_scope_index = self.lifetime_scope_stack.count()
+            let base_scope_index = if self.lifetime_scope_stack.is_empty()
+                then (UInt)0
+                else self.lifetime_scope_stack.count() - (UInt)1
             self.push_scope()
 
             let cond_result = self.generate_pattern_condition_and_bindings(arm_pattern, subject_var, subject_type)
@@ -356,11 +359,22 @@ given CodeGen {
                 for alias_entry in cond_result.aliases.iterator() then {
                     self.pattern_binding_aliases.insert(alias_entry.first, alias_entry.second)
                 }
-                let body_result = self.generate_expression_ssa(arm_body)
+                if not self.type_is_void_or_never(final_result_type) then {
+                    self.yield_target_stack.push(CodegenYieldTarget(result_var, final_result_type, end_label, base_scope_index))
+                }
+                let body_result = if self.type_is_void_or_never(final_result_type) then {
+                    self.generate_statement_body_expr(arm_body)
+                    yield ""
+                } else {
+                    yield self.generate_expression_ssa(arm_body)
+                }
                 self.pattern_binding_aliases = saved_aliases
                 if not self.type_is_void_or_never(final_result_type) and not self.type_is_never(arm_body.expr_type) then {
                     let adapted_body_result = self.adapt_expression_result_to_type(arm_body, body_result, final_result_type)
                     self.assign_expr_result(arm_body, adapted_body_result, final_result_type, result_var)
+                    let _ = self.yield_target_stack.pop()
+                } else if not self.type_is_void_or_never(final_result_type) then {
+                    let _ = self.yield_target_stack.pop()
                 }
 
                 self.pop_scope()

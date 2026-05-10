@@ -72,16 +72,18 @@ given TypeChecker {
                     return typed_op
                 }
                 let success_type = self.infer_or_else_success_type(typed_op.expr_type)
+                self.push_yield_target(span)
                 let typed_def = if is_result then {
                     let err_type = self.infer_or_else_error_binding_type(typed_op.expr_type)
                     let mut def_scope = Scope.new_child(scope)
                     let it_def_id = self.allocate_unindexed_def_id("it", DefKind.Variable())
                     let it_sym = Symbol(it_def_id, err_type, SymbolKind.Variable(VariableKind.Value()))
                     def_scope.define(self.context(), it_sym)
-                    yield self.check_expr_scoped_ref(default_expr, .Some(success_type), def_scope)
+                    yield self.check_expr_in_yield_body_context(default_expr, .Some(success_type), def_scope)
                 } else {
-                    yield self.check_expr_scoped_ref(default_expr, .Some(success_type), scope)
+                    yield self.check_expr_in_yield_body_context(default_expr, .Some(success_type), scope)
                 }
+                self.pop_yield_target()
                 let result_type = when success_type in {
                     .Unknown() then typed_def.expr_type,
                     _ then success_type,
@@ -192,7 +194,9 @@ given TypeChecker {
                 let it_def_id = self.allocate_unindexed_def_id("it", DefKind.Variable())
                 let it_sym = Symbol(it_def_id, inner_type, SymbolKind.Variable(VariableKind.Value()))
                 tr_scope.define(self.context(), it_sym)
-                let typed_tr = self.check_expr_scoped_ref(transform_expr, .None(), tr_scope)
+                self.push_yield_target(expr_span(transform_expr))
+                let typed_tr = self.check_expr_in_yield_body_context(transform_expr, .None(), tr_scope)
+                self.pop_yield_target()
                 let has_ok = not self.get_enum_case_field_types(typed_op.expr_type, "Ok").is_empty()
                 let has_error = not self.get_enum_case_field_types(typed_op.expr_type, "Error").is_empty()
                 let computed_final_type = self.compute_and_then_result_type(typed_op.expr_type, typed_tr.expr_type)
@@ -274,31 +278,63 @@ given TypeChecker {
                 }
                 let mut typed_arms = [TypedWhenArm]List.new()
                 let mut result_type = Type.Unknown()
-                let mut arm_idx UInt = 0
+                self.push_yield_target(span)
+                let mut running_expected = expected
                 for arm in checked_arms then {
                     let mut arm_scope = Scope.new_child(scope)
                     let arm_pattern_ref = box(arm.pattern)
                     self.bind_pattern_vars(arm_pattern_ref, pattern_subject_type, arm_scope)
                     self.ensure_pattern_bindings_present(arm_pattern_ref, pattern_subject_type, arm_scope)
-                    let arm_expected = when expected in {
+                    let hard_arm_expected = when expected in {
                         .Some(et) then [Type]Option.Some(et),
-                        .None() then when result_type in {
-                            .Unknown() then [Type]Option.None(),
-                            .TypeVar(_) then [Type]Option.None(),
-                            .NeverType() then [Type]Option.None(),
-                            _ then [Type]Option.Some(result_type),
+                        .None() then if self.branch_needs_expected_type_for_implicit_member(arm.body)
+                            then running_expected
+                            else [Type]Option.None(),
+                    }
+                    let soft_arm_expected = when expected in {
+                        .Some(_) then [Type]Option.None(),
+                        .None() then if self.branch_needs_expected_type_for_implicit_member(arm.body)
+                            then [Type]Option.None()
+                            else when result_type in {
+                                .Unknown() then [Type]Option.None(),
+                                .TypeVar(_) then [Type]Option.None(),
+                                .NeverType() then [Type]Option.None(),
+                                _ then [Type]Option.Some(result_type),
+                            },
+                    }
+                    let raw_typed_body = self.check_expr_in_yield_body_context(arm.body, hard_arm_expected, arm_scope)
+                    let typed_body = when hard_arm_expected in {
+                        .Some(_) then self.adapt_expr_to_expected_type_at(
+                            raw_typed_body,
+                            hard_arm_expected,
+                            [SourceSpan]Option.Some(expr_span(arm.body))
+                        ),
+                        .None() then when soft_arm_expected in {
+                            .Some(soft_expected) then if self.should_skip_soft_branch_adaptation(raw_typed_body.expr_type, soft_expected)
+                                then raw_typed_body
+                                else self.adapt_expr_to_expected_type_at(
+                                    raw_typed_body,
+                                    soft_arm_expected,
+                                    [SourceSpan]Option.Some(expr_span(arm.body))
+                                ),
+                            .None() then raw_typed_body,
                         },
                     }
-                    let raw_typed_body = when arm.body in {
-                        .Block(statements, _) then self.check_block_in_scope(statements, arm_expected, arm_scope),
-                        _ then self.check_expr_scoped_ref(arm.body, arm_expected, arm_scope),
-                    }
-                    let typed_body = self.adapt_expr_to_expected_type_at(
-                        raw_typed_body,
-                        arm_expected,
-                        [SourceSpan]Option.Some(expr_span(arm.body))
-                    )
                     let typed_arm_type = self.concretize_default_literal_type(typed_body.expr_type)
+                    if typed_arm_type is not .NeverType()
+                        and self.is_implicit_member_context_type(typed_arm_type)
+                    then {
+                        running_expected = when running_expected in {
+                            .Some(current_expected) then [Type]Option.Some(
+                                self.choose_conditional_result_type(
+                                    [Type]Option.None(),
+                                    current_expected,
+                                    [Type]Option.Some(typed_arm_type)
+                                )
+                            ),
+                            .None() then [Type]Option.Some(typed_arm_type),
+                        }
+                    }
                     when result_type in {
                         .Unknown() then { result_type = typed_arm_type },
                         _ then {
@@ -306,17 +342,24 @@ given TypeChecker {
                                 if result_type is .NeverType() then {
                                     result_type = typed_arm_type
                                 } else if not self.same_expr_type(typed_arm_type, result_type) then {
-                                    self.push_expr_diagnostic(
-                                        box(Expr.WhenExpr(subject, checked_arms, span)),
-                                        "Type mismatch: expected \(self.display_type_name(result_type)), got \(self.display_type_name(typed_arm_type))"
-                                    )
+                                    when self.common_branch_supertype(result_type, typed_arm_type) in {
+                                        .Some(common_t) then {
+                                            result_type = common_t
+                                        },
+                                        .None() then {
+                                            self.push_expr_diagnostic(
+                                                box(Expr.WhenExpr(subject, checked_arms, span)),
+                                                "Type mismatch: expected \(self.display_type_name(result_type)), got \(self.display_type_name(typed_arm_type))"
+                                            )
+                                        },
+                                    }
                                 }
                             }
                         },
                     }
                     typed_arms.push(TypedWhenArm(box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope)), box(typed_body), typed_arm_type))
-                    arm_idx += 1
                 }
+                let _ = self.pop_yield_target()
                 let mut patterns = [TypedPattern ref]List.new()
                 for typed_arm in typed_arms then {
                     patterns.push(typed_arm.pattern)
@@ -376,15 +419,55 @@ given TypeChecker {
                         let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
                         lambda_scope.define(self.context(), Symbol(def_id, p.param_type, kind))
                     }
-                    let typed_body = self.check_expr_scoped_ref(body, .Some(ret), lambda_scope)
+                    let prev_in_function = self.storage.in_function
+                    let prev_current_function_return_type = self.storage.current_function_return_type
+                    let prev_inferred_function_return_type = self.storage.inferred_function_return_type
+                    let prev_is_inferring_function_return_type = self.storage.is_inferring_function_return_type
+                    let prev_in_loop = self.storage.in_loop
+                    let prev_in_finally = self.storage.in_finally
+                    let prev_yield_targets = self.storage.yield_targets
+                    self.storage.in_function = true
+                    self.storage.in_loop = false
+                    self.storage.in_finally = false
+                    self.storage.yield_targets = [YieldTarget mut ref]List.new()
+                    let infer_return_type_from_block_returns = return_type is .None() and body is .Block(_, _)
+                    if infer_return_type_from_block_returns then {
+                        self.storage.current_function_return_type = [Type]Option.None()
+                        self.storage.inferred_function_return_type = [Type]Option.None()
+                        self.storage.is_inferring_function_return_type = true
+                    } else {
+                        let lambda_return_type_for_body_check = if self.is_unresolved_expr_type(ret)
+                            then Type.VoidType()
+                            else ret
+                        self.storage.current_function_return_type = [Type]Option.Some(lambda_return_type_for_body_check)
+                        self.storage.inferred_function_return_type = [Type]Option.None()
+                        self.storage.is_inferring_function_return_type = false
+                    }
+                    let body_expected = if body is .Block(_, _)
+                        then [Type]Option.None()
+                        else if self.is_unresolved_expr_type(ret)
+                            then [Type]Option.None()
+                            else [Type]Option.Some(ret)
+                    let typed_body = self.check_expr_in_yield_body_context(body, body_expected, lambda_scope)
+                    let inferred_return_type = self.storage.inferred_function_return_type
+                    self.storage.yield_targets = prev_yield_targets
+                    self.storage.in_function = prev_in_function
+                    self.storage.current_function_return_type = prev_current_function_return_type
+                    self.storage.inferred_function_return_type = prev_inferred_function_return_type
+                    self.storage.is_inferring_function_return_type = prev_is_inferring_function_return_type
+                    self.storage.in_loop = prev_in_loop
+                    self.storage.in_finally = prev_in_finally
                     self.validate_lambda_captures(typed_params, box(typed_body))
                     if not self.is_unresolved_expr_type(ret) and not self.contains_generic_parameter(ret) then {
                         self.validate_lambda_return_type(ret, typed_body)
                     }
-                    let actual_ret = if self.is_unresolved_expr_type(ret)
-                        or (self.contains_generic_parameter(ret) and not self.is_unresolved_expr_type(typed_body.expr_type))
-                        then typed_body.expr_type
-                        else ret
+                    let actual_ret = if self.is_unresolved_expr_type(ret) then {
+                        yield if infer_return_type_from_block_returns
+                            then inferred_return_type or else Type.VoidType()
+                            else typed_body.expr_type
+                    } else if self.contains_generic_parameter(ret) and not self.is_unresolved_expr_type(typed_body.expr_type) then {
+                        yield typed_body.expr_type
+                    } else ret
                     let lambda_type = self.build_function_type_from_params(typed_params, actual_ret)
                     yield make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), lambda_type)
                 }
@@ -534,6 +617,110 @@ given TypeChecker {
         }
     }
 
+    private branch_needs_expected_type_for_implicit_member(self, expr Expr ref) Bool = {
+        let _ = self
+        return when expr in {
+            .ImplicitMemberExpr(_, _, _) then true,
+            _ then false,
+        }
+    }
+
+    private is_implicit_member_context_type(self, t Type) Bool = {
+        let _ = self
+        return when t in {
+            .StructureType(_) then true,
+            .EnumType(_) then true,
+            .GenericStruct(_, _) then true,
+            .GenericEnum(_, _) then true,
+            _ then false,
+        }
+    }
+
+    private common_branch_supertype(self, lhs Type, rhs Type) [Type]Option = {
+        return if self.same_expr_type(lhs, rhs) then [Type]Option.Some(lhs) else when lhs in {
+            .ReferenceType(left_inner) then when rhs in {
+                .MutableReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
+                    then [Type]Option.Some(Type.ReferenceType(left_inner))
+                    else [Type]Option.None(),
+                _ then [Type]Option.None(),
+            },
+            .MutableReferenceType(left_inner) then when rhs in {
+                .ReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
+                    then [Type]Option.Some(Type.ReferenceType(right_inner))
+                    else [Type]Option.None(),
+                _ then [Type]Option.None(),
+            },
+            .PointerType(left_inner) then when rhs in {
+                .MutablePointerType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
+                    then [Type]Option.Some(Type.PointerType(left_inner))
+                    else [Type]Option.None(),
+                _ then [Type]Option.None(),
+            },
+            .MutablePointerType(left_inner) then when rhs in {
+                .PointerType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
+                    then [Type]Option.Some(Type.PointerType(right_inner))
+                    else [Type]Option.None(),
+                _ then [Type]Option.None(),
+            },
+            .WeakReferenceType(left_inner) then when rhs in {
+                .MutableWeakReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
+                    then [Type]Option.Some(Type.WeakReferenceType(left_inner))
+                    else [Type]Option.None(),
+                _ then [Type]Option.None(),
+            },
+            .MutableWeakReferenceType(left_inner) then when rhs in {
+                .WeakReferenceType(right_inner) then if self.same_expr_type(left_inner.val, right_inner.val)
+                    then [Type]Option.Some(Type.WeakReferenceType(right_inner))
+                    else [Type]Option.None(),
+                _ then [Type]Option.None(),
+            },
+            _ then [Type]Option.None(),
+        }
+    }
+
+    private should_skip_soft_branch_adaptation(self, expr_type Type, expected_type Type) Bool = {
+        return when expected_type in {
+            .MutableReferenceType(expected_inner) then when expr_type in {
+                .ReferenceType(actual_inner) then self.same_expr_type(expected_inner.val, actual_inner.val),
+                _ then false,
+            },
+            .MutablePointerType(expected_inner) then when expr_type in {
+                .PointerType(actual_inner) then self.same_expr_type(expected_inner.val, actual_inner.val),
+                _ then false,
+            },
+            .MutableWeakReferenceType(expected_inner) then when expr_type in {
+                .WeakReferenceType(actual_inner) then self.same_expr_type(expected_inner.val, actual_inner.val),
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private report_expected_void_branch_mismatch(
+        self,
+        expected [Type]Option,
+        then_type Type,
+        else_type Type,
+        span SourceSpan,
+    ) Void = {
+        let expected_t = when expected in {
+            .Some(value) then value,
+            .None() then Type.Unknown(),
+        }
+        if expected is .Some(_)
+            and not self.contains_generic_parameter(expected_t)
+            and then_type is .VoidType()
+            and else_type is not .VoidType()
+            and then_type is not .NeverType()
+            and else_type is not .NeverType()
+        then {
+            self.push_diagnostic_at_span(
+                "Type mismatch: expected \(self.display_type_name(expected_t)), got Void",
+                span
+            )
+        }
+    }
+
     private check_conditional_loop_expr_ref(self, expr Expr ref, expected [Type]Option, scope Scope) TypedExpr = {
         return when expr in {
             .IfExpr(condition, then_branch, else_branch, _) then {
@@ -574,23 +761,32 @@ given TypeChecker {
                         let chain = self.collect_if_chain(condition, then_branch, else_branch)
 
                         let mut typed_arms = [[TypedExpr ref, TypedExpr ref]Pair]List.new()
+                        self.push_yield_target(expr_span(expr))
                         for arm in chain.arms then {
                             let typed_cond = when arm.first in {
                                 .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
                                 _ then self.check_expr_core_ref(arm.first, .Some(Type.BoolType()), scope),
                             }
-                            let typed_then = when arm.second in {
-                                .Block(statements, _) then self.check_block(statements, expected, scope),
-                                _ then self.check_expr_core_ref(arm.second, expected, scope),
-                            }
+                            let typed_then = self.check_expr_in_yield_body_context(arm.second, expected, scope)
                             typed_arms.push([TypedExpr ref, TypedExpr ref]Pair(box(typed_cond), box(typed_then)))
                         }
 
+                        let final_else_expected = when chain.final_else in {
+                            .Some(eb) then if expected is .None()
+                                and self.branch_needs_expected_type_for_implicit_member(eb)
+                                and not typed_arms.is_empty()
+                                and typed_arms[typed_arms.count() - (UInt)1].second.val.expr_type is not .NeverType()
+                                and self.is_implicit_member_context_type(typed_arms[typed_arms.count() - (UInt)1].second.val.expr_type)
+                            then [Type]Option.Some(typed_arms[typed_arms.count() - (UInt)1].second.val.expr_type)
+                            else expected,
+                            .None() then expected,
+                        }
+
                         let mut current_else = when chain.final_else in {
-                            .Some(eb) then [TypedExpr ref]Option.Some(box(when eb in {
-                                .Block(statements, _) then self.check_block(statements, expected, scope),
-                                _ then self.check_expr_core_ref(eb, expected, scope),
-                            })),
+                            .Some(eb) then {
+                                let typed_else = self.check_expr_in_yield_body_context(eb, final_else_expected, scope)
+                                yield [TypedExpr ref]Option.Some(box(typed_else))
+                            },
                             .None() then [TypedExpr ref]Option.None(),
                         }
 
@@ -619,12 +815,15 @@ given TypeChecker {
                                            and not self.is_unresolved_expr_type(else_t)
                                            and not then_is_never
                                            and not else_is_never then {
-                                            typed_then = when source_arm.second in {
-                                                .Block(statements, _) then self.check_block(statements, .Some(else_t), scope),
-                                                _ then self.check_expr_scoped_ref(source_arm.second, .Some(else_t), scope),
-                                            }
+                                            typed_then = self.check_expr_in_yield_body_context(source_arm.second, .Some(else_t), scope)
                                         }
                                     }
+                                    self.report_expected_void_branch_mismatch(
+                                        expected,
+                                        typed_then.expr_type,
+                                        typed_else_ref.expr_type,
+                                        expr_span(source_arm.second)
+                                    )
                                 },
                                 .None() then {
                                     let single_branch_then_type = self.concretize_default_literal_type(typed_then.expr_type)
@@ -646,41 +845,21 @@ given TypeChecker {
                             }
                             let result_type = when current_else in {
                                 .Some(typed_else_ref) then self.choose_conditional_result_type(
-                                    expected,
+                                    [Type]Option.None(),
                                     typed_then.expr_type,
                                     [Type]Option.Some(typed_else_ref.expr_type)
                                 ),
                                 .None() then Type.VoidType(),
                             }
-                            let node_else = current_else
                             let node = make_typed_expr(
-                                TypedExprKind.IfExpr(box(typed_cond), box(typed_then), node_else),
+                                TypedExprKind.IfExpr(box(typed_cond), box(typed_then), current_else),
                                 result_type
                             )
                             final_if_expr = node
                             current_else = [TypedExpr ref]Option.Some(box(node))
                         }
+                        let _ = self.pop_yield_target()
                         yield final_if_expr
-                    },
-                }
-            },
-            .WhileExpr(condition, body, _) then {
-                let lowered_opt = self.lower_while_condition_with_bindings(condition, body, unknown_span())
-                yield when lowered_opt in {
-                    .Some(lowered) then self.check_expr_scoped_ref(lowered, expected, scope),
-                    .None() then {
-                        let typed_cond = when condition in {
-                            .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
-                            _ then self.check_expr_core_ref(condition, .Some(Type.BoolType()), scope),
-                        }
-                        let prev_in_loop = self.storage.in_loop
-                        self.storage.in_loop = true
-                        let typed_body = when body in {
-                            .Block(statements, _) then self.check_block(statements, .None(), scope),
-                            _ then self.check_expr_core_ref(body, .None(), scope),
-                        }
-                        self.storage.in_loop = prev_in_loop
-                        yield make_typed_expr(TypedExprKind.WhileExpr(box(typed_cond), box(typed_body)), Type.VoidType())
                     },
                 }
             },
@@ -692,7 +871,6 @@ given TypeChecker {
         return when expr in {
             .Block(statements, _) then self.check_block(statements, expected, scope),
             .IfExpr(_, _, _, _) then self.check_conditional_loop_expr_ref(expr, expected, scope),
-            .WhileExpr(_, _, _) then self.check_conditional_loop_expr_ref(expr, expected, scope),
             .ForExpr(pattern, iterable, body, _) then self.lower_for_expr(pattern, iterable, body, scope),
             .WhenExpr(_, _, _) then self.check_when_expr_ref(expr, expected, scope),
             .LambdaExpr(_, _, _, _) then self.check_lambda_expr_ref(expr, expected, scope),
@@ -1469,7 +1647,10 @@ given TypeChecker {
             .SubscriptExpr(_, _, _) then self.check_member_dispatch_expr_ref(expr, expected, scope),
             .Block(_, _) then self.check_control_flow_expr_ref(expr, expected, scope),
             .IfExpr(_, _, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
-            .WhileExpr(_, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
+            .WhileExpr(_, _, span) then {
+                self.push_diagnostic_at_span("'while' can only be used as a statement", span)
+                yield self.empty_typed_block(Type.Unknown())
+            },
             .ForExpr(_, _, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
             .WhenExpr(_, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
             .LambdaExpr(_, _, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),

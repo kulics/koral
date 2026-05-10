@@ -81,6 +81,24 @@ private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
     return output_dir.join(exe_name)
 }
 
+private let prepared_run_executable_path(info CaseInfo, output_dir Path) [Path]Result = {
+    let exe_path = executable_path_for_case(info, output_dir)
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    if not is_windows then {
+        return [Path]Result.Ok(exe_path)
+    }
+
+    // Windows can apply elevation / compatibility heuristics based on the
+    // executable basename. Test names such as "...dispatch..." contain
+    // "patch", which can make the exact same binary fail to launch normally.
+    // Run through a neutral filename to keep execution deterministic.
+    let launch_path = output_dir.join("run.exe")
+    return when copy_file(exe_path, to: launch_path) in {
+        .Ok(_) then [Path]Result.Ok(launch_path),
+        .Error(e) then [Path]Result.Error(e),
+    }
+}
+
 private let run_command_args_for_case() [String]List = [String]List.new()
 
 private let read_text_file_or_empty(path Path) String = {
@@ -431,9 +449,21 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         }
 
+        let launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to prepare built executable: " + it.message(),
+                build_exit_code,
+                current_duration_ms,
+            )
+        }
+
         let run_output = when execute_command_with_timeout(
                 config,
-            exe_path.to_string(),
+            launch_exe_path.to_string(),
             run_command_args_for_case(),
                 active_output_dir,
             "run",
@@ -537,9 +567,21 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         )
     }
 
+    let launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
+        let current_duration_ms = start.elapsed().as_milliseconds()
+        return failure_result(
+            info,
+            "failed",
+            "infrastructure_error",
+            "failed to prepare built executable: " + it.message(),
+            build_exit_code,
+            current_duration_ms,
+        )
+    }
+
     let run_output = when execute_command_with_timeout(
             config,
-        exe_path.to_string(),
+        launch_exe_path.to_string(),
         run_command_args_for_case(),
             active_output_dir,
         "run",

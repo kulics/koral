@@ -164,6 +164,53 @@ public func printTypedAST(_ node: TypedProgram) {
     case .expression(let expr):
       printTypedExpression(expr)
 
+    case .ifStatement(let condition, let thenBranch, let elseBranch):
+      print("\(indent)IfStatement:")
+      print("\(indent)  Condition:")
+      withIndent { printTypedExpression(condition) }
+      print("\(indent)  Then:")
+      withIndent { printTypedExpression(thenBranch) }
+      if let elseBranch {
+        print("\(indent)  Else:")
+        withIndent { printTypedExpression(elseBranch) }
+      }
+
+    case .ifPatternStatement(let subject, let pattern, _, let thenBranch, let elseBranch):
+      print("\(indent)IfPatternStatement:")
+      print("\(indent)  Subject:")
+      withIndent { printTypedExpression(subject) }
+      print("\(indent)  Pattern: \(pattern)")
+      print("\(indent)  Then:")
+      withIndent { printTypedExpression(thenBranch) }
+      if let elseBranch {
+        print("\(indent)  Else:")
+        withIndent { printTypedExpression(elseBranch) }
+      }
+
+    case .whileStatement(let condition, let body):
+      print("\(indent)WhileStatement:")
+      print("\(indent)  Condition:")
+      withIndent { printTypedExpression(condition) }
+      print("\(indent)  Body:")
+      withIndent { printTypedExpression(body) }
+
+    case .whilePatternStatement(let subject, let pattern, _, let body):
+      print("\(indent)WhilePatternStatement:")
+      print("\(indent)  Subject:")
+      withIndent { printTypedExpression(subject) }
+      print("\(indent)  Pattern: \(pattern)")
+      print("\(indent)  Body:")
+      withIndent { printTypedExpression(body) }
+
+    case .whenStatement(let subject, let cases):
+      print("\(indent)WhenStatement:")
+      print("\(indent)  Subject:")
+      withIndent { printTypedExpression(subject) }
+      for matchCase in cases {
+        print("\(indent)  Case: \(matchCase.pattern)")
+        withIndent { printTypedExpression(matchCase.body) }
+      }
+
     case .return(let value):
       print("\(indent)Return")
       if let value {
@@ -182,8 +229,8 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(expression)
       }
 
-    case .yield(let value):
-      print("\(indent)Yield:")
+    case .yield(let target, let value):
+      print("\(indent)Yield target=\(target.rawValue):")
       withIndent {
         printTypedExpression(value)
       }
@@ -347,19 +394,6 @@ public func printTypedAST(_ node: TypedProgram) {
           withIndent {
             printTypedExpression(elseBranch)
           }
-        }
-      }
-
-    case .whileExpression(let condition, let body, let type):
-      print("\(indent)WhileExpression: \(type)")
-      withIndent {
-        print("\(indent)Condition:")
-        withIndent {
-          printTypedExpression(condition)
-        }
-        print("\(indent)Body:")
-        withIndent {
-          printTypedExpression(body)
         }
       }
 
@@ -599,21 +633,6 @@ public func printTypedAST(_ node: TypedProgram) {
           withIndent {
             printTypedExpression(elseBranch)
           }
-        }
-      }
-      
-    case .whilePatternExpression(let subject, let pattern, let bindings, let body, let type):
-      print("\(indent)WhilePatternExpression: \(type)")
-      withIndent {
-        print("\(indent)Subject:")
-        withIndent {
-          printTypedExpression(subject)
-        }
-        print("\(indent)Pattern: \(pattern)")
-        print("\(indent)Bindings: \(bindings.map { "\($0.0): \($0.2)" }.joined(separator: ", "))")
-        print("\(indent)Body:")
-        withIndent {
-          printTypedExpression(body)
         }
       }
       

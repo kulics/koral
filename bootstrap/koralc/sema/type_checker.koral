@@ -13,8 +13,11 @@ protected type TypeCheckerStorage(
     mut module_path [String]List,
     mut in_function Bool,
     mut current_function_return_type [Type]Option,
+    mut inferred_function_return_type [Type]Option,
+    mut is_inferring_function_return_type Bool,
     mut in_loop Bool,
     mut in_finally Bool,
+    mut yield_targets [YieldTarget mut ref]List,
     mut constraint_solver ConstraintSolver,
     mut trait_registry TraitRegistry,
     mut generic_param_constraints [String, [String]List]Dict,
@@ -37,6 +40,11 @@ public type TypeChecker(protected mut storage TypeCheckerStorage mut ref)
 protected type IfChain(
     arms [[Expr ref, Expr ref]Pair]List,
     final_else [Expr ref]Option,
+)
+
+protected type YieldTarget(
+    span SourceSpan,
+    mut did_explicit_yield Bool,
 )
 
 protected type TypeBindingSnapshot(
@@ -79,8 +87,11 @@ given TypeChecker {
             [String]List.new(),
             false,
             [Type]Option.None(),
+            [Type]Option.None(),
             false,
             false,
+            false,
+            [YieldTarget mut ref]List.new(),
             ConstraintSolver.new(),
             TraitRegistry.new(),
             [String, [String]List]Dict.new(),
@@ -202,6 +213,9 @@ given TypeChecker {
                 .PairLetStmt(_, _, _, span) then span,
                 .AssignmentStmt(_, _, span) then span,
                 .ExprStmt(_, span) then span,
+                .IfStmt(_, _, _, span) then span,
+                .WhileStmt(_, _, span) then span,
+                .WhenStmt(_, _, span) then span,
                 .ReturnStmt(_, span) then span,
                 .BreakStmt(span) then span,
                 .ContinueStmt(span) then span,
@@ -209,7 +223,6 @@ given TypeChecker {
                 .YieldStmt(_, span) then span,
             },
             .IfExpr(condition, _, _) then self.typed_expr_span(condition),
-            .WhileExpr(condition, _) then self.typed_expr_span(condition),
             .WhenExpr(subject, _) then self.typed_expr_span(subject),
             .LambdaExpr(_, _, body) then self.typed_expr_span(body),
             .StaticMethodCall(_, _, method, _, _, args) then {

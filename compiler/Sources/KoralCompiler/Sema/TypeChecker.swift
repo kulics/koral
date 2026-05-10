@@ -16,6 +16,35 @@ public struct GlobalNodeSourceInfo {
   }
 }
 
+public struct YieldTargetId: Hashable {
+  public let rawValue: Int
+
+  public init(rawValue: Int) {
+    self.rawValue = rawValue
+  }
+}
+
+enum YieldTargetKind {
+  case ifExpression
+  case whenExpression
+  case ifPatternExpression
+}
+
+enum ExpressionUsage: Equatable {
+  case value
+  case statement
+  case branchBody(target: YieldTargetId)
+}
+
+struct YieldTarget {
+  let id: YieldTargetId
+  let kind: YieldTargetKind
+  let span: SourceSpan
+  let preferredType: Type?
+  var resultType: Type?
+  var didExplicitYield: Bool
+}
+
 struct ConformanceKey: Hashable {
   let selfType: ConformanceTypeKey
   let traitName: String
@@ -172,8 +201,13 @@ public class TypeChecker {
   let coreFileName: String
   let userFileName: String
   var currentFunctionReturnType: Type?
+  var inferredFunctionReturnType: Type?
+  var isInferringFunctionReturnType: Bool = false
   var loopDepth: Int = 0
   var insideFinally: Bool = false
+  var currentBlockExpressionDepth: Int = 0
+  var yieldTargets: [YieldTarget] = []
+  var nextYieldTargetId: Int = 0
 
   var synthesizedTempIndex: Int = 0
   
@@ -1152,8 +1186,11 @@ public class TypeChecker {
   ) throws -> (TypedExpressionNode, Type) {
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType
+    let previousYieldTargets = yieldTargets
+    yieldTargets = []
     defer {
       currentFunctionReturnType = previousReturnType
+      yieldTargets = previousYieldTargets
     }
 
     return try withNewScope {
@@ -1164,7 +1201,17 @@ public class TypeChecker {
         }
       }
 
-      var typedBody = try inferTypedExpression(body, expectedType: returnType)
+      let bodyUsage: ExpressionUsage
+      let bodyExpectedType: Type?
+      if case .blockExpression = body {
+        bodyUsage = .statement
+        bodyExpectedType = nil
+      } else {
+        bodyUsage = .value
+        bodyExpectedType = returnType
+      }
+
+      var typedBody = try inferTypedExpression(body, expectedType: bodyExpectedType, usage: bodyUsage)
       if typedBody.type != returnType,
          let implicitDeref = makeImplicitDereference(typedBody, expectedType: returnType) {
         typedBody = implicitDeref

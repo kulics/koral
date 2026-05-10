@@ -378,12 +378,12 @@ public class EscapeContext {
             }
             return origins
 
-        case .blockExpression(let statements, _):
-            // Check yield statements for reference origins
-            for stmt in statements {
-                if case .yield(let value) = stmt {
-                    return extractReferenceOrigins(from: value)
-                }
+        case .blockExpression(let statements, let type):
+            if type != .void,
+               type != .never,
+               let lastStmt = statements.last,
+               case .expression(let value) = lastStmt {
+                return extractReferenceOrigins(from: value)
             }
             return []
 
@@ -459,12 +459,12 @@ public class EscapeContext {
                 markEscapedReferences(in: matchCase.body, reason: reason)
             }
 
-        case .blockExpression(let statements, _):
-            // Check yield statements for escaped references
-            for stmt in statements {
-                if case .yield(let value) = stmt {
-                    markEscapedReferences(in: value, reason: reason)
-                }
+        case .blockExpression(let statements, let type):
+            if type != .void,
+               type != .never,
+               let lastStmt = statements.last,
+               case .expression(let value) = lastStmt {
+                markEscapedReferences(in: value, reason: reason)
             }
 
         default:
@@ -596,19 +596,19 @@ public class EscapeContext {
             // 检查这个引用是否会逃逸（基于当前上下文）
             preAnalyzeExpression(inner)
             
-        case .blockExpression(let statements, _):
+        case .blockExpression(let statements, let type):
             enterScope()
             for stmt in statements {
                 preAnalyzeStatement(stmt)
             }
-            // Check yield statements for return escape
-            for stmt in statements {
-                if case .yield(let value) = stmt {
-                    if let returnType = returnType, isReferenceLike(returnType) {
-                        checkReturnEscape(value)
-                    }
-                    preAnalyzeExpression(value)
+            if type != .void,
+               type != .never,
+               let lastStmt = statements.last,
+               case .expression(let value) = lastStmt {
+                if let returnType = returnType, isReferenceLike(returnType) {
+                    checkReturnEscape(value)
                 }
+                preAnalyzeExpression(value)
             }
             leaveScope()
             
@@ -741,19 +741,6 @@ public class EscapeContext {
                 }
             }
             
-        case .whileExpression(let condition, let body, _):
-            preAnalyzeExpression(condition)
-            enterScope()
-            preAnalyzeExpression(body)
-            leaveScope()
-            
-        case .whilePatternExpression(let subject, let pattern, _, let body, _):
-            preAnalyzeExpression(subject)
-            preAnalyzePattern(pattern)
-            enterScope()
-            preAnalyzeExpression(body)
-            leaveScope()
-            
         case .typeConstruction(_, _, let arguments, let type):
             for arg in arguments {
                 preAnalyzeExpression(arg)
@@ -823,6 +810,37 @@ public class EscapeContext {
             
         case .expression(let expr):
             preAnalyzeExpression(expr)
+
+        case .ifStatement(let condition, let thenBranch, let elseBranch):
+            preAnalyzeExpression(condition)
+            preAnalyzeExpression(thenBranch)
+            if let elseBranch {
+                preAnalyzeExpression(elseBranch)
+            }
+
+        case .ifPatternStatement(let subject, let pattern, _, let thenBranch, let elseBranch):
+            preAnalyzeExpression(subject)
+            preAnalyzePattern(pattern)
+            preAnalyzeExpression(thenBranch)
+            if let elseBranch {
+                preAnalyzeExpression(elseBranch)
+            }
+
+        case .whileStatement(let condition, let body):
+            preAnalyzeExpression(condition)
+            preAnalyzeExpression(body)
+
+        case .whilePatternStatement(let subject, let pattern, _, let body):
+            preAnalyzeExpression(subject)
+            preAnalyzePattern(pattern)
+            preAnalyzeExpression(body)
+
+        case .whenStatement(let subject, let cases):
+            preAnalyzeExpression(subject)
+            for matchCase in cases {
+                preAnalyzePattern(matchCase.pattern)
+                preAnalyzeExpression(matchCase.body)
+            }
             
         case .return(let value):
             if let value = value {
@@ -839,7 +857,7 @@ public class EscapeContext {
         case .finally(let expression):
             preAnalyzeExpression(expression)
 
-        case .yield(let value):
+        case .yield(_, let value):
             preAnalyzeExpression(value)
         }
     }
@@ -967,11 +985,12 @@ public class EscapeContext {
                 checkReturnEscape(arg)
             }
             
-        case .blockExpression(let statements, _):
-            for stmt in statements {
-                if case .yield(let value) = stmt {
-                    checkReturnEscape(value)
-                }
+        case .blockExpression(let statements, let type):
+            if type != .void,
+               type != .never,
+               let lastStmt = statements.last,
+               case .expression(let value) = lastStmt {
+                checkReturnEscape(value)
             }
             
         case .ifExpression(_, let thenBranch, let elseBranch, _):
@@ -1303,14 +1322,6 @@ public class GlobalEscapeAnalyzer {
                 extractCallsFromExpression(arg, callerDefId: callerDefId)
             }
 
-        case .whileExpression(let condition, let body, _):
-            extractCallsFromExpression(condition, callerDefId: callerDefId)
-            extractCallsFromExpression(body, callerDefId: callerDefId)
-
-        case .whilePatternExpression(let subject, _, _, let body, _):
-            extractCallsFromExpression(subject, callerDefId: callerDefId)
-            extractCallsFromExpression(body, callerDefId: callerDefId)
-
         case .typeConstruction(_, _, let arguments, _):
             for arg in arguments {
                 extractCallsFromExpression(arg, callerDefId: callerDefId)
@@ -1355,6 +1366,34 @@ public class GlobalEscapeAnalyzer {
         case .expression(let expr):
             extractCallsFromExpression(expr, callerDefId: callerDefId)
 
+        case .ifStatement(let condition, let thenBranch, let elseBranch):
+            extractCallsFromExpression(condition, callerDefId: callerDefId)
+            extractCallsFromExpression(thenBranch, callerDefId: callerDefId)
+            if let elseBranch {
+                extractCallsFromExpression(elseBranch, callerDefId: callerDefId)
+            }
+
+        case .ifPatternStatement(let subject, _, _, let thenBranch, let elseBranch):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
+            extractCallsFromExpression(thenBranch, callerDefId: callerDefId)
+            if let elseBranch {
+                extractCallsFromExpression(elseBranch, callerDefId: callerDefId)
+            }
+
+        case .whileStatement(let condition, let body):
+            extractCallsFromExpression(condition, callerDefId: callerDefId)
+            extractCallsFromExpression(body, callerDefId: callerDefId)
+
+        case .whilePatternStatement(let subject, _, _, let body):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
+            extractCallsFromExpression(body, callerDefId: callerDefId)
+
+        case .whenStatement(let subject, let cases):
+            extractCallsFromExpression(subject, callerDefId: callerDefId)
+            for matchCase in cases {
+                extractCallsFromExpression(matchCase.body, callerDefId: callerDefId)
+            }
+
         case .return(let value):
             if let value = value {
                 extractCallsFromExpression(value, callerDefId: callerDefId)
@@ -1366,7 +1405,7 @@ public class GlobalEscapeAnalyzer {
         case .finally(let expression):
             extractCallsFromExpression(expression, callerDefId: callerDefId)
 
-        case .yield(let value):
+        case .yield(_, let value):
             extractCallsFromExpression(value, callerDefId: callerDefId)
         }
     }

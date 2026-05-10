@@ -2,6 +2,11 @@
 // Each node carries a resolved Type alongside the original source information.
 
 // type_names maps DefId.id -> type name for display (struct/enum names)
+public type ValueCategory {
+    LValue(),
+    RValue(),
+}
+
 public type TypedProgram(
     declarations [TypedDecl]List,
     type_names [UInt, String]Dict,
@@ -179,6 +184,9 @@ public type TypedStatement {
     PairLetStmt(first_symbol [Symbol ref]Option, second_symbol [Symbol ref]Option, value TypedExpr ref, span SourceSpan),
     AssignmentStmt(target TypedExpr ref, value TypedExpr ref, span SourceSpan),
     ExprStmt(expr TypedExpr ref, span SourceSpan),
+    IfStmt(condition TypedExpr ref, then_branch TypedExpr ref, else_branch [TypedExpr ref]Option, span SourceSpan),
+    WhileStmt(condition TypedExpr ref, body TypedExpr ref, span SourceSpan),
+    WhenStmt(subject TypedExpr ref, arms [TypedWhenArm]List, span SourceSpan),
     ReturnStmt(value [TypedExpr ref]Option, span SourceSpan),
     BreakStmt(span SourceSpan),
     ContinueStmt(span SourceSpan),
@@ -227,7 +235,6 @@ public type TypedExprKind {
     MethodReference(base TypedExpr ref, receiver_type Type, method Symbol ref, type_args [Type]List, method_type_args [Type]List, dispatch_callsite [DefId]Option),
     Block(statements [TypedStatement]List),
     IfExpr(condition TypedExpr ref, then_branch TypedExpr ref, else_branch [TypedExpr ref]Option),
-    WhileExpr(condition TypedExpr ref, body TypedExpr ref),
     WhenExpr(subject TypedExpr ref, arms [TypedWhenArm]List),
     LambdaExpr(params [TypedParam]List, return_type Type, body TypedExpr ref),
     StaticMethodCall(receiver_type Type, method_name String, method Symbol ref, type_args [Type]List, method_type_args [Type]List, args [TypedExpr ref]List),
@@ -276,6 +283,38 @@ public type TypedIntrinsic {
     DeinitMemory(pointer_expr TypedExpr ref),
     TakeMemory(pointer_expr TypedExpr ref, result_type Type),
     NullPtr(result_type Type),
+}
+
+private let typed_value_category_preserves_identity_cast(source_type Type, target_type Type) Bool = {
+    if stable_type_key(source_type) == stable_type_key(target_type) then {
+        return true
+    }
+    return when source_type in {
+        .ReferenceType(_) then when target_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            _ then false,
+        },
+        .MutableReferenceType(_) then when target_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            _ then false,
+        },
+        _ then false,
+    }
+}
+
+public let typed_expr_value_category(expr TypedExpr ref) ValueCategory = {
+    return when expr.expr_kind in {
+        .Variable(_) then ValueCategory.LValue(),
+        .MemberPath(source, _) then typed_expr_value_category(source),
+        .CastExpr(target_type, inner) then {
+            yield if typed_value_category_preserves_identity_cast(inner.expr_type, target_type)
+                then typed_expr_value_category(inner)
+                else ValueCategory.RValue()
+        },
+        _ then ValueCategory.RValue(),
+    }
 }
 
 given TypedExprKind not Deref

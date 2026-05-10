@@ -1222,25 +1222,6 @@ extension Monomorphizer {
                 type: resolveParameterizedType(type)
             )
             
-        case .whileExpression(let condition, let body, let type):
-            return .whileExpression(
-                condition: resolveTypesInExpression(condition),
-                body: resolveTypesInExpression(body),
-                type: resolveParameterizedType(type)
-            )
-            
-        case .whilePatternExpression(let subject, let pattern, let bindings, let body, let type):
-            let newBindings = bindings.map { (name, mutable, bindType) in
-                (name, mutable, resolveParameterizedType(bindType))
-            }
-            return .whilePatternExpression(
-                subject: resolveTypesInExpression(subject),
-                pattern: resolveTypesInPattern(pattern),
-                bindings: newBindings,
-                body: resolveTypesInExpression(body),
-                type: resolveParameterizedType(type)
-            )
-            
         case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
             let resolvedType = resolveParameterizedType(identifier.type)
             
@@ -1506,6 +1487,47 @@ extension Monomorphizer {
             
         case .expression(let expr):
             return .expression(resolveTypesInExpression(expr))
+
+        case .ifStatement(let condition, let thenBranch, let elseBranch):
+            return .ifStatement(
+                condition: resolveTypesInExpression(condition),
+                thenBranch: resolveTypesInExpression(thenBranch),
+                elseBranch: elseBranch.map { resolveTypesInExpression($0) }
+            )
+
+        case .ifPatternStatement(let subject, let pattern, let bindings, let thenBranch, let elseBranch):
+            return .ifPatternStatement(
+                subject: resolveTypesInExpression(subject),
+                pattern: resolveTypesInPattern(pattern),
+                bindings: bindings.map { ($0.0, $0.1, resolveParameterizedType($0.2)) },
+                thenBranch: resolveTypesInExpression(thenBranch),
+                elseBranch: elseBranch.map { resolveTypesInExpression($0) }
+            )
+
+        case .whileStatement(let condition, let body):
+            return .whileStatement(
+                condition: resolveTypesInExpression(condition),
+                body: resolveTypesInExpression(body)
+            )
+
+        case .whilePatternStatement(let subject, let pattern, let bindings, let body):
+            return .whilePatternStatement(
+                subject: resolveTypesInExpression(subject),
+                pattern: resolveTypesInPattern(pattern),
+                bindings: bindings.map { ($0.0, $0.1, resolveParameterizedType($0.2)) },
+                body: resolveTypesInExpression(body)
+            )
+
+        case .whenStatement(let subject, let cases):
+            return .whenStatement(
+                subject: resolveTypesInExpression(subject),
+                cases: cases.map {
+                    TypedStatementMatchCase(
+                        pattern: resolveTypesInPattern($0.pattern),
+                        body: resolveTypesInExpression($0.body)
+                    )
+                }
+            )
             
         case .return(let value):
             return .return(value: value.map { resolveTypesInExpression($0) })
@@ -1519,8 +1541,8 @@ extension Monomorphizer {
         case .finally(let expression):
             return .finally(expression: resolveTypesInExpression(expression))
 
-        case .yield(let value):
-            return .yield(value: resolveTypesInExpression(value))
+        case .yield(let target, let value):
+            return .yield(target: target, value: resolveTypesInExpression(value))
         }
     }
 }

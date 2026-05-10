@@ -186,6 +186,88 @@ given EscapeContext {
         return self.escaped_variables.contains_key(name)
     }
 
+    private needs_return_escape_check_for_expr(self, expr TypedExpr ref) Bool = {
+        if self.return_type is .Some(rt) and (rt is .ReferenceType(_) or rt is .MutableReferenceType(_)) then {
+            return true
+        }
+        return when expr.expr_type in {
+            .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then true,
+            _ then false,
+        }
+    }
+
+    private statement_needs_return_escape_check(self, stmt TypedStatement) Bool = {
+        return when stmt in {
+            .YieldStmt(expr, _) then self.needs_return_escape_check_for_expr(expr),
+            .ExprStmt(expr, _) then self.needs_return_escape_check_for_expr(expr),
+            .IfStmt(_, then_branch, else_branch_opt, _) then {
+                if self.needs_return_escape_check_for_expr(then_branch) then {
+                    return true
+                }
+                return when else_branch_opt in {
+                    .Some(else_branch) then self.needs_return_escape_check_for_expr(else_branch),
+                    .None() then false,
+                }
+            },
+            .WhenStmt(_, arms, _) then {
+                let mut arm_index UInt = 0
+                while arm_index < arms.count() then {
+                    if self.needs_return_escape_check_for_expr(arms[arm_index].body) then {
+                        return true
+                    }
+                    arm_index += 1
+                }
+                return false
+            },
+            _ then false,
+        }
+    }
+
+    private apply_return_escape_if_needed(self mut ref, name String, current EscapeResult) EscapeResult = {
+        if current is not .NoEscape() then {
+            return current
+        }
+        if not self.in_return_context then {
+            return current
+        }
+        when self.return_type in {
+            .Some(rt) then {
+                if not result_type_may_escape_references(rt) then {
+                    return current
+                }
+            },
+            .None() then {
+                return current
+            },
+        }
+        return when self.variable_scopes.get(name) in {
+            .Some(scope_level) then {
+                if scope_level > 0 then {
+                    self.mark_escaped(name, EscapeResult.EscapeToReturn())
+                    return EscapeResult.EscapeToReturn()
+                }
+                return current
+            },
+            .None() then current,
+        }
+    }
+
+    private apply_field_escape_if_needed(self mut ref, name String, current EscapeResult) EscapeResult = {
+        if current is not .NoEscape() or not self.in_field_assignment_context then {
+            return current
+        }
+        return when self.variable_scopes.get(name) in {
+            .Some(scope_level) then {
+                if scope_level > 0 then {
+                    self.mark_escaped(name, EscapeResult.EscapeToField())
+                    return EscapeResult.EscapeToField()
+                }
+                return current
+            },
+            .None() then current,
+        }
+    }
+
     /// 分析引用表达式是否会逃逸
     ///
     /// 与 Swift EscapeAnalysis.analyzeEscape 语义对齐：
@@ -201,33 +283,8 @@ given EscapeContext {
                     .Some(existing_reason) then existing_reason,
                     .None() then {
                         let mut result = EscapeResult.NoEscape()
-
-                        if self.in_return_context then {
-                            if self.return_type is .Some(rt) and result_type_may_escape_references(rt) then {
-                                when self.variable_scopes.get(name) in {
-                                    .Some(scope_level) then {
-                                        if scope_level > 0 then {
-                                            self.mark_escaped(name, EscapeResult.EscapeToReturn())
-                                            result = EscapeResult.EscapeToReturn()
-                                        }
-                                    },
-                                    .None() then {},
-                                }
-                            }
-                        }
-
-                        if result is .NoEscape() and self.in_field_assignment_context then {
-                            when self.variable_scopes.get(name) in {
-                                .Some(scope_level) then {
-                                    if scope_level > 0 then {
-                                        self.mark_escaped(name, EscapeResult.EscapeToField())
-                                        result = EscapeResult.EscapeToField()
-                                    }
-                                },
-                                .None() then {},
-                            }
-                        }
-
+                        result = self.apply_return_escape_if_needed(name, result)
+                        result = self.apply_field_escape_if_needed(name, result)
                         yield result
                     },
                 }
@@ -388,13 +445,8 @@ given EscapeContext {
                 }
                 // 检查 yield 语句是否导致返回逃逸
                 for stmt in statements then {
-                    when stmt in {
-                        .YieldStmt(yield_expr, _) then {
-                            if self.return_type is .Some(rt) and (rt is .ReferenceType(_) or rt is .MutableReferenceType(_)) then {
-                                self.check_return_escape(yield_expr)
-                            }
-                        },
-                        _ then {},
+                    if self.statement_needs_return_escape_check(stmt) then {
+                        self.check_return_escape_in_statement_result(stmt)
                     }
                 }
                 self.leave_scope()
@@ -410,13 +462,6 @@ given EscapeContext {
 
             .IsExpr(subject, _, _) then {
                 self.pre_analyze_expr(subject)
-            },
-
-            .WhileExpr(condition, body) then {
-                self.pre_analyze_expr(condition)
-                self.enter_scope()
-                self.pre_analyze_expr(body)
-                self.leave_scope()
             },
 
             .WhenExpr(subject, arms) then {
@@ -437,7 +482,7 @@ given EscapeContext {
                 // 不做 inter-procedural propagation（Swift 中这些是独立的
                 // .typeConstruction/.enumConstruction case）。
                 // 普通函数/方法调用才做 propagate_call_escape。
-                let is_type_construction = when expr.expr_type in {
+                let is_type_construction = when callee.expr_type in {
                     .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then true,
                     _ then false,
                 }
@@ -630,11 +675,42 @@ given EscapeContext {
                 self.pre_analyze_expr(expr)
             },
 
+            .IfStmt(condition, then_branch, else_branch_opt, _) then {
+                self.pre_analyze_expr(condition)
+                self.enter_scope()
+                self.pre_analyze_expr(then_branch)
+                self.leave_scope()
+                when else_branch_opt in {
+                    .Some(else_branch) then {
+                        self.enter_scope()
+                        self.pre_analyze_expr(else_branch)
+                        self.leave_scope()
+                    },
+                    .None() then {},
+                }
+            },
+
+            .WhileStmt(condition, body, _) then {
+                self.pre_analyze_expr(condition)
+                self.enter_scope()
+                self.pre_analyze_expr(body)
+                self.leave_scope()
+            },
+
+            .WhenStmt(subject, arms, _) then {
+                self.pre_analyze_expr(subject)
+                for arm in arms then {
+                    self.enter_scope()
+                    self.pre_analyze_expr(arm.body)
+                    self.leave_scope()
+                }
+            },
+
             .ReturnStmt(value_opt, _) then {
                 if value_opt is .Some(value_expr) then {
                     self.pre_analyze_expr(value_expr)
                     // 检查返回值是否导致逃逸
-                    if self.return_type is .Some(rt) and (rt is .ReferenceType(_) or rt is .MutableReferenceType(_)) then {
+                    if self.needs_return_escape_check_for_expr(value_expr) then {
                         self.check_return_escape(value_expr)
                     }
                 }
@@ -654,6 +730,30 @@ given EscapeContext {
     }
 
     /// 检查返回表达式是否导致变量逃逸（与 Swift checkReturnEscape 完全对齐）
+    check_return_escape_in_statement_result(self mut ref, stmt TypedStatement) Void = {
+        when stmt in {
+            .YieldStmt(yield_expr, _) then {
+                self.check_return_escape(yield_expr)
+            },
+            .ExprStmt(expr, _) then {
+                self.check_return_escape(expr)
+            },
+            .IfStmt(_, then_branch, else_branch_opt, _) then {
+                self.check_return_escape(then_branch)
+                when else_branch_opt in {
+                    .Some(else_branch) then self.check_return_escape(else_branch),
+                    .None() then {},
+                }
+            },
+            .WhenStmt(_, arms, _) then {
+                for arm in arms then {
+                    self.check_return_escape(arm.body)
+                }
+            },
+            _ then {},
+        }
+    }
+
     check_return_escape(self mut ref, expr TypedExpr ref) Void = {
         when expr.expr_kind in {
             .RefExpr(_) then {
@@ -687,12 +787,7 @@ given EscapeContext {
             },
             .Block(statements) then {
                 for stmt in statements then {
-                    when stmt in {
-                        .YieldStmt(yield_expr, _) then {
-                            self.check_return_escape(yield_expr)
-                        },
-                        _ then {},
-                    }
+                    self.check_return_escape_in_statement_result(stmt)
                 }
             },
             .WhenExpr(_, arms) then {
@@ -778,10 +873,6 @@ given EscapeContext {
                     .Some(else_branch) then self.scan_lambda_body_for_captures(else_branch, param_names),
                     .None() then {},
                 }
-            },
-            .WhileExpr(condition, body) then {
-                self.scan_lambda_body_for_captures(condition, param_names)
-                self.scan_lambda_body_for_captures(body, param_names)
             },
             .WhenExpr(subject, arms) then {
                 self.scan_lambda_body_for_captures(subject, param_names)
@@ -897,6 +988,24 @@ given EscapeContext {
                 self.scan_lambda_body_for_captures(value, param_names)
             },
             .ExprStmt(expr, _) then self.scan_lambda_body_for_captures(expr, param_names),
+            .IfStmt(condition, then_branch, else_branch_opt, _) then {
+                self.scan_lambda_body_for_captures(condition, param_names)
+                self.scan_lambda_body_for_captures(then_branch, param_names)
+                when else_branch_opt in {
+                    .Some(else_branch) then self.scan_lambda_body_for_captures(else_branch, param_names),
+                    .None() then {},
+                }
+            },
+            .WhileStmt(condition, body, _) then {
+                self.scan_lambda_body_for_captures(condition, param_names)
+                self.scan_lambda_body_for_captures(body, param_names)
+            },
+            .WhenStmt(subject, arms, _) then {
+                self.scan_lambda_body_for_captures(subject, param_names)
+                for arm in arms then {
+                    self.scan_lambda_body_for_captures(arm.body, param_names)
+                }
+            },
             .ReturnStmt(value_opt, _) then when value_opt in {
                 .Some(value) then self.scan_lambda_body_for_captures(value, param_names),
                 .None() then {},
@@ -1073,6 +1182,21 @@ given EscapeContext {
                         .YieldStmt(yield_expr, _) then {
                             self.mark_escaped_references_in_expr(yield_expr, reason)
                         },
+                        .ExprStmt(stmt_expr, _) then {
+                            self.mark_escaped_references_in_expr(stmt_expr, reason)
+                        },
+                        .IfStmt(_, then_branch, else_branch_opt, _) then {
+                            self.mark_escaped_references_in_expr(then_branch, reason)
+                            when else_branch_opt in {
+                                .Some(else_branch) then self.mark_escaped_references_in_expr(else_branch, reason),
+                                .None() then {},
+                            }
+                        },
+                        .WhenStmt(_, arms, _) then {
+                            for arm in arms then {
+                                self.mark_escaped_references_in_expr(arm.body, reason)
+                            }
+                        },
                         _ then {},
                     }
                 }
@@ -1210,6 +1334,31 @@ private let extend_origins_unique(target [String]List mut ref, incoming [String]
     }
 }
 
+private let extract_reference_origins_from_statement(ctx EscapeContext ref, stmt TypedStatement) [String]List = {
+    return when stmt in {
+        .YieldStmt(expr, _) then extract_reference_origins(ctx, expr),
+        .ExprStmt(expr, _) then extract_reference_origins(ctx, expr),
+        .IfStmt(_, then_branch, else_branch_opt, _) then {
+            let mut origins = extract_reference_origins(ctx, then_branch)
+            when else_branch_opt in {
+                .Some(else_branch) then {
+                    extend_origins_unique(origins.ref, extract_reference_origins(ctx, else_branch))
+                },
+                .None() then {},
+            }
+            yield origins
+        },
+        .WhenStmt(_, arms, _) then {
+            let mut origins = [String]List.new()
+            for arm in arms then {
+                extend_origins_unique(origins.ref, extract_reference_origins(ctx, arm.body))
+            }
+            yield origins
+        },
+        _ then [String]List.new(),
+    }
+}
+
 private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref) [String]List = {
     return when expr.expr_kind in {
         .RefExpr(inner) then {
@@ -1242,12 +1391,7 @@ private let extract_reference_origins(ctx EscapeContext ref, expr TypedExpr ref)
         .Block(statements) then {
             let mut origins = [String]List.new()
             for stmt in statements then {
-                when stmt in {
-                    .YieldStmt(yield_expr, _) then {
-                        origins = extract_reference_origins(ctx, yield_expr)
-                    },
-                    _ then {},
-                }
+                extend_origins_unique(origins.ref, extract_reference_origins_from_statement(ctx, stmt))
             }
             yield origins
         },
@@ -1391,6 +1535,24 @@ private let extract_escape_calls_from_statement(
             extract_escape_calls_from_expr(program, context_opt, value, callees)
         },
         .ExprStmt(expr, _) then extract_escape_calls_from_expr(program, context_opt, expr, callees),
+        .IfStmt(condition, then_branch, else_branch_opt, _) then {
+            extract_escape_calls_from_expr(program, context_opt, condition, callees)
+            extract_escape_calls_from_expr(program, context_opt, then_branch, callees)
+            when else_branch_opt in {
+                .Some(else_branch) then extract_escape_calls_from_expr(program, context_opt, else_branch, callees),
+                .None() then {},
+            }
+        },
+        .WhileStmt(condition, body, _) then {
+            extract_escape_calls_from_expr(program, context_opt, condition, callees)
+            extract_escape_calls_from_expr(program, context_opt, body, callees)
+        },
+        .WhenStmt(subject, arms, _) then {
+            extract_escape_calls_from_expr(program, context_opt, subject, callees)
+            for arm in arms then {
+                extract_escape_calls_from_expr(program, context_opt, arm.body, callees)
+            }
+        },
         .ReturnStmt(value_opt, _) then when value_opt in {
             .Some(value) then extract_escape_calls_from_expr(program, context_opt, value, callees),
             .None() then {},
@@ -1460,10 +1622,6 @@ private let extract_escape_calls_from_expr(
             }
         },
         .IsExpr(subject, _, _) then extract_escape_calls_from_expr(program, context_opt, subject, callees),
-        .WhileExpr(condition, body) then {
-            extract_escape_calls_from_expr(program, context_opt, condition, callees)
-            extract_escape_calls_from_expr(program, context_opt, body, callees)
-        },
         .WhenExpr(subject, arms) then {
             extract_escape_calls_from_expr(program, context_opt, subject, callees)
             for arm in arms then {

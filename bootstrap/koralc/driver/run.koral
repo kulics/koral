@@ -319,40 +319,36 @@ private let build_c_output_path(file_path String, out_dir [String]Option) Path =
 private let emit_c(file_path String, no_std Bool, out_dir [String]Option, phase_prefix String, profile_total_phase Bool) [Path]Option = {
     let total_start = MonoTime.now()
 
-    let mono_output = {
-        debug_phase("\(phase_prefix): type check")
-        let type_check_start = MonoTime.now()
-        let result = type_check_entry_file(file_path, no_std)
-        profile_phase("\(phase_prefix): type check", type_check_start)
+    debug_phase("\(phase_prefix): type check")
+    let type_check_start = MonoTime.now()
+    let result = type_check_entry_file(file_path, no_std)
+    profile_phase("\(phase_prefix): type check", type_check_start)
 
-        if result.diagnostics.has_errors() then {
-            debug_phase("\(phase_prefix): render diagnostics")
-            let render_start = MonoTime.now()
-            print_user_focused_diagnostic_records(result.diagnostics, file_path)
-            profile_phase("\(phase_prefix): render diagnostics", render_start)
-            if profile_total_phase then {
-                profile_phase("\(phase_prefix): total", total_start)
-            }
-            return [Path]Option.None()
+    if result.diagnostics.has_errors() then {
+        debug_phase("\(phase_prefix): render diagnostics")
+        let render_start = MonoTime.now()
+        print_user_focused_diagnostic_records(result.diagnostics, file_path)
+        profile_phase("\(phase_prefix): render diagnostics", render_start)
+        if profile_total_phase then {
+            profile_phase("\(phase_prefix): total", total_start)
         }
-
-        let typed_program = if result.typed_program is .Some(program) then program else { return [Path]Option.None() }
-        let context = result.context
-
-        debug_phase("\(phase_prefix): monomorphize")
-        let mono_start = MonoTime.now()
-        let mut mono_program = {
-            let mut mono = Monomorphizer.new_with_inputs(
-                typed_program,
-                result.instantiation_requests,
-                result.generic_templates,
-                context,
-            )
-            yield mono.monomorphize()
-        }
-        profile_phase("\(phase_prefix): monomorphize", mono_start)
-        yield [CompilerContext, MonomorphizedProgram]Pair(context, mono_program)
+        return [Path]Option.None()
     }
+
+    let typed_program = if result.typed_program is .Some(program) then program else { return [Path]Option.None() }
+    let context = result.context
+
+    debug_phase("\(phase_prefix): monomorphize")
+    let mono_start = MonoTime.now()
+    let mut mono = Monomorphizer.new_with_inputs(
+        typed_program,
+        result.instantiation_requests,
+        result.generic_templates,
+        context,
+    )
+    let mut mono_program = mono.monomorphize()
+    profile_phase("\(phase_prefix): monomorphize", mono_start)
+    let mono_output = [CompilerContext, MonomorphizedProgram]Pair(context, mono_program)
 
     let output_path = build_c_output_path(file_path, out_dir)
 

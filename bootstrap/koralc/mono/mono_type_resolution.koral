@@ -1716,6 +1716,34 @@ private let resolve_types_in_statement(mono Monomorphizer ref, stmt TypedStateme
         .ExprStmt(expr, span) then {
             yield TypedStatement.ExprStmt(resolve_types_in_expression(mono, expr), span)
         },
+        .IfStmt(condition, then_branch, else_branch, span) then {
+            let new_else = when else_branch in {
+                .Some(expr) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, expr)),
+                .None() then [TypedExpr ref]Option.None(),
+            }
+            yield TypedStatement.IfStmt(
+                resolve_types_in_expression(mono, condition),
+                resolve_types_in_expression(mono, then_branch),
+                new_else,
+                span
+            )
+        },
+        .WhileStmt(condition, body, span) then {
+            yield TypedStatement.WhileStmt(
+                resolve_types_in_expression(mono, condition),
+                resolve_types_in_expression(mono, body),
+                span
+            )
+        },
+        .WhenStmt(subject, arms, span) then {
+            let new_subject = resolve_types_in_expression(mono, subject)
+            let mut new_arms = [TypedWhenArm]List.new()
+            for arm in arms then {
+                let new_body = resolve_types_in_expression(mono, arm.body)
+                new_arms.push(TypedWhenArm(arm.pattern, new_body, resolve_parameterized_type(mono, arm.arm_type)))
+            }
+            yield TypedStatement.WhenStmt(new_subject, new_arms, span)
+        },
         .ReturnStmt(value, span) then {
             let new_value = when value in {
                 .Some(expr) then [TypedExpr ref]Option.Some(resolve_types_in_expression(mono, expr)),
@@ -2557,6 +2585,24 @@ private let mono_register_pattern_binding_types_in_statement(
             mono_register_pattern_binding_types_in_expr(mono, value, bindings)
         },
         .ExprStmt(expr, _) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
+        .IfStmt(condition, then_branch, else_branch, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings)
+            when else_branch in {
+                .Some(expr) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
+                .None() then {},
+            }
+        },
+        .WhileStmt(condition, body, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
+            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
+        },
+        .WhenStmt(subject, arms, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
+            for arm in arms then {
+                mono_register_pattern_binding_types_in_expr(mono, arm.body, bindings)
+            }
+        },
         .ReturnStmt(value, _) then when value in {
             .Some(expr) then mono_register_pattern_binding_types_in_expr(mono, expr, bindings),
             .None() then {},
@@ -2611,10 +2657,6 @@ private let mono_register_pattern_binding_types_in_expr(
             mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
             mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings)
             when else_branch in { .Some(inner) then mono_register_pattern_binding_types_in_expr(mono, inner, bindings), .None() then {} }
-        },
-        .WhileExpr(condition, body) then {
-            mono_register_pattern_binding_types_in_expr(mono, condition, bindings)
-            mono_register_pattern_binding_types_in_expr(mono, body, bindings)
         },
         .WhenExpr(subject, arms) then {
             mono_register_pattern_binding_types_in_expr(mono, subject, bindings)
@@ -3638,9 +3680,6 @@ private let resolve_expr_kind(mono Monomorphizer ref, expr TypedExpr ref) TypedE
                 .None() then [TypedExpr ref]Option.None(),
             }
             yield box(TypedExprKind.IfExpr(new_condition, new_then, new_else))
-        },
-        .WhileExpr(condition, body) then {
-            yield box(TypedExprKind.WhileExpr(resolve_types_in_expression(mono, condition), resolve_types_in_expression(mono, body)))
         },
         .WhenExpr(subject, arms) then {
             let new_subject = resolve_types_in_expression(mono, subject)

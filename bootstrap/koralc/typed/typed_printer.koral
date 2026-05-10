@@ -506,11 +506,6 @@ private let print_typed_expr_named(expr TypedExpr ref, level UInt, type_names [U
             print_typed_expr_named(then_branch, level + 1, type_names)
             if else_branch is .Some(eb) then { print_typed_expr_named(eb, level + 1, type_names) }
         },
-        .WhileExpr(condition, body) then {
-            println("\(prefix)While\(type_ann)")
-            print_typed_expr_named(condition, level + 1, type_names)
-            print_typed_expr_named(body, level + 1, type_names)
-        },
         .IsExpr(subject, pattern, negated) then {
             let _ = pattern
             println(if negated then "\(prefix)IsNot\(type_ann)" else "\(prefix)Is\(type_ann)")
@@ -581,6 +576,28 @@ private let print_typed_stmt_named(stmt TypedStatement, level UInt, type_names [
         },
         .ExprStmt(expr, span) then {
             print_typed_expr_named(expr, level, type_names)
+        },
+        .IfStmt(condition, then_branch, else_branch, span) then {
+            println("\(prefix)if")
+            print_typed_expr_named(condition, level + 1, type_names)
+            print_typed_expr_named(then_branch, level + 1, type_names)
+            when else_branch in {
+                .Some(else_ref) then print_typed_expr_named(else_ref, level + 1, type_names),
+                .None() then {},
+            }
+        },
+        .WhileStmt(condition, body, span) then {
+            println("\(prefix)while")
+            print_typed_expr_named(condition, level + 1, type_names)
+            print_typed_expr_named(body, level + 1, type_names)
+        },
+        .WhenStmt(subject, arms, span) then {
+            println("\(prefix)when")
+            print_typed_expr_named(subject, level + 1, type_names)
+            for arm in arms then {
+                println("\(indent(level + 1))arm :: \(type_display(arm.arm_type, type_names))")
+                print_typed_expr_named(arm.body, level + 2, type_names)
+            }
         },
         .ReturnStmt(value, span) then {
             println("\(prefix)return")

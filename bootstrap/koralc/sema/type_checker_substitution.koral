@@ -132,6 +132,32 @@ given TypeChecker {
             .ExprStmt(expr, span) then {
                 yield TypedStatement.ExprStmt(self.apply_subst_to_expr(subst, expr), span)
             },
+            .IfStmt(condition, then_branch, else_branch, span) then {
+                let new_else = when else_branch in {
+                    .Some(expr) then [TypedExpr ref]Option.Some(self.apply_subst_to_expr(subst, expr)),
+                    .None() then [TypedExpr ref]Option.None(),
+                }
+                yield TypedStatement.IfStmt(
+                    self.apply_subst_to_expr(subst, condition),
+                    self.apply_subst_to_expr(subst, then_branch),
+                    new_else,
+                    span
+                )
+            },
+            .WhileStmt(condition, body, span) then {
+                yield TypedStatement.WhileStmt(
+                    self.apply_subst_to_expr(subst, condition),
+                    self.apply_subst_to_expr(subst, body),
+                    span
+                )
+            },
+            .WhenStmt(subject, arms, span) then {
+                yield TypedStatement.WhenStmt(
+                    self.apply_subst_to_expr(subst, subject),
+                    self.apply_subst_to_when_arms(subst, arms),
+                    span
+                )
+            },
             .ReturnStmt(value, span) then {
                 let new_value = when value in {
                     .Some(expr) then [TypedExpr ref]Option.Some(self.apply_subst_to_expr(subst, expr)),
@@ -343,7 +369,6 @@ given TypeChecker {
                 yield box(TypedExprKind.Block(new_statements))
             },
             .IfExpr(condition, then_branch, else_branch) then box(TypedExprKind.IfExpr(self.apply_subst_to_expr(subst, condition), self.apply_subst_to_expr(subst, then_branch), self.apply_subst_to_optional_expr(subst, else_branch))),
-            .WhileExpr(condition, body) then box(TypedExprKind.WhileExpr(self.apply_subst_to_expr(subst, condition), self.apply_subst_to_expr(subst, body))),
             .IsExpr(subject, pattern, negated) then box(TypedExprKind.IsExpr(self.apply_subst_to_expr(subst, subject), pattern, negated)),
             .WhenExpr(subject, arms) then box(TypedExprKind.WhenExpr(self.apply_subst_to_expr(subst, subject), self.apply_subst_to_when_arms(subst, arms))),
             .LambdaExpr(params, return_type, body) then box(TypedExprKind.LambdaExpr(self.apply_subst_to_params(subst, params), subst.apply(return_type), self.apply_subst_to_expr(subst, body))),
