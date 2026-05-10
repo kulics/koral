@@ -9,7 +9,7 @@
 public type Token {
     // Keywords
     KwLet(), KwMut(), KwIf(), KwThen(), KwElse(), KwWhile(), KwFor(),
-    KwWhen(), KwIs(), KwAnd(), KwOr(), KwNot(),
+    KwWhen(), KwIn(), KwIs(), KwAnd(), KwOr(), KwNot(),
     KwType(), KwTrait(), KwGiven(), KwAs(), KwUsing(), KwForeign(), KwIntrinsic(),
     KwSelf(), KwSelfType(),
     KwReturn(), KwBreak(), KwContinue(),
@@ -75,7 +75,7 @@ given Token {
     public to_string(self ref) String = when self in {
         .KwLet then "let", .KwMut then "mut", .KwIf then "if",
         .KwThen then "then", .KwElse then "else", .KwWhile then "while",
-        .KwFor then "for", .KwWhen then "when", .KwIs then "is",
+        .KwFor then "for", .KwWhen then "when", .KwIn then "in", .KwIs then "is",
         .KwAnd then "and", .KwOr then "or", .KwNot then "not",
         .KwType then "type", .KwTrait then "trait", .KwGiven then "given", .KwAs then "as",
         .KwUsing then "using", .KwForeign then "foreign", .KwIntrinsic then "intrinsic",
@@ -115,7 +115,7 @@ given Token {
 
     public is_keyword(self) Bool = when self in {
         .KwLet or .KwMut or .KwIf or .KwThen or .KwElse or .KwWhile or .KwFor
-        or .KwWhen or .KwIs or .KwAnd or .KwOr or .KwNot
+        or .KwWhen or .KwIn or .KwIs or .KwAnd or .KwOr or .KwNot
         or .KwType or .KwTrait or .KwGiven or .KwAs or .KwUsing or .KwForeign or .KwIntrinsic
         or .KwSelf or .KwSelfType
         or .KwReturn or .KwBreak or .KwContinue
@@ -160,10 +160,10 @@ given Token {
     public tag(t Token) Int = when t in {
         .KwLet then 1, .KwMut then 2, .KwIf then 3, .KwThen then 4,
         .KwElse then 5, .KwWhile then 6, .KwFor then 7, .KwWhen then 8,
-        .KwIs then 9, .KwAnd then 10, .KwOr then 11, .KwNot then 12,
-        .KwType then 13, .KwTrait then 14, .KwGiven then 15, .KwAs then 16, .KwUsing then 17,
-        .KwForeign then 18, .KwIntrinsic then 19, .KwSelf then 20, .KwSelfType then 21,
-        .KwReturn then 22, .KwBreak then 23, .KwContinue then 24,
+        .KwIn then 9, .KwIs then 10, .KwAnd then 11, .KwOr then 12, .KwNot then 13,
+        .KwType then 14, .KwTrait then 15, .KwGiven then 16, .KwAs then 17, .KwUsing then 18,
+        .KwForeign then 19, .KwIntrinsic then 20, .KwSelf then 21, .KwSelfType then 22,
+        .KwReturn then 23, .KwBreak then 24, .KwContinue then 25,
         .KwYield then 93, .KwDefer then 94,
         .KwRef then 25, .KwPtr then 26, .KwDeptr then 27, .KwVal then 28,
         .KwWeakref then 29, .KwPublic then 30, .KwPrivate then 31,
@@ -194,7 +194,7 @@ given Token {
 // ============================================================================
 
 public type Tokenizer(
-    runes [Rune]List,
+    runes List[Rune],
     mut pos UInt,
 )
 
@@ -203,20 +203,20 @@ given Tokenizer {
     public new(source String) Tokenizer = Tokenizer(source.to_runes(), 0)
 
     // Peek at current rune without consuming
-    private peek(self) [Rune]Option = {
+    private peek(self) Option[Rune] = {
         if self.pos >= self.runes.count() then {
             return .None()
         }
-        return [Rune]Option.Some(self.runes[self.pos])
+        return Option[Rune].Some(self.runes[self.pos])
     }
 
     // Peek at rune at offset from current position
-    private peek_at(self, offset UInt) [Rune]Option = {
+    private peek_at(self, offset UInt) Option[Rune] = {
         let idx = self.pos + offset
         if idx >= self.runes.count() then {
             return .None()
         }
-        return [Rune]Option.Some(self.runes[idx])
+        return Option[Rune].Some(self.runes[idx])
     }
 
     // Advance and return current rune
@@ -236,8 +236,8 @@ given Tokenizer {
     // Main tokenize entry point
     // ========================================================================
 
-    public tokenize(self mut ref) [[Token]List]Result = {
-        let mut tokens = [Token]List.new()
+    public tokenize(self mut ref) Result[List[Token]] = {
+        let mut tokens = List[Token].new()
 
         while not self.is_eof() then {
             let r = self.runes[self.pos]
@@ -368,7 +368,7 @@ given Tokenizer {
     // String literal: "..." or "\(...)" interpolation
     // ========================================================================
 
-    private scan_string(self mut ref) [Token]Result = {
+    private scan_string(self mut ref) Result[Token] = {
         let mut text = String.new()
         text.push_byte('"')
         self.pos += 1 // skip opening "
@@ -424,7 +424,7 @@ given Tokenizer {
             self.pos += 1
         }
 
-        return [Token]Result.Error(box("unterminated string literal"))
+        return Result[Token].Error(box("unterminated string literal"))
     }
 
     // ========================================================================
@@ -501,6 +501,7 @@ given Tokenizer {
             "while" then .KwWhile(),
             "for" then .KwFor(),
             "when" then .KwWhen(),
+            "in" then .KwIn(),
             "is" then .KwIs(),
             "and" then .KwAnd(),
             "or" then .KwOr(),
@@ -538,7 +539,7 @@ given Tokenizer {
     // Operators and punctuation
     // ========================================================================
 
-    private scan_operator(self mut ref) [Token]Option = {
+    private scan_operator(self mut ref) Option[Token] = {
         let r = self.runes[self.pos]
         let cp = r.to_uint32()
 
@@ -816,7 +817,7 @@ given Tokenizer {
             return .Some(self.scan_char_literal())
         }
 
-        return [Token]Option.None()
+        return Option[Token].None()
     }
 
     // ========================================================================

@@ -10,27 +10,27 @@
 // ============================================================================
 
 // FFI declaration for system entropy
-foreign let __koral_random_fill(buf UInt8 ptr, len Int32) Int32
+foreign let __koral_random_fill(buf ptr UInt8, len Int32) Int32
 
 // Internal mutable state behind a ref
 type SimpleRandomState(mut s0 UInt64, mut s1 UInt64, mut s2 UInt64, mut s3 UInt64)
 
 // DefaultRandomSource — xoshiro256** PRNG (value-semantic handle to shared state)
-public type DefaultRandomSource(private state SimpleRandomState mut ref)
+public type DefaultRandomSource(private state mut ref SimpleRandomState)
 
 // Helper: rotate left for UInt64
 let rotate_left(x UInt64, k UInt64) UInt64 = (x << k) | (x >> (64 - k))
 
 // Helper: read a little-endian UInt64 from a byte buffer at offset
-let read_u64_le(buf UInt8 ptr, offset UInt) UInt64 = {
-    let b0 = (UInt64)buf[offset]
-    let b1 = (UInt64)buf[offset + 1]
-    let b2 = (UInt64)buf[offset + 2]
-    let b3 = (UInt64)buf[offset + 3]
-    let b4 = (UInt64)buf[offset + 4]
-    let b5 = (UInt64)buf[offset + 5]
-    let b6 = (UInt64)buf[offset + 6]
-    let b7 = (UInt64)buf[offset + 7]
+let read_u64_le(buf ptr UInt8, offset UInt) UInt64 = {
+    let b0 = buf[offset](UInt64)
+    let b1 = buf[offset + 1](UInt64)
+    let b2 = buf[offset + 2](UInt64)
+    let b3 = buf[offset + 3](UInt64)
+    let b4 = buf[offset + 4](UInt64)
+    let b5 = buf[offset + 5](UInt64)
+    let b6 = buf[offset + 6](UInt64)
+    let b7 = buf[offset + 7](UInt64)
     return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56)
 }
 
@@ -46,7 +46,7 @@ given DefaultRandomSource {
 
     // Create with system entropy. Panics if entropy source fails.
     public new() DefaultRandomSource = {
-        let buf = [UInt8]alloc_memory(32)
+        let buf = alloc_memory[UInt8](32)
         let result = __koral_random_fill(buf, 32)
         if result <> 0 then {
             dealloc_memory(buf)

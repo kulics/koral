@@ -16,7 +16,7 @@ private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UIn
     return RunSummary(total, passed, failed, timed_out, infra_failed, duration_ms, exit_code)
 }
 
-private let run_cases_serial(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
+private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
     let start = MonoTime.now()
     let total = cases.count()
     let mut passed UInt = 0
@@ -46,7 +46,7 @@ private let run_cases_serial(config RunnerConfig, cases [CaseInfo]List) RunSumma
     return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
 }
 
-private let run_case_and_emit_events(config RunnerConfig, info CaseInfo, sender [CaseWorkerEvent]SendChannel) Void = {
+private let run_case_and_emit_events(config RunnerConfig, info CaseInfo, sender SendChannel[CaseWorkerEvent]) Void = {
     let _ = sender.send(.Started(info))
     let result = run_single_case(config, info)
     let _ = sender.send(.Finished(result))
@@ -58,7 +58,7 @@ private let run_case_with_group_lock(
     sync_lock Mutex,
     net_lock Mutex,
     env_lock Mutex,
-    sender [CaseWorkerEvent]SendChannel,
+    sender SendChannel[CaseWorkerEvent],
 ) Void = {
     if info.group_key == "sync" then {
         sync_lock.lock()
@@ -81,7 +81,7 @@ private let run_case_with_group_lock(
     run_case_and_emit_events(config, info, sender)
 }
 
-private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
+private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
     let start = MonoTime.now()
     let total = cases.count()
     if total == 0 then {
@@ -94,7 +94,7 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) RunSum
     random.shuffle(shuffled_cases)
 
     let next_index = AtomicInt.new(0)
-    let channels = [CaseWorkerEvent]make_channel(total + total)
+    let channels = make_channel[CaseWorkerEvent](total + total)
     let sender = channels.first
     let receiver = channels.second
     let sync_lock = Mutex.new()
@@ -120,11 +120,11 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) RunSum
         let _ = run_task(() -> {
             while true then {
                 let idx = shared_index.fetch_add(1)
-                if idx < 0 or (UInt)idx >= shared_cases.count() then {
+                if idx < 0 or idx(UInt) >= shared_cases.count() then {
                     break
                 }
 
-                let case_info = shared_cases[(UInt)idx]
+                let case_info = shared_cases[idx(UInt)]
                 run_case_with_group_lock(shared_config, case_info, shared_sync_lock, shared_net_lock, shared_env_lock, shared_sender)
             }
         })
@@ -166,7 +166,7 @@ private let run_cases_parallel(config RunnerConfig, cases [CaseInfo]List) RunSum
     return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
 }
 
-public let run_cases(config RunnerConfig, cases [CaseInfo]List) RunSummary = {
+public let run_cases(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
     if cases.is_empty() then {
         report_error_line(config, "No test cases matched current filter")
         return RunSummary(0, 0, 1, 0, 0, 0, 1)

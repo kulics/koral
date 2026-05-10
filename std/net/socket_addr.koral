@@ -8,17 +8,17 @@
 using Super.Text.Parseable
 
 public trait IntoSocketAddr {
-    into_socket_addr(self) [SocketAddr]Result
+    into_socket_addr(self) Result[SocketAddr]
 }
 
 given String as IntoSocketAddr {
 
-    public into_socket_addr(self) [SocketAddr]Result = SocketAddr.parse(self)
+    public into_socket_addr(self) Result[SocketAddr] = SocketAddr.parse(self)
 }
 
 given SocketAddr as IntoSocketAddr {
 
-    public into_socket_addr(self) [SocketAddr]Result = [SocketAddr]Result.Ok(self)
+    public into_socket_addr(self) Result[SocketAddr] = Result[SocketAddr].Ok(self)
 }
 
 /// Socket address type, combining an IP address and a port number.
@@ -57,13 +57,13 @@ given SocketAddr {
     public is_ipv6(self ref) Bool = self.addr.is_ipv6()
 
     /// Parse an IPv6 socket address in "[ip]:port" format.
-    private parse_ipv6_socket_addr(s String, len UInt) [SocketAddr]Result = {
+    private parse_ipv6_socket_addr(s String, len UInt) Result[SocketAddr] = {
         // Find the closing ']'
-        let mut close_bracket = [UInt]Option.None()
+        let mut close_bracket = Option[UInt].None()
         let mut i UInt = 1
         while i < len then {
             if s[i] == ']' then {
-                close_bracket = [UInt]Option.Some(i)
+                close_bracket = Option[UInt].Some(i)
                 break
             }
             i += 1
@@ -71,15 +71,15 @@ given SocketAddr {
 
         when close_bracket in {
             .None then {
-                return [SocketAddr]Result.Error(box("invalid socket address"))
+                return Result[SocketAddr].Error(box("invalid socket address"))
             },
             .Some(cb) then {
                 // Must have "]:port" after the closing bracket
                 if cb + 1 >= len or s[cb + 1] <> ':' then {
-                    return [SocketAddr]Result.Error(box("invalid socket address"))
+                    return Result[SocketAddr].Error(box("invalid socket address"))
                 }
                 if cb + 2 >= len then {
-                    return [SocketAddr]Result.Error(box("invalid socket address"))
+                    return Result[SocketAddr].Error(box("invalid socket address"))
                 }
 
                 // Extract IPv6 part (between '[' and ']')
@@ -87,17 +87,17 @@ given SocketAddr {
                 let ip_result = Ipv6Addr.parse(ip_str)
                 when ip_result in {
                     .Error(_) then {
-                        return [SocketAddr]Result.Error(box("invalid socket address"))
+                        return Result[SocketAddr].Error(box("invalid socket address"))
                     },
                     .Ok(ipv6) then {
                         // Extract port part
                         let port_result = SocketAddr.parse_port(s, cb + 2, len)
                         when port_result in {
                             .Error(e) then {
-                                return [SocketAddr]Result.Error(e)
+                                return Result[SocketAddr].Error(e)
                             },
                             .Ok(port) then {
-                                return [SocketAddr]Result.Ok(SocketAddr(IpAddr.V6(ipv6), port))
+                                return Result[SocketAddr].Ok(SocketAddr(IpAddr.V6(ipv6), port))
                             },
                         }
                     },
@@ -108,14 +108,14 @@ given SocketAddr {
 
     /// Parse a port number from a substring s[start..end].
     /// Port must be 0-65535, no leading zeros (except "0" itself).
-    private parse_port(s String, start UInt, end UInt) [UInt16]Result = {
+    private parse_port(s String, start UInt, end UInt) Result[UInt16] = {
         let digit_count = end - start
         if digit_count == 0 then {
-            return [UInt16]Result.Error(box("invalid socket address"))
+            return Result[UInt16].Error(box("invalid socket address"))
         }
         // Reject leading zeros (except single "0")
         if digit_count > 1 and s[start] == '0' then {
-            return [UInt16]Result.Error(box("invalid socket address"))
+            return Result[UInt16].Error(box("invalid socket address"))
         }
 
         let mut value UInt = 0
@@ -123,16 +123,16 @@ given SocketAddr {
         while i < end then {
             let b = s[i]
             if b < '0' or b > '9' then {
-                return [UInt16]Result.Error(box("invalid socket address"))
+                return Result[UInt16].Error(box("invalid socket address"))
             }
-            value = value * 10 + (UInt)(b - '0')
+            value = value * 10 + (b - '0')(UInt)
             if value > 65535 then {
-                return [UInt16]Result.Error(box("invalid socket address"))
+                return Result[UInt16].Error(box("invalid socket address"))
             }
             i += 1
         }
 
-        return [UInt16]Result.Ok((UInt16)value)
+        return Result[UInt16].Ok(value(UInt16))
     }
 
     /// Convert a SocketAddr to a sockaddr_in (16 bytes) or sockaddr_in6 (28 bytes) byte array.
@@ -150,18 +150,18 @@ given SocketAddr {
     ///   [4..7]  = sin6_flowinfo (zeros)
     ///   [8..23] = sin6_addr (16 bytes, network byte order)
     ///   [24..27] = sin6_scope_id (zeros)
-    public to_sockaddr_bytes(self ref) [UInt8]List = {
+    public to_sockaddr_bytes(self ref) List[UInt8] = {
         when self.addr in {
             .V4(v4) then {
-                let mut buf = [UInt8]List.with_capacity(16)
+                let mut buf = List[UInt8].with_capacity(16)
                 // sin_family = AF_INET (little-endian)
                 let af = __koral_const_AF_INET()
-                buf.push((UInt8)(af & 255))
-                buf.push((UInt8)((af >> 8) & 255))
+                buf.push((af & 255)(UInt8))
+                buf.push(((af >> 8) & 255)(UInt8))
                 // sin_port in network byte order (big-endian)
-                let port = (UInt)self.port_num
-                buf.push((UInt8)(port >> 8))
-                buf.push((UInt8)(port & 255))
+                let port = self.port_num(UInt)
+                buf.push((port >> 8)(UInt8))
+                buf.push((port & 255)(UInt8))
                 // sin_addr: 4 octets
                 let octs = v4.octets()
                 buf.push(octs[0])
@@ -171,40 +171,40 @@ given SocketAddr {
                 // Padding zeros (8 bytes)
                 let mut i UInt = 0
                 while i < 8 then {
-                    buf.push((UInt8)0)
+                    buf.push(0(UInt8))
                     i += 1
                 }
                 return buf
             },
             .V6(v6) then {
-                let mut buf = [UInt8]List.with_capacity(28)
+                let mut buf = List[UInt8].with_capacity(28)
                 // sin6_family = AF_INET6 (little-endian)
                 let af6 = __koral_const_AF_INET6()
-                buf.push((UInt8)(af6 & 255))
-                buf.push((UInt8)((af6 >> 8) & 255))
+                buf.push((af6 & 255)(UInt8))
+                buf.push(((af6 >> 8) & 255)(UInt8))
                 // sin6_port in network byte order (big-endian)
-                let port = (UInt)self.port_num
-                buf.push((UInt8)(port >> 8))
-                buf.push((UInt8)(port & 255))
+                let port = self.port_num(UInt)
+                buf.push((port >> 8)(UInt8))
+                buf.push((port & 255)(UInt8))
                 // sin6_flowinfo (4 bytes of zeros)
-                buf.push((UInt8)0)
-                buf.push((UInt8)0)
-                buf.push((UInt8)0)
-                buf.push((UInt8)0)
+                buf.push(0(UInt8))
+                buf.push(0(UInt8))
+                buf.push(0(UInt8))
+                buf.push(0(UInt8))
                 // sin6_addr: 16 bytes from 8 segments (each segment big-endian)
                 let segs = v6.segments()
                 let mut i UInt = 0
                 while i < 8 then {
-                    let seg = (UInt)segs[i]
-                    buf.push((UInt8)(seg >> 8))
-                    buf.push((UInt8)(seg & 255))
+                    let seg = segs[i](UInt)
+                    buf.push((seg >> 8)(UInt8))
+                    buf.push((seg & 255)(UInt8))
                     i += 1
                 }
                 // sin6_scope_id (4 bytes of zeros)
-                buf.push((UInt8)0)
-                buf.push((UInt8)0)
-                buf.push((UInt8)0)
-                buf.push((UInt8)0)
+                buf.push(0(UInt8))
+                buf.push(0(UInt8))
+                buf.push(0(UInt8))
+                buf.push(0(UInt8))
                 return buf
             },
         }
@@ -214,49 +214,49 @@ given SocketAddr {
     /// back to a SocketAddr. Examines the family field to determine IPv4 or IPv6.
     ///
     /// Returns Error if the family is unrecognized or the buffer is too short.
-    public from_sockaddr_bytes(buf [UInt8]List) [SocketAddr]Result = {
+    public from_sockaddr_bytes(buf List[UInt8]) Result[SocketAddr] = {
         let len = buf.count()
         if len < 2 then {
-            return [SocketAddr]Result.Error(box("invalid sockaddr: too short"))
+            return Result[SocketAddr].Error(box("invalid sockaddr: too short"))
         }
 
-        let family = (UInt)buf[0] + ((UInt)buf[1] << 8)
+        let family = buf[0](UInt) + (buf[1](UInt) << 8)
 
         // AF_INET
-        let af_inet = (UInt)__koral_const_AF_INET()
+        let af_inet = __koral_const_AF_INET()(UInt)
         if family == af_inet then {
             if len < 8 then {
-                return [SocketAddr]Result.Error(box("invalid sockaddr_in: too short"))
+                return Result[SocketAddr].Error(box("invalid sockaddr_in: too short"))
             }
             // Port: bytes [2..3] in network byte order (big-endian)
-            let port = (UInt16)(((UInt)buf[2] << 8) + (UInt)buf[3])
+            let port = ((buf[2](UInt) << 8) + buf[3](UInt))(UInt16)
             // Address: bytes [4..7]
             let ipv4 = Ipv4Addr.new(buf[4], buf[5], buf[6], buf[7])
-            return [SocketAddr]Result.Ok(SocketAddr(IpAddr.V4(ipv4), port))
+            return Result[SocketAddr].Ok(SocketAddr(IpAddr.V4(ipv4), port))
         }
 
         // AF_INET6 (10 on Linux, 23 on Windows, 30 on macOS/BSD)
-        let af_inet6 = (UInt)__koral_const_AF_INET6()
+        let af_inet6 = __koral_const_AF_INET6()(UInt)
         if family == af_inet6 or family == 10 or family == 23 or family == 30 then {
             if len < 24 then {
-                return [SocketAddr]Result.Error(box("invalid sockaddr_in6: too short"))
+                return Result[SocketAddr].Error(box("invalid sockaddr_in6: too short"))
             }
             // Port: bytes [2..3] in network byte order (big-endian)
-            let port = (UInt16)(((UInt)buf[2] << 8) + (UInt)buf[3])
+            let port = ((buf[2](UInt) << 8) + buf[3](UInt))(UInt16)
             // Address: bytes [8..23], 8 segments of 2 bytes each (big-endian)
-            let seg_a = (UInt16)(((UInt)buf[8] << 8) + (UInt)buf[9])
-            let seg_b = (UInt16)(((UInt)buf[10] << 8) + (UInt)buf[11])
-            let seg_c = (UInt16)(((UInt)buf[12] << 8) + (UInt)buf[13])
-            let seg_d = (UInt16)(((UInt)buf[14] << 8) + (UInt)buf[15])
-            let seg_e = (UInt16)(((UInt)buf[16] << 8) + (UInt)buf[17])
-            let seg_f = (UInt16)(((UInt)buf[18] << 8) + (UInt)buf[19])
-            let seg_g = (UInt16)(((UInt)buf[20] << 8) + (UInt)buf[21])
-            let seg_h = (UInt16)(((UInt)buf[22] << 8) + (UInt)buf[23])
+            let seg_a = ((buf[8](UInt) << 8) + buf[9](UInt))(UInt16)
+            let seg_b = ((buf[10](UInt) << 8) + buf[11](UInt))(UInt16)
+            let seg_c = ((buf[12](UInt) << 8) + buf[13](UInt))(UInt16)
+            let seg_d = ((buf[14](UInt) << 8) + buf[15](UInt))(UInt16)
+            let seg_e = ((buf[16](UInt) << 8) + buf[17](UInt))(UInt16)
+            let seg_f = ((buf[18](UInt) << 8) + buf[19](UInt))(UInt16)
+            let seg_g = ((buf[20](UInt) << 8) + buf[21](UInt))(UInt16)
+            let seg_h = ((buf[22](UInt) << 8) + buf[23](UInt))(UInt16)
             let ipv6 = Ipv6Addr.new(seg_a, seg_b, seg_c, seg_d, seg_e, seg_f, seg_g, seg_h)
-            return [SocketAddr]Result.Ok(SocketAddr(IpAddr.V6(ipv6), port))
+            return Result[SocketAddr].Ok(SocketAddr(IpAddr.V6(ipv6), port))
         }
 
-        return [SocketAddr]Result.Error(box("invalid sockaddr: unknown address family"))
+        return Result[SocketAddr].Error(box("invalid sockaddr: unknown address family"))
     }
 }
 
@@ -270,14 +270,14 @@ given SocketAddr as ToString {
             .V4(v4) then {
                 s.push_string(v4.to_string())
                 s.push_byte(':')
-                s.push_string(((UInt)self.port_num).to_string())
+                s.push_string(self.port_num(UInt).to_string())
             },
             .V6(v6) then {
                 s.push_byte('[')
                 s.push_string(v6.to_string())
                 s.push_byte(']')
                 s.push_byte(':')
-                s.push_string(((UInt)self.port_num).to_string())
+                s.push_string(self.port_num(UInt).to_string())
             },
         }
         return s
@@ -289,10 +289,10 @@ given SocketAddr as Parseable {
     /// Parse a socket address from a string.
     /// IPv4 format: "ip:port" (e.g., "192.168.1.1:8080")
     /// IPv6 format: "[ip]:port" (e.g., "[::1]:8080")
-    public parse(s String) [Self]Result = {
+    public parse(s String) Result[Self] = {
         let len = s.count()
         if len == 0 then {
-            return [SocketAddr]Result.Error(box("invalid socket address"))
+            return Result[SocketAddr].Error(box("invalid socket address"))
         }
 
         // Check if this is an IPv6 address (starts with '[')
@@ -302,40 +302,40 @@ given SocketAddr as Parseable {
 
         // IPv4 format: find the last ':' separator
         // We search from the end to find the port separator
-        let mut colon_pos = [UInt]Option.None()
+        let mut colon_pos = Option[UInt].None()
         let mut i = len
         while i > 0 then {
             i -= 1
             if s[i] == ':' then {
-                colon_pos = [UInt]Option.Some(i)
+                colon_pos = Option[UInt].Some(i)
                 break
             }
         }
 
         when colon_pos in {
             .None then {
-                return [SocketAddr]Result.Error(box("invalid socket address"))
+                return Result[SocketAddr].Error(box("invalid socket address"))
             },
             .Some(cp) then {
                 if cp == 0 or cp == len - 1 then {
-                    return [SocketAddr]Result.Error(box("invalid socket address"))
+                    return Result[SocketAddr].Error(box("invalid socket address"))
                 }
                 // Extract IP part
                 let ip_str = s.substring(0..<cp)
                 let ip_result = Ipv4Addr.parse(ip_str)
                 when ip_result in {
                     .Error(_) then {
-                        return [SocketAddr]Result.Error(box("invalid socket address"))
+                        return Result[SocketAddr].Error(box("invalid socket address"))
                     },
                     .Ok(ipv4) then {
                         // Extract port part
                         let port_result = SocketAddr.parse_port(s, cp + 1, len)
                         when port_result in {
                             .Error(e) then {
-                                return [SocketAddr]Result.Error(e)
+                                return Result[SocketAddr].Error(e)
                             },
                             .Ok(port) then {
-                                return [SocketAddr]Result.Ok(SocketAddr(IpAddr.V4(ipv4), port))
+                                return Result[SocketAddr].Ok(SocketAddr(IpAddr.V4(ipv4), port))
                             },
                         }
                     },

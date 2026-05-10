@@ -13,50 +13,50 @@
 given Reader {
 
     // Read all bytes from self until EOF. Returns all bytes as a list.
-    public read_all(self ref) [[UInt8]List]Result = {
-        let mut out = [UInt8]List.new()
+    public read_all(self ref) Result[List[UInt8]] = {
+        let mut out = List[UInt8].new()
         let mut chunk = make_bytes(4096)
         while true then {
             when self.read(into: chunk.ref, ..) in {
                 .Ok(n) then {
                     if n == 0 then {
-                        return [[UInt8]List]Result.Ok(out)
+                        return Result[List[UInt8]].Ok(out)
                     }
                     out.push_sublist(chunk, 0..<n)
                 },
                 .Error(e) then {
-                    return [[UInt8]List]Result.Error(e)
+                    return Result[List[UInt8]].Error(e)
                 },
             }
         }
-        return [[UInt8]List]Result.Ok(out)
+        return Result[List[UInt8]].Ok(out)
     }
 
     // Copy all bytes from self to dst. Returns total bytes copied.
-    public [W Writer]copy_all_to(self, dst W) [UInt]Result = {
+    public copy_all_to[W Writer](self, dst W) Result[UInt] = {
         let mut chunk = make_bytes(4096)
         let mut total UInt = 0
         while true then {
             when self.read(into: chunk.ref, ..) in {
                 .Ok(n) then {
                     if n == 0 then {
-                        return [UInt]Result.Ok(total)
+                        return Result[UInt].Ok(total)
                     }
                     when dst.write_all(from: chunk, 0..<n) in {
                         .Ok(_) then {
                             total += n
                         },
                         .Error(e) then {
-                            return [UInt]Result.Error(e)
+                            return Result[UInt].Error(e)
                         },
                     }
                 },
                 .Error(e) then {
-                    return [UInt]Result.Error(e)
+                    return Result[UInt].Error(e)
                 },
             }
         }
-        return [UInt]Result.Ok(total)
+        return Result[UInt].Ok(total)
     }
 }
 
@@ -67,26 +67,26 @@ given Reader {
 given Writer {
 
     // Write all bytes in src[range] to self, looping on short writes.
-    public write_all(self ref, from: [UInt8]List, range [UInt]Range) [Void]Result = {
+    public write_all(self ref, from: List[UInt8], range Range[UInt]) Result[Void] = {
         let span = from.slice_spec(range)
         let mut start = span.start()
         let end = span.end()
         if end <= start then {
-            return [Void]Result.Ok({})
+            return Result[Void].Ok({})
         }
         while start < end then {
             when self.write(from: from, start..<end) in {
                 .Ok(n) then {
                     if n == 0 then {
-                        return [Void]Result.Error(box(IoError.WriteZero()))
+                        return Result[Void].Error(box(IoError.WriteZero()))
                     }
                     start += n
                 },
                 .Error(e) then {
-                    return [Void]Result.Error(e)
+                    return Result[Void].Error(e)
                 },
             }
         }
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 }

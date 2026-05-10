@@ -14,11 +14,11 @@
 // ============================================================================
 
 // channel internal shared storage
-private type [T Any]ChannelStorage(
+private type ChannelStorage[T Any](
     mutex Mutex,
     not_empty MutexCondvar,          // notify consumer: new message available
     not_full MutexCondvar,           // notify producer: space available
-    mut queue [T]List,          // message queue
+    mut queue List[T],          // message queue
     capacity UInt,              // buffer size
     mut sender_closed Bool,     // all SendChannels have been dropped
     mut receiver_closed Bool,   // all RecvChannels have been dropped
@@ -28,10 +28,9 @@ private type [T Any]ChannelStorage(
 // SendChannelStorage / RecvChannelStorage (intermediate ref layer, tracks holder count)
 // ============================================================================
 
-private type [T Any]SendChannelStorage(channel [T]ChannelStorage mut ref)
+private type SendChannelStorage[T Any](channel mut ref ChannelStorage[T])
 
-given[T Any] [T]SendChannelStorage as Drop {
-
+given[T Any] SendChannelStorage[T] as Drop {
     drop(self mut ref) Void = {
         if ref_is_borrow(self) then {
             return
@@ -43,10 +42,9 @@ given[T Any] [T]SendChannelStorage as Drop {
     }
 }
 
-private type [T Any]RecvChannelStorage(channel [T]ChannelStorage mut ref)
+private type RecvChannelStorage[T Any](channel mut ref ChannelStorage[T])
 
-given[T Any] [T]RecvChannelStorage as Drop {
-
+given[T Any] RecvChannelStorage[T] as Drop {
     drop(self mut ref) Void = {
         if ref_is_borrow(self) then {
             return
@@ -62,12 +60,11 @@ given[T Any] [T]RecvChannelStorage as Drop {
 // SendChannel Type
 // ============================================================================
 
-public type [T Any]SendChannel(private storage [T]SendChannelStorage mut ref)
+public type SendChannel[T Any](private storage mut ref SendChannelStorage[T])
 
-given[T Any] [T]SendChannel {
-
+given[T Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
-    public send(self ref, value T) [Void]Result = {
+    public send(self ref, value T) Result[Void] = {
         self.storage.channel.mutex.lock()
         finally self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.count() >= self.storage.channel.capacity
@@ -75,26 +72,26 @@ given[T Any] [T]SendChannel {
             self.storage.channel.not_full.wait()
         }
         if self.storage.channel.receiver_closed then {
-            return [Void]Result.Error(box("channel closed"))
+            return Result[Void].Error(box("channel closed"))
         }
         self.storage.channel.queue.push(value)
         self.storage.channel.not_empty.notify()
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     /// 非阻塞发送
-    public try_send(self ref, value T) [Bool]Result = {
+    public try_send(self ref, value T) Result[Bool] = {
         self.storage.channel.mutex.lock()
         finally self.storage.channel.mutex.unlock()
         if self.storage.channel.receiver_closed then {
-            return [Bool]Result.Error(box("channel closed"))
+            return Result[Bool].Error(box("channel closed"))
         }
         if self.storage.channel.queue.count() >= self.storage.channel.capacity then {
-            return [Bool]Result.Ok(false)
+            return Result[Bool].Ok(false)
         }
         self.storage.channel.queue.push(value)
         self.storage.channel.not_empty.notify()
-        return [Bool]Result.Ok(true)
+        return Result[Bool].Ok(true)
     }
 }
 
@@ -102,12 +99,11 @@ given[T Any] [T]SendChannel {
 // RecvChannel Type
 // ============================================================================
 
-public type [T Any]RecvChannel(private storage [T]RecvChannelStorage mut ref)
+public type RecvChannel[T Any](private storage mut ref RecvChannelStorage[T])
 
-given[T Any] [T]RecvChannel {
-
+given[T Any] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）
-    public recv(self ref) [T]Result = {
+    public recv(self ref) Result[T] = {
         self.storage.channel.mutex.lock()
         finally self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.is_empty() and not self.storage.channel.sender_closed then {
@@ -116,24 +112,24 @@ given[T Any] [T]RecvChannel {
         if not self.storage.channel.queue.is_empty() then {
             let value = self.storage.channel.queue.take_at(0)
             self.storage.channel.not_full.notify()
-            return [T]Result.Ok(value)
+            return Result[T].Ok(value)
         }
-        return [T]Result.Error(box("channel closed"))
+        return Result[T].Error(box("channel closed"))
     }
 
     /// 非阻塞接收
-    public try_recv(self ref) [[T]Option]Result = {
+    public try_recv(self ref) Result[Option[T]] = {
         self.storage.channel.mutex.lock()
         finally self.storage.channel.mutex.unlock()
         if not self.storage.channel.queue.is_empty() then {
             let value = self.storage.channel.queue.take_at(0)
             self.storage.channel.not_full.notify()
-            return [[T]Option]Result.Ok([T]Option.Some(value))
+            return Result[Option[T]].Ok(Option[T].Some(value))
         }
         if self.storage.channel.sender_closed then {
-            return [[T]Option]Result.Error(box("channel closed"))
+            return Result[Option[T]].Error(box("channel closed"))
         }
-        return [[T]Option]Result.Ok([T]Option.None())
+        return Result[Option[T]].Ok(Option[T].None())
     }
 }
 
@@ -143,17 +139,17 @@ given[T Any] [T]RecvChannel {
 
 /// 类型安全的消息传递通道工厂。
 /// 返回 (SendChannel, RecvChannel) 对，避免统一 Channel 类型带来的误用。
-public let [T Any]make_channel(capacity UInt) [[T]SendChannel, [T]RecvChannel]Pair = {
+public let make_channel[T Any](capacity UInt) Pair[SendChannel[T], RecvChannel[T]] = {
     let mu = Mutex.new()
     let not_empty = mu.condvar()
     let not_full = mu.condvar()
-    let storage = box([T]ChannelStorage(
+    let storage = box(ChannelStorage[T](
         mu, not_empty, not_full,
-        [T]List.new(),
+        List[T].new(),
         capacity,
         false, false
     ))
-    let sender = [T]SendChannel(box([T]SendChannelStorage(storage)))
-    let receiver = [T]RecvChannel(box([T]RecvChannelStorage(storage)))
-    return [[T]SendChannel, [T]RecvChannel]Pair(sender, receiver)
+    let sender = SendChannel[T](box(SendChannelStorage[T](storage)))
+    let receiver = RecvChannel[T](box(RecvChannelStorage[T](storage)))
+    return Pair[SendChannel[T], RecvChannel[T]](sender, receiver)
 }

@@ -14,13 +14,13 @@ using Super.Os.IntoPath
 
 /// Create a child process via posix_spawn (Unix) / CreateProcess (Windows).
 foreign let __koral_spawn(
-    program UInt8 ptr,
-    argv UInt8 ptr ptr, argc Int32,
-    envp UInt8 ptr ptr, envc Int32,
-    cwd UInt8 ptr,
+    program ptr UInt8,
+    argv ptr ptr UInt8, argc Int32,
+    envp ptr ptr UInt8, envc Int32,
+    cwd ptr UInt8,
     stdin_mode Int32, stdout_mode Int32, stderr_mode Int32,
     stdin_fd Int32, stdout_fd Int32, stderr_fd Int32,
-    out KoralProcess ptr
+    out ptr KoralProcess
 ) Int32
 
 /// Get pointer to errno value.
@@ -32,30 +32,32 @@ foreign let __koral_spawn(
 
 /// IoRedirect enum to integer (FFI encoding): 0=inherit, 1=piped, 2=null, 3=fd.
 private let stdio_to_int(s IoRedirect) Int32 = when s in {
-    .Inherit then (Int32)0,
-    .Piped then (Int32)1,
-    .Null then (Int32)2,
-    .File(_) then (Int32)3,
-    .StdoutPipe(_) then (Int32)3,
-    .StderrPipe(_) then (Int32)3,
+    .Inherit then 0(Int32),
+    .Piped then 1(Int32),
+    .Null then 2(Int32),
+    .File(_) then 3(Int32),
+    .StdoutPipe(_) then 3(Int32),
+    .StderrPipe(_) then 3(Int32),
 }
 
 /// Extract the file descriptor from an IoRedirect (mode=3 variants).
 /// Returns -1 for non-fd variants (Inherit, Piped, Null).
 private let stdio_to_fd(s IoRedirect) Int32 = when s in {
-    .File(f) then (Int32)f.fd(),
-    .StdoutPipe(p) then (Int32)p.fd(),
-    .StderrPipe(p) then (Int32)p.fd(),
-    _ then (Int32)-1,
+    .File(f) then f.fd()(Int32),
+    .StdoutPipe(p) then p.fd()(Int32),
+    .StderrPipe(p) then p.fd()(Int32),
+    .Inherit then 0(Int32) - 1,
+    .Piped then 0(Int32) - 1,
+    .Null then 0(Int32) - 1,
 }
 
 /// Convert a list of strings to an array of UInt8 pointers for FFI.
-private let argv_to_ptrs(argv [String]List) UInt8 ptr ptr = {
+private let argv_to_ptrs(argv List[String]) ptr ptr UInt8 = {
     let count = argv.count()
-    let ptrs = [UInt8 ptr]alloc_memory(count)
+    let ptrs = alloc_memory[ptr UInt8](count)
     let mut i UInt = 0
     while i < count then {
-        init_memory(ptrs + i, (UInt8 ptr)argv[i].storage.data)
+        init_memory(ptrs + i, argv[i].storage.data(ptr UInt8))
         i += 1
     }
     return ptrs
@@ -63,8 +65,8 @@ private let argv_to_ptrs(argv [String]List) UInt8 ptr ptr = {
 
 /// Build environment variable strings from env actions.
 /// Set => "KEY=VALUE", Remove => "KEY" (no =), Clear => "" (empty string).
-private let build_env_strings(actions [EnvAction]List) [String]List = {
-    let mut result = [String]List.new()
+private let build_env_strings(actions List[EnvAction]) List[String] = {
+    let mut result = List[String].new()
     for action in actions then {
         when action in {
             .Set(name, value) then {
@@ -86,15 +88,15 @@ private let build_env_strings(actions [EnvAction]List) [String]List = {
 }
 
 /// Convert env strings list to pointer array for FFI.
-private let env_strs_to_ptrs(strs [String]List) UInt8 ptr ptr = {
+private let env_strs_to_ptrs(strs List[String]) ptr ptr UInt8 = {
     let count = strs.count()
     if count == 0 then {
-        return [UInt8 ptr]null_ptr()
+        return null_ptr[ptr UInt8]()
     }
-    let ptrs = [UInt8 ptr]alloc_memory(count)
+    let ptrs = alloc_memory[ptr UInt8](count)
     let mut i UInt = 0
     while i < count then {
-        init_memory(ptrs + i, (UInt8 ptr)strs[i].storage.data)
+        init_memory(ptrs + i, strs[i].storage.data(ptr UInt8))
         i += 1
     }
     return ptrs
@@ -121,9 +123,9 @@ type EnvAction {
 /// Internal storage for the Command builder.
 private type CommandStorage(
     program String,
-    mut arguments [String]List,
-    mut env_actions [EnvAction]List,
-    mut work_dir [Path]Option,
+    mut arguments List[String],
+    mut env_actions List[EnvAction],
+    mut work_dir Option[Path],
     mut stdin_cfg IoRedirect,
     mut stdout_cfg IoRedirect,
     mut stderr_cfg IoRedirect,
@@ -136,16 +138,16 @@ private type CommandStorage(
 /// Command builder for configuring and launching child processes.
 /// Provides a fluent API for setting program, arguments, environment variables,
 /// working directory, and I/O redirection before spawning.
-public type Command(private mut storage CommandStorage mut ref)
+public type Command(private mut storage mut ref CommandStorage)
 
 given Command {
 
     /// Create a new command builder for the specified program.
     public new(program String) Command = Command(box(CommandStorage(
         program,
-        [String]List.new(),
-        [EnvAction]List.new(),
-        [Path]Option.None(),
+        List[String].new(),
+        List[EnvAction].new(),
+        Option[Path].None(),
         IoRedirect.Inherit(),
         IoRedirect.Inherit(),
         IoRedirect.Inherit()
@@ -158,7 +160,7 @@ given Command {
     }
 
     /// Add multiple arguments at once (chainable).
-    public args(self, values [String]List) Command = {
+    public args(self, values List[String]) Command = {
         for v in values then {
             self.storage.arguments.push(v)
         }
@@ -184,8 +186,8 @@ given Command {
     }
 
     /// Set the child process working directory (chainable).
-    public [T IntoPath]set_current_dir(self, path T) Command = {
-        self.storage.work_dir = [Path]Option.Some(path.into_path())
+    public set_current_dir[T IntoPath](self, path T) Command = {
+        self.storage.work_dir = Option[Path].Some(path.into_path())
         return self
     }
 
@@ -208,9 +210,9 @@ given Command {
     }
 
     /// Asynchronously spawn a child process, returning a Process handle.
-    public spawn(self) [Process]Result = {
+    public spawn(self) Result[Process] = {
         // Build argv array (program + arguments)
-        let mut argv = [String]List.new()
+        let mut argv = List[String].new()
         argv.push(self.storage.program)
         for a in self.storage.arguments then {
             argv.push(a)
@@ -238,9 +240,9 @@ given Command {
         let result = __koral_spawn(
             self.storage.program.storage.data,
             argv_to_ptrs(argv),
-            (Int32)argv.count(),
+            argv.count()(Int32),
             env_strs_to_ptrs(env_strs),
-            (Int32)env_strs.count(),
+            env_strs.count()(Int32),
             cwd.storage.data,
             stdin_mode,
             stdout_mode,
@@ -252,10 +254,10 @@ given Command {
         )
 
         if result <> 0 then {
-            return [Process]Result.Error(box(last_error_message()))
+            return Result[Process].Error(box(last_error_message()))
         }
 
-        return [Process]Result.Ok(Process(box(ProcessStorage(
+        return Result[Process].Ok(Process(box(ProcessStorage(
             proc.pid,
             proc.stdin_fd,
             proc.stdout_fd,
@@ -266,22 +268,22 @@ given Command {
 
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
-    public run(self) [ExitStatus]Result =
+    public run(self) Result[ExitStatus] =
         when self.spawn() in {
             .Ok(proc) then proc.wait(),
-            .Error(e) then [ExitStatus]Result.Error(e),
+            .Error(e) then Result[ExitStatus].Error(e),
         }
 
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
     /// Forces stdout/stderr to Piped mode to capture output.
-    public run_output(self) [CommandOutput]Result = {
+    public run_output(self) Result[CommandOutput] = {
         // Force stdout/stderr to Piped to capture output
         self.storage.stdout_cfg = IoRedirect.Piped()
         self.storage.stderr_cfg = IoRedirect.Piped()
 
         return when self.spawn() in {
             .Ok(proc) then proc.wait_output(),
-            .Error(e) then [CommandOutput]Result.Error(e),
+            .Error(e) then Result[CommandOutput].Error(e),
         }
     }
 }

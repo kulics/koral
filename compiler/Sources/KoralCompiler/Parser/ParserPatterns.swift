@@ -21,7 +21,10 @@ extension Parser {
   /// Parse a single pattern argument, which may be a named pattern (label: pattern) or positional (pattern).
   private func parsePatternArgument() throws -> PatternArg {
     // Try to parse as named pattern: identifier followed by colon
-    if case .identifier(let name) = currentToken, !name.first!.isUppercase, name != "_" {
+    if case .identifier(let name) = currentToken,
+       isValidVariableName(name),
+       name != "_"
+    {
       let savedState = lexer.saveState()
       let savedToken = currentToken
       do {
@@ -176,7 +179,7 @@ extension Parser {
       try match(.identifier(name))
       
       // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
-      if currentToken === .leftParen {
+      if currentToken === .leftParen, isValidTypeName(name) {
         var args: [PatternArg] = []
         try match(.leftParen)
         while currentToken !== .rightParen {

@@ -20,7 +20,7 @@ public type FormatOptions(
 
 public type Config(
     mut format_options FormatOptions,
-    mut input_files [String]List,
+    mut input_files List[String],
     mut show_help Bool,
     mut show_version Bool,
 )
@@ -60,10 +60,10 @@ private let show_version() Void = {
 // Argument Parsing
 // ============================================================================
 
-private let parse_args(args [String]List) [Config]Result = {
+private let parse_args(args List[String]) Result[Config] = {
     let mut config = Config(
         FormatOptions(false, false, false, false, false, false),
-        [String]List.new(),
+        List[String].new(),
         false,
         false
     )
@@ -94,7 +94,7 @@ private let parse_args(args [String]List) [Config]Result = {
         } else if arg == "--version" then {
             config.show_version = true
         } else if arg.starts_with("-") and arg <> "-" then {
-            return [Config]Result.Error(box(arg))
+            return Result[Config].Error(box(arg))
         } else {
             config.input_files.push(arg)
         }
@@ -106,7 +106,7 @@ private let parse_args(args [String]List) [Config]Result = {
         config.format_options.number_lines = false
     }
 
-    return [Config]Result.Ok(config)
+    return Result[Config].Ok(config)
 }
 
 // ============================================================================
@@ -124,11 +124,11 @@ given Formatter {
         return Formatter(options, 1, false)
     }
     
-    public format_line(self mut ref, line String) [String]Option = {
+    public format_line(self mut ref, line String) Option[String] = {
         let is_blank = self.is_blank_line(line)
         if self.options.squeeze_blank and is_blank and self.last_was_blank then {
             self.last_was_blank = is_blank
-            return [String]Option.None()
+            return Option[String].None()
         }
 
         self.last_was_blank = is_blank
@@ -158,7 +158,7 @@ given Formatter {
             result = formatted
         }
 
-        return [String]Option.Some(result)
+        return Option[String].Some(result)
     }
 
     private is_blank_line(self ref, line String) Bool = {
@@ -174,7 +174,7 @@ given Formatter {
             let byte_opt = line.get(i)
             when byte_opt in {
                 .Some(byte_val) then {
-                    let byte_uint = (UInt)byte_val
+                    let byte_uint = byte_val(UInt)
                     
                     // Handle newline specially for show_ends
                     if byte_val == '\n' then {
@@ -193,7 +193,7 @@ given Formatter {
                     } else if self.options.show_nonprinting and byte_uint < 32 then {
                         // Control characters (0x00-0x1F except tab and newline)
                         result.push_byte('^')
-                        let ctrl_byte = (UInt8)(byte_uint + 64)
+                        let ctrl_byte = (byte_uint + 64)(UInt8)
                         result.push_byte(ctrl_byte)
                     } else if self.options.show_nonprinting and byte_uint == 127 then {
                         // DEL character (0x7F)
@@ -220,14 +220,14 @@ given Formatter {
 // File Processing
 // ============================================================================
 
-private let emit_formatted_line(formatter Formatter mut ref, line String) Void = {
+private let emit_formatted_line(formatter mut ref Formatter, line String) Void = {
     when formatter.format_line(line) in {
         .Some(formatted) then print(formatted),
         .None() then {},
     }
 }
 
-private let process_file(file_path String, formatter Formatter mut ref) Bool = {
+private let process_file(file_path String, formatter mut ref Formatter) Bool = {
     let file = open_file(file_path.into_path(), OpenMode.Read()) or else {
         let mut msg = String.new()
         msg.push_string("cat: ")
@@ -260,7 +260,7 @@ private let process_file(file_path String, formatter Formatter mut ref) Bool = {
     return false
 }
 
-private let process_stdin(formatter Formatter mut ref) Bool = {
+private let process_stdin(formatter mut ref Formatter) Bool = {
     let mut running = true
     while running then {
         when scanln() in {
@@ -280,7 +280,7 @@ private let process_stdin(formatter Formatter mut ref) Bool = {
     return false
 }
 
-private let process_all_inputs(sources [InputSource]List, formatter Formatter mut ref) Int = {
+private let process_all_inputs(sources List[InputSource], formatter mut ref Formatter) Int = {
     let mut had_error = false
     let mut i UInt = 0
     
@@ -324,7 +324,7 @@ public let main() Int = {
         return 0
     }
 
-    let mut sources = [InputSource]List.new()
+    let mut sources = List[InputSource].new()
     if config.input_files.is_empty() then {
         sources.push(InputSource.StdIn())
     } else {

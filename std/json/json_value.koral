@@ -13,8 +13,8 @@ public type JsonValue {
     Bool(value Bool),
     Number(value Float64),
     String(value String),
-    Array(elements [JsonValue ref]List),
-    Object(entries [String, JsonValue ref]Dict),
+    Array(elements List[ref JsonValue]),
+    Object(entries Dict[String, ref JsonValue]),
 }
 
 // ============================================================================
@@ -22,9 +22,9 @@ public type JsonValue {
 // ============================================================================
 private let hex_char(nibble UInt) UInt8 = {
     if nibble < 10 then {
-        return (UInt8)nibble + '0'
+        return nibble(UInt8) + '0'
     }
-    return (UInt8)(nibble - 10) + 'a'
+    return (nibble - 10)(UInt8) + 'a'
 }
 
 let escape_json_string(s String) String = {
@@ -43,10 +43,10 @@ let escape_json_string(s String) String = {
         } else if b == '/' then {
             result.push_byte('\\')
             result.push_byte('/')
-        } else if b == (UInt8)8 then {
+        } else if b == 8(UInt8) then {
             result.push_byte('\\')
             result.push_byte('b')
-        } else if b == (UInt8)12 then {
+        } else if b == 12(UInt8) then {
             result.push_byte('\\')
             result.push_byte('f')
         } else if b == '\n' then {
@@ -58,13 +58,13 @@ let escape_json_string(s String) String = {
         } else if b == '\t' then {
             result.push_byte('\\')
             result.push_byte('t')
-        } else if b < (UInt8)32 then {
+        } else if b < 32(UInt8) then {
             result.push_byte('\\')
             result.push_byte('u')
             result.push_byte('0')
             result.push_byte('0')
-            let hi = (UInt)(b >> 4)
-            let lo = (UInt)(b & (UInt8)0x0F)
+            let hi = (b >> 4)(UInt)
+            let lo = (b & 0x0F(UInt8))(UInt)
             result.push_byte(hex_char(hi))
             result.push_byte(hex_char(lo))
         } else {
@@ -89,7 +89,7 @@ let format_json_number(f Float64) String = {
 
     let truncated = abs_val.trunc()
     if abs_val == truncated then {
-        let int_val = (Int)abs_val
+        let int_val = abs_val(Int)
         let mut result = String.new()
         if is_negative then {
             result.push_byte('-')
@@ -103,20 +103,20 @@ let format_json_number(f Float64) String = {
         result.push_byte('-')
     }
 
-    let int_part = (Int)truncated
+    let int_part = truncated(Int)
     result.push_string(int_part.to_string())
     result.push_byte('.')
 
     let frac_part = abs_val - truncated
     let mut frac = frac_part
-    let mut digits = [UInt8]List.new()
+    let mut digits = List[UInt8].new()
     let mut max_digits UInt = 15
     let mut d UInt = 0
     while d < max_digits then {
         frac = frac * 10.0
-        let digit = (Int)frac
-        digits.push((UInt8)digit + '0')
-        frac = frac - (Float64)digit
+        let digit = frac(Int)
+        digits.push(digit(UInt8) + '0')
+        frac = frac - digit(Float64)
         d += 1
     }
 
@@ -144,7 +144,7 @@ private let make_indent(level UInt) String = {
     return out
 }
 
-private let to_string_pretty_array(elements [JsonValue ref]List, level UInt) String = {
+private let to_string_pretty_array(elements List[ref JsonValue], level UInt) String = {
     let count = elements.count()
     if count == 0 then {
         return "[]"
@@ -168,7 +168,7 @@ private let to_string_pretty_array(elements [JsonValue ref]List, level UInt) Str
     return result
 }
 
-private let to_string_pretty_object(entries [String, JsonValue ref]Dict, level UInt) String = {
+private let to_string_pretty_object(entries Dict[String, ref JsonValue], level UInt) String = {
     if entries.count() == 0 then {
         return "{}"
     }
@@ -244,41 +244,41 @@ given JsonValue {
 
     // --- Value extraction methods ---
 
-    public as_bool(self ref) [Bool]Option = when self in {
-        .Bool(v) then [Bool]Option.Some(v),
-        _ then [Bool]Option.None(),
+    public as_bool(self ref) Option[Bool] = when self in {
+        .Bool(v) then Option[Bool].Some(v),
+        _ then Option[Bool].None(),
     }
 
-    public as_number(self ref) [Float64]Option = when self in {
-        .Number(v) then [Float64]Option.Some(v),
-        _ then [Float64]Option.None(),
+    public as_number(self ref) Option[Float64] = when self in {
+        .Number(v) then Option[Float64].Some(v),
+        _ then Option[Float64].None(),
     }
 
-    public as_string(self ref) [String]Option = when self in {
-        .String(v) then [String]Option.Some(v),
-        _ then [String]Option.None(),
+    public as_string(self ref) Option[String] = when self in {
+        .String(v) then Option[String].Some(v),
+        _ then Option[String].None(),
     }
 
-    public as_array(self ref) [[JsonValue ref]List]Option = when self in {
-        .Array(v) then [[JsonValue ref]List]Option.Some(v),
-        _ then [[JsonValue ref]List]Option.None(),
+    public as_array(self ref) Option[List[ref JsonValue]] = when self in {
+        .Array(v) then Option[List[ref JsonValue]].Some(v),
+        _ then Option[List[ref JsonValue]].None(),
     }
 
-    public as_object(self ref) [[String, JsonValue ref]Dict]Option = when self in {
-        .Object(v) then [[String, JsonValue ref]Dict]Option.Some(v),
-        _ then [[String, JsonValue ref]Dict]Option.None(),
+    public as_object(self ref) Option[Dict[String, ref JsonValue]] = when self in {
+        .Object(v) then Option[Dict[String, ref JsonValue]].Some(v),
+        _ then Option[Dict[String, ref JsonValue]].None(),
     }
 
     // --- Indexed access methods ---
 
-    public get_field(self ref, key String) [JsonValue ref]Option = when self in {
+    public get_field(self ref, key String) Option[ref JsonValue] = when self in {
         .Object(entries) then entries.get(key),
-        _ then [JsonValue ref]Option.None(),
+        _ then Option[ref JsonValue].None(),
     }
 
-    public get_element(self ref, index UInt) [JsonValue ref]Option = when self in {
+    public get_element(self ref, index UInt) Option[ref JsonValue] = when self in {
         .Array(elements) then elements.get(index),
-        _ then [JsonValue ref]Option.None(),
+        _ then Option[ref JsonValue].None(),
     }
 
     public to_string_pretty(self ref) String = to_string_pretty_impl(self, 0)

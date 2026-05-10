@@ -4,19 +4,19 @@
 
 // FFI declarations for C runtime regex functions
 foreign let __koral_regex_compile(
-    pattern UInt8 ptr, flags Int32,
-    out_handle UInt8 ptr ptr,
-    out_error_buf UInt8 ptr, error_buf_size Int32,
-    out_error_len Int32 ptr
+    pattern ptr UInt8, flags Int32,
+    out_handle ptr ptr UInt8,
+    out_error_buf ptr UInt8, error_buf_size Int32,
+    out_error_len ptr Int32
 ) Int32
 
 foreign let __koral_regex_match(
-    handle UInt8 ptr, text UInt8 ptr, text_offset Int32,
+    handle ptr UInt8, text ptr UInt8, text_offset Int32,
     max_groups Int32,
-    out_starts Int32 ptr, out_ends Int32 ptr
+    out_starts ptr Int32, out_ends ptr Int32
 ) Int32
 
-foreign let __koral_regex_free(handle UInt8 ptr) Void
+foreign let __koral_regex_free(handle ptr UInt8) Void
 
 // ============================================================================
 // Regex — Compilation
@@ -24,16 +24,16 @@ foreign let __koral_regex_free(handle UInt8 ptr) Void
 
 given Regex {
 
-    public compile(pattern String) [Regex]Result =
+    public compile(pattern String) Result[Regex] =
         Regex.compile_with_flags(pattern, RegexFlag.none())
 
-    public compile_with_flags(pattern String, flags RegexFlag) [Regex]Result = {
+    public compile_with_flags(pattern String, flags RegexFlag) Result[Regex] = {
         let c_flags = flags.to_c_flags()
 
         // 分配输出缓冲区
-        let handle_out = [UInt8 ptr]alloc_memory(1)
-        let error_buf = [UInt8]alloc_memory(256)
-        let error_len_out = [Int32]alloc_memory(1)
+        let handle_out = alloc_memory[ptr UInt8](1)
+        let error_buf = alloc_memory[UInt8](256)
+        let error_len_out = alloc_memory[Int32](1)
 
         let rc = __koral_regex_compile(
             pattern.storage.data, c_flags,
@@ -44,13 +44,13 @@ given Regex {
 
         if rc <> 0 then {
             let err_len = error_len_out.val
-            let msg = String.from_utf8_ptr(error_buf, (UInt)err_len)
+            let msg = String.from_utf8_ptr(error_buf, err_len(UInt))
             dealloc_memory(handle_out)
             dealloc_memory(error_buf)
             dealloc_memory(error_len_out)
             return when msg in {
-                .Ok(msg) then [Regex]Result.Error(box(msg)),
-                .Error(e) then [Regex]Result.Error(e),
+                .Ok(msg) then Result[Regex].Error(box(msg)),
+                .Error(e) then Result[Regex].Error(e),
             }
         }
 
@@ -63,7 +63,7 @@ given Regex {
         let groups = Regex.count_groups(pattern)
 
         let storage = box(RegexStorage(handle, pattern, groups))
-        return [Regex]Result.Ok(Regex(storage))
+        return Result[Regex].Ok(Regex(storage))
     }
 
     // 计算正则表达式中的捕获组数量
@@ -94,8 +94,8 @@ given Regex {
 
     // 最快路径：不捕获任何 group，只测试是否匹配
     public matches(self ref, text String) Bool = {
-        let starts = [Int32]alloc_memory(1)
-        let ends = [Int32]alloc_memory(1)
+        let starts = alloc_memory[Int32](1)
+        let ends = alloc_memory[Int32](1)
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, 0,
@@ -108,31 +108,31 @@ given Regex {
     }
 
     // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
-    public find(self ref, text String) [Match]Option =
+    public find(self ref, text String) Option[Match] =
         Regex.find_at(self, text, 0)
 
     // 从指定偏移开始查找（内部方法，仅 $0）
-    find_at(self ref, text String, offset UInt) [Match]Option = {
-        let starts = [Int32]alloc_memory(1)
-        let ends = [Int32]alloc_memory(1)
+    find_at(self ref, text String, offset UInt) Option[Match] = {
+        let starts = alloc_memory[Int32](1)
+        let ends = alloc_memory[Int32](1)
 
         let matched = __koral_regex_match(
-            self.storage.handle, text.storage.data, (Int32)offset,
+            self.storage.handle, text.storage.data, offset(Int32),
             1, starts, ends
         )
 
         if matched == 0 then {
             dealloc_memory(starts)
             dealloc_memory(ends)
-            return [Match]Option.None()
+            return Option[Match].None()
         }
 
-        let s = (UInt)(starts.val)
-        let e = (UInt)(ends.val)
+        let s = starts.val(UInt)
+        let e = ends.val(UInt)
         dealloc_memory(starts)
         dealloc_memory(ends)
 
-        return [Match]Option.Some(Match(text, s, e))
+        return Option[Match].Some(Match(text, s, e))
     }
 }
 
@@ -146,39 +146,39 @@ given Regex {
         MatchIterator(self.val, text, 0)
 
     // 完整路径：捕获所有 group
-    public captures(self ref, text String) [Captures]Option =
+    public captures(self ref, text String) Option[Captures] =
         Regex.captures_at(self, text, 0)
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
-    captures_at(self ref, text String, offset UInt) [Captures]Option = {
-        let max_groups = (Int32)(self.storage.groups + 1)  // +1 for $0
-        let starts = [Int32]alloc_memory((UInt)max_groups)
-        let ends = [Int32]alloc_memory((UInt)max_groups)
+    captures_at(self ref, text String, offset UInt) Option[Captures] = {
+        let max_groups = (self.storage.groups + 1)(Int32)  // +1 for $0
+        let starts = alloc_memory[Int32](max_groups(UInt))
+        let ends = alloc_memory[Int32](max_groups(UInt))
 
         let matched = __koral_regex_match(
-            self.storage.handle, text.storage.data, (Int32)offset,
+            self.storage.handle, text.storage.data, offset(Int32),
             max_groups, starts, ends
         )
 
         if matched == 0 then {
             dealloc_memory(starts)
             dealloc_memory(ends)
-            return [Captures]Option.None()
+            return Option[Captures].None()
         }
 
-        let mut start_list = [Int32]List.new()
-        let mut end_list = [Int32]List.new()
+        let mut start_list = List[Int32].new()
+        let mut end_list = List[Int32].new()
         let mut i Int32 = 0
         while i < max_groups then {
-            start_list.push(starts[(UInt)i])
-            end_list.push(ends[(UInt)i])
+            start_list.push(starts[i(UInt)])
+            end_list.push(ends[i(UInt)])
             i += 1
         }
 
         dealloc_memory(starts)
         dealloc_memory(ends)
 
-        return [Captures]Option.Some(Captures(text, start_list, end_list))
+        return Option[Captures].Some(Captures(text, start_list, end_list))
     }
 
     public captures_all(self ref, text String) CapturesIterator =
@@ -256,7 +256,7 @@ given Regex {
             if ch == '$' and i + 1 < len then {
                 let next = replacement[i + 1]
                 if next >= '0' and next <= '9' then {
-                    let group_idx = (UInt)(next - '0')
+                    let group_idx = (next - '0')(UInt)
                     when c.group(group_idx) in {
                         .Some(g) then result.push_string(g),
                         .None then {},  // 未匹配的组替换为空

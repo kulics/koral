@@ -4,159 +4,157 @@
 /// Extension containing all type parsing methods
 extension Parser {
 
-  private func parseTypeSuffixes(for base: TypeNode) throws -> TypeNode {
-    var type = base
+  private enum TypeModifierPrefix {
+    case reference(mutable: Bool)
+    case pointer(mutable: Bool)
+    case weakReference(mutable: Bool)
+  }
+
+  private func wrapType(_ base: TypeNode, with prefix: TypeModifierPrefix) -> TypeNode {
+    switch prefix {
+    case .reference(let mutable):
+      return .reference(base, mutable: mutable)
+    case .pointer(let mutable):
+      return .pointer(base, mutable: mutable)
+    case .weakReference(let mutable):
+      return .weakReference(base, mutable: mutable)
+    }
+  }
+
+  private func parseTypePrefixModifiers() throws -> [TypeModifierPrefix] {
+    var prefixes: [TypeModifierPrefix] = []
+
     while true {
       if currentToken === .mutKeyword {
         let nextToken = lexer.peekNextToken()
         if nextToken === .refKeyword {
           try match(.mutKeyword)
           try match(.refKeyword)
-          type = .reference(type, mutable: true)
+          prefixes.append(.reference(mutable: true))
           continue
         }
         if nextToken === .ptrKeyword {
           try match(.mutKeyword)
           try match(.ptrKeyword)
-          type = .pointer(type, mutable: true)
+          prefixes.append(.pointer(mutable: true))
           continue
         }
         if nextToken === .weakrefKeyword {
           try match(.mutKeyword)
           try match(.weakrefKeyword)
-          type = .weakReference(type, mutable: true)
+          prefixes.append(.weakReference(mutable: true))
           continue
         }
+        break
       }
+
       if currentToken === .refKeyword {
         try match(.refKeyword)
-        type = .reference(type, mutable: false)
+        prefixes.append(.reference(mutable: false))
         continue
       }
       if currentToken === .ptrKeyword {
         try match(.ptrKeyword)
-        type = .pointer(type, mutable: false)
+        prefixes.append(.pointer(mutable: false))
         continue
       }
       if currentToken === .weakrefKeyword {
         try match(.weakrefKeyword)
-        type = .weakReference(type, mutable: false)
+        prefixes.append(.weakReference(mutable: false))
         continue
       }
       break
     }
-    return type
-  }
-  
-  // MARK: - Type Parsing
 
-  /// Parse type identifier
-  /// Supports:
-  /// - Simple types: Int, String, Bool
-  /// - Generic types: [T]List, [K, V]Dict
-  /// - Function types: [ParamType1, ParamType2, ReturnType]Func
-  /// - Reference types: Int ref, [T]List ref
-  /// - Self type: Self, Self ref, Self mut ref
-  /// - Module-qualified types: module.TypeName, module.[T]List
-  func parseType() throws -> TypeNode {
-    // Handle Self type
+    return prefixes
+  }
+
+  func parseTypeListInBrackets() throws -> [TypeNode] {
+    try match(.leftBracket)
+    var args: [TypeNode] = []
+    while currentToken !== .rightBracket {
+      args.append(try parseType())
+      if currentToken === .comma {
+        try match(.comma)
+      }
+    }
+    try match(.rightBracket)
+    return args
+  }
+
+  private func parseTypeAtom() throws -> TypeNode {
     if currentToken === .selfTypeKeyword {
       try match(.selfTypeKeyword)
-      return try parseTypeSuffixes(for: .inferredSelf)
-    }
-    
-    // Handle generic types and function types: [...]TypeName
-    if currentToken === .leftBracket {
-      try match(.leftBracket)
-      var args: [TypeNode] = []
-      while currentToken !== .rightBracket {
-        args.append(try parseType())
-        if currentToken === .comma {
-          try match(.comma)
-        }
-      }
-      try match(.rightBracket)
-
-      guard case .identifier(let name) = currentToken else {
-        throw ParserError.expectedTypeIdentifier(
-          span: currentSpan, got: currentToken.description)
-      }
-      try match(.identifier(name))
-
-      // Check if this is a function type: [...]Func
-      if name == "Func" {
-        // Function type: [ParamType1, ParamType2, ..., ReturnType]Func
-        // The last type is the return type, all others are parameter types
-        guard !args.isEmpty else {
-          throw ParserError.invalidFunctionType(
-            span: currentSpan, message: "Function type must have at least a return type")
-        }
-        let returnType = args.last!
-        let paramTypes = Array(args.dropLast())
-        return try parseTypeSuffixes(for: .functionType(paramTypes: paramTypes, returnType: returnType))
-      }
-
-
-      // Regular generic type
-      return try parseTypeSuffixes(for: .generic(base: name, args: args))
+      return .inferredSelf
     }
 
-    // Handle simple type identifier or module-qualified type
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedTypeIdentifier(
         span: currentSpan, got: currentToken.description)
     }
     try match(.identifier(name))
-    
-    // Check for module-qualified type: module.TypeName or module.[T]List
+
     if currentToken === .dot {
-      // This is a module-qualified type
       try match(.dot)
-      
-      // Check for generic type after module prefix: module.[T]List
-      if currentToken === .leftBracket {
-        try match(.leftBracket)
-        var args: [TypeNode] = []
-        while currentToken !== .rightBracket {
-          args.append(try parseType())
-          if currentToken === .comma {
-            try match(.comma)
-          }
-        }
-        try match(.rightBracket)
-        
-        guard case .identifier(let typeName) = currentToken else {
-          throw ParserError.expectedTypeIdentifier(
-            span: currentSpan, got: currentToken.description)
-        }
-        
-        if !isValidTypeName(typeName) {
-          throw ParserError.invalidTypeName(span: currentSpan, name: typeName)
-        }
-        try match(.identifier(typeName))
-        
-        return try parseTypeSuffixes(for: .moduleQualifiedGeneric(module: name, base: typeName, args: args))
-      }
-      
-      // Simple module-qualified type: module.TypeName
+
       guard case .identifier(let typeName) = currentToken else {
         throw ParserError.expectedTypeIdentifier(
           span: currentSpan, got: currentToken.description)
       }
-      
       if !isValidTypeName(typeName) {
         throw ParserError.invalidTypeName(span: currentSpan, name: typeName)
       }
       try match(.identifier(typeName))
-      
-      return try parseTypeSuffixes(for: .moduleQualified(module: name, name: typeName))
+
+      if currentToken === .leftBracket {
+        let args = try parseTypeListInBrackets()
+        return .moduleQualifiedGeneric(module: name, base: typeName, args: args)
+      }
+
+      return .moduleQualified(module: name, name: typeName)
     }
 
-    // Simple type - must start with uppercase
+    if name == "Func", currentToken === .leftBracket {
+      let args = try parseTypeListInBrackets()
+      guard !args.isEmpty else {
+        throw ParserError.invalidFunctionType(
+          span: currentSpan, message: "Function type must have at least a return type")
+      }
+      let returnType = args.last!
+      let paramTypes = Array(args.dropLast())
+      return .functionType(paramTypes: paramTypes, returnType: returnType)
+    }
+
     if !isValidTypeName(name) {
       throw ParserError.invalidTypeName(span: currentSpan, name: name)
     }
 
-    return try parseTypeSuffixes(for: .identifier(name))
+    if currentToken === .leftBracket {
+      let args = try parseTypeListInBrackets()
+      return .generic(base: name, args: args)
+    }
+
+    return .identifier(name)
+  }
+
+  // MARK: - Type Parsing
+
+  /// Parse type identifier
+  /// Supports:
+  /// - Simple types: Int, String, Bool
+  /// - Generic types: List[T], Dict[K, V]
+  /// - Function types: Func[ParamType1, ParamType2, ReturnType]
+  /// - Reference types: ref Int, ref List[T]
+  /// - Self type: Self
+  /// - Module-qualified types: module.TypeName, module.List[T]
+  func parseType() throws -> TypeNode {
+    let prefixes = try parseTypePrefixModifiers()
+    var type = try parseTypeAtom()
+
+    for prefix in prefixes.reversed() {
+      type = wrapType(type, with: prefix)
+    }
+
+    return type
   }
 }

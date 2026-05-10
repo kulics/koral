@@ -287,25 +287,25 @@ public indirect enum Type: CustomStringConvertible {
       }
       return "enum(\(defId.id))"
     case .reference(let inner):
-      return "\(inner.description) ref"
+      return "ref \(inner.description)"
     case .mutableReference(let inner):
-      return "\(inner.description) mut ref"
+      return "mut ref \(inner.description)"
     case .pointer(let element):
-      return "\(element.description) ptr"
+      return "ptr \(element.description)"
     case .mutablePointer(let element):
-      return "\(element.description) mut ptr"
+      return "mut ptr \(element.description)"
     case .weakReference(let inner):
-      return "\(inner.description) weakref"
+      return "weakref \(inner.description)"
     case .mutableWeakReference(let inner):
-      return "\(inner.description) mut weakref"
+      return "mut weakref \(inner.description)"
     case .genericParameter(let name):
       return name
     case .genericStruct(let template, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
-      return "[\(argsStr)]\(template)"
+      return "\(template)[\(argsStr)]"
     case .genericEnum(let template, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
-      return "[\(argsStr)]\(template)"
+      return "\(template)[\(argsStr)]"
     case .opaque(let defId):
       if let context = SemanticErrorContext.currentCompilerContext {
         return context.getDebugName(self)

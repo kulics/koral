@@ -22,10 +22,10 @@ type Node(
     value Int,
     // Uses Option to break cycle but relies on Node being defined (recursive reference)
     // Using [Node ref]Option because [Node]Option (value) would be infinite size.
-    next [Node ref]Option
+    next Option[ref Node]
 )
 
-let sum_node(n Node ref) Int = {
+let sum_node(n ref Node) Int = {
     return n.value + when n.next in {
         .Some(next_node_ref) then sum_node(next_node_ref),
         .None then 0,
@@ -34,7 +34,7 @@ let sum_node(n Node ref) Int = {
 
 // 3. Enum Recursion (Direct)
 type IntList {
-    Cons(head Int, tail IntList ref),
+    Cons(head Int, tail ref IntList),
     Nil(),
 }
 
@@ -46,21 +46,21 @@ let sum_list(l IntList) Int = {
 }
 
 // 4. Generic Function Recursion
-let [T Any]generic_fact(n Int, v T) T = {
+let generic_fact[T Any](n Int, v T) T = {
     // Recursive call without [T] prefix (inference)
     return if n <= 0 then v else generic_fact(n - 1, v)
 }
-let [T Any]generic_identity(v T) T = v
+let generic_identity[T Any](v T) T = v
 
 // 5. Generic Struct Recursion
-type [T Any]GenNode(
+type GenNode[T Any](
     value T,
-    next [[T]GenNode ref]Option
+    next Option[ref GenNode[T]]
 )
 
-let [T Any]count_gen_node(n [T]GenNode ref) Int = {
+let count_gen_node[T Any](n ref GenNode[T]) Int = {
     return 1 + when n.next in {
-        .Some(next_ref) then [T]count_gen_node(next_ref),
+        .Some(next_ref) then count_gen_node[T](next_ref),
         .None then 0,
     }
 }
@@ -68,14 +68,14 @@ let [T Any]count_gen_node(n [T]GenNode ref) Int = {
 let identity(x Int) Int = x
 
 // 6. Generic Enum Recursion
-type [T Any]GenList {
-    Cons(head T, tail [T]GenList ref),
+type GenList[T Any] {
+    Cons(head T, tail ref GenList[T]),
     Nil(),
 }
 
-let [T Deref]count_gen_list(l [T]GenList) Int = {
+let count_gen_list[T Deref](l GenList[T]) Int = {
     return when l in {
-        .Cons(h, t) then 1 + [T]count_gen_list(t.val),
+        .Cons(h, t) then 1 + count_gen_list[T](t.val),
         .Nil then 0,
     }
 }
@@ -88,7 +88,7 @@ let main() Int = {
 
     // 2
     // Create Node(10, None)
-    let n2 = Node(10, [Node ref]Option.None())
+    let n2 = Node(10, Option[ref Node].None())
     let n2_ref = box(n2)
     println("Struct: ")
     println(sum_node(n2_ref))
@@ -108,17 +108,17 @@ let main() Int = {
     println("\n")
 
     // 5
-    let gn5 = [Int]GenNode(30, [[Int]GenNode ref]Option.None())
+    let gn5 = GenNode[Int](30, Option[ref GenNode[Int]].None())
     let gn5_ref = box(gn5)
     println("Generic Struct: ")
-    println([Int]count_gen_node(gn5_ref))
+    println(count_gen_node[Int](gn5_ref))
     println("\n")
 
     // 6
-    let nil_gl6 = [Int]GenList.Nil()
-    let gl6 = [Int]GenList.Cons(40, box(nil_gl6))
+    let nil_gl6 = GenList[Int].Nil()
+    let gl6 = GenList[Int].Cons(40, box(nil_gl6))
     println("Generic Enum: ")
-    println([Int]count_gen_list(gl6))
+    println(count_gen_list[Int](gl6))
     println("\n")
 
     return 0

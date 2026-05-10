@@ -7,21 +7,21 @@
 // ============================================================================
 // Set Storage and Type Definition
 // ============================================================================
-type [T Hash]SetBucket {
+type SetBucket[T Hash] {
     Empty(),
     Occupied(value T),
     Deleted(),
 }
 
-protected type [T Hash]SetStorage(
-    mut buckets [T]SetBucket mut ptr,
+protected type SetStorage[T Hash](
+    mut buckets mut ptr SetBucket[T],
     mut count UInt,
     mut capacity UInt,
 )
 
-given[T Hash] [T]SetStorage as Drop {
+given[T Hash] SetStorage[T] as Drop {
 
-    drop(self mut ref) = {
+    drop(self mut ref) Void = {
         if ref_is_borrow(self) then {
             return
         }
@@ -34,38 +34,38 @@ given[T Hash] [T]SetStorage as Drop {
     }
 }
 
-public type [T Hash]Set(protected mut storage [T]SetStorage mut ref)
+public type Set[T Hash](protected mut storage mut ref SetStorage[T])
 
-public type [T Hash]SetIterator(protected storage [T]SetStorage mut ref, protected mut index UInt)
+public type SetIterator[T Hash](protected storage mut ref SetStorage[T], protected mut index UInt)
 
 // ============================================================================
 // Set Methods
 // ============================================================================
-given[T Hash] [T]Set {
+given[T Hash] Set[T] {
 
     public new() Self = {
         let capacity UInt = 16
-        let buckets = [[T]SetBucket]alloc_memory(capacity)
+        let buckets = alloc_memory[SetBucket[T]](capacity)
         let mut i UInt = 0
         while i < capacity then {
-            init_memory(buckets + i, [T]SetBucket.Empty())
+            init_memory(buckets + i, SetBucket[T].Empty())
             i += 1
         }
-        let storage = box([T]SetStorage(buckets, 0, capacity))
-        return [T]Set(storage)
+        let storage = box(SetStorage[T](buckets, 0, capacity))
+        return Set[T](storage)
     }
 
     public with_capacity(capacity UInt) Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5)
         let cap = if capacity < 4 then 4 else capacity * 2
-        let buckets = [[T]SetBucket]alloc_memory(cap)
+        let buckets = alloc_memory[SetBucket[T]](cap)
         let mut i UInt = 0
         while i < cap then {
-            init_memory(buckets + i, [T]SetBucket.Empty())
+            init_memory(buckets + i, SetBucket[T].Empty())
             i += 1
         }
-        let storage = box([T]SetStorage(buckets, 0, cap))
-        return [T]Set(storage)
+        let storage = box(SetStorage[T](buckets, 0, cap))
+        return Set[T](storage)
     }
 
     public count(self ref) UInt = self.storage.count
@@ -73,23 +73,23 @@ given[T Hash] [T]Set {
     private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
-            let new_buckets = [[T]SetBucket]alloc_memory(old.capacity)
+            let new_buckets = alloc_memory[SetBucket[T]](old.capacity)
             let mut i UInt = 0
             while i < old.capacity then {
                 let bucket = old.buckets[i]
                 init_memory(new_buckets + i, bucket)
                 i += 1
             }
-            let new_storage = box([T]SetStorage(new_buckets, old.count, old.capacity))
+            let new_storage = box(SetStorage[T](new_buckets, old.count, old.capacity))
             self.storage = new_storage
         }
     }
 
     // Using when for bucket handling
-    private find_slot(self ref, value T) [UInt]Option = {
+    private find_slot(self ref, value T) Option[UInt] = {
         let h = value.hash()
         let mut idx = h % self.storage.capacity
-        let mut first_deleted = [UInt]Option.None()
+        let mut first_deleted = Option[UInt].None()
         let mut probes UInt = 0
         while probes < self.storage.capacity then {
             let bucket = self.storage.buckets[idx]
@@ -100,21 +100,21 @@ given[T Hash] [T]Set {
                             return first_deleted
                         },
                         .None then {
-                            return [UInt]Option.Some(idx)
+                            return Option[UInt].Some(idx)
                         },
                     }
                 },
                 .Deleted then {
                     when first_deleted in {
                         .None then {
-                            first_deleted = [UInt]Option.Some(idx)
+                            first_deleted = Option[UInt].Some(idx)
                         },
                         _ then {},
                     }
                 },
                 .Occupied(v) then {
                     if v == value then {
-                        return [UInt]Option.Some(idx)
+                        return Option[UInt].Some(idx)
                     }
                 },
             }
@@ -128,10 +128,10 @@ given[T Hash] [T]Set {
         let old_cap = self.storage.capacity
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
-        let new_buckets = [[T]SetBucket]alloc_memory(new_cap)
+        let new_buckets = alloc_memory[SetBucket[T]](new_cap)
         let mut i UInt = 0
         while i < new_cap then {
-            init_memory(new_buckets + i, [T]SetBucket.Empty())
+            init_memory(new_buckets + i, SetBucket[T].Empty())
             i += 1
         }
         self.storage.buckets = new_buckets
@@ -171,7 +171,7 @@ given[T Hash] [T]Set {
                         return false
                     },
                     .Empty or .Deleted then {
-                        self.storage.buckets[idx] = [T]SetBucket.Occupied(value)
+                        self.storage.buckets[idx] = SetBucket[T].Occupied(value)
                         self.storage.count = self.storage.count + 1
                         return true
                     },
@@ -180,7 +180,7 @@ given[T Hash] [T]Set {
         }
     }
 
-    public insert_set(self mut ref, other [T]Set) Void = {
+    public insert_set(self mut ref, other Set[T]) Void = {
         let mut iter = other.iterator()
         while iter.next() is .Some(v) then {
             self.insert(v);
@@ -216,7 +216,7 @@ given[T Hash] [T]Set {
                 let bucket = self.storage.buckets[idx]
                 return when bucket in {
                     .Occupied(_) then {
-                        self.storage.buckets[idx] = [T]SetBucket.Deleted()
+                        self.storage.buckets[idx] = SetBucket[T].Deleted()
                         self.storage.count = self.storage.count - 1
                         return true
                     },
@@ -228,8 +228,8 @@ given[T Hash] [T]Set {
 
     public is_empty(self ref) Bool = self.storage.count == 0
 
-    public is_subset_of(self ref, other [T]Set) Bool = {
-        let mut iter = [T]SetIterator(self.storage, 0)
+    public is_subset_of(self ref, other Set[T]) Bool = {
+        let mut iter = SetIterator[T](self.storage, 0)
         while iter.next() is .Some(v) then {
             if not other.contains(v) then {
                 return false
@@ -238,20 +238,20 @@ given[T Hash] [T]Set {
         return true
     }
 
-    public is_superset_of(self ref, other [T]Set) Bool = other.is_subset_of(self)
+    public is_superset_of(self ref, other Set[T]) Bool = other.is_subset_of(self)
 
     public clear(self mut ref) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
-            self.storage.buckets[i] = [T]SetBucket.Empty()
+            self.storage.buckets[i] = SetBucket[T].Empty()
             i += 1
         }
         self.storage.count = 0
     }
 
     // Retains only elements satisfying the predicate. O(n).
-    public retain(self mut ref, predicate [T, Bool]Func) Void = {
+    public retain(self mut ref, predicate Func[T, Bool]) Void = {
         self.ensure_unique()
         let mut i UInt = 0
         while i < self.storage.capacity then {
@@ -259,7 +259,7 @@ given[T Hash] [T]Set {
             when bucket in {
                 .Occupied(v) then {
                     if not predicate(v) then {
-                        self.storage.buckets[i] = [T]SetBucket.Deleted()
+                        self.storage.buckets[i] = SetBucket[T].Deleted()
                         self.storage.count = self.storage.count - 1
                     }
                 },
@@ -270,22 +270,22 @@ given[T Hash] [T]Set {
     }
 
     // Using while is pattern matching for iterator loops
-    public union(self ref, other [T]Set) [T]Set = {
-        let mut result = [T]Set.new()
-        let mut iter = [T]SetIterator(self.storage, 0)
+    public union(self ref, other Set[T]) Set[T] = {
+        let mut result = Set[T].new()
+        let mut iter = SetIterator[T](self.storage, 0)
         while iter.next() is .Some(v) then {
             result.insert(v);
         }
-        let mut iter2 = [T]SetIterator(other.storage, 0)
+        let mut iter2 = SetIterator[T](other.storage, 0)
         while iter2.next() is .Some(v) then {
             result.insert(v);
         }
         return result
     }
 
-    public intersection(self ref, other [T]Set) [T]Set = {
-        let mut result = [T]Set.new()
-        let mut iter = [T]SetIterator(self.storage, 0)
+    public intersection(self ref, other Set[T]) Set[T] = {
+        let mut result = Set[T].new()
+        let mut iter = SetIterator[T](self.storage, 0)
         while iter.next() is .Some(v) then {
             if other.contains(v) then {
                 result.insert(v);
@@ -294,9 +294,9 @@ given[T Hash] [T]Set {
         return result
     }
 
-    public difference(self ref, other [T]Set) [T]Set = {
-        let mut result = [T]Set.new()
-        let mut iter = [T]SetIterator(self.storage, 0)
+    public difference(self ref, other Set[T]) Set[T] = {
+        let mut result = Set[T].new()
+        let mut iter = SetIterator[T](self.storage, 0)
         while iter.next() is .Some(v) then {
             if not other.contains(v) then {
                 result.insert(v);
@@ -305,15 +305,15 @@ given[T Hash] [T]Set {
         return result
     }
 
-    public symmetric_difference(self ref, other [T]Set) [T]Set = {
-        let mut result = [T]Set.new()
-        let mut iter = [T]SetIterator(self.storage, 0)
+    public symmetric_difference(self ref, other Set[T]) Set[T] = {
+        let mut result = Set[T].new()
+        let mut iter = SetIterator[T](self.storage, 0)
         while iter.next() is .Some(v) then {
             if not other.contains(v) then {
                 result.insert(v);
             }
         }
-        let mut iter2 = [T]SetIterator(other.storage, 0)
+        let mut iter2 = SetIterator[T](other.storage, 0)
         while iter2.next() is .Some(v) then {
             if not self.contains(v) then {
                 result.insert(v);
@@ -324,27 +324,27 @@ given[T Hash] [T]Set {
     }
 }
 
-given[T Hash] [T]Set as [T, [T]SetIterator]Iterable {
+given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
 
-    public iterator(self ref) [T]SetIterator = [T]SetIterator(self.storage, 0)
+    public iterator(self ref) SetIterator[T] = SetIterator[T](self.storage, 0)
 }
 
 // ============================================================================
 // Set Iterator
 // ============================================================================
-given[T Hash] [T]SetIterator as [T]Iterator {
+given[T Hash] SetIterator[T] as Iterator[T] {
 
-    public next(self mut ref) [T]Option = {
+    public next(self mut ref) Option[T] = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
             self.index = self.index + 1
             when bucket in {
                 .Occupied(v) then {
-                    return [T]Option.Some(v)
+                    return Option[T].Some(v)
                 },
                 _ then {},
             }
         }
-        return [T]Option.None()
+        return Option[T].None()
     }
 }

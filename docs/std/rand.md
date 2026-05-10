@@ -5,7 +5,7 @@ This page lists the public API of module `Std.Rand` (declaration-only syntax), o
 
 ## Free Functions
 ```koral
-public let default_random() [DefaultRandomSource]Random
+public let default_random() Random[DefaultRandomSource]
 ```
 
 ## Traits
@@ -15,78 +15,78 @@ public trait RandomSource {
 }
 
 public trait Randomizable {
-    [R RandomSource]random(source R) Self
+    random[R RandomSource](source R) Self
 }
 ```
 
 ## Types
 ```koral
-public type [R RandomSource]Random
+public type Random[R RandomSource]
 
 public type DefaultRandomSource
 ```
 
 ## Given Implementations
 ```koral
-given[R RandomSource] [R]Random {
-    public new(rng R) [R]Random
-    public [T Randomizable]next(self ref) T
-    public next_int(self ref, range [Int]Range) Int
-    public next_uint(self ref, range [UInt]Range) UInt
-    public [T Deref]shuffle(self ref, list [T]List mut ref) Void
-    public [T Deref]choose(self ref, list [T]List) [T]Option
+given[R RandomSource] Random[R] {
+    public new(rng R) Random[R]
+    public next[T Randomizable](self ref) T
+    public next_int(self ref, range Range[Int]) Int
+    public next_uint(self ref, range Range[UInt]) UInt
+    public shuffle[T Deref](self ref, list mut ref List[T]) Void
+    public choose[T Deref](self ref, list List[T]) Option[T]
 }
 
 given UInt64 as Randomizable {
-    public [R RandomSource]random(source R) UInt64
+    public random[R RandomSource](source R) UInt64
 }
 
 given UInt32 as Randomizable {
-    public [R RandomSource]random(source R) UInt32
+    public random[R RandomSource](source R) UInt32
 }
 
 given UInt16 as Randomizable {
-    public [R RandomSource]random(source R) UInt16
+    public random[R RandomSource](source R) UInt16
 }
 
 given UInt8 as Randomizable {
-    public [R RandomSource]random(source R) UInt8
+    public random[R RandomSource](source R) UInt8
 }
 
 given Int64 as Randomizable {
-    public [R RandomSource]random(source R) Int64
+    public random[R RandomSource](source R) Int64
 }
 
 given Int32 as Randomizable {
-    public [R RandomSource]random(source R) Int32
+    public random[R RandomSource](source R) Int32
 }
 
 given Int16 as Randomizable {
-    public [R RandomSource]random(source R) Int16
+    public random[R RandomSource](source R) Int16
 }
 
 given Int8 as Randomizable {
-    public [R RandomSource]random(source R) Int8
+    public random[R RandomSource](source R) Int8
 }
 
 given Float64 as Randomizable {
-    public [R RandomSource]random(source R) Float64
+    public random[R RandomSource](source R) Float64
 }
 
 given Float32 as Randomizable {
-    public [R RandomSource]random(source R) Float32
+    public random[R RandomSource](source R) Float32
 }
 
 given Bool as Randomizable {
-    public [R RandomSource]random(source R) Bool
+    public random[R RandomSource](source R) Bool
 }
 
 given UInt as Randomizable {
-    public [R RandomSource]random(source R) UInt
+    public random[R RandomSource](source R) UInt
 }
 
 given Int as Randomizable {
-    public [R RandomSource]random(source R) Int
+    public random[R RandomSource](source R) Int
 }
 
 given DefaultRandomSource {

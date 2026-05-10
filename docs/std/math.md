@@ -5,82 +5,82 @@ This page lists the public API of module `Std.Math` (declaration-only syntax), o
 
 ## Free Functions
 ```koral
-public let [T FloatingPoint]sqrt(x T) T
+public let sqrt[T FloatingPoint](x T) T
 
-public let [T FloatingPoint]cbrt(x T) T
+public let cbrt[T FloatingPoint](x T) T
 
-public let [T FloatingPoint]hypot(x T, y T) T
+public let hypot[T FloatingPoint](x T, y T) T
 
-public let [T FloatMath]exp(x T) T
+public let exp[T FloatMath](x T) T
 
-public let [T FloatMath]exp2(x T) T
+public let exp2[T FloatMath](x T) T
 
-public let [T FloatMath]exp_m1(x T) T
+public let exp_m1[T FloatMath](x T) T
 
-public let [T FloatingPoint]ln(x T) T
+public let ln[T FloatingPoint](x T) T
 
-public let [T FloatingPoint]log2(x T) T
+public let log2[T FloatingPoint](x T) T
 
-public let [T FloatingPoint]log10(x T) T
+public let log10[T FloatingPoint](x T) T
 
-public let [T FloatMath]ln_1p(x T) T
+public let ln_1p[T FloatMath](x T) T
 
-public let [T FloatMath]sin(x T) T
+public let sin[T FloatMath](x T) T
 
-public let [T FloatMath]cos(x T) T
+public let cos[T FloatMath](x T) T
 
-public let [T FloatMath]tan(x T) T
+public let tan[T FloatMath](x T) T
 
-public let [T FloatMath]asin(x T) T
+public let asin[T FloatMath](x T) T
 
-public let [T FloatMath]acos(x T) T
+public let acos[T FloatMath](x T) T
 
-public let [T FloatMath]atan(x T) T
+public let atan[T FloatMath](x T) T
 
-public let [T FloatMath]atan2(y T, x T) T
+public let atan2[T FloatMath](y T, x T) T
 
-public let [T FloatMath]sinh(x T) T
+public let sinh[T FloatMath](x T) T
 
-public let [T FloatMath]cosh(x T) T
+public let cosh[T FloatMath](x T) T
 
-public let [T FloatMath]tanh(x T) T
+public let tanh[T FloatMath](x T) T
 
-public let [T FloatMath]asinh(x T) T
+public let asinh[T FloatMath](x T) T
 
-public let [T FloatMath]acosh(x T) T
+public let acosh[T FloatMath](x T) T
 
-public let [T FloatMath]atanh(x T) T
+public let atanh[T FloatMath](x T) T
 
-public let [T FloatingPoint]fma(x T, mul: T, add: T) T
+public let fma[T FloatingPoint](x T, mul: T, add: T) T
 
-public let [T FloatingPoint]lerp(a T, b T, t T) T
+public let lerp[T FloatingPoint](a T, b T, t T) T
 
-public let [T FloatMath]erf(x T) T
+public let erf[T FloatMath](x T) T
 
-public let [T FloatMath]erfc(x T) T
+public let erfc[T FloatMath](x T) T
 
-public let [T FloatMath]gamma(x T) T
+public let gamma[T FloatMath](x T) T
 
-public let [T FloatMath]log_gamma(x T) T
+public let log_gamma[T FloatMath](x T) T
 
-public let [T FloatingPoint]log(x T, base: T) T
+public let log[T FloatingPoint](x T, base: T) T
 
-public let [T Integer]gcd(a T, b T) T
+public let gcd[T Integer](a T, b T) T
 
-public let [T Integer]lcm(a T, b T) T
+public let lcm[T Integer](a T, b T) T
 
-public let [T Integer]ilog2(x T) UInt
+public let ilog2[T Integer](x T) UInt
 
-public let [T Integer]ilog10(x T) UInt
+public let ilog10[T Integer](x T) UInt
 ```
 
 ## Traits
 ```koral
-public trait Numeric [Self]Add and [Self]Sub and [Self]Mul and Ord {
+public trait Numeric Add[Self] and Sub[Self] and Mul[Self] and Ord {
     abs(self) Self
 }
 
-public trait FloatingPoint Numeric and [Self]Div and Neg {
+public trait FloatingPoint Numeric and Div[Self] and Neg {
     sqrt(x Self) Self
     cbrt(x Self) Self
     pow(self, exp Self) Self
@@ -133,7 +133,7 @@ public trait FloatMath FloatingPoint {
     log_gamma(x Self) Self
 }
 
-public trait Integer Numeric and [Self]Div and [Self]Rem {
+public trait Integer Numeric and Div[Self] and Rem[Self] {
     wrapping_abs(self) Self
     pow(self, exp UInt) Self
     wrapping_pow(self, exp UInt) Self

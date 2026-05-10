@@ -100,19 +100,19 @@ let port = config.get("port") or else 8080
 
 let name = user and then it.profile and then it.display_name or else "anonymous"
 
-let read_config(path String) [Config]Result = {
+let read_config(path String) Result[Config] = {
     let text = read_text_file(path) or return
     let parsed = parse_json(text) or return
     return .Ok(parsed)
 }
 ```
 
-### Prefix generics
+### Generics
 
 ```koral
-let nums = [Int]List.new()
-let scores = [String, Int]Dict.new()
-let [T Ord]max(a T, b T) T = if a > b then a else b
+let nums = List[Int].new()
+let scores = Dict[String, Int].new()
+let max[T Ord](a T, b T) T = if a > b then a else b
 ```
 
 ### Traits and `given` blocks
@@ -124,11 +124,11 @@ trait Greet {
 
 type Bot(name String)
 
-given Bot Greet {
+given Bot as Greet {
     greet(self ref) String = "beep boop, I'm " + self.name
 }
 
-let g Greet ref = box(Bot("K-9"))  // trait object
+let g ref Greet = box(Bot("K-9"))  // trait object
 ```
 
 ### Algebraic data types with implicit member syntax
@@ -140,12 +140,12 @@ Rules:
 - If the expected type is not known, the expression is rejected.
 
 ```koral
-type [T Any]Result {
+type Result[T Any] {
     Ok(value T),
-    Error(error Error ref),
+    Error(error ref Error),
 }
 
-let parse_int(s String) [Int]Result =
+let parse_int(s String) Result[Int] =
     if s == "42" then .Ok(42) else .Error(box("bad input"))
 ```
 
@@ -167,8 +167,8 @@ let result = list.iterator()
 - Structs (product types): `type Point(x Int, y Int)`
 - Enums (sum types / tagged enums): `type Shape { Circle(r Float64), Rectangle(w Float64, h Float64) }`
 - Type aliases: `type Name = TargetType`
-- Generic types and functions: `[T Ord]`, `[K Hash, V Any]`
-- Function types: `[Int, Int, Int]Func` — `(Int, Int) -> Int`
+- Generic types and functions: `Type[T]`, `func[T Constraint](...)`
+- Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
 - Reference types: `ref` (read-only), `mut ref` (mutable), `ptr` (read-only), `mut ptr` (mutable), `weakref` (read-only weak), `mut weakref` (mutable weak)
 
 ### Control Flow
@@ -190,9 +190,9 @@ let result = list.iterator()
 ### Traits and Generics
 
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
-- Generic trait declarations use prefix generic syntax: `trait [T Any]Iterator { ... }`
+- Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
-- Trait objects for runtime polymorphism: `Greet ref`, `Greet mut ref`
+- Trait objects for runtime polymorphism: `ref Greet`, `mut ref Greet`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Mul`, `Div`, `Index`, etc.)
 
 ### Functions and Lambdas
@@ -206,10 +206,10 @@ let result = list.iterator()
 - Pair literal: `(a, b)` (equivalent to `Pair(a, b)`)
 - Pair destructuring: `let (a, b) = pair` (binds Pair fields to separate variables)
 - Collection literals:
-    - List: `[1, 2, 3]` (defaults to `[T]List` when no explicit type context exists)
-    - Set: `let s [Int]Set = [1, 2, 3]`
+    - List: `[1, 2, 3]` (defaults to `List[T]` when no explicit type context exists)
+    - Set: `let s Set[Int] = [1, 2, 3]`
     - Dict: `["k": 1, "v": 2]`
-    - Empty literal `[]` requires explicit type context (e.g. `let xs [Int]List = []`)
+    - Empty literal `[]` requires explicit type context (e.g. `let xs List[Int] = []`)
 - String interpolation: `"value = \(x)"`
 - Multiline string literals: `"""..."""` with Swift-style indentation stripping
 
@@ -221,26 +221,26 @@ let result = list.iterator()
 - `finally` for deterministic resource cleanup
 
 Reference creation rules:
-- `.ref` result type depends on the source's mutability: `let mut` binding → `T mut ref`, `let` binding → `T ref`, mutable path → `T mut ref`.
-- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+- `.ref` result type depends on the source's mutability: `let mut` binding → `mut ref T`, `let` binding → `ref T`, mutable path → `mut ref T`.
+- `mut ref T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected by the compiler.
 - Method/subscript receiver adjustment is a special case: a call whose receiver is declared as `self ref` may use an rvalue receiver. The compiler materializes a stable temporary for the duration of that call.
 - This receiver-only rule does **not** make `expr.ref` on rvalues legal.
 - `self mut ref` still requires a writable lvalue receiver; rvalues are rejected.
 - Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
-- Trait objects follow the same mutability split as ordinary refs: `Trait ref` can call only `self ref` requirements, while `Trait mut ref` can call both `self mut ref` and `self ref` requirements.
-- `T ref` is read-only: `.val` read only. `T mut ref` supports `.val` read and `.val = expr` assignment.
-- `T ptr` is read-only: `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
-- Use `box(expr)` for owned heap references from literals/temporaries — returns `T mut ref`.
+- Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `mut ref Trait` can call both `self mut ref` and `self ref` requirements.
+- `ref T` is read-only: `.val` read only. `mut ref T` supports `.val` read and `.val = expr` assignment.
+- `ptr T` is read-only: `.val` read only. `mut ptr T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
+- Use `box(expr)` for owned heap references from literals/temporaries — returns `mut ref T`.
 
 Weak reference rules:
-- `.weakref` on a `T ref` produces `T weakref`; on a `T mut ref` produces `T mut weakref`. It is only valid on ref types.
-- `.to_ref()` on a `T weakref` returns `[T ref]Option`; on a `T mut weakref` returns `[T mut ref]Option`.
-- `T mut weakref` implicitly converts to `T weakref` (widening).
+- `.weakref` on a `ref T` produces `weakref T`; on a `mut ref T` produces `mut weakref T`. It is only valid on ref types.
+- `.to_ref()` on a `weakref T` returns `Option[ref T]`; on a `mut weakref T` returns `Option[mut ref T]`.
+- `mut weakref T` implicitly converts to `weakref T` (widening).
 
 ```koral
-let strong Int mut ref = box(42)
-let weak Int mut weakref = strong.weakref   // mut ref → mut weakref
+let strong mut ref Int = box(42)
+let weak mut weakref Int = strong.weakref   // mut ref → mut weakref
 
 when weak.to_ref() in {
     .Some(r) then println(r.val),
@@ -285,27 +285,27 @@ The standard library (`std/`) ships with the compiler and is loaded automaticall
 Commonly used pieces:
 
 - Core types: `Int`, `Float64`, `String`, `Rune`, `Bool`
-- Collections: `[T]List`, `[K, V]Dict`, `[T]Set`
-- Error flow: `[T]Option`, `[T]Result`, `or else`, `and then`, `or return`
+- Collections: `List[T]`, `Dict[K, V]`, `Set[T]`
+- Error flow: `Option[T]`, `Result[T]`, `or else`, `and then`, `or return`
 - Runtime and system modules: `Io`, `Os`, `Proc`, `Time`, `Async`, `Sync`, `Net`
 - Utility modules: `Math`, `Rand`, `Text`, `Container`
 
 Minimal examples:
 
 ```koral
-let nums [Int]List = [1, 2, 3]
-let scores [String, Int]Dict = ["alice": 10, "bob": 8]
+let nums List[Int] = [1, 2, 3]
+let scores Dict[String, Int] = ["alice": 10, "bob": 8]
 
-let port = [Int]Option.Some(8080) or else 80
-let doubled = [Int]Option.Some(21) and then it * 2
+let port = Option[Int].Some(8080) or else 80
+let doubled = Option[Int].Some(21) and then it * 2
 
-let parse_port(text String) [Int]Result = {
+let parse_port(text String) Result[Int] = {
     let port = parse_int(text) or return
     return .Ok(port)
 }
 
-let ok = [Int]Result.Ok(42)
-let err = [Int]Result.Error(box("failed"))
+let ok = Result[Int].Ok(42)
+let err = Result[Int].Error(box("failed"))
 ```
 
 For full module-by-module API documentation, see `docs/std/`.

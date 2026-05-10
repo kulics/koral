@@ -36,7 +36,7 @@ given TcpSocketStorage as Drop {
 /// Internally holds a TcpSocketStorage ref, shared via reference counting.
 /// The socket is automatically closed when the last reference is released.
 /// Implements Reader and Writer traits for use with BufReader/BufWriter.
-public type TcpSocket(protected storage TcpSocketStorage ref)
+public type TcpSocket(protected storage ref TcpSocketStorage)
 
 // ============================================================================
 // TcpSocket Methods
@@ -44,16 +44,16 @@ public type TcpSocket(protected storage TcpSocketStorage ref)
 given TcpSocket {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(self ref) Int = (Int)self.storage.fd
+    public fd(self ref) Int = self.storage.fd(Int)
 
     /// Connect to a socket address.
     /// Flow: create socket → connect
     /// On any failure, closes the fd and returns Error.
-    public [T IntoSocketAddr]connect(addr T) [TcpSocket]Result = {
+    public connect[T IntoSocketAddr](addr T) Result[TcpSocket] = {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
-                return [TcpSocket]Result.Error(box("invalid socket address"))
+                return Result[TcpSocket].Error(box("invalid socket address"))
             },
         }
         // Determine address family from SocketAddr
@@ -64,20 +64,20 @@ given TcpSocket {
         // Create socket
         let fd = __koral_socket_create(domain, sock_type, protocol)
         if fd < 0 then {
-            return [TcpSocket]Result.Error(box(last_error_message()))
+            return Result[TcpSocket].Error(box(last_error_message()))
         }
 
         // Connect to address
         let addr_bytes = addr.to_sockaddr_bytes()
-        let addr_len = (UInt32)addr_bytes.count()
+        let addr_len = addr_bytes.count()(UInt32)
         let connect_result = __koral_socket_connect(fd, addr_bytes.borrow_ptr(), addr_len)
         if connect_result <> 0 then {
             __koral_socket_close(fd)
-            return [TcpSocket]Result.Error(box(last_error_message()))
+            return Result[TcpSocket].Error(box(last_error_message()))
         }
 
         let storage = box(TcpSocketStorage(fd))
-        return [TcpSocket]Result.Ok(TcpSocket(storage))
+        return Result[TcpSocket].Ok(TcpSocket(storage))
     }
 
     // ========================================================================
@@ -85,23 +85,23 @@ given TcpSocket {
     // ========================================================================
 
     /// Get the local address of this socket.
-    public local_addr(self ref) [SocketAddr]Result = {
-        let addr_buf = [UInt8]alloc_memory(128)
+    public local_addr(self ref) Result[SocketAddr] = {
+        let addr_buf = alloc_memory[UInt8](128)
         let mut i UInt = 0
         while i < 128 then {
-            init_memory(addr_buf + i, (UInt8)0)
+            init_memory(addr_buf + i, 0(UInt8))
             i += 1
         }
-        let mut addr_len UInt32 = (UInt32)128
+        let mut addr_len UInt32 = 128(UInt32)
 
         let result = __koral_socket_getsockname(self.storage.fd, addr_buf, addr_len.ptr)
         if result <> 0 then {
             dealloc_memory(addr_buf)
-            return [SocketAddr]Result.Error(box(last_error_message()))
+            return Result[SocketAddr].Error(box(last_error_message()))
         }
 
-        let actual_len = (UInt)addr_len
-        let mut addr_list = [UInt8]List.with_capacity(actual_len)
+        let actual_len = addr_len(UInt)
+        let mut addr_list = List[UInt8].with_capacity(actual_len)
         let mut j UInt = 0
         while j < actual_len then {
             addr_list.push(addr_buf[j])
@@ -113,23 +113,23 @@ given TcpSocket {
     }
 
     /// Get the peer address of this socket.
-    public peer_addr(self ref) [SocketAddr]Result = {
-        let addr_buf = [UInt8]alloc_memory(128)
+    public peer_addr(self ref) Result[SocketAddr] = {
+        let addr_buf = alloc_memory[UInt8](128)
         let mut i UInt = 0
         while i < 128 then {
-            init_memory(addr_buf + i, (UInt8)0)
+            init_memory(addr_buf + i, 0(UInt8))
             i += 1
         }
-        let mut addr_len UInt32 = (UInt32)128
+        let mut addr_len UInt32 = 128(UInt32)
 
         let result = __koral_socket_getpeername(self.storage.fd, addr_buf, addr_len.ptr)
         if result <> 0 then {
             dealloc_memory(addr_buf)
-            return [SocketAddr]Result.Error(box(last_error_message()))
+            return Result[SocketAddr].Error(box(last_error_message()))
         }
 
-        let actual_len = (UInt)addr_len
-        let mut addr_list = [UInt8]List.with_capacity(actual_len)
+        let actual_len = addr_len(UInt)
+        let mut addr_list = List[UInt8].with_capacity(actual_len)
         let mut j UInt = 0
         while j < actual_len then {
             addr_list.push(addr_buf[j])
@@ -146,17 +146,17 @@ given TcpSocket {
 
     /// Shutdown the connection.
     /// Shutdown.Read() = 0, Shutdown.Write() = 1, Shutdown.Both() = 2
-    public shutdown(self ref, how Shutdown) [Void]Result = {
+    public shutdown(self ref, how Shutdown) Result[Void] = {
         let how_int Int32 = when how in {
-            .Read then (Int32)0,
-            .Write then (Int32)1,
-            .Both then (Int32)2,
+            .Read then 0(Int32),
+            .Write then 1(Int32),
+            .Both then 2(Int32),
         }
         let result = __koral_socket_shutdown(self.storage.fd, how_int)
         if result <> 0 then {
-            return [Void]Result.Error(box(last_error_message()))
+            return Result[Void].Error(box(last_error_message()))
         }
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     // ========================================================================
@@ -165,38 +165,38 @@ given TcpSocket {
 
     /// Set TCP_NODELAY option (disable Nagle's algorithm).
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
-    public set_nodelay(self ref, nodelay Bool) [Void]Result = {
-        let opt_buf = [UInt8]alloc_memory(4)
-        let value UInt8 = if nodelay then (UInt8)1 else (UInt8)0
+    public set_nodelay(self ref, nodelay Bool) Result[Void] = {
+        let opt_buf = alloc_memory[UInt8](4)
+        let value UInt8 = if nodelay then 1(UInt8) else 0(UInt8)
         init_memory(opt_buf + 0, value)
-        init_memory(opt_buf + 1, (UInt8)0)
-        init_memory(opt_buf + 2, (UInt8)0)
-        init_memory(opt_buf + 3, (UInt8)0)
-        let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_IPPROTO_TCP(), __koral_const_TCP_NODELAY(), opt_buf, (UInt32)4)
+        init_memory(opt_buf + 1, 0(UInt8))
+        init_memory(opt_buf + 2, 0(UInt8))
+        init_memory(opt_buf + 3, 0(UInt8))
+        let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_IPPROTO_TCP(), __koral_const_TCP_NODELAY(), opt_buf, 4(UInt32))
         dealloc_memory(opt_buf)
         if result <> 0 then {
-            return [Void]Result.Error(box(last_error_message()))
+            return Result[Void].Error(box(last_error_message()))
         }
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     /// Get TCP_NODELAY option.
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
-    public nodelay(self ref) [Bool]Result = {
-        let opt_buf = [UInt8]alloc_memory(4)
-        init_memory(opt_buf + 0, (UInt8)0)
-        init_memory(opt_buf + 1, (UInt8)0)
-        init_memory(opt_buf + 2, (UInt8)0)
-        init_memory(opt_buf + 3, (UInt8)0)
-        let mut opt_len UInt32 = (UInt32)4
+    public nodelay(self ref) Result[Bool] = {
+        let opt_buf = alloc_memory[UInt8](4)
+        init_memory(opt_buf + 0, 0(UInt8))
+        init_memory(opt_buf + 1, 0(UInt8))
+        init_memory(opt_buf + 2, 0(UInt8))
+        init_memory(opt_buf + 3, 0(UInt8))
+        let mut opt_len UInt32 = 4(UInt32)
         let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_IPPROTO_TCP(), __koral_const_TCP_NODELAY(), opt_buf, opt_len.ptr)
         if result <> 0 then {
             dealloc_memory(opt_buf)
-            return [Bool]Result.Error(box(last_error_message()))
+            return Result[Bool].Error(box(last_error_message()))
         }
         let value = opt_buf.val
         dealloc_memory(opt_buf)
-        return [Bool]Result.Ok(value <> (UInt8)0)
+        return Result[Bool].Ok(value <> 0(UInt8))
     }
 
     // ========================================================================
@@ -206,14 +206,14 @@ given TcpSocket {
     /// Set read timeout. None clears the timeout.
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
     /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
-    public set_read_timeout(self ref, timeout [Duration]Option) [Void]Result = {
-        let tv_buf = [UInt8]alloc_memory(16)
+    public set_read_timeout(self ref, timeout Option[Duration]) Result[Void] = {
+        let tv_buf = alloc_memory[UInt8](16)
         when timeout in {
             .None then {
                 // Zero timeval clears the timeout
                 let mut i UInt = 0
                 while i < 16 then {
-                    init_memory(tv_buf + i, (UInt8)0)
+                    init_memory(tv_buf + i, 0(UInt8))
                     i += 1
                 }
             },
@@ -221,23 +221,23 @@ given TcpSocket {
                 TcpSocket.duration_to_timeval(duration, tv_buf)
             },
         }
-        let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, (UInt32)16)
+        let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, 16(UInt32))
         dealloc_memory(tv_buf)
         if result <> 0 then {
-            return [Void]Result.Error(box(last_error_message()))
+            return Result[Void].Error(box(last_error_message()))
         }
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     /// Set write timeout. None clears the timeout.
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
-    public set_write_timeout(self ref, timeout [Duration]Option) [Void]Result = {
-        let tv_buf = [UInt8]alloc_memory(16)
+    public set_write_timeout(self ref, timeout Option[Duration]) Result[Void] = {
+        let tv_buf = alloc_memory[UInt8](16)
         when timeout in {
             .None then {
                 let mut i UInt = 0
                 while i < 16 then {
-                    init_memory(tv_buf + i, (UInt8)0)
+                    init_memory(tv_buf + i, 0(UInt8))
                     i += 1
                 }
             },
@@ -245,52 +245,52 @@ given TcpSocket {
                 TcpSocket.duration_to_timeval(duration, tv_buf)
             },
         }
-        let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, (UInt32)16)
+        let result = __koral_socket_setsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, 16(UInt32))
         dealloc_memory(tv_buf)
         if result <> 0 then {
-            return [Void]Result.Error(box(last_error_message()))
+            return Result[Void].Error(box(last_error_message()))
         }
-        return [Void]Result.Ok({})
+        return Result[Void].Ok({})
     }
 
     /// Get read timeout. Returns None if no timeout is set.
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
-    public read_timeout(self ref) [[Duration]Option]Result = {
-        let tv_buf = [UInt8]alloc_memory(16)
+    public read_timeout(self ref) Result[Option[Duration]] = {
+        let tv_buf = alloc_memory[UInt8](16)
         let mut i UInt = 0
         while i < 16 then {
-            init_memory(tv_buf + i, (UInt8)0)
+            init_memory(tv_buf + i, 0(UInt8))
             i += 1
         }
-        let mut opt_len UInt32 = (UInt32)16
+        let mut opt_len UInt32 = 16(UInt32)
         let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, opt_len.ptr)
         if result <> 0 then {
             dealloc_memory(tv_buf)
-            return [[Duration]Option]Result.Error(box(last_error_message()))
+            return Result[Option[Duration]].Error(box(last_error_message()))
         }
         let duration_opt = TcpSocket.timeval_to_duration(tv_buf)
         dealloc_memory(tv_buf)
-        return [[Duration]Option]Result.Ok(duration_opt)
+        return Result[Option[Duration]].Ok(duration_opt)
     }
 
     /// Get write timeout. Returns None if no timeout is set.
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
-    public write_timeout(self ref) [[Duration]Option]Result = {
-        let tv_buf = [UInt8]alloc_memory(16)
+    public write_timeout(self ref) Result[Option[Duration]] = {
+        let tv_buf = alloc_memory[UInt8](16)
         let mut i UInt = 0
         while i < 16 then {
-            init_memory(tv_buf + i, (UInt8)0)
+            init_memory(tv_buf + i, 0(UInt8))
             i += 1
         }
-        let mut opt_len UInt32 = (UInt32)16
+        let mut opt_len UInt32 = 16(UInt32)
         let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, opt_len.ptr)
         if result <> 0 then {
             dealloc_memory(tv_buf)
-            return [[Duration]Option]Result.Error(box(last_error_message()))
+            return Result[Option[Duration]].Error(box(last_error_message()))
         }
         let duration_opt = TcpSocket.timeval_to_duration(tv_buf)
         dealloc_memory(tv_buf)
-        return [[Duration]Option]Result.Ok(duration_opt)
+        return Result[Option[Duration]].Ok(duration_opt)
     }
 
     // ========================================================================
@@ -299,61 +299,61 @@ given TcpSocket {
 
     /// Convert a Duration to a struct timeval (16 bytes) in a raw buffer.
     /// timeval layout: tv_sec (Int64, 8 bytes LE) + tv_usec (Int64, 8 bytes LE)
-    private duration_to_timeval(duration Duration, buf UInt8 mut ptr) Void = {
+    private duration_to_timeval(duration Duration, buf mut ptr UInt8) Void = {
         let secs = duration.secs
         let usec = duration.nanos / 1000
 
         // Write tv_sec as little-endian Int64 (bytes 0..7)
-        init_memory(buf + 0, (UInt8)(secs & 255))
-        init_memory(buf + 1, (UInt8)((secs >> 8) & 255))
-        init_memory(buf + 2, (UInt8)((secs >> 16) & 255))
-        init_memory(buf + 3, (UInt8)((secs >> 24) & 255))
-        init_memory(buf + 4, (UInt8)((secs >> 32) & 255))
-        init_memory(buf + 5, (UInt8)((secs >> 40) & 255))
-        init_memory(buf + 6, (UInt8)((secs >> 48) & 255))
-        init_memory(buf + 7, (UInt8)((secs >> 56) & 255))
+        init_memory(buf + 0, (secs & 255)(UInt8))
+        init_memory(buf + 1, ((secs >> 8) & 255)(UInt8))
+        init_memory(buf + 2, ((secs >> 16) & 255)(UInt8))
+        init_memory(buf + 3, ((secs >> 24) & 255)(UInt8))
+        init_memory(buf + 4, ((secs >> 32) & 255)(UInt8))
+        init_memory(buf + 5, ((secs >> 40) & 255)(UInt8))
+        init_memory(buf + 6, ((secs >> 48) & 255)(UInt8))
+        init_memory(buf + 7, ((secs >> 56) & 255)(UInt8))
 
         // Write tv_usec as little-endian Int64 (bytes 8..15)
-        init_memory(buf + 8, (UInt8)(usec & 255))
-        init_memory(buf + 9, (UInt8)((usec >> 8) & 255))
-        init_memory(buf + 10, (UInt8)((usec >> 16) & 255))
-        init_memory(buf + 11, (UInt8)((usec >> 24) & 255))
-        init_memory(buf + 12, (UInt8)((usec >> 32) & 255))
-        init_memory(buf + 13, (UInt8)((usec >> 40) & 255))
-        init_memory(buf + 14, (UInt8)((usec >> 48) & 255))
-        init_memory(buf + 15, (UInt8)((usec >> 56) & 255))
+        init_memory(buf + 8, (usec & 255)(UInt8))
+        init_memory(buf + 9, ((usec >> 8) & 255)(UInt8))
+        init_memory(buf + 10, ((usec >> 16) & 255)(UInt8))
+        init_memory(buf + 11, ((usec >> 24) & 255)(UInt8))
+        init_memory(buf + 12, ((usec >> 32) & 255)(UInt8))
+        init_memory(buf + 13, ((usec >> 40) & 255)(UInt8))
+        init_memory(buf + 14, ((usec >> 48) & 255)(UInt8))
+        init_memory(buf + 15, ((usec >> 56) & 255)(UInt8))
     }
 
     /// Convert a struct timeval (16 bytes) from a raw buffer to a [Duration]Option.
     /// Returns None if both tv_sec and tv_usec are zero (no timeout set).
-    private timeval_to_duration(buf UInt8 ptr) [Duration]Option = {
+    private timeval_to_duration(buf ptr UInt8) Option[Duration] = {
         // Read tv_sec as little-endian Int64 (bytes 0..7)
-        let secs = (Int64)(UInt)buf[0]
-            + ((Int64)(UInt)buf[1] << 8)
-            + ((Int64)(UInt)buf[2] << 16)
-            + ((Int64)(UInt)buf[3] << 24)
-            + ((Int64)(UInt)buf[4] << 32)
-            + ((Int64)(UInt)buf[5] << 40)
-            + ((Int64)(UInt)buf[6] << 48)
-            + ((Int64)(UInt)buf[7] << 56)
+        let secs = buf[0](UInt)(Int64)
+            + (buf[1](UInt)(Int64) << 8)
+            + (buf[2](UInt)(Int64) << 16)
+            + (buf[3](UInt)(Int64) << 24)
+            + (buf[4](UInt)(Int64) << 32)
+            + (buf[5](UInt)(Int64) << 40)
+            + (buf[6](UInt)(Int64) << 48)
+            + (buf[7](UInt)(Int64) << 56)
 
         // Read tv_usec as little-endian Int64 (bytes 8..15)
-        let usec = (Int64)(UInt)buf[8]
-            + ((Int64)(UInt)buf[9] << 8)
-            + ((Int64)(UInt)buf[10] << 16)
-            + ((Int64)(UInt)buf[11] << 24)
-            + ((Int64)(UInt)buf[12] << 32)
-            + ((Int64)(UInt)buf[13] << 40)
-            + ((Int64)(UInt)buf[14] << 48)
-            + ((Int64)(UInt)buf[15] << 56)
+        let usec = buf[8](UInt)(Int64)
+            + (buf[9](UInt)(Int64) << 8)
+            + (buf[10](UInt)(Int64) << 16)
+            + (buf[11](UInt)(Int64) << 24)
+            + (buf[12](UInt)(Int64) << 32)
+            + (buf[13](UInt)(Int64) << 40)
+            + (buf[14](UInt)(Int64) << 48)
+            + (buf[15](UInt)(Int64) << 56)
 
         // Zero timeval means no timeout
         if secs == 0 and usec == 0 then {
-            return [Duration]Option.None()
+            return Option[Duration].None()
         }
 
         let nanos = usec * 1000
-        return [Duration]Option.Some(Duration(secs, nanos))
+        return Option[Duration].Some(Duration(secs, nanos))
     }
 }
 
@@ -361,32 +361,32 @@ given TcpSocket as Reader {
 
     /// Reader trait: read bytes into into[range].
     /// Returns Ok(0) on EOF (peer closed connection).
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = into.slice_spec(range)
         let start = span.start()
         let end = span.end()
-        if end <= start then { return [UInt]Result.Ok(0) }
+        if end <= start then { return Result[UInt].Ok(0) }
         let data_ptr = into.borrow_mut_ptr() + start
-        let n = __koral_socket_recv(self.storage.fd, data_ptr, (UInt64)span.len(), (Int32)0)
-        if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
-        return [UInt]Result.Ok((UInt)n)
+        let n = __koral_socket_recv(self.storage.fd, data_ptr, span.len()(UInt64), 0(Int32))
+        if n < 0 then { return Result[UInt].Error(box(last_error_message())) }
+        return Result[UInt].Ok(n(UInt))
     }
 }
 
 given TcpSocket as Writer {
 
     /// Writer trait: write bytes from from[range] into the connection.
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result = {
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = from.slice_spec(range)
         let start = span.start()
         let end = span.end()
-        if end <= start then { return [UInt]Result.Ok(0) }
+        if end <= start then { return Result[UInt].Ok(0) }
         let data_ptr = from.borrow_ptr() + start
-        let n = __koral_socket_send(self.storage.fd, data_ptr, (UInt64)span.len(), (Int32)0)
-        if n < 0 then { return [UInt]Result.Error(box(last_error_message())) }
-        return [UInt]Result.Ok((UInt)n)
+        let n = __koral_socket_send(self.storage.fd, data_ptr, span.len()(UInt64), 0(Int32))
+        if n < 0 then { return Result[UInt].Error(box(last_error_message())) }
+        return Result[UInt].Ok(n(UInt))
     }
 
     /// Writer trait: flush. TCP has no user-space buffer, so this is a no-op.
-    public flush(self ref) [Void]Result = [Void]Result.Ok({})
+    public flush(self ref) Result[Void] = Result[Void].Ok({})
 }

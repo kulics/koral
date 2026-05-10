@@ -1,5 +1,12 @@
 import Foundation
 
+private func isASCIIUppercaseLetter(_ char: Character) -> Bool {
+    guard char.unicodeScalars.count == 1, let scalar = char.unicodeScalars.first else {
+        return false
+    }
+    return scalar.value >= 65 && scalar.value <= 90
+}
+
 // MARK: - Module Error Types
 
 /// 模块系统错误类型
@@ -205,7 +212,7 @@ public func moduleIdentifierToFileName(_ identifier: String) -> String {
 
     var result = ""
     for char in identifier {
-        if char.isUppercase {
+        if isASCIIUppercaseLetter(char) {
             if !result.isEmpty {
                 result.append("_")
             }

@@ -1,19 +1,19 @@
 using Std.Os.*
 
-type Decl(lines [String]List)
+type Decl(lines List[String])
 
-type TraitBlock(header Decl, methods [Decl]List)
+type TraitBlock(header Decl, methods List[Decl])
 
 type ParsedApi(
-    mut free_functions [Decl]List,
-    mut traits [TraitBlock]List,
-    mut types [Decl]List,
-    mut givens [TraitBlock]List,
+    mut free_functions List[Decl],
+    mut traits List[TraitBlock],
+    mut types List[Decl],
+    mut givens List[TraitBlock],
 )
 
-type CollectSignatureResult(end UInt, signature [String]List, has_block Bool)
+type CollectSignatureResult(end UInt, signature List[String], has_block Bool)
 
-type ExtractBlockResult(end UInt, block [String]List)
+type ExtractBlockResult(end UInt, block List[String])
 
 type ExtractTypeResult(end UInt, declaration Decl)
 
@@ -112,7 +112,7 @@ let count_braces(text String) Int = {
     return delta
 }
 
-let has_unclosed_delimiters(lines [String]List) Bool = {
+let has_unclosed_delimiters(lines List[String]) Bool = {
     let mut paren Int = 0
     let mut bracket Int = 0
 
@@ -173,8 +173,8 @@ let signature_seems_complete(line String) Bool = {
     return paren <= 0 and bracket <= 0 and angle <= 0
 }
 
-let trim_signature_lines(lines [String]List, keep_open_brace Bool) [String]List = {
-    let mut out = [String]List.new()
+let trim_signature_lines(lines List[String], keep_open_brace Bool) List[String] = {
+    let mut out = List[String].new()
     for line in lines then {
         if not trim(line).is_empty() then {
             out.push(line)
@@ -220,8 +220,8 @@ let trim_signature_lines(lines [String]List, keep_open_brace Bool) [String]List 
     return out
 }
 
-let collect_signature(lines [String]List, start UInt, keep_open_brace Bool) CollectSignatureResult = {
-    let mut parts = [String]List.new()
+let collect_signature(lines List[String], start UInt, keep_open_brace Bool) CollectSignatureResult = {
+    let mut parts = List[String].new()
     let mut i = start
     let mut has_block = false
 
@@ -247,8 +247,8 @@ let collect_signature(lines [String]List, start UInt, keep_open_brace Bool) Coll
     return CollectSignatureResult(i, trim_signature_lines(parts, keep_open_brace), has_block)
 }
 
-let extract_block(lines [String]List, start UInt) ExtractBlockResult = {
-    let mut block = [String]List.new()
+let extract_block(lines List[String], start UInt) ExtractBlockResult = {
+    let mut block = List[String].new()
     block.push(lines[start])
     let mut level = count_braces(lines[start])
     let mut i = start + 1
@@ -275,7 +275,7 @@ let looks_like_method_signature(line String) Bool = {
     return starts_ok and line.contains("(")
 }
 
-let list_lines_equal(a [String]List, b [String]List) Bool = {
+let list_lines_equal(a List[String], b List[String]) Bool = {
     if a.count() <> b.count() then {
         return false
     }
@@ -289,7 +289,7 @@ let list_lines_equal(a [String]List, b [String]List) Bool = {
     return true
 }
 
-let methods_contains(methods [Decl]List, signature [String]List) Bool = {
+let methods_contains(methods List[Decl], signature List[String]) Bool = {
     for method in methods then {
         if list_lines_equal(method.lines, signature) then {
             return true
@@ -298,8 +298,8 @@ let methods_contains(methods [Decl]List, signature [String]List) Bool = {
     return false
 }
 
-let extract_trait_or_given_methods(block [String]List, require_public Bool) ExtractTraitResult = {
-    let mut header_lines = [String]List.new()
+let extract_trait_or_given_methods(block List[String], require_public Bool) ExtractTraitResult = {
+    let mut header_lines = List[String].new()
     let mut i UInt = 0
 
     while i < block.count() then {
@@ -315,21 +315,21 @@ let extract_trait_or_given_methods(block [String]List, require_public Bool) Extr
 
     let header = trim_signature_lines(header_lines, true)
     if header.is_empty() then {
-        return ExtractTraitResult(TraitBlock(Decl([String]List.new()), [Decl]List.new()), false)
+        return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false)
     }
 
     let header_first = trim(header[0])
     if require_public then {
         if not header_first.starts_with("given") and not header_first.starts_with("intrinsic given") then {
-            return ExtractTraitResult(TraitBlock(Decl([String]List.new()), [Decl]List.new()), false)
+            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false)
         }
     } else {
         if not header_first.starts_with("public trait") then {
-            return ExtractTraitResult(TraitBlock(Decl([String]List.new()), [Decl]List.new()), false)
+            return ExtractTraitResult(TraitBlock(Decl(List[String].new()), List[Decl].new()), false)
         }
     }
 
-    let mut methods = [Decl]List.new()
+    let mut methods = List[Decl].new()
     let mut depth Int = 0
     i = 0
 
@@ -368,7 +368,7 @@ let extract_trait_or_given_methods(block [String]List, require_public Bool) Extr
     return ExtractTraitResult(TraitBlock(Decl(header), methods), true)
 }
 
-let extract_type_api(lines [String]List, start UInt) ExtractTypeResult = {
+let extract_type_api(lines List[String], start UInt) ExtractTypeResult = {
     let collected = collect_signature(lines, start, false)
     if not collected.has_block then {
         return ExtractTypeResult(collected.end, Decl(collected.signature))
@@ -376,7 +376,7 @@ let extract_type_api(lines [String]List, start UInt) ExtractTypeResult = {
 
     let extracted = extract_block(lines, start)
     let block = extracted.block
-    let mut out = [String]List.new()
+    let mut out = List[String].new()
     let mut depth Int = 0
     let mut idx UInt = 0
 
@@ -412,8 +412,8 @@ let extract_type_api(lines [String]List, start UInt) ExtractTypeResult = {
     return ExtractTypeResult(extracted.end, Decl(out))
 }
 
-let split_top_level_commas(text String) [String]List = {
-    let mut parts = [String]List.new()
+let split_top_level_commas(text String) List[String] = {
+    let mut parts = List[String].new()
     let mut current = String.new()
     let mut paren Int = 0
     let mut bracket Int = 0
@@ -557,7 +557,7 @@ let sanitize_type_declaration(decl Decl) Decl = {
     let prefix = rstrip(line.substring(0..<open_idx))
     let fields_raw = trim(line.substring((open_idx + 1)..<close_idx))
     let fields = split_top_level_commas(fields_raw)
-    let mut filtered = [String]List.new()
+    let mut filtered = List[String].new()
 
     for field in fields then {
         if not contains_word(field, "private") and not contains_word(field, "protected") then {
@@ -566,19 +566,19 @@ let sanitize_type_declaration(decl Decl) Decl = {
     }
 
     if filtered.count() == 0 then {
-        let mut single = [String]List.new()
+        let mut single = List[String].new()
         single.push(prefix)
         return Decl(single)
     }
 
     let multiline = decl.lines.count() > 1 or filtered.count() > 1
     if not multiline and filtered.count() == 1 then {
-        let mut single = [String]List.new()
+        let mut single = List[String].new()
         single.push(prefix + "(" + filtered[0] + ")")
         return Decl(single)
     }
 
-    let mut out = [String]List.new()
+    let mut out = List[String].new()
     out.push(prefix + "(")
     for field in filtered then {
         out.push("    " + field + ",")
@@ -587,8 +587,8 @@ let sanitize_type_declaration(decl Decl) Decl = {
     return Decl(out)
 }
 
-let split_lines(text String) [String]List = {
-    let mut lines = [String]List.new()
+let split_lines(text String) List[String] = {
+    let mut lines = List[String].new()
     for line in text.split("\n") then {
         if line.ends_with("\r") and line.count() > 0 then {
             lines.push(line.substring(0..<(line.count() - 1)))
@@ -602,14 +602,14 @@ let split_lines(text String) [String]List = {
 let parse_public_api(file_path Path) ParsedApi = {
     let text = read_text_file(file_path) or else {
         eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())")
-        return ParsedApi([Decl]List.new(), [TraitBlock]List.new(), [Decl]List.new(), [TraitBlock]List.new())
+        return ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new())
     }
 
     let lines = split_lines(text)
-    let mut free_functions = [Decl]List.new()
-    let mut traits = [TraitBlock]List.new()
-    let mut types = [Decl]List.new()
-    let mut givens = [TraitBlock]List.new()
+    let mut free_functions = List[Decl].new()
+    let mut traits = List[TraitBlock].new()
+    let mut types = List[Decl].new()
+    let mut givens = List[TraitBlock].new()
 
     let mut i UInt = 0
     let mut level Int = 0
@@ -676,7 +676,7 @@ let to_pascal_case(s String) String = {
     return first + rest
 }
 
-let segments_to_pascal_key(segments [String]List) String = {
+let segments_to_pascal_key(segments List[String]) String = {
     let mut out = String.new()
     let mut i UInt = 0
     while i < segments.count() then {
@@ -697,7 +697,7 @@ let module_key_for_source(source Path, std_root Path) String = {
         return "Std"
     }
     let parts = parent.split("/").into_list()
-    let mut pascal_parts = [String]List.new()
+    let mut pascal_parts = List[String].new()
     pascal_parts.push("Std")
     for part in parts then {
         pascal_parts.push(to_pascal_case(part))
@@ -707,7 +707,7 @@ let module_key_for_source(source Path, std_root Path) String = {
 
 let module_name_from_key(key String) String = key
 
-let append_declarations(lines [String]List mut ref, declarations [Decl]List) Void = {
+let append_declarations(lines mut ref List[String], declarations List[Decl]) Void = {
     let mut idx UInt = 0
     while idx < declarations.count() then {
         let decl = declarations[idx]
@@ -721,7 +721,7 @@ let append_declarations(lines [String]List mut ref, declarations [Decl]List) Voi
     }
 }
 
-let append_traits_or_givens(lines [String]List mut ref, blocks [TraitBlock]List) Void = {
+let append_traits_or_givens(lines mut ref List[String], blocks List[TraitBlock]) Void = {
     let mut idx UInt = 0
     while idx < blocks.count() then {
         let block = blocks[idx]
@@ -756,7 +756,7 @@ let last_segment(key String) String =
         .None then key,
     }
 
-let merge_parsed(target ParsedApi mut ref, parsed ParsedApi) Void = {
+let merge_parsed(target mut ref ParsedApi, parsed ParsedApi) Void = {
     for item in parsed.free_functions then {
         target.free_functions.push(item)
     }
@@ -771,11 +771,11 @@ let merge_parsed(target ParsedApi mut ref, parsed ParsedApi) Void = {
     }
 }
 
-let write_module_doc(module_key String, source_files [String]List, docs_root Path) [Void]Result = {
+let write_module_doc(module_key String, source_files List[String], docs_root Path) Result[Void] = {
     let module_name = module_name_from_key(module_key)
     let module_stem = last_segment(module_key)
-    let mut stem_first = [String]List.new()
-    let mut rest = [String]List.new()
+    let mut stem_first = List[String].new()
+    let mut rest = List[String].new()
     for source_str in source_files then {
         if to_pascal_case(file_stem(source_str.into_path())) == module_stem then {
             stem_first.push(source_str)
@@ -789,19 +789,19 @@ let write_module_doc(module_key String, source_files [String]List, docs_root Pat
     let mut ordered_sources = stem_first
     ordered_sources.push_list(rest)
 
-    let mut parsed_all = ParsedApi([Decl]List.new(), [TraitBlock]List.new(), [Decl]List.new(), [TraitBlock]List.new())
+    let mut parsed_all = ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new())
 
     for source_str in ordered_sources then {
         let parsed = parse_public_api(source_str.into_path())
         merge_parsed(parsed_all.ref, parsed)
     }
 
-    let mut sanitized_types = [Decl]List.new()
+    let mut sanitized_types = List[Decl].new()
     for decl in parsed_all.types then {
         sanitized_types.push(sanitize_type_declaration(decl))
     }
 
-    let mut lines = [String]List.new()
+    let mut lines = List[String].new()
     lines.push("# " + module_name + " API")
     lines.push("")
     lines.push("## Overview")
@@ -879,8 +879,8 @@ let clear_generated_docs(docs_root Path) Void = {
     clear_generated_docs_recursive(docs_root)
 }
 
-let collect_koral_sources(root Path) [[String]List]Result = {
-    let mut out = [String]List.new()
+let collect_koral_sources(root Path) Result[List[String]] = {
+    let mut out = List[String].new()
     let mut walker = walk_dir(root) or return
 
     while walker.next() is .Some(entry) then {
@@ -889,17 +889,17 @@ let collect_koral_sources(root Path) [[String]List]Result = {
         }
     }
 
-    return [[String]List]Result.Ok(out)
+    return Result[List[String]].Ok(out)
 }
 
-let find_repo_root() [Path]Result = {
+let find_repo_root() Result[Path] = {
     let mut cursor = current_dir() or return
 
     let mut steps UInt = 0
     while steps < 12 then {
         let marker = cursor.join("std/std.koral")
         if path_exist(marker) then {
-            return [Path]Result.Ok(cursor)
+            return Result[Path].Ok(cursor)
         }
 
         let parent = cursor.dir_name()
@@ -910,7 +910,7 @@ let find_repo_root() [Path]Result = {
         steps += 1
     }
 
-    return [Path]Result.Error(box("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly."))
+    return Result[Path].Error(box("Cannot locate repo root (missing std/std.koral). Please run under the repository or set working directory accordingly."))
 }
 
 let main() Void = {
@@ -933,7 +933,7 @@ let main() Void = {
 
     let grouped = source_files.group_by((source_str) -> module_key_for_source(source_str.into_path(), std_root))
 
-    let mut module_keys = [String]List.new()
+    let mut module_keys = List[String].new()
     let mut grouped_entries = grouped.iterator()
     while grouped_entries.next() is .Some(entry) then {
         module_keys.push(entry.first)

@@ -7,11 +7,11 @@
 
 using Std.*
 
-type MyListStorage(mut source UInt mut ptr, mut len UInt, mut cap UInt)
+type MyListStorage(mut source mut ptr UInt, mut len UInt, mut cap UInt)
 
 given MyListStorage as Drop {
 
-    drop(self mut ref) = {
+    drop(self mut ref) Void = {
         if ref_is_borrow(self) then {
             return
         }
@@ -20,25 +20,25 @@ given MyListStorage as Drop {
             deinit_memory(self.source + i)
             i += 1
         }
-        [UInt]dealloc_memory(self.source)
+        dealloc_memory[UInt](self.source)
     }
 }
 
-type MyList(mut storage MyListStorage mut ref)
+type MyList(mut storage mut ref MyListStorage)
 
 given MyList {
 
     new() Self = {
         let cap UInt = 64
-        let source = [UInt]alloc_memory(cap)
-        let storage MyListStorage mut ref = box(MyListStorage(source, 0, cap))
+        let source = alloc_memory[UInt](cap)
+        let storage mut ref MyListStorage = box(MyListStorage(source, 0, cap))
         return MyList(storage)
     }
 
     private ensure_unique(self mut ref) Void = {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
-            let new_source = [UInt]alloc_memory(old.cap)
+            let new_source = alloc_memory[UInt](old.cap)
             let mut i UInt = 0
             while i < old.len then {
                 let v = old.source[i]
@@ -56,12 +56,12 @@ given MyList {
             if new_cap < min_capacity then {
                 new_cap = min_capacity
             }
-            let new_source = [UInt]alloc_memory(new_cap)
+            let new_source = alloc_memory[UInt](new_cap)
             let old_len = self.storage.len
             if ref_count(self.storage) == 1 then {
                 let old_source = self.storage.source
                 move_memory(new_source, old_source, old_len)
-                [UInt]dealloc_memory(old_source)
+                dealloc_memory[UInt](old_source)
                 self.storage.source = new_source
                 self.storage.cap = new_cap
             } else {
@@ -95,13 +95,13 @@ given MyList {
     }
 }
 
-given MyList as [UInt, UInt]Index {
+given MyList as Index[UInt, UInt] {
 
-    ref_at(self ref, key UInt) UInt ref = {
+    ref_at(self ref, key UInt) ref UInt = {
         if key >= self.storage.len then {
             panic("MyList index out of bounds")
         }
-        return [UInt, MyListStorage]make_ref(self.storage.source + key, self.storage)
+        return make_ref[UInt, MyListStorage](self.storage.source + key, self.storage)
     }
 }
 
@@ -118,7 +118,7 @@ given Wrap {
     at(self, index UInt) UInt = self.list[index]
 }
 
-let push_list_burst(target Wrap mut ref, base UInt, rounds UInt) Void = {
+let push_list_burst(target mut ref Wrap, base UInt, rounds UInt) Void = {
     let mut i UInt = 0
     while i < rounds then {
         target.list.push(base + i)
@@ -126,7 +126,7 @@ let push_list_burst(target Wrap mut ref, base UInt, rounds UInt) Void = {
     }
 }
 
-let push_wrap_burst(target Wrap mut ref, base UInt, rounds UInt) Void = {
+let push_wrap_burst(target mut ref Wrap, base UInt, rounds UInt) Void = {
     let mut i UInt = 0
     while i < rounds then {
         target.push(base + i)

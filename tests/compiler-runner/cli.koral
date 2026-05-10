@@ -15,17 +15,17 @@ private let default_swift_koralc_path() Path = {
     return "compiler/.build/debug/koralc".into_path()
 }
 
-private let parse_uint(value String, flag_name String) [UInt]Result = {
+private let parse_uint(value String, flag_name String) Result[UInt] = {
     return when UInt.parse(value) in {
-        .Ok(v) then [UInt]Result.Ok(v),
-        .Error(_) then [UInt]Result.Error(box("invalid value for \(flag_name): \(value)")),
+        .Ok(v) then Result[UInt].Ok(v),
+        .Error(_) then Result[UInt].Error(box("invalid value for \(flag_name): \(value)")),
     }
 }
 
-private let parse_int(value String, flag_name String) [Int]Result = {
+private let parse_int(value String, flag_name String) Result[Int] = {
     return when Int.parse(value) in {
-        .Ok(v) then [Int]Result.Ok(v),
-        .Error(_) then [Int]Result.Error(box("invalid value for \(flag_name): \(value)")),
+        .Ok(v) then Result[Int].Ok(v),
+        .Error(_) then Result[Int].Error(box("invalid value for \(flag_name): \(value)")),
     }
 }
 
@@ -54,21 +54,21 @@ public let print_usage() Void = {
     eprintln("  -h, --help                   show this help")
 }
 
-public let parse_runner_config() [RunnerConfig]Result = {
+public let parse_runner_config() Result[RunnerConfig] = {
     let argv = args()
 
     let run_root = current_dir() or else {
-        return [RunnerConfig]Result.Error(box("failed to determine current working directory: " + it.message()))
+        return Result[RunnerConfig].Error(box("failed to determine current working directory: " + it.message()))
     }
     let mut cases_root = "tests/compiler-cases".into_path()
-    let mut filter = [String]Option.None()
+    let mut filter = Option[String].None()
     let mut jobs UInt = 1
     let mut timeout_secs Int = 120
     let mut compiler_kind = "bootstrap"
-    let mut compiler_bin_opt = [Path]Option.None()
+    let mut compiler_bin_opt = Option[Path].None()
     let mut bootstrap_koralc = default_bootstrap_koralc_path()
     let mut swift_koralc = default_swift_koralc_path()
-    let mut report_file_opt = [Path]Option.None()
+    let mut report_file_opt = Option[Path].None()
     let mut verbose = false
 
     let mut i UInt = 1
@@ -76,7 +76,7 @@ public let parse_runner_config() [RunnerConfig]Result = {
         let arg = argv[i]
 
         if arg == "-h" or arg == "--help" then {
-            return [RunnerConfig]Result.Error(box("__HELP__"))
+            return Result[RunnerConfig].Error(box("__HELP__"))
         }
 
         if arg == "--verbose" then {
@@ -88,11 +88,11 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--compiler" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --compiler"))
+                return Result[RunnerConfig].Error(box("missing value for --compiler"))
             }
             let value = argv[i]
             if value <> "bootstrap" and value <> "swift" and value <> "custom" then {
-                return [RunnerConfig]Result.Error(box("invalid value for --compiler: " + value))
+                return Result[RunnerConfig].Error(box("invalid value for --compiler: " + value))
             }
             compiler_kind = value
             i += 1
@@ -102,7 +102,7 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--cases" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --cases"))
+                return Result[RunnerConfig].Error(box("missing value for --cases"))
             }
             cases_root = argv[i].into_path()
             i += 1
@@ -112,9 +112,9 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--filter" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --filter"))
+                return Result[RunnerConfig].Error(box("missing value for --filter"))
             }
-            filter = [String]Option.Some(argv[i])
+            filter = Option[String].Some(argv[i])
             i += 1
             continue
         }
@@ -122,13 +122,13 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--timeout" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --timeout"))
+                return Result[RunnerConfig].Error(box("missing value for --timeout"))
             }
             timeout_secs = parse_int(argv[i], "--timeout") or else {
-                return [RunnerConfig]Result.Error(it)
+                return Result[RunnerConfig].Error(it)
             }
             if timeout_secs <= 0 then {
-                return [RunnerConfig]Result.Error(box("--timeout must be > 0"))
+                return Result[RunnerConfig].Error(box("--timeout must be > 0"))
             }
             i += 1
             continue
@@ -137,7 +137,7 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--bootstrap-koralc" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --bootstrap-koralc"))
+                return Result[RunnerConfig].Error(box("missing value for --bootstrap-koralc"))
             }
             bootstrap_koralc = argv[i].into_path()
             i += 1
@@ -147,7 +147,7 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--swift-koralc" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --swift-koralc"))
+                return Result[RunnerConfig].Error(box("missing value for --swift-koralc"))
             }
             swift_koralc = argv[i].into_path()
             i += 1
@@ -157,9 +157,9 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--compiler-bin" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --compiler-bin"))
+                return Result[RunnerConfig].Error(box("missing value for --compiler-bin"))
             }
-            compiler_bin_opt = [Path]Option.Some(argv[i].into_path())
+            compiler_bin_opt = Option[Path].Some(argv[i].into_path())
             i += 1
             continue
         }
@@ -167,9 +167,9 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "--report-file" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for --report-file"))
+                return Result[RunnerConfig].Error(box("missing value for --report-file"))
             }
-            report_file_opt = [Path]Option.Some(argv[i].into_path())
+            report_file_opt = Option[Path].Some(argv[i].into_path())
             i += 1
             continue
         }
@@ -177,13 +177,13 @@ public let parse_runner_config() [RunnerConfig]Result = {
         if arg == "-j" then {
             i += 1
             if i >= argv.count() then {
-                return [RunnerConfig]Result.Error(box("missing value for -j"))
+                return Result[RunnerConfig].Error(box("missing value for -j"))
             }
             jobs = parse_uint(argv[i], "-j") or else {
-                return [RunnerConfig]Result.Error(it)
+                return Result[RunnerConfig].Error(it)
             }
             if jobs == 0 then {
-                return [RunnerConfig]Result.Error(box("-j must be >= 1"))
+                return Result[RunnerConfig].Error(box("-j must be >= 1"))
             }
             i += 1
             continue
@@ -191,16 +191,16 @@ public let parse_runner_config() [RunnerConfig]Result = {
 
         if arg.starts_with("-j=") then {
             jobs = parse_uint(arg.trim_prefix("-j="), "-j") or else {
-                return [RunnerConfig]Result.Error(it)
+                return Result[RunnerConfig].Error(it)
             }
             if jobs == 0 then {
-                return [RunnerConfig]Result.Error(box("-j must be >= 1"))
+                return Result[RunnerConfig].Error(box("-j must be >= 1"))
             }
             i += 1
             continue
         }
 
-        return [RunnerConfig]Result.Error(box("unknown argument: \(arg)"))
+        return Result[RunnerConfig].Error(box("unknown argument: \(arg)"))
     }
 
     let abs_cases_root = make_absolute(run_root, cases_root)
@@ -219,15 +219,15 @@ public let parse_runner_config() [RunnerConfig]Result = {
         "custom" then when compiler_bin_opt in {
             .Some(path) then make_absolute(run_root, path).normalize(),
             .None() then {
-                return [RunnerConfig]Result.Error(box("--compiler-bin is required when --compiler custom"))
+                return Result[RunnerConfig].Error(box("--compiler-bin is required when --compiler custom"))
             },
         },
         _ then {
-            return [RunnerConfig]Result.Error(box("invalid compiler kind: " + compiler_kind))
+            return Result[RunnerConfig].Error(box("invalid compiler kind: " + compiler_kind))
         },
     }
 
-    return [RunnerConfig]Result.Ok(RunnerConfig(
+    return Result[RunnerConfig].Ok(RunnerConfig(
         run_root,
         abs_cases_root,
         output_root,

@@ -7,15 +7,15 @@ This page lists the public API of module `Std.Proc` (declaration-only syntax), o
 ```koral
 public let current_pid() UInt32
 
-public let send_process_signal(signal Int, to: UInt32) [Void]Result
+public let send_process_signal(signal Int, to: UInt32) Result[Void]
 
-public let kill_process(pid UInt32) [Void]Result
+public let kill_process(pid UInt32) Result[Void]
 
 public let is_process_alive(pid UInt32) Bool
 
-public let run_command(program String, args [String]List) [ExitStatus]Result
+public let run_command(program String, args List[String]) Result[ExitStatus]
 
-public let run_command_output(program String, args [String]List) [CommandOutput]Result
+public let run_command_output(program String, args List[String]) Result[CommandOutput]
 ```
 
 ## Traits
@@ -56,22 +56,22 @@ public type IoRedirect {
 given Command {
     public new(program String) Command
     public arg(self, value String) Command
-    public args(self, values [String]List) Command
+    public args(self, values List[String]) Command
     public set_env(self, name String, value String) Command
     public clear_env(self) Command
     public remove_env(self, name String) Command
-    public [T IntoPath]set_current_dir(self, path T) Command
+    public set_current_dir[T IntoPath](self, path T) Command
     public set_stdin(self, cfg IoRedirect) Command
     public set_stdout(self, cfg IoRedirect) Command
     public set_stderr(self, cfg IoRedirect) Command
-    public spawn(self) [Process]Result
-    public run(self) [ExitStatus]Result
-    public run_output(self) [CommandOutput]Result
+    public spawn(self) Result[Process]
+    public run(self) Result[ExitStatus]
+    public run_output(self) Result[CommandOutput]
 }
 
 given CommandOutput {
     public is_success(self ref) Bool
-    public code(self ref) [Int]Option
+    public code(self ref) Option[Int]
 }
 
 given CommandOutput as ToString {
@@ -79,9 +79,9 @@ given CommandOutput as ToString {
 }
 
 given ExitStatus {
-    public code(self ref) [Int]Option
+    public code(self ref) Option[Int]
     public is_success(self ref) Bool
-    public signal(self ref) [Int]Option
+    public signal(self ref) Option[Int]
 }
 
 given ExitStatus as ToString {
@@ -93,8 +93,8 @@ given StdinPipe {
 }
 
 given StdinPipe as Writer {
-    public write(self ref, from: [UInt8]List, range [UInt]Range) [UInt]Result
-    public flush(self ref) [Void]Result
+    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(self ref) Result[Void]
 }
 
 given StdoutPipe {
@@ -102,7 +102,7 @@ given StdoutPipe {
 }
 
 given StdoutPipe as Reader {
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given StderrPipe {
@@ -110,17 +110,17 @@ given StderrPipe {
 }
 
 given StderrPipe as Reader {
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given Process {
     public pid(self ref) UInt32
-    public wait(self ref) [ExitStatus]Result
-    public wait_output(self ref) [CommandOutput]Result
-    public try_wait(self ref) [[ExitStatus]Option]Result
-    public take_stdin_pipe(self ref) [StdinPipe]Option
-    public take_stdout_pipe(self ref) [StdoutPipe]Option
-    public take_stderr_pipe(self ref) [StderrPipe]Option
+    public wait(self ref) Result[ExitStatus]
+    public wait_output(self ref) Result[CommandOutput]
+    public try_wait(self ref) Result[Option[ExitStatus]]
+    public take_stdin_pipe(self ref) Option[StdinPipe]
+    public take_stdout_pipe(self ref) Option[StdoutPipe]
+    public take_stderr_pipe(self ref) Option[StderrPipe]
 }
 
 given IoRedirect as ToString {

@@ -25,8 +25,8 @@ public type TimeZone
 ## Given Implementations
 ```koral
 given ClockTime {
-    public new(hour: Int, minute: Int, second: Int) [ClockTime]Result
-    public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) [ClockTime]Result
+    public new(hour: Int, minute: Int, second: Int) Result[ClockTime]
+    public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) Result[ClockTime]
     public midnight() ClockTime
 }
 
@@ -37,11 +37,11 @@ given ClockTime {
     public nanosecond(self) Int
 }
 
-given ClockTime as [Duration]Add {
+given ClockTime as Add[Duration] {
     public add(self, v Duration) ClockTime
 }
 
-given ClockTime as [Duration]Sub {
+given ClockTime as Sub[Duration] {
     public sub(self, v Duration) ClockTime
 }
 
@@ -62,11 +62,11 @@ given ClockTime as ToString {
 }
 
 given ClockTime as Parseable {
-    public parse(s String) [ClockTime]Result
+    public parse(s String) Result[ClockTime]
 }
 
 given Date {
-    public new(year: Int, month: Int, day: Int) [Date]Result
+    public new(year: Int, month: Int, day: Int) Result[Date]
     public epoch() Date
 }
 
@@ -100,7 +100,7 @@ given Date as ToString {
 }
 
 given Date as Parseable {
-    public parse(s String) [Date]Result
+    public parse(s String) Result[Date]
 }
 
 given TimeZone {
@@ -140,11 +140,11 @@ given DateTime {
     public elapsed(self ref) Duration
 }
 
-given DateTime as [Duration]Add {
+given DateTime as Add[Duration] {
     public add(self, v Duration) DateTime
 }
 
-given DateTime as [Duration]Sub {
+given DateTime as Sub[Duration] {
     public sub(self, v Duration) DateTime
 }
 
@@ -165,7 +165,7 @@ given DateTime as ToString {
 }
 
 given DateTime as Parseable {
-    public parse(s String) [DateTime]Result
+    public parse(s String) Result[DateTime]
 }
 
 given MonoTime {
@@ -173,11 +173,11 @@ given MonoTime {
     public elapsed(self) Duration
 }
 
-given MonoTime as [Duration]Add {
+given MonoTime as Add[Duration] {
     public add(self, v Duration) MonoTime
 }
 
-given MonoTime as [Duration]Sub {
+given MonoTime as Sub[Duration] {
     public sub(self, v Duration) MonoTime
 }
 
@@ -196,8 +196,8 @@ given MonoTime as Ord {
 given TimeZone {
     public utc() TimeZone
     public local() TimeZone
-    public from_offset(offset Duration) [TimeZone]Result
-    public from_name(name String) [TimeZone]Result
+    public from_offset(offset Duration) Result[TimeZone]
+    public from_name(name String) Result[TimeZone]
 }
 
 given TimeZone as Eq {

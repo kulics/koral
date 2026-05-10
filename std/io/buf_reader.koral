@@ -5,104 +5,104 @@
 // Uses compile-time static dispatch (generics, not trait objects).
 // ============================================================================
 
-private type [R Reader]BufReaderStorage(
+private type BufReaderStorage[R Reader](
     inner R,
-    mut buf [UInt8]List,
+    mut buf List[UInt8],
     cap UInt,
     mut start UInt,
     mut end UInt,
 )
 
-public type [R Reader]BufReader(private storage [R]BufReaderStorage mut ref)
+public type BufReader[R Reader](private storage mut ref BufReaderStorage[R])
 
-given[R Reader] [R]BufReader {
+given[R Reader] BufReader[R] {
 
-    public new(r R) [R]BufReader = {
+    public new(r R) BufReader[R] = {
         let cap UInt = 4096
-        let storage = box([R]BufReaderStorage(r, make_bytes(cap), cap, 0, 0))
-        return [R]BufReader(storage)
+        let storage = box(BufReaderStorage[R](r, make_bytes(cap), cap, 0, 0))
+        return BufReader[R](storage)
     }
 
-    public with_capacity(cap UInt, r R) [R]BufReader = {
+    public with_capacity(cap UInt, r R) BufReader[R] = {
         if cap == 0 then {
             panic("BufReader.with_capacity: zero capacity")
         }
-        let storage = box([R]BufReaderStorage(r, make_bytes(cap), cap, 0, 0))
-        return [R]BufReader(storage)
+        let storage = box(BufReaderStorage[R](r, make_bytes(cap), cap, 0, 0))
+        return BufReader[R](storage)
     }
 
-    private fill_buf(self ref) [UInt]Result = {
+    private fill_buf(self ref) Result[UInt] = {
         if self.storage.start < self.storage.end then {
-            return [UInt]Result.Ok(self.storage.end - self.storage.start)
+            return Result[UInt].Ok(self.storage.end - self.storage.start)
         }
         self.storage.start = 0
         self.storage.end = 0
         return when self.storage.inner.read(into: self.storage.buf.ref, 0..<self.storage.cap) in {
             .Ok(n) then {
                 self.storage.end = n
-                yield [UInt]Result.Ok(n)
+                yield Result[UInt].Ok(n)
             },
-            .Error(e) then [UInt]Result.Error(e),
+            .Error(e) then Result[UInt].Error(e),
         }
     }
 
-    public read_byte(self ref) [[UInt8]Option]Result = {
+    public read_byte(self ref) Result[Option[UInt8]] = {
         return when self.fill_buf() in {
             .Ok(n) then {
                 if n == 0 then {
-                    return [[UInt8]Option]Result.Ok([UInt8]Option.None())
+                    return Result[Option[UInt8]].Ok(Option[UInt8].None())
                 }
                 let b = self.storage.buf[self.storage.start]
                 self.storage.start += 1
-                return [[UInt8]Option]Result.Ok([UInt8]Option.Some(b))
+                return Result[Option[UInt8]].Ok(Option[UInt8].Some(b))
             },
-            .Error(e) then [[UInt8]Option]Result.Error(e),
+            .Error(e) then Result[Option[UInt8]].Error(e),
         }
     }
 
-    public read_rune(self ref) [[Rune]Option]Result = {
+    public read_rune(self ref) Result[Option[Rune]] = {
         return when self.read_byte() in {
-            .Error(e) then [[Rune]Option]Result.Error(e),
+            .Error(e) then Result[Option[Rune]].Error(e),
             .Ok(first_opt) then {
                 return when first_opt in {
-                    .None then [[Rune]Option]Result.Ok([Rune]Option.None()),
+                    .None then Result[Option[Rune]].Ok(Option[Rune].None()),
                     .Some(first) then {
-                        if first < (UInt8)128 then {
-                            return [[Rune]Option]Result.Ok([Rune]Option.Some(Rune.from_uint32_unchecked((UInt32)first)))
+                        if first < 128(UInt8) then {
+                            return Result[Option[Rune]].Ok(Option[Rune].Some(Rune.from_uint32_unchecked(first(UInt32))))
                         }
 
                         let mut needed UInt = 0
                         let mut code UInt32 = 0
 
-                        if first >= (UInt8)194 and first <= (UInt8)223 then {
+                        if first >= 194(UInt8) and first <= 223(UInt8) then {
                             needed = 1
-                            code = (UInt32)(first & (UInt8)31)
-                        } else if first >= (UInt8)224 and first <= (UInt8)239 then {
+                            code = (first & 31(UInt8))(UInt32)
+                        } else if first >= 224(UInt8) and first <= 239(UInt8) then {
                             needed = 2
-                            code = (UInt32)(first & (UInt8)15)
-                        } else if first >= (UInt8)240 and first <= (UInt8)244 then {
+                            code = (first & 15(UInt8))(UInt32)
+                        } else if first >= 240(UInt8) and first <= 244(UInt8) then {
                             needed = 3
-                            code = (UInt32)(first & (UInt8)7)
+                            code = (first & 7(UInt8))(UInt32)
                         } else {
-                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
                         }
 
                         let mut i UInt = 0
                         while i < needed then {
                             when self.read_byte() in {
                                 .Error(e) then {
-                                    return [[Rune]Option]Result.Error(e)
+                                    return Result[Option[Rune]].Error(e)
                                 },
                                 .Ok(next_opt) then {
                                     when next_opt in {
                                         .None then {
-                                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
                                         },
                                         .Some(next_byte) then {
-                                            if next_byte < (UInt8)128 or next_byte > (UInt8)191 then {
-                                                return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                                            if next_byte < 128(UInt8) or next_byte > 191(UInt8) then {
+                                                return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
                                             }
-                                            code = (code << 6) | (UInt32)(next_byte & (UInt8)63)
+                                            code = (code << 6) | ((next_byte & 63(UInt8))(UInt32))
                                         },
                                     }
                                 },
@@ -110,19 +110,19 @@ given[R Reader] [R]BufReader {
                             i += 1
                         }
 
-                        if needed == 1 and code < (UInt32)128 then {
-                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        if needed == 1 and code < 128(UInt32) then {
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
                         }
-                        if needed == 2 and code < (UInt32)2048 then {
-                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        if needed == 2 and code < 2048(UInt32) then {
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
                         }
-                        if needed == 3 and code < (UInt32)65536 then {
-                            return [[Rune]Option]Result.Error(box("invalid UTF-8 sequence"))
+                        if needed == 3 and code < 65536(UInt32) then {
+                            return Result[Option[Rune]].Error(box("invalid UTF-8 sequence"))
                         }
 
                         return when Rune.from_uint32(code) in {
-                            .Ok(r) then [[Rune]Option]Result.Ok([Rune]Option.Some(r)),
-                            .Error(_) then [[Rune]Option]Result.Error(box("invalid UTF-8 sequence")),
+                            .Ok(r) then Result[Option[Rune]].Ok(Option[Rune].Some(r)),
+                            .Error(_) then Result[Option[Rune]].Error(box("invalid UTF-8 sequence")),
                         }
                     },
                 }
@@ -130,13 +130,13 @@ given[R Reader] [R]BufReader {
         }
     }
 
-    public read_until(self ref, delim UInt8, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
+    public read_until(self ref, delim UInt8, into: mut ref List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = into.slice_spec(range)
         let base = span.start()
         let mut out_pos = base
         let out_end = span.end()
         if out_end <= out_pos then {
-            return [UInt]Result.Ok(0)
+            return Result[UInt].Ok(0)
         }
 
         let dst_ptr = into.borrow_mut_ptr()
@@ -145,7 +145,7 @@ given[R Reader] [R]BufReader {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
-                        return [UInt]Result.Ok(out_pos - base)
+                        return Result[UInt].Ok(out_pos - base)
                     }
 
                     let src_ptr = self.storage.buf.borrow_ptr()
@@ -173,67 +173,67 @@ given[R Reader] [R]BufReader {
                     out_pos += take
 
                     if found then {
-                        return [UInt]Result.Ok(out_pos - base)
+                        return Result[UInt].Ok(out_pos - base)
                     }
                 },
                 .Error(e) then {
-                    return [UInt]Result.Error(e)
+                    return Result[UInt].Error(e)
                 },
             }
         }
 
-        return [UInt]Result.Ok(out_pos - base)
+        return Result[UInt].Ok(out_pos - base)
     }
 
-    public read_line(self ref) [[String]Option]Result = {
+    public read_line(self ref) Result[Option[String]] = {
         let mut tmp = make_bytes(4096)
-        when self.read_until((UInt8)10, into: tmp.ref, ..) in {
+        when self.read_until(10(UInt8), into: tmp.ref, ..) in {
             .Ok(n) then {
                 if n == 0 then {
-                    return [[String]Option]Result.Ok([String]Option.None())
+                    return Result[Option[String]].Ok(Option[String].None())
                 }
                 let p = tmp.borrow_ptr()
                 return when String.from_utf8_ptr(p, n) in {
-                    .Ok(line) then [[String]Option]Result.Ok([String]Option.Some(line)),
-                    .Error(e) then [[String]Option]Result.Error(e),
+                    .Ok(line) then Result[Option[String]].Ok(Option[String].Some(line)),
+                    .Error(e) then Result[Option[String]].Error(e),
                 }
             },
             .Error(e) then {
-                return [[String]Option]Result.Error(e)
+                return Result[Option[String]].Error(e)
             },
         }
     }
 
-    public skip(self ref, n UInt) [UInt]Result = {
+    public skip(self ref, n UInt) Result[UInt] = {
         let mut remaining = n
         while remaining > 0 then {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
-                        return [UInt]Result.Ok(n - remaining)
+                        return Result[UInt].Ok(n - remaining)
                     }
                     let to_skip = if remaining < avail then remaining else avail
                     self.storage.start += to_skip
                     remaining -= to_skip
                 },
                 .Error(e) then {
-                    return [UInt]Result.Error(e)
+                    return Result[UInt].Error(e)
                 },
             }
         }
-        return [UInt]Result.Ok(n)
+        return Result[UInt].Ok(n)
     }
 }
 
-given[R Reader] [R]BufReader as Reader {
+given[R Reader] BufReader[R] as Reader {
 
-    public read(self ref, into: [UInt8]List mut ref, range [UInt]Range) [UInt]Result = {
+    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = into.slice_spec(range)
         let base = span.start()
         let mut out_pos = base
         let out_end = span.end()
         if out_end <= out_pos then {
-            return [UInt]Result.Ok(0)
+            return Result[UInt].Ok(0)
         }
 
         let dst_ptr = into.borrow_mut_ptr()
@@ -242,7 +242,7 @@ given[R Reader] [R]BufReader as Reader {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
-                        return [UInt]Result.Ok(out_pos - base)
+                        return Result[UInt].Ok(out_pos - base)
                     }
                     let src_ptr = self.storage.buf.borrow_ptr()
                     let remain_out = out_end - out_pos
@@ -252,22 +252,22 @@ given[R Reader] [R]BufReader as Reader {
                     out_pos += take
                 },
                 .Error(e) then {
-                    return [UInt]Result.Error(e)
+                    return Result[UInt].Error(e)
                 },
             }
         }
 
-        return [UInt]Result.Ok(out_pos - base)
+        return Result[UInt].Ok(out_pos - base)
     }
 }
 
-given[R Reader and Seeker] [R]BufReader as Seeker {
+given[R Reader and Seeker] BufReader[R] as Seeker {
 
-    public seek(self ref, pos SeekOrigin) [UInt64]Result = {
+    public seek(self ref, pos SeekOrigin) Result[UInt64] = {
         let unread = self.storage.end - self.storage.start
         let adjusted = when pos in {
             .Start(offset) then SeekOrigin.Start(offset),
-            .Current(offset) then SeekOrigin.Current(offset - (Int64)unread),
+            .Current(offset) then SeekOrigin.Current(offset - unread(Int64)),
             .End(offset) then SeekOrigin.End(offset),
         }
 
@@ -275,10 +275,10 @@ given[R Reader and Seeker] [R]BufReader as Seeker {
             .Ok(new_pos) then {
                 self.storage.start = 0
                 self.storage.end = 0
-                return [UInt64]Result.Ok(new_pos)
+                return Result[UInt64].Ok(new_pos)
             },
             .Error(e) then {
-                return [UInt64]Result.Error(e)
+                return Result[UInt64].Error(e)
             },
         }
     }
