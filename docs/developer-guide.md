@@ -111,6 +111,9 @@ Windows notes:
 # Build an executable (default command is build)
 swift run koralc path/to/file.koral
 
+# Type-check only
+swift run koralc check path/to/file.koral
+
 # Build and run
 swift run koralc run path/to/file.koral
 
@@ -128,15 +131,16 @@ swift run koralc path/to/file.koral -m=2
 CLI shape in current implementation:
 
 - `koralc <file.koral> [options]` (defaults to `build`)
-- `koralc [build|run|emit-c] <file.koral> [options]`
+- `koralc [build|check|run|emit-c] <file.koral> [options]`
 - If no command is given, the first argument must end with `.koral`.
 
 Output behavior:
 
+- `check`: type-checks only; it does not run monomorphization, C generation, or clang
 - `build`: writes executable and prints `Build successful: <path>`
 - `run`: compiles and runs executable
 - `emit-c`: writes `<basename>.c` to output directory and exits
-- Non-`emit-c` modes use a temporary `.c` file that is cleaned up automatically
+- `build` and `run` use a temporary `.c` file that is cleaned up automatically
 
 ### Standard Library Resolution (`KORAL_HOME`)
 
@@ -162,28 +166,44 @@ Notes:
 - If `Driver.getCoreLibPath()` cannot find `std/std.koral`, the driver prints an error and exits.
 - `Driver.getStdLibPath()` is also used to add `std/` include path and `koral_runtime.c` to clang when available.
 
+## Module System Rules That Commonly Drift
+
+- Module entry file names must be valid module names: start with a lowercase letter, then continue with lowercase letters, digits, or `_`.
+- `using "file"` resolves relative to the current file's directory, not the module root.
+- `using "file"` without an alias merges the target file into the current module and shares `protected` scope.
+- `using "file" as Name` declares a named submodule.
+- Explicit member imports are parser-normalized: forms such as `using Std.Io.Reader` and `using Super.Mod.Symbol` record the imported symbol directly.
+- In `using path as alias`, alias casing must match the referenced identifier after parser normalization. In practice, the last remaining path segment controls the case check.
+- `Self` is no longer valid in `using` declarations. Use string-based file imports instead.
+
+## Language Rules That Commonly Drift
+
+- String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
+- Type aliases must start with an uppercase letter.
+- `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
+
 ## Reference Creation Semantics (`.ref` / `box`)
 
-Koral distinguishes read-only references (`T ref`) from mutable references (`T mut ref`), and read-only pointers (`T ptr`) from mutable pointers (`T mut ptr`):
+Koral distinguishes read-only references (`ref T`) from mutable references (`mut ref T`), and read-only pointers (`ptr T`) from mutable pointers (`mut ptr T`):
 
 - `x.ref` forms a managed reference from an existing lvalue. The result type depends on the source's mutability:
-  - `let mut` binding → `T mut ref`
-  - `let` (immutable) binding → `T ref`
-  - Mutable path (e.g. `mut ref`'s `mut` field) → `T mut ref`
-- `T mut ref` implicitly converts to `T ref` (widening). The reverse is not allowed.
+    - `let mut` binding → `mut ref T`
+    - `let` (immutable) binding → `ref T`
+    - Mutable path (e.g. `mut ref`'s `mut` field) → `mut ref T`
+- `mut ref T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected.
-- `T ref` supports `.val` read only. `T mut ref` supports `.val` read and `.val = expr` assignment.
-- `T ptr` supports `.val` read only. `T mut ptr` supports `.val` read, `.val = expr`, and `p[i] = expr`.
-- `box(expr)` returns `T mut ref` — an escaping managed reference from temporaries/literals.
+- `ref T` supports `.val` read only. `mut ref T` supports `.val` read and `.val = expr` assignment.
+- `ptr T` supports `.val` read only. `mut ptr T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
+- `box(expr)` returns `mut ref T` — an escaping managed reference from temporaries/literals.
 
 ```koral
 let mut x = 10
-let rx Int mut ref = x.ref    // let mut → T mut ref
+let rx mut ref Int = x.ref    // let mut → mut ref T
 
 let y = 10
-let ry Int ref = y.ref        // let → T ref (read-only)
+let ry ref Int = y.ref        // let → ref T (read-only)
 
-let owned Int mut ref = box(42)   // box() returns T mut ref
+let owned mut ref Int = box(42)   // box() returns mut ref T
 
 // let rz = 42.ref            // error: rvalue cannot be borrowed
 ```
@@ -376,7 +396,7 @@ For new traits, prefer the narrowest receiver that matches the semantic contract
 - mutation traits should use `self mut ref`
 - consuming traits should use `self`
 - traits intended for trait objects should keep requirement receivers on `self ref` / `self mut ref` only
-- `Trait ref` can call only `self ref` requirements, while `Trait mut ref` can call both `self mut ref` and `self ref`
+- `ref Trait` can call only `self ref` requirements, while `mut ref Trait` can call both `self mut ref` and `self ref`
 
 Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
 
@@ -647,7 +667,7 @@ if escapeContext.shouldUseHeapAllocation(innerExpr) {
 
 using Std.*
 
-let main() = {
+let main() Void = {
     println("test passed")
 }
 ```
