@@ -125,7 +125,7 @@ Notes:
 - CLI error rendering goes through `DiagnosticError` + renderer when wrapped.
 
 ## Koral Coding Rule
-- When writing or modifying Koral code, always consult the relevant language and project documentation first (for example `docs/document.md`, `docs/grammar.bnf`, `docs/grammar_preview.koral`, and `docs/std/`).
+- When writing or modifying Koral code, always consult the relevant language and project documentation first (for example `docs/document.md`, `docs/grammar.bnf`, parser code/tests, and `docs/std/`). Use `docs/grammar_preview.koral` only as an illustrative sketch, not as an authority.
 - Ensure the resulting code follows current Koral language rules, module conventions, and repository best practices.
 - If docs and code behavior appear to conflict, treat the compiler/tested behavior as source of truth and align documentation updates in the same change when appropriate.
 - For grammar-sensitive work, prefer `docs/grammar.bnf`, parser implementation, and compiler tests over `docs/grammar_preview.koral` examples.
