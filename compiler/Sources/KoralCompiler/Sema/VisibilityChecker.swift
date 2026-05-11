@@ -93,7 +93,7 @@ public class VisibilityChecker {
         }
         
         // 仅标准库根模块符号可直接访问；子模块符号需要显式导入
-        if symbolModulePath.count == 1 && symbolModulePath[0] == "Std" {
+        if symbolModulePath.count == 1 && (symbolModulePath[0] == "Std" || symbolModulePath[0] == "std") {
             return true
         }
         

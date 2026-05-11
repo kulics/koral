@@ -858,235 +858,52 @@ extension Parser {
 
   // MARK: - Using Declarations
 
-  /// Check if current position is a foreign using declaration
-  func isForeignUsingDeclaration() -> Bool {
-    if currentToken === .foreignKeyword {
-      let state = lexer.saveState()
-      let savedToken = currentToken
-      do {
-        let nextToken = try lexer.getNextToken()
-        lexer.restoreState(state)
-        currentToken = savedToken
-        return nextToken === .usingKeyword
-      } catch {
-        lexer.restoreState(state)
-        currentToken = savedToken
-        return false
-      }
-    }
-    return false
-  }
-
-  /// Parse foreign using declaration
-  func parseForeignUsingDeclaration() throws -> GlobalNode {
-    let startSpan = currentSpan
-    try match(.foreignKeyword)
-    try match(.usingKeyword)
-
-    let libraryName: String
-    if case .string(let name) = currentToken {
-      libraryName = name
-      try match(currentToken)
-    } else if case .identifier(let name) = currentToken {
-      // Legacy support: foreign using m → foreign using "m"
-      libraryName = name
-      try match(currentToken)
-    } else {
-      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "string literal")
-    }
-
-    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-    return .foreignUsingDeclaration(libraryName: libraryName, span: span)
-  }
-  
   /// Check if current position is a using declaration
   func isUsingDeclaration() -> Bool {
-    // using ...
-    if currentToken === .usingKeyword {
-      return true
-    }
-    // public/protected/private using ...
-    if currentToken === .publicKeyword || currentToken === .protectedKeyword || currentToken === .privateKeyword {
-      let state = lexer.saveState()
-      let savedToken = currentToken
-      do {
-        // Get the token after the access modifier
-        let nextToken = try lexer.getNextToken()
-        lexer.restoreState(state)
-        currentToken = savedToken
-        return nextToken === .usingKeyword
-      } catch {
-        lexer.restoreState(state)
-        currentToken = savedToken
-        return false
-      }
-    }
-    return false
+    currentToken === .usingKeyword
   }
   
   /// Parse using declaration
   func parseUsingDeclaration() throws -> UsingDeclaration {
     let startSpan = currentSpan
-    let explicitAccess = try parseExplicitAccessModifier()
-    let access = explicitAccess ?? .private
-    
     try match(.usingKeyword)
     
     // Check if next token is a string literal → file-based using
     if case .string(let fileName) = currentToken {
       try match(currentToken)
-      
-      // Parse optional alias: using "file" as Name
-      let alias = try parseUsingAliasIfPresent()
-      
-      // Validate: alias must start with uppercase
-      if let alias, !isValidTypeName(alias) {
-        throw ParserError.invalidUsingAliasCase(
-          span: startSpan,
-          alias: alias,
-          referenced: fileName,
-          expectedUppercase: true
+
+      if currentToken === .asKeyword {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: currentToken.description,
+          expected: "file merge syntax no longer supports aliases; declare a module in koral.json instead"
         )
       }
-      
-      // Validate: merge (no alias) cannot have explicit access modifier
-      if alias == nil && explicitAccess != nil {
-        throw ParserError.submoduleMergeNoAccessModifier(span: startSpan)
-      }
-      
+
       let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
       return UsingDeclaration(
         pathKind: .fileUsing,
         fileName: fileName,
-        alias: alias,
-        access: access,
         span: span
       )
     }
-    
-    // Otherwise, parse identifier-based using (external / parent)
-    let (pathKind, pathSegments, importedSymbol, isBatchImport) = try parseUsingIdentifierPath()
 
-    if isBatchImport && currentToken === .asKeyword {
-      throw ParserError.unexpectedToken(
-        span: currentSpan,
-        got: currentToken.description,
-        expected: "';' or end of declaration"
+    if case .identifier = currentToken, isModuleUsingDeclarationStart() {
+      let (modulePath, moduleItems) = try parseExplicitModuleUsing()
+      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+      return UsingDeclaration(
+        pathKind: .modulePath,
+        pathSegments: modulePath,
+        moduleItems: moduleItems,
+        span: span
       )
     }
 
-    let alias = try parseUsingAliasIfPresent()
-    try validateUsingAliasCase(
-      alias: alias,
-      pathKind: pathKind,
-      pathSegments: pathSegments,
-      span: startSpan
+    throw ParserError.unexpectedToken(
+      span: currentSpan,
+      got: currentToken.description,
+      expected: "string literal for file merge, or module import like 'std::io { Reader }'"
     )
-    let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
-    return UsingDeclaration(
-      pathKind: pathKind,
-      pathSegments: pathSegments,
-      alias: alias,
-      importedSymbol: importedSymbol,
-      isBatchImport: isBatchImport,
-      access: access,
-      span: span
-    )
-  }
-
-  private func parseUsingIdentifierPath() throws -> (
-    kind: UsingPathKind,
-    segments: [String],
-    importedSymbol: String?,
-    isBatchImport: Bool
-  ) {
-    var kind: UsingPathKind
-    var segments: [String] = []
-    var isBatchImport = false
-    var inLeadingSuperChain = false
-
-    switch currentToken {
-    case .selfKeyword, .selfTypeKeyword:
-      throw ParserError.invalidUsingPath(
-        span: currentSpan,
-        path: "Self",
-        reason: "'Self' is not allowed in using declarations. Use string syntax: using \"file_name\" or using \"file_name\" as Name"
-      )
-    case .superKeyword:
-      kind = .parent
-      segments.append("Super")
-      inLeadingSuperChain = true
-      try match(.superKeyword)
-    case .identifier(let name):
-      kind = .path
-      segments.append(name)
-      try match(currentToken)
-    default:
-      throw ParserError.unexpectedToken(
-        span: currentSpan,
-        got: currentToken.description,
-        expected: "Super, module name, or string literal"
-      )
-    }
-
-    while currentToken === .dot {
-      try match(.dot)
-
-      if currentToken === .multiply {
-        try match(.multiply)
-        isBatchImport = true
-        break
-      }
-
-      switch currentToken {
-      case .identifier(let segment):
-        segments.append(segment)
-        inLeadingSuperChain = false
-        try match(currentToken)
-      case .superKeyword:
-        guard kind == .parent && inLeadingSuperChain else {
-          throw ParserError.invalidUsingPath(
-            span: currentSpan,
-            path: "Super",
-            reason: "'Super' can only appear as leading segments"
-          )
-        }
-        segments.append("Super")
-        try match(.superKeyword)
-      default:
-        throw ParserError.unexpectedToken(
-          span: currentSpan,
-          got: currentToken.description,
-          expected: "identifier or '*'"
-        )
-      }
-    }
-
-    if inLeadingSuperChain {
-      let hasConcreteItem = segments.contains { $0 != "Super" }
-      if !hasConcreteItem {
-        throw ParserError.usingRequiresConcreteItem(span: currentSpan, base: "Super")
-      }
-    }
-
-    // Explicit member import normalization
-    var importedSymbol: String? = nil
-    if !isBatchImport {
-      if inLeadingSuperChain {
-        // Super paths: using Super.Mod.Symbol -> importedSymbol=Symbol
-        let concreteCount = segments.filter { $0 != "Super" }.count
-        if concreteCount >= 2 {
-          importedSymbol = segments.removeLast()
-        }
-      } else {
-        // Non-Super paths: using Std.Io.Reader -> importedSymbol=Reader
-        if segments.count >= 3 {
-          importedSymbol = segments.removeLast()
-        }
-      }
-    }
-
-    return (kind, segments, importedSymbol, isBatchImport)
   }
 
   private func parseUsingAliasIfPresent() throws -> String? {
@@ -1101,48 +918,110 @@ extension Parser {
     return alias
   }
 
-  private func validateUsingAliasCase(
-    alias: String?,
-    pathKind: UsingPathKind,
-    pathSegments: [String],
-    span: SourceSpan
-  ) throws {
-    guard let alias, !alias.isEmpty else {
-      return
+  private func isModuleUsingDeclarationStart() -> Bool {
+    let state = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(state)
+      currentToken = savedToken
     }
 
-    let referencedIdentifier: String? = {
-      switch pathKind {
-      case .path:
-        return pathSegments.last
-      case .parent:
-        return pathSegments.last(where: { $0 != "Super" })
-      case .fileUsing:
-        return nil
+    guard case .identifier = currentToken else {
+      return false
+    }
+
+    do {
+      let nextToken = try lexer.getNextToken()
+      return nextToken === .doubleColon || nextToken === .leftBrace
+    } catch {
+      return false
+    }
+  }
+
+  private func parseExplicitModuleUsing() throws -> ([String], [UsingModuleItem]) {
+    var pathSegments: [String] = []
+
+    guard case .identifier(let firstSegment) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+    }
+    pathSegments.append(moduleFileNameToIdentifier(firstSegment))
+    try match(currentToken)
+
+    while currentToken === .doubleColon {
+      try match(.doubleColon)
+      guard case .identifier(let segment) = currentToken else {
+        throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
-    }()
-
-    guard let referencedIdentifier else {
-      return
+      pathSegments.append(moduleFileNameToIdentifier(segment))
+      try match(currentToken)
     }
 
-    if isValidTypeName(referencedIdentifier) && !isValidTypeName(alias) {
-      throw ParserError.invalidUsingAliasCase(
-        span: span,
-        alias: alias,
-        referenced: referencedIdentifier,
-        expectedUppercase: true
+    try match(.leftBrace)
+    var items: [UsingModuleItem] = []
+    var sawAllPublic = false
+
+    while currentToken !== .rightBrace {
+      if currentToken === .range {
+        if !items.isEmpty {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "'..' must be the only item in a module import list"
+          )
+        }
+        try match(.range)
+        items.append(UsingModuleItem(kind: .allPublic))
+        sawAllPublic = true
+      } else {
+        guard case .identifier(let symbolName) = currentToken else {
+          throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+        }
+        try match(currentToken)
+        let alias = try parseUsingAliasIfPresent()
+        if let alias {
+          if isValidTypeName(symbolName) && !isValidTypeName(alias) {
+            throw ParserError.invalidUsingAliasCase(
+              span: currentSpan,
+              alias: alias,
+              referenced: symbolName,
+              expectedUppercase: true
+            )
+          }
+          if isValidVariableName(symbolName) && !isValidVariableName(alias) {
+            throw ParserError.invalidUsingAliasCase(
+              span: currentSpan,
+              alias: alias,
+              referenced: symbolName,
+              expectedUppercase: false
+            )
+          }
+        }
+        items.append(UsingModuleItem(kind: .symbol, name: symbolName, alias: alias))
+      }
+
+      if currentToken === .comma {
+        if sawAllPublic {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "'..' must not be combined with other imports"
+          )
+        }
+        try match(.comma)
+      } else {
+        break
+      }
+    }
+
+    try match(.rightBrace)
+    if items.isEmpty {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "at least one import item"
       )
     }
-
-    if isValidVariableName(referencedIdentifier) && !isValidVariableName(alias) {
-      throw ParserError.invalidUsingAliasCase(
-        span: span,
-        alias: alias,
-        referenced: referencedIdentifier,
-        expectedUppercase: false
-      )
-    }
+    return (pathSegments, items)
   }
 
 }

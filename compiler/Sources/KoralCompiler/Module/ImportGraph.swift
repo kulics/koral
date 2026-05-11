@@ -8,7 +8,7 @@ public struct ImportGraph {
     public private(set) var edges: [(source: [String], target: [String], kind: ImportKind, sourceFile: String?)]
     
     /// 符号导入：(导入发生的模块路径, 目标模块路径, 符号名称, 导入类型)
-    public private(set) var symbolImports: [(module: [String], target: [String], symbol: String, kind: ImportKind, sourceFile: String?)]
+    public private(set) var symbolImports: [(module: [String], target: [String], symbol: String, originalSymbol: String, kind: ImportKind, sourceFile: String?)]
 
     /// 模块别名：(导入发生的模块路径, 别名, 目标模块路径)
     public private(set) var moduleAliases: [(module: [String], alias: String, target: [String], sourceFile: String?)]
@@ -67,8 +67,37 @@ public struct ImportGraph {
     ///   - symbol: 符号名称
     ///   - kind: 导入类型
     ///   - sourceFile: 若为 private using，则限定为该文件可见；nil 表示模块级可见
-    public mutating func addSymbolImport(module: [String], target: [String], symbol: String, kind: ImportKind, sourceFile: String? = nil) {
-        symbolImports.append((module: module, target: target, symbol: symbol, kind: kind, sourceFile: sourceFile))
+    public mutating func addSymbolImport(
+        module: [String],
+        target: [String],
+        symbol: String,
+        originalSymbol: String? = nil,
+        kind: ImportKind,
+        sourceFile: String? = nil
+    ) {
+        symbolImports.append((
+            module: module,
+            target: target,
+            symbol: symbol,
+            originalSymbol: originalSymbol ?? symbol,
+            kind: kind,
+            sourceFile: sourceFile
+        ))
+    }
+
+    public func resolveAliasedSymbol(
+        alias: String,
+        inModule: [String],
+        inSourceFile: String? = nil
+    ) -> (target: [String], originalSymbol: String)? {
+        for entry in symbolImports.reversed() {
+            if entry.module == inModule
+                && entry.symbol == alias
+                && (entry.sourceFile == nil || entry.sourceFile == inSourceFile) {
+                return (entry.target, entry.originalSymbol)
+            }
+        }
+        return nil
     }
     
     /// 获取符号的导入类型
@@ -95,7 +124,7 @@ public struct ImportGraph {
             for symbolImport in symbolImports {
                 if symbolImport.module == inModule &&
                     symbolImport.target == symbolModulePath &&
-                    symbolImport.symbol == name &&
+                    (symbolImport.symbol == name || symbolImport.originalSymbol == name) &&
                     (symbolImport.sourceFile == nil || symbolImport.sourceFile == inSourceFile) {
                     return symbolImport.kind
                 }

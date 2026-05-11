@@ -15,6 +15,24 @@ public enum UsingPathKind {
   case path        // 标识符路径（非 Super）: Std.Io / Worker.run
   case parent      // 父模块导入: Super.Sib / Super.Super.Uncle
   case fileUsing   // 文件引用: using "file_name" / using "file_name" as Name
+  case modulePath  // 显式模块导入: using std::io { Reader, .. }
+}
+
+public enum UsingModuleItemKind {
+  case symbol
+  case allPublic
+}
+
+public struct UsingModuleItem {
+  public let kind: UsingModuleItemKind
+  public let name: String?
+  public let alias: String?
+
+  public init(kind: UsingModuleItemKind, name: String? = nil, alias: String? = nil) {
+    self.kind = kind
+    self.name = name
+    self.alias = alias
+  }
 }
 
 /// Using 声明 AST 节点
@@ -40,6 +58,9 @@ public struct UsingDeclaration {
   
   /// 是否批量导入: using Std.Io.*
   public let isBatchImport: Bool
+
+  /// 显式模块导入项: using std::io { Reader, .. }
+  public let moduleItems: [UsingModuleItem]
   
   /// 访问修饰符
   public let access: AccessModifier
@@ -54,6 +75,7 @@ public struct UsingDeclaration {
     alias: String? = nil,
     importedSymbol: String? = nil,
     isBatchImport: Bool = false,
+    moduleItems: [UsingModuleItem] = [],
     access: AccessModifier = .private,
     span: SourceSpan
   ) {
@@ -63,6 +85,7 @@ public struct UsingDeclaration {
     self.alias = alias
     self.importedSymbol = importedSymbol
     self.isBatchImport = isBatchImport
+    self.moduleItems = moduleItems
     self.access = access
     self.span = span
   }

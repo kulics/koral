@@ -10,6 +10,17 @@ enum DriverCommand: String {
 public class Driver {
   /// Source manager for error rendering with code snippets
   private var sourceManager = SourceManager()
+
+  private struct InvocationOptions {
+    var legacyFilePath: String?
+    var packageConfigPath: String?
+    var targetModuleName: String?
+    var depsRoot: String?
+    var stdConfigPath: String?
+    var outputDir: String?
+    var noStd = false
+    var escapeAnalysisReport = false
+  }
   
   public init() {}
 
@@ -31,55 +42,74 @@ public class Driver {
 
     let commandStr = args[1]
     let command = DriverCommand(rawValue: commandStr)
-
-    let filePath: String
     let mode: DriverCommand
     var remainingArgs: [String] = []
 
     if let cmd = command {
-      // koralc <command> <file> [options]
-      guard args.count > 2 else {
-        writeStderr("Error: Missing file path for command '\(cmd.rawValue)'")
-        return
-      }
       mode = cmd
-      filePath = args[2]
-      if args.count > 3 {
-        remainingArgs = Array(args[3...])
+      if args.count > 2 {
+        remainingArgs = Array(args[2...])
       }
+    } else if commandStr.hasSuffix(".koral") {
+      mode = .build
+      remainingArgs = Array(args[1...])
+    } else if commandStr.hasPrefix("-") {
+      mode = .build
+      remainingArgs = Array(args[1...])
     } else {
-      // koralc <file> [options] (default to build)
-      // Check if the first argument looks like a file
-      if commandStr.hasSuffix(".koral") {
-        mode = .build
-        filePath = commandStr
-        if args.count > 2 {
-          remainingArgs = Array(args[2...])
-        }
-      } else {
-        writeStderr("Unknown command or file: \(commandStr)")
-        printUsage()
-        return
-      }
+      writeStderr("Unknown command or file: \(commandStr)")
+      printUsage()
+      return
     }
 
     // Parse options
-    var outputDir: String?
-    var noStd = false
+    var options = InvocationOptions()
     var escapeAnalysisLevel = 0
     var i = 0
     while i < remainingArgs.count {
       let arg = remainingArgs[i]
       if arg == "-o" || arg == "--output" {
         if i + 1 < remainingArgs.count {
-          outputDir = remainingArgs[i + 1]
+          options.outputDir = remainingArgs[i + 1]
           i += 2
         } else {
           writeStderr("Error: Missing path for -o option")
           exit(1)
         }
+      } else if arg == "--package-config" {
+        if i + 1 < remainingArgs.count {
+          options.packageConfigPath = remainingArgs[i + 1]
+          i += 2
+        } else {
+          writeStderr("Error: Missing path for --package-config option")
+          exit(1)
+        }
+      } else if arg == "--target-module" {
+        if i + 1 < remainingArgs.count {
+          options.targetModuleName = remainingArgs[i + 1]
+          i += 2
+        } else {
+          writeStderr("Error: Missing value for --target-module option")
+          exit(1)
+        }
+      } else if arg == "--deps-root" {
+        if i + 1 < remainingArgs.count {
+          options.depsRoot = remainingArgs[i + 1]
+          i += 2
+        } else {
+          writeStderr("Error: Missing path for --deps-root option")
+          exit(1)
+        }
+      } else if arg == "--std-config" {
+        if i + 1 < remainingArgs.count {
+          options.stdConfigPath = remainingArgs[i + 1]
+          i += 2
+        } else {
+          writeStderr("Error: Missing path for --std-config option")
+          exit(1)
+        }
       } else if arg == "--no-std" {
-        noStd = true
+        options.noStd = true
         i += 1
       } else if arg == "-m" {
         // Go-style escape analysis flag.
@@ -96,15 +126,26 @@ public class Driver {
           writeStderr("Error: Invalid value for -m: \(levelString)")
           exit(1)
         }
+      } else if arg.hasPrefix("-") {
+        i += 1
       } else {
+        if options.legacyFilePath == nil {
+          options.legacyFilePath = arg
+        }
         i += 1
       }
     }
 
-    let escapeAnalysisReport = escapeAnalysisLevel > 0
+    options.escapeAnalysisReport = escapeAnalysisLevel > 0
+
+    if options.packageConfigPath == nil && options.legacyFilePath == nil {
+      writeStderr("Error: Missing input file or --package-config")
+      printUsage()
+      return
+    }
 
     do {
-      try process(file: filePath, mode: mode, outputDir: outputDir, noStd: noStd, escapeAnalysisReport: escapeAnalysisReport)
+      try process(mode: mode, options: options)
     } catch var error as DiagnosticError {
       // Attach source manager for rendering with code snippets
       error.sourceManager = sourceManager
@@ -218,7 +259,159 @@ public class Driver {
     }
   }
 
-  func process(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false, escapeAnalysisReport: Bool = false) throws {
+  private func injectStdPreludeImports(
+    stdRootPath: [String],
+    loadedModulePaths: [[String]],
+    importGraph: inout ImportGraph
+  ) {
+    let uniquePaths = Set(loadedModulePaths.map { $0.joined(separator: ".") })
+    for moduleKey in uniquePaths.sorted() {
+      let modulePath = moduleKey.isEmpty ? [] : moduleKey.split(separator: ".").map(String.init)
+      if modulePath == stdRootPath {
+        continue
+      }
+      let alreadyInjected = importGraph.edges.contains { edge in
+        edge.source == modulePath
+          && edge.target == stdRootPath
+          && edge.kind == .batchImport
+          && edge.sourceFile == nil
+      }
+      if alreadyInjected {
+        continue
+      }
+      importGraph.addModuleImport(from: modulePath, to: stdRootPath, kind: .batchImport)
+    }
+  }
+
+  private func registerModuleSources(from module: ModuleInfo, displayPrefix: String) {
+    if let source = try? String(contentsOfFile: module.entryFile, encoding: .utf8) {
+      let displayName = "\(displayPrefix)/" + URL(fileURLWithPath: module.entryFile).lastPathComponent
+      sourceManager.loadFile(name: displayName, content: source)
+    }
+    for mergedSubmodule in module.mergedSubmodules {
+      if let source = try? String(contentsOfFile: mergedSubmodule, encoding: .utf8) {
+        let displayName = "\(displayPrefix)/" + URL(fileURLWithPath: mergedSubmodule).lastPathComponent
+        sourceManager.loadFile(name: displayName, content: source)
+      }
+    }
+    for (_, submodule) in module.submodules {
+      registerModuleSources(from: submodule, displayPrefix: displayPrefix)
+    }
+  }
+
+  private func sanitizeModuleArtifactName(_ moduleName: String) -> String {
+    moduleName.replacingOccurrences(of: "::", with: "__")
+  }
+
+  private func splitModuleName(_ moduleName: String) -> [String] {
+    moduleName
+      .split(separator: ":")
+      .map(String.init)
+      .filter { !$0.isEmpty }
+      .map(moduleFileNameToIdentifier)
+  }
+
+  private func defaultTargetModuleName(in manifest: PackageManifest) -> String? {
+    if let defaultTargetModuleName = manifest.defaultTargetModuleName {
+      if manifest.modules[defaultTargetModuleName] != nil {
+        return defaultTargetModuleName
+      }
+    }
+    if manifest.modules.count == 1 {
+      return manifest.modules.keys.first
+    }
+    return nil
+  }
+
+  private func loadManifestModules(
+    manifest: PackageManifest,
+    resolver: ModuleResolver
+  ) throws -> (
+    globalNodes: [GlobalNode],
+    nodeSourceInfoList: [GlobalNodeSourceInfo],
+    importGraph: ImportGraph,
+    rootModulePath: [String]?,
+    loadedModulePaths: [[String]],
+    linkedLibraries: [String]
+  ) {
+    var globalNodes: [GlobalNode] = []
+    var nodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    var importGraph = ImportGraph()
+    var rootModulePath: [String]?
+    var loadedModulePaths: [[String]] = []
+    var linkedLibraries: [String] = []
+
+    for moduleName in manifest.modules.keys.sorted() {
+      guard let spec = manifest.modules[moduleName] else { continue }
+      let compilationUnit = try resolver.resolveModule(
+        entryFile: spec.entryPath,
+        rootModulePath: spec.pathSegments,
+        resolveModuleImports: false
+      )
+      let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
+      for (node, sourceFile, modulePath) in nodesWithInfo {
+        globalNodes.append(node)
+        nodeSourceInfoList.append(
+          GlobalNodeSourceInfo(sourceFile: sourceFile, modulePath: modulePath, node: node)
+        )
+      }
+      importGraph.merge(compilationUnit.importGraph)
+      registerModuleSources(from: compilationUnit.rootModule, displayPrefix: moduleName)
+      loadedModulePaths.append(spec.pathSegments)
+      linkedLibraries.append(contentsOf: manifest.links)
+      linkedLibraries.append(contentsOf: spec.links)
+      if rootModulePath == nil && !moduleName.contains("::") {
+        rootModulePath = spec.pathSegments
+      }
+    }
+
+    if rootModulePath == nil {
+      rootModulePath = loadedModulePaths.first
+    }
+
+    return (
+      globalNodes: globalNodes,
+      nodeSourceInfoList: nodeSourceInfoList,
+      importGraph: importGraph,
+      rootModulePath: rootModulePath,
+      loadedModulePaths: loadedModulePaths,
+      linkedLibraries: linkedLibraries
+    )
+  }
+
+  private func process(mode: DriverCommand, options: InvocationOptions) throws {
+    if let packageConfigPath = options.packageConfigPath {
+      try processPackage(
+        packageConfigPath: packageConfigPath,
+        targetModuleName: options.targetModuleName,
+        mode: mode,
+        outputDir: options.outputDir,
+        noStd: options.noStd,
+        escapeAnalysisReport: options.escapeAnalysisReport,
+        depsRoot: options.depsRoot,
+        stdConfigPath: options.stdConfigPath
+      )
+      return
+    }
+
+    guard let filePath = options.legacyFilePath else {
+      throw NSError(
+        domain: "Driver",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Missing legacy input file"]
+      )
+    }
+
+    try processLegacy(
+      file: filePath,
+      mode: mode,
+      outputDir: options.outputDir,
+      noStd: options.noStd,
+      escapeAnalysisReport: options.escapeAnalysisReport
+    )
+  }
+
+  private func processLegacy(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false, escapeAnalysisReport: Bool = false) throws {
     let fileManager = FileManager.default
     let inputURL = URL(fileURLWithPath: file).standardized
     
@@ -236,58 +429,43 @@ public class Driver {
     }
 
     let userDisplayName = inputURL.lastPathComponent
-    let stdDisplayName = "std/std.koral"
+    let stdDisplayName = getStdManifestPath() ?? "std/koral.json"
 
     // Initialize module resolver
     let resolver = initializeModuleResolver()
     
     var stdGlobalNodes: [GlobalNode] = []
     var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var stdCompilationUnit: CompilationUnit? = nil
+    var stdImportGraph = ImportGraph()
+    var stdRootModulePath: [String]? = nil
+    var loadedStdModulePaths: [[String]] = []
+    var extraLinkedLibraries: [String] = []
     
     if !noStd {
-        // Load standard library using ModuleResolver (same as user code)
-        let stdLibPath = getCoreLibPath()
-        do {
-            stdCompilationUnit = try resolver.resolveModule(entryFile: stdLibPath)
-            
-            // Collect std library nodes with source info
-            let stdNodesWithInfo = stdCompilationUnit!.getAllGlobalNodesWithSourceInfo()
-            for (node, sourceFile, modulePath) in stdNodesWithInfo {
-                stdGlobalNodes.append(node)
-                stdNodeSourceInfoList.append(GlobalNodeSourceInfo(
-                    sourceFile: sourceFile,
-                    modulePath: modulePath,
-                node: node
-                ))
-            }
-            
-            // Register std library source files with source manager
-            func registerStdSources(from module: ModuleInfo) {
-                if let source = try? String(contentsOfFile: module.entryFile, encoding: .utf8) {
-                    let displayName = "std/" + URL(fileURLWithPath: module.entryFile).lastPathComponent
-                    sourceManager.loadFile(name: displayName, content: source)
-                }
-                for mergedSubmodule in module.mergedSubmodules {
-                  if let source = try? String(contentsOfFile: mergedSubmodule, encoding: .utf8) {
-                    let displayName = "std/" + URL(fileURLWithPath: mergedSubmodule).lastPathComponent
-                        sourceManager.loadFile(name: displayName, content: source)
-                    }
-                }
-                for (_, submodule) in module.submodules {
-                    registerStdSources(from: submodule)
-                }
-            }
-            registerStdSources(from: stdCompilationUnit!.rootModule)
-            
-        } catch let error as ModuleError {
-            throw DiagnosticError(
-                stage: .other,
-                fileName: stdDisplayName,
-                underlying: error,
-                sourceManager: sourceManager
-            )
+      do {
+        guard let stdManifestPath = getStdManifestPath() else {
+          throw NSError(
+            domain: "Driver",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Could not locate std/koral.json"]
+          )
         }
+        let stdManifest = try loadPackageManifest(at: stdManifestPath)
+        let loadedStd = try loadManifestModules(manifest: stdManifest, resolver: resolver)
+        stdGlobalNodes = loadedStd.globalNodes
+        stdNodeSourceInfoList = loadedStd.nodeSourceInfoList
+        stdImportGraph = loadedStd.importGraph
+        stdRootModulePath = loadedStd.rootModulePath
+        loadedStdModulePaths = loadedStd.loadedModulePaths
+        extraLinkedLibraries.append(contentsOf: loadedStd.linkedLibraries)
+      } catch let error as ModuleError {
+        throw DiagnosticError(
+          stage: .other,
+          fileName: stdDisplayName,
+          underlying: error,
+          sourceManager: sourceManager
+        )
+      }
     }
 
     // Compile user code
@@ -342,31 +520,166 @@ public class Driver {
       )
     }
     
-    let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
-
     var mergedImportGraph = ImportGraph()
-    if let stdCompilationUnit {
-      mergedImportGraph.merge(stdCompilationUnit.importGraph)
-    }
+    mergedImportGraph.merge(stdImportGraph)
     if let userCompilationUnit {
       mergedImportGraph.merge(userCompilationUnit.importGraph)
     }
-    if let stdCompilationUnit, let userCompilationUnit {
+    if let stdRootModulePath, let userCompilationUnit {
       injectStdPreludeImports(
-        stdCompilationUnit: stdCompilationUnit,
-        userCompilationUnit: userCompilationUnit,
+        stdRootPath: stdRootModulePath,
+        loadedModulePaths: loadedStdModulePaths + userCompilationUnit.loadedModules.values.map(\.path),
         importGraph: &mergedImportGraph
       )
     }
 
-    // Type checking - always use source info initializer for unified handling
+    try performCompilation(
+      baseName: baseName,
+      outputDirectory: outputDirectory,
+      mode: mode,
+      escapeAnalysisReport: escapeAnalysisReport,
+      stdDisplayName: stdDisplayName,
+      userDisplayName: userDisplayName,
+      stdGlobalNodes: stdGlobalNodes,
+      allGlobalNodes: allGlobalNodes,
+      nodeSourceInfoList: nodeSourceInfoList,
+      importGraph: mergedImportGraph,
+      extraLinkedLibraries: extraLinkedLibraries
+    )
+  }
+
+  private func processPackage(
+    packageConfigPath: String,
+    targetModuleName: String?,
+    mode: DriverCommand,
+    outputDir: String?,
+    noStd: Bool,
+    escapeAnalysisReport: Bool,
+    depsRoot: String?,
+    stdConfigPath: String?
+  ) throws {
+    let packageConfigURL = URL(fileURLWithPath: packageConfigPath).standardized
+    let manifest = try loadPackageManifest(at: packageConfigURL.path)
+    guard let resolvedTargetModuleName = targetModuleName ?? defaultTargetModuleName(in: manifest) else {
+      throw PackageManifestError.missingTargetModule("<unspecified>")
+    }
+    let resolvedStdConfigPath = noStd ? nil : (stdConfigPath ?? getStdManifestPath())
+    let packageGraph = try loadResolvedPackageGraph(
+      rootManifestPath: packageConfigURL.path,
+      targetModuleName: resolvedTargetModuleName,
+      stdManifestPath: resolvedStdConfigPath,
+      depsRoot: depsRoot
+    )
+
+    let baseName = sanitizeModuleArtifactName(packageGraph.targetModuleName)
+    let packageRootURL = packageConfigURL.deletingLastPathComponent()
+    let outputDirectory: URL
+    if let outputDir {
+      outputDirectory = URL(fileURLWithPath: outputDir).standardized
+    } else {
+      outputDirectory = packageRootURL
+    }
+
+    let resolver = initializeModuleResolver()
+    var stdGlobalNodes: [GlobalNode] = []
+    var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    var userGlobalNodes: [GlobalNode] = []
+    var userNodeSourceInfoList: [GlobalNodeSourceInfo] = []
+    var mergedImportGraph = ImportGraph()
+    var extraLinkedLibraries: [String] = []
+
+    for moduleName in packageGraph.reachableModuleNames {
+      guard let spec = packageGraph.modulesByName[moduleName] else { continue }
+      let isStdModule: Bool
+      switch spec.packageKind {
+      case .std:
+        isStdModule = true
+      case .root, .dependency:
+        isStdModule = false
+      }
+
+      do {
+        resolver.manifestModuleAliases = spec.visibleModuleAliases
+        defer { resolver.manifestModuleAliases = [] }
+        let compilationUnit = try resolver.resolveModule(
+          entryFile: spec.entryFile,
+          rootModulePath: spec.pathSegments,
+          resolveModuleImports: false
+        )
+        let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
+        for (node, sourceFile, modulePath) in nodesWithInfo {
+          let info = GlobalNodeSourceInfo(sourceFile: sourceFile, modulePath: modulePath, node: node)
+          if isStdModule {
+            stdGlobalNodes.append(node)
+            stdNodeSourceInfoList.append(info)
+          } else {
+            userGlobalNodes.append(node)
+            userNodeSourceInfoList.append(info)
+          }
+        }
+        mergedImportGraph.merge(compilationUnit.importGraph)
+        registerModuleSources(from: compilationUnit.rootModule, displayPrefix: moduleName)
+      } catch let error as ModuleError {
+        throw DiagnosticError(
+          stage: .other,
+          fileName: spec.entryFile,
+          underlying: error,
+          sourceManager: sourceManager
+        )
+      }
+
+      extraLinkedLibraries.append(contentsOf: spec.links)
+    }
+
+    if let stdRootModuleName = packageGraph.stdRootModuleName {
+      injectStdPreludeImports(
+        stdRootPath: splitModuleName(stdRootModuleName),
+        loadedModulePaths: packageGraph.reachableModuleNames.map(splitModuleName),
+        importGraph: &mergedImportGraph
+      )
+    }
+
+    let allGlobalNodes = stdGlobalNodes + userGlobalNodes
+    let nodeSourceInfoList = stdNodeSourceInfoList + userNodeSourceInfoList
+
+    try performCompilation(
+      baseName: baseName,
+      outputDirectory: outputDirectory,
+      mode: mode,
+      escapeAnalysisReport: escapeAnalysisReport,
+      stdDisplayName: resolvedStdConfigPath ?? "std/koral.json",
+      userDisplayName: packageGraph.targetModuleName,
+      stdGlobalNodes: stdGlobalNodes,
+      allGlobalNodes: allGlobalNodes,
+      nodeSourceInfoList: nodeSourceInfoList,
+      importGraph: mergedImportGraph,
+      extraLinkedLibraries: extraLinkedLibraries
+    )
+  }
+
+  private func performCompilation(
+    baseName: String,
+    outputDirectory: URL,
+    mode: DriverCommand,
+    escapeAnalysisReport: Bool,
+    stdDisplayName: String,
+    userDisplayName: String,
+    stdGlobalNodes: [GlobalNode],
+    allGlobalNodes: [GlobalNode],
+    nodeSourceInfoList: [GlobalNodeSourceInfo],
+    importGraph: ImportGraph,
+    extraLinkedLibraries: [String]
+  ) throws {
+    let fileManager = FileManager.default
+    let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
+
     let typeChecker = TypeChecker(
       ast: combinedAST,
       nodeSourceInfoList: nodeSourceInfoList,
       coreGlobalCount: stdGlobalNodes.count,
       coreFileName: stdDisplayName,
       userFileName: userDisplayName,
-      importGraph: mergedImportGraph
+      importGraph: importGraph
     )
     let typeCheckerOutput: TypeCheckerOutput
     do {
@@ -380,12 +693,10 @@ public class Driver {
       )
     }
 
-    // check mode: stop after type checking, no codegen
     if mode == .check {
       return
     }
 
-    // 2. Monomorphization (new phase)
     let monomorphizer = Monomorphizer(input: typeCheckerOutput)
     let monomorphizedProgram: MonomorphizedProgram
     do {
@@ -399,15 +710,13 @@ public class Driver {
       )
     }
 
-    // 3. Code generation
     let codeGen = CodeGen(
       ast: monomorphizedProgram,
       context: monomorphizer.context,
       escapeAnalysisReportEnabled: escapeAnalysisReport
     )
     let cSource = codeGen.generate()
-    
-    // Output escape analysis report if enabled
+
     if escapeAnalysisReport {
       let diagnostics = codeGen.getEscapeAnalysisDiagnostics()
       if !diagnostics.isEmpty {
@@ -415,7 +724,6 @@ public class Driver {
       }
     }
 
-    // Ensure output directory exists
     if !fileManager.fileExists(atPath: outputDirectory.path) {
       try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
     }
@@ -442,23 +750,18 @@ public class Driver {
       return
     }
 
-    // 2. Compile C to Executable using Clang
     #if os(Windows)
     let exeURL = outputDirectory.appendingPathComponent(baseName + ".exe")
     #else
     let exeURL = outputDirectory.appendingPathComponent(baseName)
     #endif
-    
-    // Suppress warnings to keep output clean
-    var clangArgs = [cFileURL.path]
 
-    // If a koral runtime C file exists in the std directory, include it
+    var clangArgs = [cFileURL.path]
     if let stdPath = getStdLibPath() {
       let runtimeURL = URL(fileURLWithPath: stdPath).appendingPathComponent("koral_runtime.c")
       if FileManager.default.fileExists(atPath: runtimeURL.path) {
         clangArgs.append(runtimeURL.path)
       }
-      // Add std directory to include path for koral_runtime.h and related headers
       clangArgs.append(contentsOf: ["-I", stdPath])
     }
 
@@ -467,27 +770,22 @@ public class Driver {
     clangArgs.append("-Wno-everything")
     clangArgs.append("-O1")
 
-    // Collect linked libraries from foreign using declarations (in order)
-    let linkedLibraries: [String] = monomorphizedProgram.globalNodes.compactMap { node in
+    let foreignLinkedLibraries: [String] = monomorphizedProgram.globalNodes.compactMap { node in
       if case .foreignUsing(let libraryName) = node {
         return libraryName
       }
       return nil
     }
+    let linkedLibraries = Array(NSOrderedSet(array: foreignLinkedLibraries + extraLinkedLibraries)) as? [String] ?? (foreignLinkedLibraries + extraLinkedLibraries)
     for lib in linkedLibraries {
-      // libc is implicitly linked; skip -lc on all platforms
       if lib == "c" { continue }
       clangArgs.append("-l\(lib)")
     }
 
     #if os(Windows)
-    // koral_runtime.c uses BCryptGenRandom on Windows.
-    // Ensure bcrypt is linked even when not requested by foreign using.
     if !linkedLibraries.contains("bcrypt") {
       clangArgs.append("-lbcrypt")
     }
-    // koral_runtime.c uses Winsock2 for socket operations.
-    // Ensure ws2_32 is linked even when not requested by foreign using.
     if !linkedLibraries.contains("ws2_32") {
       clangArgs.append("-lws2_32")
     }
@@ -495,16 +793,18 @@ public class Driver {
 
     #if os(macOS)
     if let sdkPath = getSDKPath() {
-        clangArgs.append(contentsOf: ["-isysroot", sdkPath])
+      clangArgs.append(contentsOf: ["-isysroot", sdkPath])
     }
     #endif
-    
+
     let clangPath = findExecutable("clang") ?? "/usr/bin/clang"
     let clangResult = try runSubprocess(executable: clangPath, args: clangArgs)
     if clangResult != 0 {
       throw NSError(
-        domain: "Driver", code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Clang compilation failed"])
+        domain: "Driver",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Clang compilation failed"]
+      )
     }
 
     if mode == .build {
@@ -512,16 +812,25 @@ public class Driver {
       return
     }
 
-    // 3. Run Executable
     if mode == .run {
       let runResult = try runSubprocess(executable: exeURL.path, args: [])
       if runResult != 0 {
-          exit(runResult)
+        exit(runResult)
       }
     }
   }
 
   func getCoreLibPath() -> String {
+    if let stdManifestPath = getStdManifestPath() {
+      let legacyEntry = URL(fileURLWithPath: stdManifestPath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("std.koral")
+        .path
+      if FileManager.default.fileExists(atPath: legacyEntry) {
+        return legacyEntry
+      }
+    }
+
     // Check KORAL_HOME environment variable first
     if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
         let path = URL(fileURLWithPath: koralHome).appendingPathComponent("std/std.koral").path
@@ -546,9 +855,36 @@ public class Driver {
     writeStderr("Error: Could not locate std/std.koral. Please set KORAL_HOME environment variable.")
     exit(1)
   }
+
+  func getStdManifestPath() -> String? {
+    if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
+      let path = URL(fileURLWithPath: koralHome).appendingPathComponent("std/koral.json").path
+      if FileManager.default.fileExists(atPath: path) {
+        return path
+      }
+    }
+
+    let currentURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let candidatePaths = [
+      currentURL.appendingPathComponent("std/koral.json").path,
+      currentURL.deletingLastPathComponent().appendingPathComponent("std/koral.json").path,
+      currentURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("std/koral.json").path
+    ]
+    for path in candidatePaths {
+      if FileManager.default.fileExists(atPath: path) {
+        return path
+      }
+    }
+
+    return nil
+  }
   
   /// Gets the standard library directory path
   func getStdLibPath() -> String? {
+    if let stdManifestPath = getStdManifestPath() {
+      return URL(fileURLWithPath: stdManifestPath).deletingLastPathComponent().path
+    }
+
     // Check KORAL_HOME environment variable first
     if let koralHome = ProcessInfo.processInfo.environment["KORAL_HOME"] {
         let path = URL(fileURLWithPath: koralHome).appendingPathComponent("std").path
@@ -648,6 +984,7 @@ public class Driver {
     writeStdout(
       """
       Usage: koralc [command] <file.koral> [options]
+             koralc [command] --package-config <koral.json> --target-module <module> [options]
 
       Commands:
         build   Compile to executable (default)
@@ -657,6 +994,10 @@ public class Driver {
 
       Options:
         -o, --output <path>       Output directory for generated files
+        --package-config <path>   Package manifest path for manifest-driven builds
+        --target-module <name>    Target module full name, e.g. app::main
+        --deps-root <path>        Dependency root directory (default unresolved)
+        --std-config <path>       Standard library manifest path
         --no-std                  Compile without standard library
         -m, -m=<N>                Print escape analysis diagnostics (Go-style)
       """

@@ -2,8 +2,24 @@
 // Koral Build System - build Command
 // ============================================================================
 
-using Std.Os.*
-using Std.Proc.*
+using std::os { .. }
+using std::proc { .. }
+
+private let target_module_for_build(config ProjectConfig, flags Dict[String, String]) Result[String] = {
+    return when flags.get("--module") in {
+        .Some(module_name) then {
+            if config.modules.contains(module_name) then {
+                yield Result[String].Ok(module_name)
+            }
+            yield Result[String].Error(box("error: module '\(module_name)' not found in koral.json"))
+        },
+        .None() then default_target_module(config),
+    }
+}
+
+private let artifact_stem(module_name String) String = {
+    return module_name.replace_all("::", with: "__")
+}
 
 /// Find koralc executable by searching PATH and KORAL_HOME
 public let find_koralc() Option[String] = {
@@ -49,6 +65,10 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
         error_msg(it.message())
         return 1
     }
+    let target_module = target_module_for_build(config, flags) or else {
+        error_msg(it.message())
+        return 1
+    }
 
     // Find koralc
     let koralc = find_koralc() or else {
@@ -56,8 +76,8 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
         return 1
     }
 
-    let stem = config.entry.into_path().stem_name()
-    status_msg("Compiling", "\(config.name) v\(config.version)")
+    let stem = artifact_stem(target_module)
+    status_msg("Compiling", "\(config.name) v\(config.version) [\(target_module)]")
 
     // Ensure .build/ directory exists
     create_dir_all(".build".into_path()) or else {
@@ -65,10 +85,15 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
         return 1
     }
 
-    // Call koralc build <entry> -o .build/
+    // Call koralc build --package-config ./koral.json --target-module <module> -o .build/
     let status = Command.new(koralc)
         .arg("build")
-        .arg(config.entry)
+        .arg("--package-config")
+        .arg("koral.json")
+        .arg("--target-module")
+        .arg(target_module)
+        .arg("--deps-root")
+        .arg(".deps")
         .arg("-o")
         .arg(".build/")
         .set_stdout(IoRedirect.Inherit())

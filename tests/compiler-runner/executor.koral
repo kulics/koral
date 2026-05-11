@@ -1,9 +1,9 @@
-using Std.*
-using Std.Os.*
-using Std.Proc.*
-using Std.Time.*
-using Std.Async.*
-using Std.Sync.*
+using std { .. }
+using std::os { .. }
+using std::proc { .. }
+using std::time { .. }
+using std::async { .. }
+using std::sync { .. }
 
 private let failure_result(
     info CaseInfo,
@@ -58,17 +58,49 @@ private type CommandExecution {
 
 private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) List[String] = {
     let mut args = List[String].new()
-    args.push("build")
-    args.push(info.absolute_path.to_string())
+    when find_case_manifest(config, info) in {
+        .Some(manifest_path) then {
+            args.push("build")
+            args.push("--package-config")
+            args.push(manifest_path.to_string())
+            when find_case_deps_root(manifest_path) in {
+                .Some(deps_root) then {
+                    args.push("--deps-root")
+                    args.push(deps_root.to_string())
+                },
+                .None() then {},
+            }
+        },
+        .None then {
+            args.push("build")
+            args.push(info.absolute_path.to_string())
+        },
+    }
     args.push("-o")
     args.push(output_dir.to_string())
     return args
 }
 
-private let check_command_args_for_case(info CaseInfo) List[String] = {
+private let check_command_args_for_case(config RunnerConfig, info CaseInfo) List[String] = {
     let mut args = List[String].new()
-    args.push("check")
-    args.push(info.absolute_path.to_string())
+    when find_case_manifest(config, info) in {
+        .Some(manifest_path) then {
+            args.push("check")
+            args.push("--package-config")
+            args.push(manifest_path.to_string())
+            when find_case_deps_root(manifest_path) in {
+                .Some(deps_root) then {
+                    args.push("--deps-root")
+                    args.push(deps_root.to_string())
+                },
+                .None() then {},
+            }
+        },
+        .None then {
+            args.push("check")
+            args.push(info.absolute_path.to_string())
+        },
+    }
     return args
 }
 
@@ -81,8 +113,72 @@ private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
     return output_dir.join(exe_name)
 }
 
+private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
+    let cases_root = config.cases_root.normalize()
+    let mut current = info.absolute_path.dir_name().normalize()
+    while true then {
+        let candidate = current.join("koral.json")
+        if path_exist(candidate) then {
+            return Option[Path].Some(candidate)
+        }
+        if current == cases_root then {
+            return Option[Path].None()
+        }
+        let parent = current.dir_name().normalize()
+        if parent == current then {
+            return Option[Path].None()
+        }
+        current = parent
+    }
+    return Option[Path].None()
+}
+
+private let find_case_deps_root(manifest_path Path) Option[Path] = {
+    let deps_root = manifest_path.dir_name().join("deps").normalize()
+    if path_exist(deps_root) then {
+        return Option[Path].Some(deps_root)
+    }
+    return Option[Path].None()
+}
+
+private let find_built_executable(output_dir Path) Result[Path] = {
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let mut iter = read_dir(output_dir) or else {
+        return Result[Path].Error(it)
+    }
+
+    let mut found = List[Path].new()
+    while iter.next() is .Some(entry) then {
+        if not entry.is_file() then {
+            continue
+        }
+        let name = entry.name()
+        if name.ends_with(".txt") or name.ends_with(".c") then {
+            continue
+        }
+        if is_windows then {
+            if name.ends_with(".exe") then {
+                found.push(entry.path())
+            }
+        } else {
+            found.push(entry.path())
+        }
+    }
+
+    if found.count() == 1 then {
+        return Result[Path].Ok(found[0].normalize())
+    }
+    if found.count() == 0 then {
+        return Result[Path].Error(box("no executable produced"))
+    }
+    return Result[Path].Error(box("multiple executable candidates produced"))
+}
+
 private let prepared_run_executable_path(info CaseInfo, output_dir Path) Result[Path] = {
-    let exe_path = executable_path_for_case(info, output_dir)
+    let exe_path = when path_exist(executable_path_for_case(info, output_dir)) in {
+        true then executable_path_for_case(info, output_dir),
+        false then find_built_executable(output_dir) or return,
+    }
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     if not is_windows then {
         return Result[Path].Ok(exe_path)
@@ -94,7 +190,10 @@ private let prepared_run_executable_path(info CaseInfo, output_dir Path) Result[
     // Run through a neutral filename to keep execution deterministic.
     let launch_path = output_dir.join("run.exe")
     return when copy_file(exe_path, to: launch_path) in {
-        .Ok(_) then Result[Path].Ok(launch_path),
+        .Ok(_) then {
+            sleep(100ms)
+            yield Result[Path].Ok(launch_path)
+        },
         .Error(e) then Result[Path].Error(e),
     }
 }
@@ -225,6 +324,57 @@ private let execute_command_with_timeout(
     return execution
 }
 
+private let execute_built_executable_with_retry(
+    config RunnerConfig,
+    program Path,
+    capture_root Path,
+    start MonoTime,
+    timeout_secs Int64,
+) CommandExecution = {
+    let first = execute_command_with_timeout(
+        config,
+        program.to_string(),
+        run_command_args_for_case(),
+        capture_root,
+        "run",
+        start,
+        timeout_secs,
+        "failed to spawn built executable",
+    )
+    return when first in {
+        .InfrastructureError(_) then {
+            sleep(100ms)
+            let second = execute_command_with_timeout(
+                config,
+                program.to_string(),
+                run_command_args_for_case(),
+                capture_root,
+                "run",
+                start,
+                timeout_secs,
+                "failed to spawn built executable",
+            )
+            yield when second in {
+                .InfrastructureError(_) then {
+                    sleep(150ms)
+                    yield execute_command_with_timeout(
+                        config,
+                        program.to_string(),
+                        run_command_args_for_case(),
+                        capture_root,
+                        "run",
+                        start,
+                        timeout_secs,
+                        "failed to spawn built executable",
+                    )
+                },
+                _ then second,
+            }
+        },
+        _ then first,
+    }
+}
+
 private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Path] = {
     let root = config.output_root
     when create_dir_all(root) in {
@@ -301,7 +451,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         and expectations.expect_exact_output.is_empty()
         and not has_runtime_expect_error(expectations.expect_error)
 
-    let mut build_args = if check_only_expect_error then check_command_args_for_case(info) else build_command_args_for_case(config, info, active_output_dir)
+    let mut build_args = if check_only_expect_error then check_command_args_for_case(config, info) else build_command_args_for_case(config, info, active_output_dir)
     let mut compile_command_name = if check_only_expect_error then "check" else "build"
 
     if config.verbose then {
@@ -461,15 +611,12 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         }
 
-        let run_output = when execute_command_with_timeout(
+        let run_output = when execute_built_executable_with_retry(
                 config,
-            launch_exe_path.to_string(),
-            run_command_args_for_case(),
+            launch_exe_path,
                 active_output_dir,
-            "run",
             start,
             timeout_secs,
-            "failed to spawn built executable",
         ) in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
@@ -484,15 +631,48 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 )
             },
             .InfrastructureError(message) then {
-                let current_duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "failed",
-                    "infrastructure_error",
-                    message,
-                    build_exit_code,
-                    current_duration_ms,
-                )
+                let retry_launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
+                    let current_duration_ms = start.elapsed().as_milliseconds()
+                    return failure_result(
+                        info,
+                        "failed",
+                        "infrastructure_error",
+                        "failed to re-prepare built executable: " + it.message(),
+                        build_exit_code,
+                        current_duration_ms,
+                    )
+                }
+                yield when execute_built_executable_with_retry(
+                    config,
+                    retry_launch_exe_path,
+                    active_output_dir,
+                    start,
+                    timeout_secs,
+                ) in {
+                    .Finished(output) then output,
+                    .TimedOut(exit_code) then {
+                        let current_duration_ms = start.elapsed().as_milliseconds()
+                        return failure_result(
+                            info,
+                            "timed_out",
+                            "timeout",
+                            "case timed out after \(config.timeout_secs) seconds",
+                            exit_code,
+                            current_duration_ms,
+                        )
+                    },
+                    .InfrastructureError(_) then {
+                        let current_duration_ms = start.elapsed().as_milliseconds()
+                        return failure_result(
+                            info,
+                            "failed",
+                            "infrastructure_error",
+                            message,
+                            build_exit_code,
+                            current_duration_ms,
+                        )
+                    },
+                }
             },
         }
 
@@ -579,15 +759,12 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         )
     }
 
-    let run_output = when execute_command_with_timeout(
+    let run_output = when execute_built_executable_with_retry(
             config,
-        launch_exe_path.to_string(),
-        run_command_args_for_case(),
+        launch_exe_path,
             active_output_dir,
-        "run",
         start,
         timeout_secs,
-        "failed to spawn built executable",
     ) in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
@@ -602,15 +779,48 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         },
         .InfrastructureError(message) then {
-            let current_duration_ms = start.elapsed().as_milliseconds()
-            return failure_result(
-                info,
-                "failed",
-                "infrastructure_error",
-                message,
-                build_exit_code,
-                current_duration_ms,
-            )
+            let retry_launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "failed",
+                    "infrastructure_error",
+                    "failed to re-prepare built executable: " + it.message(),
+                    build_exit_code,
+                    current_duration_ms,
+                )
+            }
+            yield when execute_built_executable_with_retry(
+                config,
+                retry_launch_exe_path,
+                active_output_dir,
+                start,
+                timeout_secs,
+            ) in {
+                .Finished(output) then output,
+                .TimedOut(exit_code) then {
+                    let current_duration_ms = start.elapsed().as_milliseconds()
+                    return failure_result(
+                        info,
+                        "timed_out",
+                        "timeout",
+                        "case timed out after \(config.timeout_secs) seconds",
+                        exit_code,
+                        current_duration_ms,
+                    )
+                },
+                .InfrastructureError(_) then {
+                    let current_duration_ms = start.elapsed().as_milliseconds()
+                    return failure_result(
+                        info,
+                        "failed",
+                        "infrastructure_error",
+                        message,
+                        build_exit_code,
+                        current_duration_ms,
+                    )
+                },
+            }
         },
     }
 

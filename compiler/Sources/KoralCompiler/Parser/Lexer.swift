@@ -58,6 +58,7 @@ public enum Token: CustomStringConvertible {
   case orKeyword  // 'or' keyword
   case notKeyword  // 'not' keyword
   case colon  // Colon ':'
+  case doubleColon // '::'
   case typeKeyword  // 'type' keyword
   case dot  // Dot operator '.'
   case isKeyword  // 'is' keyword
@@ -165,7 +166,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.letKeyword, .letKeyword), (.mutKeyword, .mutKeyword):
       return true
-    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.dot, .dot), (.arrow, .arrow):
+    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.arrow, .arrow):
       return true
     case (.leftParen, .leftParen), (.rightParen, .rightParen):
       return true
@@ -310,6 +311,8 @@ public enum Token: CustomStringConvertible {
       return "not"
     case .colon:
       return ":"
+    case .doubleColon:
+      return "::"
     case .typeKeyword:
       return "type"
     case .dot:
@@ -1488,6 +1491,12 @@ public class Lexer {
     case "]":
       return .rightBracket
     case ":":
+      if let nextChar = getNextChar() {
+        if nextChar == ":" {
+          return .doubleColon
+        }
+        unreadChar(nextChar)
+      }
       return .colon
     case ".":
       if let nextChar = getNextChar() {

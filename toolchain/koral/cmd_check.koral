@@ -2,13 +2,17 @@
 // Koral Build System - check Command
 // ============================================================================
 
-using Std.Os.*
-using Std.Proc.*
+using std::os { .. }
+using std::proc { .. }
 
 /// Type-check the project without generating an executable
 /// koral check
 public let cmd_check(args List[String], flags Dict[String, String]) Int = {
     let config = load_config(".") or else {
+        error_msg(it.message())
+        return 1
+    }
+    let target_module = target_module_for_build(config, flags) or else {
         error_msg(it.message())
         return 1
     }
@@ -18,11 +22,16 @@ public let cmd_check(args List[String], flags Dict[String, String]) Int = {
         return 1
     }
 
-    status_msg("Checking", "\(config.name) v\(config.version)")
+    status_msg("Checking", "\(config.name) v\(config.version) [\(target_module)]")
 
     let status = Command.new(koralc)
         .arg("check")
-        .arg(config.entry)
+        .arg("--package-config")
+        .arg("koral.json")
+        .arg("--target-module")
+        .arg(target_module)
+        .arg("--deps-root")
+        .arg(".deps")
         .set_stdout(IoRedirect.Inherit())
         .set_stderr(IoRedirect.Inherit())
         .run() or else {

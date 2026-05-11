@@ -265,31 +265,26 @@ when weak.to_ref() in {
 
 Module rules summary:
 
-- `using "file"` merges a file into the current module scope.
-- `using "file" as Name` declares a named submodule.
-- `using path as alias` keeps first-letter case aligned with the referenced symbol.
+- `using "path"` merges another file into the current module scope.
+- `using module::path { Symbol, Other as Alias }` imports explicit public symbols from another module.
+- `using module::path { .. }` imports all public symbols from that module, and `..` must be the only item.
 - Entry file basenames must match `[a-z][a-z0-9_]*`.
 
-- File merge (`using "file_name"`) — merges file contents into current module, sharing `protected` visibility
-- Submodule declaration (`public using "file_name" as Name`) — registers a named submodule
-- External imports (`using Std.Io`, `using Super.Sibling`)
-- Member imports (`using Std.Io.Reader`)
-- Alias imports (`using Std.Io as Io`)
-- Batch imports (`using Std.Io.*`)
+- File merge (`using "file_name"` / `using "./helpers"` / `using "../shared/format"`) is resolved relative to the current file directory
+- Modules are declared in `koral.json`; `std` modules are declared in `std/koral.json`
+- Imports are file-local bindings and never re-export automatically
+- Removed forms: `using "file" as Name`, `using Super...`, bare-path imports such as `using Std.Io`, alias imports such as `using Std.Io as Io`, batch imports such as `using Std.Io.*`, and `public/protected/private using ...`
 - Access control: `public`, `protected` (default), `private`
 - Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
-- Submodule entry file must match directory name: `foo/foo.koral` (not `foo/index.koral`)
 - Module entry file basename must match `[a-z][a-z0-9_]*`
 - String in `using "file"` is the literal file name (no case conversion); file is resolved relative to the current file's directory
-- In std submodules, symbols declared as `public` in root `Std` are default-visible; no redundant `using Std.X` is required for those root exports
-- `using path as alias` follows first-letter case matching: uppercase target -> uppercase alias, lowercase target -> lowercase alias
 - Type aliases must start with an uppercase letter (`type Name = ...`)
 
 ### FFI
 
 - `foreign let` for binding C functions
 - `foreign type` for opaque or layout-compatible C types
-- `foreign using "lib"` for linking external libraries
+- Native library linking is configured in `koral.json` / `std/koral.json` via `links`, not via source syntax
 
 ## Standard Library Overview
 
@@ -354,19 +349,26 @@ swift build -c debug
 ## Run the Compiler
 
 ```bash
-# Build (default command)
+# Build a single-file program (default command)
 swift run koralc path/to/file.koral
 
+# Build a manifest-declared target module
+swift run koralc build --package-config path/to/koral.json --target-module app::main
+
 # Build and run
-swift run koralc run path/to/file.koral
+swift run koralc run --package-config path/to/koral.json --target-module app::main
 
 # Emit C only
-swift run koralc emit-c path/to/file.koral -o out
+swift run koralc emit-c --package-config path/to/koral.json --target-module app::main -o out
 ```
 
 ## Common Options
 
 - `-o, --output <dir>`: output directory (default: input file directory)
+- `--package-config <path>`: build from a package manifest
+- `--target-module <name>`: choose the manifest target module, for example `app::main`
+- `--deps-root <path>`: dependency root directory for manifest-driven builds
+- `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading `std/std.koral`
 - `-m` / `-m=<N>`: print escape analysis diagnostics (Go-style; `-m -m` or higher level currently same output)
 
@@ -378,8 +380,8 @@ The only supported test entry lives under `tests/`.
 cd compiler
 swift build -c debug
 cd ..
-compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
-./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
 See [tests/README.md](tests/README.md) for bootstrap mode, custom compiler mode, and other runner flags.
@@ -393,7 +395,7 @@ See [tests/README.md](tests/README.md) for bootstrap mode, custom compiler mode,
 
 ## Standard Library Resolution (`KORAL_HOME`)
 
-If `koralc` cannot find `std/std.koral` due to your working directory, set `KORAL_HOME` to the repository root.
+If `koralc` cannot find `std/std.koral` / `std/koral.json` due to your working directory, set `KORAL_HOME` to the repository root.
 
 ```bash
 # macOS / Linux

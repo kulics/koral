@@ -1,46 +1,37 @@
 // Koral Language Grammar (BNF)
 // Updated to match current implementation (Lexer/Parser)
 
-<program> ::= (<using-decl> | <foreign-using-decl>)* <global-decl>*
+<program> ::= <using-decl>* <global-decl>*
 
 // using 必须出现在其他全局声明之前
 
-<using-decl> ::= <access-modifier>? "using" <using-spec> ";"?
-<foreign-using-decl> ::= "foreign" "using" <string-literal> ";"?
-// 说明：foreign using 的字符串是链接库名（如 "m"），
-// 编译器在链接阶段添加 -l<name> 参数。
-<using-spec> ::= <file-using-spec>
-               | <module-import-spec>
-               | <batch-import-spec>
+<using-decl> ::= "using" <using-spec> ";"?
+<using-spec> ::= <file-merge-spec>
+               | <module-using-spec>
 
-<file-using-spec> ::= <string-literal> <module-alias>?
+<file-merge-spec> ::= <string-literal>
 // 说明：
-// 1) using "file_name"：文件合并，将 file_name.koral 的声明合并到当前模块（共享 protected 可见性）
-//    不允许访问修饰符。文件查找相对于当前文件所在目录。
-// 2) using "file_name" as Name：声明子模块，将 file_name.koral（或 file_name/file_name.koral）
-//    注册为名为 Name 的独立子模块。支持访问修饰符（public/protected/private）。
-//    别名必须以大写字母开头。
+// 1) using "path"：把相对路径对应的 .koral 文件合并进当前模块
+// 2) 路径相对于当前文件所在目录解析，可包含 "." / ".."
+// 3) 文件合并不会创建子模块、别名或导出面
 
-<module-import-spec> ::= <module-path> <module-alias>?
-<batch-import-spec> ::= <module-path> "." "*"
+<module-using-spec> ::= <module-name> "{" <module-import-list> "}"
+<module-name> ::= <identifier> ("::" <identifier>)*
 
-<module-alias> ::= "as" <identifier>
+<module-import-list> ::= ".."
+                       | <module-import-item> ("," <module-import-item>)* ","?
 
-<module-path> ::= <external-module-path>
-                | <parent-module-path>
-
-<module-segment> ::= <identifier> | <type-identifier>
-
-<external-module-path> ::= <module-segment> ("." <module-segment>)*   // e.g. Std, Std.Io
-<parent-module-path> ::= "Super" ("." "Super")* "." <module-segment> ("." <module-segment>)*
+<module-import-item> ::= <identifier> <module-item-alias>?
+<module-item-alias> ::= "as" <identifier>
 
 // 说明：
-// 1) 文件合并和子模块声明使用字符串语法（using "file"），文件名即字符串内容
-// 2) 外部模块和父模块导入使用标识符路径语法（using Std.Io）
-// 3) 成员导入使用路径尾段表示，例如 using Std.Io.Reader
-// 4) 别名语法统一为 using path as alias
-// 5) using 别名首字母必须与被引用标识符首字母大小写一致
-// 6) Self 不再用于 using 声明，文件操作统一使用字符串语法
+// 1) using std::io { Reader }：从显式模块导入 public 符号
+// 2) using std::io { Reader as IoReader, Writer }：支持逐项别名
+// 3) using std::io { .. }：导入该模块全部 public 符号
+// 4) ".." 必须单独出现，不能与其他导入项混用
+// 5) 模块名来自 package manifest（koral.json / std/koral.json），编译器不再从源码语法推断子模块树
+// 6) 已移除：using "file" as Name、using Super...、using Std.Io、using Std.Io.Reader、
+//    using Std.Io.*、using path as alias、public/protected/private using ...、foreign using ...
 
 // ============================================================================
 // Global Declarations

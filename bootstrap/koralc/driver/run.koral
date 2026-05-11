@@ -1,55 +1,166 @@
-using Std.Os.*
-using Std.Proc.*
-using Std.Time.*
+using std::os { .. }
+using std::proc { .. }
+using std::time { .. }
+
+private type InvocationOptions(
+    command String,
+    legacy_file_path Option[String],
+    package_config_path Option[String],
+    target_module_name Option[String],
+    deps_root Option[String],
+    std_config_path Option[String],
+    no_std Bool,
+    out_dir Option[String],
+)
+
+private type PreparedCompilation(
+    graph ResolvedModuleGraph,
+    display_name String,
+    artifact_base_name String,
+    linked_libraries List[String],
+    default_output_dir Path,
+)
 
 public let run_driver() Int = {
     let argv = args()
 
-    if argv.count() < 3 then {
+    if argv.count() < 2 then {
         print_usage()
         return 1
     }
 
-    let command = argv[1]
-    let file_path = argv[2]
+    let first = argv[1]
+    let mut command = "build"
+    let mut index UInt = 1
 
-    // Parse flags from remaining args
+    if first == "--emit-ast" or
+       first == "--emit-typed-ast" or
+       first == "--resolve-module" or
+       first == "--emit-c" or
+       first == "check" or
+       first == "build" then {
+        command = first
+        index = 2
+    } else if not first.ends_with(".koral") and not first.starts_with("-") then {
+        eprintln("unsupported command: \(first)")
+        print_usage()
+        return 1
+    }
+
+    let mut legacy_file_path = Option[String].None()
+    let mut package_config_path = Option[String].None()
+    let mut target_module_name = Option[String].None()
+    let mut deps_root = Option[String].None()
+    let mut std_config_path = Option[String].None()
     let mut no_std = false
     let mut out_dir = Option[String].None()
-    let mut i UInt = 3
+
+    let mut i = index
     while i < argv.count() then {
         let arg = argv[i]
         if arg == "--no-std" then {
             no_std = true
+        } else if arg == "--package-config" then {
+            i += 1
+            if i >= argv.count() then {
+                eprintln("missing value for --package-config")
+                return 1
+            }
+            package_config_path = Option[String].Some(argv[i])
+        } else if arg == "--target-module" then {
+            i += 1
+            if i >= argv.count() then {
+                eprintln("missing value for --target-module")
+                return 1
+            }
+            target_module_name = Option[String].Some(argv[i])
+        } else if arg == "--deps-root" then {
+            i += 1
+            if i >= argv.count() then {
+                eprintln("missing value for --deps-root")
+                return 1
+            }
+            deps_root = Option[String].Some(argv[i])
+        } else if arg == "--std-config" then {
+            i += 1
+            if i >= argv.count() then {
+                eprintln("missing value for --std-config")
+                return 1
+            }
+            std_config_path = Option[String].Some(argv[i])
         } else if arg == "-o" then {
             i += 1
-            if i < argv.count() then {
-                out_dir = Option[String].Some(argv[i])
+            if i >= argv.count() then {
+                eprintln("missing value for -o")
+                return 1
             }
+            out_dir = Option[String].Some(argv[i])
+        } else if arg.starts_with("-") then {
+            eprintln("unknown argument: \(arg)")
+            return 1
+        } else if legacy_file_path is .None() then {
+            legacy_file_path = Option[String].Some(arg)
+        } else {
+            eprintln("unexpected positional argument: \(arg)")
+            return 1
         }
         i += 1
     }
 
-    if command == "--emit-ast" then { return run_emit_ast(file_path) }
-    if command == "--emit-typed-ast" then { return run_emit_typed_ast(file_path, no_std) }
-    if command == "--resolve-module" then { return run_resolve_module(file_path, no_std) }
-    if command == "--emit-c" then { return run_emit_c(file_path, no_std, out_dir) }
-    if command == "check" then { return run_check(file_path, no_std) }
-    if command == "build" then { return run_build(file_path, no_std, out_dir) }
+    let options = InvocationOptions(
+        command,
+        legacy_file_path,
+        package_config_path,
+        target_module_name,
+        deps_root,
+        std_config_path,
+        no_std,
+        out_dir,
+    )
 
-    eprintln("unsupported command: \(command)")
-    print_usage()
+    if options.package_config_path is .None() and options.legacy_file_path is .None() then {
+        eprintln("missing input file or --package-config")
+        print_usage()
+        return 1
+    }
+
+    if command == "--emit-ast" then {
+        when options.package_config_path in {
+            .Some(_) then {
+                eprintln("--emit-ast only supports a direct source file input")
+                return 1
+            },
+            .None() then {},
+        }
+        let file_path = options.legacy_file_path or else {
+            eprintln("missing input file")
+            return 1
+        }
+        return run_emit_ast(file_path)
+    }
+    if command == "--emit-typed-ast" then { return run_emit_typed_ast(options) }
+    if command == "--resolve-module" then { return run_resolve_module(options) }
+    if command == "--emit-c" then { return run_emit_c(options) }
+    if command == "check" then { return run_check(options) }
+    if command == "build" then { return run_build(options) }
+
     return 1
 }
 
 private let print_usage() Void = {
     eprintln("bootstrap-koralc")
-    eprintln("usage: bootstrap-koralc --emit-ast <file.koral>")
-    eprintln("       bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]")
-    eprintln("       bootstrap-koralc --resolve-module <file.koral>")
-    eprintln("       bootstrap-koralc --emit-c <file.koral> [-o <dir>] [--no-std]")
-    eprintln("       bootstrap-koralc check <file.koral> [--no-std]")
-    eprintln("       bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]")
+    eprintln("usage: bootstrap-koralc [build|check|--emit-c] <file.koral> [options]")
+    eprintln("       bootstrap-koralc [build|check|--emit-c] --package-config <koral.json> [--target-module <module>] [options]")
+    eprintln("       bootstrap-koralc --emit-ast <file.koral>")
+    eprintln("       bootstrap-koralc --emit-typed-ast <file.koral>|--package-config <koral.json> [options]")
+    eprintln("       bootstrap-koralc --resolve-module <file.koral>|--package-config <koral.json> [options]")
+    eprintln("options:")
+    eprintln("  -o <dir>                    output directory")
+    eprintln("  --no-std                    disable std loading")
+    eprintln("  --package-config <path>     package manifest path")
+    eprintln("  --target-module <name>      target module full name, e.g. app::main")
+    eprintln("  --deps-root <path>          dependency root directory")
+    eprintln("  --std-config <path>         explicit std manifest path")
 }
 
 // Shared: lex + parse source text.
@@ -189,16 +300,328 @@ private let format_cli_diagnostic(diag DiagnosticError, user_file_path String) S
     }
 }
 
-private let run_check(file_path String, no_std Bool) Int = {
+private let sanitize_module_artifact_name(module_name String) String = {
+    return module_name.replace_all("::", with: "__")
+}
+
+private let collect_unique_module_paths_from_pairs(pairs List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
+    let mut seen = Set[String].new()
+    let mut out = List[List[String]].new()
+    for pair in pairs then {
+        let key = pair.second.join_to_string(".")
+        if not seen.contains(key) then {
+            seen.insert(key)
+            out.push(pair.second)
+        }
+    }
+    return out
+}
+
+private let collect_unique_source_paths_from_pairs(pairs List[Pair[LoadedNode, List[String]]]) List[String] = {
+    let mut seen = Set[String].new()
+    let mut out = List[String].new()
+    for pair in pairs then {
+        let source_path = pair.first.source_file
+        if not seen.contains(source_path) then {
+            seen.insert(source_path)
+            out.push(source_path)
+        }
+    }
+    return out
+}
+
+private let inject_std_prelude_imports(std_root_path List[String], loaded_module_paths List[List[String]], graph mut ref ImportGraph) Void = {
+    let std_key = std_root_path.join_to_string(".")
+    let mut seen = Set[String].new()
+    for module_path in loaded_module_paths then {
+        let key = module_path.join_to_string(".")
+        if key == std_key or seen.contains(key) then {
+            continue
+        }
+        seen.insert(key)
+        let mut already = false
+        for edge in graph.edges then {
+            if string_list_eq(edge.source, module_path) and
+               string_list_eq(edge.target, std_root_path) and
+               (when edge.kind in { .BatchImport() then true, _ then false }) and
+               (when edge.source_file in { .None() then true, _ then false }) then {
+                already = true
+                break
+            }
+        }
+        if not already then {
+            graph.add_module_import(module_path, std_root_path, ImportKind.BatchImport(), Option[String].None())
+        }
+    }
+}
+
+private let make_prepared_compilation(
+    std_pairs List[Pair[LoadedNode, List[String]]],
+    user_pairs List[Pair[LoadedNode, List[String]]],
+    merged_graph ImportGraph,
+    display_name String,
+    artifact_base_name String,
+    linked_libraries List[String],
+    default_output_dir Path,
+    root_module_path String,
+) PreparedCompilation = {
+    let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
+    for pair in std_pairs then { all_pairs.push(pair) }
+    for pair in user_pairs then { all_pairs.push(pair) }
+
+    let mut loaded_nodes = List[LoadedNode].new()
+    let mut node_source_paths = List[String].new()
+    for pair in all_pairs then {
+        loaded_nodes.push(pair.first)
+        node_source_paths.push(pair.first.source_file)
+    }
+
+    let graph = ResolvedModuleGraph(
+        root_module_path,
+        merged_graph,
+        loaded_nodes,
+        all_pairs,
+        node_source_paths,
+        collect_unique_module_paths_from_pairs(all_pairs),
+        collect_unique_source_paths_from_pairs(all_pairs),
+    )
+
+    return PreparedCompilation(graph, display_name, artifact_base_name, linked_libraries, default_output_dir)
+}
+
+private let load_manifest_modules_into_prepared(
+    resolver mut ref ModuleResolver,
+    manifest PackageManifest,
+    package_kind ResolvedPackageKind,
+    std_root_module_name Option[String],
+    target_module_name Option[String],
+    default_output_dir Path,
+) Result[PreparedCompilation] = {
+    let mut std_pairs = List[Pair[LoadedNode, List[String]]].new()
+    let mut user_pairs = List[Pair[LoadedNode, List[String]]].new()
+    let mut merged_graph = ImportGraph.new()
+    let mut linked_libraries = List[String].new()
+    let mut loaded_module_paths = List[List[String]].new()
+    let mut root_module_path = ""
+    let mut display_name = manifest.manifest_path
+    let mut artifact_base_name = "main"
+
+    let mut iter = manifest.modules.iterator()
+    while iter.next() is .Some(entry) then {
+        let spec = entry.second
+        let unit = resolver.resolve_module_with_path(spec.entry_path, Option[List[String]].Some(spec.path_segments)) or return
+        let pairs = unit.collect_all_nodes_with_path()
+        let is_std = when package_kind in {
+            .Std() then true,
+            _ then false,
+        }
+        if is_std then {
+            for pair in pairs then { std_pairs.push(pair) }
+        } else {
+            for pair in pairs then { user_pairs.push(pair) }
+        }
+        merged_graph.merge(unit.import_graph())
+        loaded_module_paths.push(spec.path_segments)
+        for link in manifest.links then { linked_libraries.push(link) }
+        for link in spec.links then { linked_libraries.push(link) }
+        if root_module_path.is_empty() and not entry.first.contains("::") then {
+            root_module_path = spec.path_segments.join_to_string(".")
+        }
+        when target_module_name in {
+            .Some(target_name) then {
+                if entry.first == target_name then {
+                    display_name = target_name
+                    artifact_base_name = sanitize_module_artifact_name(target_name)
+                    root_module_path = spec.path_segments.join_to_string(".")
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    when std_root_module_name in {
+        .Some(std_root_name) then {
+            let std_root_segments = parse_manifest_module_name(std_root_name) or else List[String].new()
+            if not std_root_segments.is_empty() then {
+                inject_std_prelude_imports(std_root_segments, loaded_module_paths, merged_graph.ref)
+            }
+        },
+        .None() then {},
+    }
+
+    return Result[PreparedCompilation].Ok(make_prepared_compilation(
+        std_pairs,
+        user_pairs,
+        merged_graph,
+        display_name,
+        artifact_base_name,
+        linked_libraries,
+        default_output_dir,
+        root_module_path,
+    ))
+}
+
+private let prepare_package_compilation(options InvocationOptions) Result[PreparedCompilation] = {
+    let package_config_path = options.package_config_path or else {
+        return Result[PreparedCompilation].Error(box("missing --package-config"))
+    }
+    let manifest = load_package_manifest(package_config_path) or return
+    let target_module_name = when options.target_module_name in {
+        .Some(name) then name,
+        .None() then default_target_module_name(manifest) or return,
+    }
+    let resolved_std_manifest_path = if options.no_std then Option[String].None()
+        else when options.std_config_path in {
+            .Some(path) then Option[String].Some(path),
+            .None() then find_std_manifest_path(),
+        }
+    let package_graph = load_resolved_package_graph(
+        package_config_path,
+        target_module_name,
+        resolved_std_manifest_path,
+        options.deps_root,
+    ) or return
+
+    let mut resolver = ModuleResolver.new()
+    let mut std_pairs = List[Pair[LoadedNode, List[String]]].new()
+    let mut user_pairs = List[Pair[LoadedNode, List[String]]].new()
+    let mut merged_graph = ImportGraph.new()
+    let mut linked_libraries = List[String].new()
+    let mut loaded_module_paths = List[List[String]].new()
+
+    for module_name in package_graph.reachable_module_names then {
+        let spec = package_graph.modules_by_name.get(module_name) or else {
+            return Result[PreparedCompilation].Error(box("Target module '\(module_name)' not found in resolved module graph"))
+        }
+        resolver.set_manifest_module_aliases(spec.visible_module_aliases)
+        let unit = resolver.resolve_module_with_path(spec.entry_file, Option[List[String]].Some(spec.path_segments)) or return
+        resolver.set_manifest_module_aliases(List[ResolvedModuleAliasRule].new())
+        let pairs = unit.collect_all_nodes_with_path()
+        let is_std = when spec.package_kind in {
+            .Std() then true,
+            _ then false,
+        }
+        if is_std then {
+            for pair in pairs then { std_pairs.push(pair) }
+        } else {
+            for pair in pairs then { user_pairs.push(pair) }
+        }
+        merged_graph.merge(unit.import_graph())
+        loaded_module_paths.push(spec.path_segments)
+        for link in spec.links then { linked_libraries.push(link) }
+    }
+
+    when package_graph.std_root_module_name in {
+        .Some(std_root_name) then {
+            let std_root_segments = parse_manifest_module_name(std_root_name) or else List[String].new()
+            if not std_root_segments.is_empty() then {
+                inject_std_prelude_imports(std_root_segments, loaded_module_paths, merged_graph.ref)
+            }
+        },
+        .None() then {},
+    }
+
+    let target_spec = package_graph.modules_by_name.get(package_graph.target_module_name) or else {
+        return Result[PreparedCompilation].Error(box("Target module '\(package_graph.target_module_name)' not found in resolved module graph"))
+    }
+    let default_output_dir = package_config_path.into_path().dir_name()
+    return Result[PreparedCompilation].Ok(make_prepared_compilation(
+        std_pairs,
+        user_pairs,
+        merged_graph,
+        package_graph.target_module_name,
+        sanitize_module_artifact_name(package_graph.target_module_name),
+        linked_libraries,
+        default_output_dir,
+        target_spec.path_segments.join_to_string("."),
+    ))
+}
+
+private let prepare_legacy_compilation(options InvocationOptions) Result[PreparedCompilation] = {
+    let file_path = options.legacy_file_path or else {
+        return Result[PreparedCompilation].Error(box("missing input file"))
+    }
+    let mut resolver = ModuleResolver.new()
+    let user_unit = resolver.resolve_module(file_path) or return
+    let mut std_pairs = List[Pair[LoadedNode, List[String]]].new()
+    let user_pairs = user_unit.collect_all_nodes_with_path()
+    let mut merged_graph = user_unit.import_graph()
+    let mut linked_libraries = List[String].new()
+    let mut loaded_module_paths = collect_unique_module_paths_from_pairs(user_pairs)
+
+    if not options.no_std then {
+        when find_std_manifest_path() in {
+            .Some(std_manifest_path) then {
+                let std_manifest = load_package_manifest(std_manifest_path) or return
+                let mut iter = std_manifest.modules.iterator()
+                while iter.next() is .Some(entry) then {
+                    let spec = entry.second
+                    let unit = resolver.resolve_module_with_path(spec.entry_path, Option[List[String]].Some(spec.path_segments)) or return
+                    let pairs = unit.collect_all_nodes_with_path()
+                    for pair in pairs then { std_pairs.push(pair) }
+                    merged_graph.merge(unit.import_graph())
+                    loaded_module_paths.push(spec.path_segments)
+                    for link in std_manifest.links then { linked_libraries.push(link) }
+                    for link in spec.links then { linked_libraries.push(link) }
+                }
+
+                let mut std_root_name = Option[String].None()
+                let mut std_iter = std_manifest.modules.iterator()
+                while std_iter.next() is .Some(entry) then {
+                    if not entry.first.contains("::") then {
+                        std_root_name = Option[String].Some(entry.first)
+                        break
+                    }
+                }
+                when std_root_name in {
+                    .Some(name) then {
+                        let std_root_segments = parse_manifest_module_name(name) or else List[String].new()
+                        if not std_root_segments.is_empty() then {
+                            inject_std_prelude_imports(std_root_segments, loaded_module_paths, merged_graph.ref)
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    let source_path = file_path.into_path()
+    let base_name = source_path.with_ext_name("").base_name()
+    return Result[PreparedCompilation].Ok(make_prepared_compilation(
+        std_pairs,
+        user_pairs,
+        merged_graph,
+        file_path,
+        base_name,
+        linked_libraries,
+        source_path.dir_name(),
+        user_unit.root_module().path_string(),
+    ))
+}
+
+private let prepare_compilation(options InvocationOptions) Result[PreparedCompilation] = {
+    return when options.package_config_path in {
+        .Some(_) then prepare_package_compilation(options),
+        .None() then prepare_legacy_compilation(options),
+    }
+}
+
+private let run_check(options InvocationOptions) Int = {
     debug_phase("check: type check")
     let type_check_start = MonoTime.now()
-    let result = type_check_entry_file(file_path, no_std)
+    let prepared = prepare_compilation(options) or else {
+        eprintln(it.message())
+        return 1
+    }
+    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
     profile_phase("check: type check", type_check_start)
 
     if result.diagnostics.has_errors() then {
         debug_phase("check: render diagnostics")
         let render_start = MonoTime.now()
-        print_user_focused_diagnostic_records(result.diagnostics, file_path)
+        print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
         profile_phase("check: render diagnostics", render_start)
         return 1
     }
@@ -214,13 +637,17 @@ private let run_emit_ast(file_path String) Int = {
     return 0
 }
 
-private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
+private let run_emit_typed_ast(options InvocationOptions) Int = {
     debug_phase("emit-typed-ast: type check")
-    let result = type_check_entry_file(file_path, no_std)
+    let prepared = prepare_compilation(options) or else {
+        eprintln(it.message())
+        return 1
+    }
+    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
 
     if result.diagnostics.has_errors() then {
         debug_phase("emit-typed-ast: render diagnostics")
-        print_user_focused_diagnostic_records(result.diagnostics, file_path)
+        print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
         return 1
     }
 
@@ -234,14 +661,14 @@ private let run_emit_typed_ast(file_path String, no_std Bool) Int = {
     return 0
 }
 
-private let run_resolve_module(file_path String, no_std Bool) Int = {
-    let mut resolver = ModuleResolver.new()
-    let graph = resolver.resolve_for_typecheck(file_path, no_std) or else {
+private let run_resolve_module(options InvocationOptions) Int = {
+    let prepared = prepare_compilation(options) or else {
         eprintln("module resolution failed: \(it.message())")
         return 1
     }
+    let graph = prepared.graph
 
-    println("Resolved module graph for: \(file_path)")
+    println("Resolved module graph for: \(prepared.display_name)")
     println("root module path: \(graph.root_module_path)")
     println("module paths (\(graph.module_paths.count())):")
     for module_path in graph.module_paths then {
@@ -276,7 +703,7 @@ private let find_clang() String = {
 // Invoke clang to compile a .c file to an executable.
 // Uses Inherit stdio (no pipe) to avoid buffer deadlock, mirroring Swift runSubprocess.
 // Returns true on success.
-private let run_clang(c_file String, exe_file String) Bool = {
+private let run_clang(c_file String, exe_file String, linked_libraries List[String]) Bool = {
     let clang = find_clang()
 
     let mut clang_args = List[String].new()
@@ -297,10 +724,23 @@ private let run_clang(c_file String, exe_file String) Bool = {
     clang_args.push("-Wno-everything")
     clang_args.push("-O1")
 
+    let mut seen_libs = Set[String].new()
+    for lib in linked_libraries then {
+        if lib == "c" or seen_libs.contains(lib) then {
+            continue
+        }
+        seen_libs.insert(lib)
+        clang_args.push("-l\(lib)")
+    }
+
     // Windows: link bcrypt and ws2_32 (needed by koral_runtime)
     if env("OS") is .Some(os) and os.contains("Windows") then {
-        clang_args.push("-lbcrypt")
-        clang_args.push("-lws2_32")
+        if not seen_libs.contains("bcrypt") then {
+            clang_args.push("-lbcrypt")
+        }
+        if not seen_libs.contains("ws2_32") then {
+            clang_args.push("-lws2_32")
+        }
     }
 
     // Use Inherit stdio so clang output goes directly to terminal (no pipe deadlock)
@@ -318,38 +758,38 @@ private let run_clang(c_file String, exe_file String) Bool = {
     return true
 }
 
-private let build_c_output_path(file_path String, out_dir Option[String]) Path = {
+private let build_c_output_path(artifact_base_name String, default_output_dir Path, out_dir Option[String]) Path = {
     return if out_dir is .Some(dir) then {
-        let src_path = file_path.into_path()
-        let base = src_path.base_name()
-        let ext = src_path.ext_name()
-        let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
-        yield (dir + "/" + stem + ".c").into_path()
+        yield dir.into_path().join(artifact_base_name + ".c").normalize()
     } else {
-        yield file_path.into_path().with_ext_name(".c")
+        yield default_output_dir.join(artifact_base_name + ".c").normalize()
     }
 }
 
-private let emit_c(file_path String, no_std Bool, out_dir Option[String], phase_prefix String, profile_total_phase Bool) Option[Path] = {
+private let emit_c(options InvocationOptions, phase_prefix String, profile_total_phase Bool) Option[Pair[Path, List[String]]] = {
     let total_start = MonoTime.now()
 
     debug_phase("\(phase_prefix): type check")
     let type_check_start = MonoTime.now()
-    let result = type_check_entry_file(file_path, no_std)
+    let prepared = prepare_compilation(options) or else {
+        eprintln(it.message())
+        return Option[Pair[Path, List[String]]].None()
+    }
+    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
     profile_phase("\(phase_prefix): type check", type_check_start)
 
     if result.diagnostics.has_errors() then {
         debug_phase("\(phase_prefix): render diagnostics")
         let render_start = MonoTime.now()
-        print_user_focused_diagnostic_records(result.diagnostics, file_path)
+        print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
         profile_phase("\(phase_prefix): render diagnostics", render_start)
         if profile_total_phase then {
             profile_phase("\(phase_prefix): total", total_start)
         }
-        return Option[Path].None()
+        return Option[Pair[Path, List[String]]].None()
     }
 
-    let typed_program = if result.typed_program is .Some(program) then program else { return Option[Path].None() }
+    let typed_program = if result.typed_program is .Some(program) then program else { return Option[Pair[Path, List[String]]].None() }
     let context = result.context
 
     debug_phase("\(phase_prefix): monomorphize")
@@ -364,14 +804,14 @@ private let emit_c(file_path String, no_std Bool, out_dir Option[String], phase_
     profile_phase("\(phase_prefix): monomorphize", mono_start)
     let mono_output = Pair[CompilerContext, MonomorphizedProgram](context, mono_program)
 
-    let output_path = build_c_output_path(file_path, out_dir)
+    let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir)
 
     create_dir_all(output_path.dir_name()) or else {
         eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(it.message())")
         if profile_total_phase then {
             profile_phase("\(phase_prefix): total", total_start)
         }
-        return Option[Path].None()
+        return Option[Pair[Path, List[String]]].None()
     }
 
     {
@@ -388,7 +828,7 @@ private let emit_c(file_path String, no_std Bool, out_dir Option[String], phase_
             if profile_total_phase then {
                 profile_phase("\(phase_prefix): total", total_start)
             }
-            return Option[Path].None()
+            return Option[Pair[Path, List[String]]].None()
         }
     }
 
@@ -396,25 +836,27 @@ private let emit_c(file_path String, no_std Bool, out_dir Option[String], phase_
     if profile_total_phase then {
         profile_phase("\(phase_prefix): total", total_start)
     }
-    return Option[Path].Some(output_path)
+    return Option[Pair[Path, List[String]]].Some(Pair[Path, List[String]](output_path, prepared.linked_libraries))
 }
 
-private let run_emit_c(file_path String, no_std Bool, out_dir Option[String]) Int = {
-    return when emit_c(file_path, no_std, out_dir, "emit-c", true) in {
+private let run_emit_c(options InvocationOptions) Int = {
+    return when emit_c(options, "emit-c", true) in {
         .Some(_) then 0,
         .None() then 1,
     }
 }
 
-private let run_build(file_path String, no_std Bool, out_dir Option[String]) Int = {
+private let run_build(options InvocationOptions) Int = {
     let total_start = MonoTime.now()
-    let output_path = emit_c(file_path, no_std, out_dir, "build", false) or else { return 1 }
+    let output = emit_c(options, "build", false) or else { return 1 }
+    let output_path = output.first
+    let linked_libraries = output.second
 
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
     debug_phase("build: clang")
     let clang_start = MonoTime.now()
-    if not run_clang(output_path.to_string(), exe_path.to_string()) then {
+    if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries) then {
         eprintln("clang compilation failed")
         profile_phase("build: clang", clang_start)
         profile_phase("build: total", total_start)

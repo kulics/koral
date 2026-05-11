@@ -72,8 +72,8 @@ public class AccessChecker {
             return
             
         case .protected:
-            // protected 符号只能从定义模块及其子模块访问
-            if !isSubmoduleOf(from, definedIn) {
+            // protected 符号只能从定义模块内部访问
+            if from.path != definedIn.path {
                 throw AccessError.protectedAccess(
                     symbol: symbolName,
                     definedIn: definedIn.path,
@@ -184,8 +184,8 @@ public class AccessChecker {
         traitModule: ModuleInfo,
         span: SourceSpan
     ) throws {
-        // 如果实现模块是 trait 模块或其子模块，总是可以实现
-        if isSubmoduleOf(implementingModule, traitModule) {
+        // 如果实现模块和 trait 模块相同，总是可以实现
+        if implementingModule.path == traitModule.path {
             return
         }
         

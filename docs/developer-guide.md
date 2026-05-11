@@ -25,8 +25,8 @@ swift build -c debug
 cd compiler
 swift build -c debug
 cd ..
-compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
-./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
 ### Run Shared Test Runner
@@ -46,13 +46,13 @@ swift build -c debug
 cd ..
 
 # 2) Build bootstrap compiler executable
-compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o bin/bootstrap
+compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
 
 # 3) Build shared test runner executable
-compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
+compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 
 # 4) Run shared cases against the host-built bootstrap compiler
-./bin/compiler-test-runner/main.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/main.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
 ```
 
 Common options:
@@ -72,13 +72,13 @@ Examples:
 
 ```bash
 # Run only hello-related cases
-./bin/compiler-test-runner/main.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/main --filter hello
+./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter hello
 
 # Run shared cases against the Swift compiler
-./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 
 # Point to a custom compiler path
-./bin/compiler-test-runner/main.exe --compiler custom --compiler-bin path/to/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler custom --compiler-bin path/to/koralc.exe -j=8
 ```
 
 Current expectations syntax in case files:
@@ -102,7 +102,7 @@ Case names with these prefixes are tagged for conflict grouping metadata:
 
 Windows notes:
 
-- Default bootstrap compiler path is auto-selected as `bin/bootstrap/main.exe` when `OS` contains `Windows`.
+- Default bootstrap compiler path is auto-selected as `bin/bootstrap/koralc.exe` when `OS` contains `Windows`.
 - Output matching normalizes CRLF to LF before evaluating `EXPECT` comments.
 
 ### Compile Koral Programs
@@ -111,14 +111,17 @@ Windows notes:
 # Build an executable (default command is build)
 swift run koralc path/to/file.koral
 
+# Build a manifest target module
+swift run koralc build --package-config path/to/koral.json --target-module app::main
+
 # Type-check only
 swift run koralc check path/to/file.koral
 
 # Build and run
-swift run koralc run path/to/file.koral
+swift run koralc run --package-config path/to/koral.json --target-module app::main
 
 # Emit C only
-swift run koralc emit-c path/to/file.koral -o output/
+swift run koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
 
 # Disable stdlib preload
 swift run koralc path/to/file.koral --no-std
@@ -132,7 +135,8 @@ CLI shape in current implementation:
 
 - `koralc <file.koral> [options]` (defaults to `build`)
 - `koralc [build|check|run|emit-c] <file.koral> [options]`
-- If no command is given, the first argument must end with `.koral`.
+- `koralc [build|check|run|emit-c] --package-config <koral.json> --target-module <module> [options]`
+- If no command is given, the first argument must either end with `.koral` or be an option such as `--package-config`.
 
 Output behavior:
 
@@ -146,10 +150,10 @@ Output behavior:
 
 `Driver.getCoreLibPath()` / `Driver.getStdLibPath()` search in this order:
 
-1. `KORAL_HOME` (expects `$KORAL_HOME/std/std.koral`)
-2. `std/std.koral` in current working directory
-3. `std/std.koral` in parent directory
-4. `std/std.koral` in grandparent directory
+1. `KORAL_HOME` (expects `$KORAL_HOME/std/std.koral` and `$KORAL_HOME/std/koral.json`)
+2. `std/std.koral` / `std/koral.json` in current working directory
+3. `std/std.koral` / `std/koral.json` in parent directory
+4. `std/std.koral` / `std/koral.json` in grandparent directory
 
 If you run `koralc` outside the repository root, set `KORAL_HOME` explicitly.
 
@@ -163,18 +167,18 @@ $env:KORAL_HOME = "C:\path\to\koral"
 
 Notes:
 
-- If `Driver.getCoreLibPath()` cannot find `std/std.koral`, the driver prints an error and exits.
+- If the driver cannot find std sources or `std/koral.json`, it prints an error and exits.
 - `Driver.getStdLibPath()` is also used to add `std/` include path and `koral_runtime.c` to clang when available.
 
 ## Module System Rules That Commonly Drift
 
 - Module entry file names must be valid module names: start with a lowercase letter, then continue with lowercase letters, digits, or `_`.
 - `using "file"` resolves relative to the current file's directory, not the module root.
-- `using "file"` without an alias merges the target file into the current module and shares `protected` scope.
-- `using "file" as Name` declares a named submodule.
-- Explicit member imports are parser-normalized: forms such as `using Std.Io.Reader` and `using Super.Mod.Symbol` record the imported symbol directly.
-- In `using path as alias`, alias casing must match the referenced identifier after parser normalization. In practice, the last remaining path segment controls the case check.
-- `Self` is no longer valid in `using` declarations. Use string-based file imports instead.
+- `using "file"` merges the target file into the current module; it does not create a submodule or alias.
+- Cross-module imports must use explicit module syntax such as `using std::io { Reader }` or `using std::io { .. }`.
+- `..` must be the only item inside a module import list.
+- Imported symbols are file-local bindings and are not re-exported automatically.
+- Module names come from `koral.json` / `std/koral.json`; removed source forms include `using "file" as Name`, `using Super...`, bare-path imports such as `using Std.Io`, alias imports such as `using Std.Io as Io`, batch imports such as `using Std.Io.*`, and `foreign using`.
 
 ## Language Rules That Commonly Drift
 
@@ -665,7 +669,7 @@ if escapeContext.shouldUseHeapAllocation(innerExpr) {
 // my_feature.koral
 // EXPECT: test passed
 
-using Std.*
+using std { .. }
 
 let main() Void = {
     println("test passed")
@@ -689,8 +693,8 @@ How integration tests run (current behavior):
 cd compiler
 swift build -c debug
 cd ..
-compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
-./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
 - Output assertions are comment-based and order-sensitive:
@@ -702,10 +706,31 @@ compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compi
 
 ```text
 tests/compiler-cases/my_module_test/
-├── my_module_test.koral    # entry file (must match folder name)
+├── koral.json              # explicit module table
+├── my_module_test.koral    # root module entry
 ├── helper.koral            # merged file (using "helper")
 └── child/
-    └── child.koral         # submodule (using "child" as Child)
+    └── child.koral         # separate module entry declared in manifest
+```
+
+```json
+{
+  "name": "MyModuleTest",
+  "version": "0.1.0",
+  "entry": "my_module_test.koral",
+  "modules": {
+    "my_module_test": {
+      "entry": "my_module_test.koral",
+      "deps": ["std", "my_module_test::child"],
+      "links": []
+    },
+    "my_module_test::child": {
+      "entry": "child/child.koral",
+      "deps": ["std"],
+      "links": []
+    }
+  }
+}
 ```
 
 ## Debugging Tips
@@ -780,7 +805,7 @@ Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier(
 
 ### How do I add a new foreign binding?
 
-1. Declare external library with `foreign using "library"`
+1. Declare external libraries in package or module `links` inside `koral.json`
 2. Declare external functions with `foreign let`
 3. Declare external types with `foreign type` (optional fields)
-4. CodeGen emits C declarations; Driver appends linker `-l` flags
+4. CodeGen emits C declarations; Driver appends linker flags from the resolved manifest graph

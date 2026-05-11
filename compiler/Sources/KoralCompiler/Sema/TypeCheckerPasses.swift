@@ -123,6 +123,11 @@ extension TypeChecker {
       // Run BodyChecker
       if let typeResolverOutput {
         do {
+          try registerExplicitModuleImports()
+        } catch let error as SemanticError {
+          try? handleError(error)
+        }
+        do {
           let output = try runBodyChecker(typeResolverOutput: typeResolverOutput)
           // Store the BodyChecker output for potential use by later stages
           self.bodyCheckerOutput = output
@@ -254,6 +259,8 @@ extension TypeChecker {
       }
       let remaining = index < using.pathSegments.count ? Array(using.pathSegments[index...]) : []
       return base + remaining
+    case .modulePath:
+      return using.pathSegments
     }
   }
 
@@ -302,6 +309,90 @@ extension TypeChecker {
           access: usingDecl.access
         )
       }
+    }
+  }
+
+  private func registerExplicitModuleImports() throws {
+    guard let importGraph else {
+      return
+    }
+
+    for edge in importGraph.edges where edge.kind == .batchImport {
+      guard let sourceFile = edge.sourceFile else { continue }
+      let targetKey = edge.target.joined(separator: ".")
+      guard let moduleInfo = moduleSymbols[targetKey] else { continue }
+
+      for (name, type) in moduleInfo.publicTypes {
+        if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
+          try currentScope.definePrivateType(name, sourceFile: sourceFile, type: type)
+        }
+      }
+      for (name, symbol) in moduleInfo.publicSymbols {
+        try registerImportedSymbol(
+          name: name,
+          symbol: symbol,
+          sourceModulePath: edge.source,
+          sourceFile: sourceFile
+        )
+      }
+    }
+
+    for symbolImport in importGraph.symbolImports {
+      guard let sourceFile = symbolImport.sourceFile else { continue }
+      let targetKey = symbolImport.target.joined(separator: ".")
+      guard let moduleInfo = moduleSymbols[targetKey] else { continue }
+
+      let originalName = symbolImport.originalSymbol
+      let localName = symbolImport.symbol
+
+      if let importedType = moduleInfo.publicTypes[originalName],
+         currentScope.lookupType(localName, sourceFile: sourceFile) == nil {
+        try currentScope.definePrivateType(localName, sourceFile: sourceFile, type: importedType)
+      }
+
+      if let importedSymbol = moduleInfo.publicSymbols[originalName] {
+        try registerImportedSymbol(
+          name: localName,
+          symbol: importedSymbol,
+          sourceModulePath: symbolImport.module,
+          sourceFile: sourceFile
+        )
+      }
+    }
+  }
+
+  private func registerImportedSymbol(
+    name: String,
+    symbol: Symbol,
+    sourceModulePath: [String],
+    sourceFile: String
+  ) throws {
+    if currentScope.lookup(name, sourceFile: sourceFile) != nil {
+      return
+    }
+
+    switch symbol.kind {
+    case .function:
+      currentScope.definePrivateFunction(
+        name,
+        sourceFile: sourceFile,
+        type: symbol.type,
+        modulePath: sourceModulePath
+      )
+    case .variable(let variableKind):
+      currentScope.definePrivateSymbol(
+        name,
+        sourceFile: sourceFile,
+        type: symbol.type,
+        mutable: variableKind == .MutableValue,
+        modulePath: sourceModulePath
+      )
+    case .type:
+      if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
+        try currentScope.definePrivateType(name, sourceFile: sourceFile, type: symbol.type)
+      }
+    case .module:
+      return
     }
   }
   
