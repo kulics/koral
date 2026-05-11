@@ -133,10 +133,8 @@ swift run koralc path/to/file.koral -m=2
 
 CLI shape in current implementation:
 
-- `koralc <file.koral> [options]` (defaults to `build`)
-- `koralc [build|check|run|emit-c] <file.koral> [options]`
-- `koralc [build|check|run|emit-c] --package-config <koral.json> --target-module <module> [options]`
-- If no command is given, the first argument must either end with `.koral` or be an option such as `--package-config`.
+- `koralc [build|check|run|emit-c] --package-config <koral.json> [--target-module <module>] [options]`
+- If no command is given, the first argument must be an option such as `--package-config`.
 
 Output behavior:
 

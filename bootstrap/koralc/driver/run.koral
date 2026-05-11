@@ -4,7 +4,6 @@ using std::time { .. }
 
 private type InvocationOptions(
     command String,
-    legacy_file_path Option[String],
     package_config_path Option[String],
     target_module_name Option[String],
     deps_root Option[String],
@@ -41,13 +40,12 @@ public let run_driver() Int = {
        first == "build" then {
         command = first
         index = 2
-    } else if not first.ends_with(".koral") and not first.starts_with("-") then {
+    } else if not first.starts_with("-") then {
         eprintln("unsupported command: \(first)")
         print_usage()
         return 1
     }
 
-    let mut legacy_file_path = Option[String].None()
     let mut package_config_path = Option[String].None()
     let mut target_module_name = Option[String].None()
     let mut deps_root = Option[String].None()
@@ -98,8 +96,6 @@ public let run_driver() Int = {
         } else if arg.starts_with("-") then {
             eprintln("unknown argument: \(arg)")
             return 1
-        } else if legacy_file_path is .None() then {
-            legacy_file_path = Option[String].Some(arg)
         } else {
             eprintln("unexpected positional argument: \(arg)")
             return 1
@@ -109,7 +105,6 @@ public let run_driver() Int = {
 
     let options = InvocationOptions(
         command,
-        legacy_file_path,
         package_config_path,
         target_module_name,
         deps_root,
@@ -118,25 +113,15 @@ public let run_driver() Int = {
         out_dir,
     )
 
-    if options.package_config_path is .None() and options.legacy_file_path is .None() then {
-        eprintln("missing input file or --package-config")
+    if options.package_config_path is .None() then {
+        eprintln("missing --package-config")
         print_usage()
         return 1
     }
 
     if command == "--emit-ast" then {
-        when options.package_config_path in {
-            .Some(_) then {
-                eprintln("--emit-ast only supports a direct source file input")
-                return 1
-            },
-            .None() then {},
-        }
-        let file_path = options.legacy_file_path or else {
-            eprintln("missing input file")
-            return 1
-        }
-        return run_emit_ast(file_path)
+        eprintln("--emit-ast is no longer supported by the manifest-driven bootstrap driver")
+        return 1
     }
     if command == "--emit-typed-ast" then { return run_emit_typed_ast(options) }
     if command == "--resolve-module" then { return run_resolve_module(options) }
@@ -149,11 +134,7 @@ public let run_driver() Int = {
 
 private let print_usage() Void = {
     eprintln("bootstrap-koralc")
-    eprintln("usage: bootstrap-koralc [build|check|--emit-c] <file.koral> [options]")
-    eprintln("       bootstrap-koralc [build|check|--emit-c] --package-config <koral.json> [--target-module <module>] [options]")
-    eprintln("       bootstrap-koralc --emit-ast <file.koral>")
-    eprintln("       bootstrap-koralc --emit-typed-ast <file.koral>|--package-config <koral.json> [options]")
-    eprintln("       bootstrap-koralc --resolve-module <file.koral>|--package-config <koral.json> [options]")
+    eprintln("usage: bootstrap-koralc [build|check|--emit-c|--emit-typed-ast|--resolve-module] --package-config <koral.json> [--target-module <module>] [options]")
     eprintln("options:")
     eprintln("  -o <dir>                    output directory")
     eprintln("  --no-std                    disable std loading")
@@ -537,75 +518,8 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
     ))
 }
 
-private let prepare_legacy_compilation(options InvocationOptions) Result[PreparedCompilation] = {
-    let file_path = options.legacy_file_path or else {
-        return Result[PreparedCompilation].Error(box("missing input file"))
-    }
-    let mut resolver = ModuleResolver.new()
-    let user_unit = resolver.resolve_module(file_path) or return
-    let mut std_pairs = List[Pair[LoadedNode, List[String]]].new()
-    let user_pairs = user_unit.collect_all_nodes_with_path()
-    let mut merged_graph = user_unit.import_graph()
-    let mut linked_libraries = List[String].new()
-    let mut loaded_module_paths = collect_unique_module_paths_from_pairs(user_pairs)
-
-    if not options.no_std then {
-        when find_std_manifest_path() in {
-            .Some(std_manifest_path) then {
-                let std_manifest = load_package_manifest(std_manifest_path) or return
-                let mut iter = std_manifest.modules.iterator()
-                while iter.next() is .Some(entry) then {
-                    let spec = entry.second
-                    let unit = resolver.resolve_module_with_path(spec.entry_path, Option[List[String]].Some(spec.path_segments)) or return
-                    let pairs = unit.collect_all_nodes_with_path()
-                    for pair in pairs then { std_pairs.push(pair) }
-                    merged_graph.merge(unit.import_graph())
-                    loaded_module_paths.push(spec.path_segments)
-                    for link in std_manifest.links then { linked_libraries.push(link) }
-                    for link in spec.links then { linked_libraries.push(link) }
-                }
-
-                let mut std_root_name = Option[String].None()
-                let mut std_iter = std_manifest.modules.iterator()
-                while std_iter.next() is .Some(entry) then {
-                    if not entry.first.contains("::") then {
-                        std_root_name = Option[String].Some(entry.first)
-                        break
-                    }
-                }
-                when std_root_name in {
-                    .Some(name) then {
-                        let std_root_segments = parse_manifest_module_name(name) or else List[String].new()
-                        if not std_root_segments.is_empty() then {
-                            inject_std_prelude_imports(std_root_segments, loaded_module_paths, merged_graph.ref)
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .None() then {},
-        }
-    }
-
-    let source_path = file_path.into_path()
-    let base_name = source_path.with_ext_name("").base_name()
-    return Result[PreparedCompilation].Ok(make_prepared_compilation(
-        std_pairs,
-        user_pairs,
-        merged_graph,
-        file_path,
-        base_name,
-        linked_libraries,
-        source_path.dir_name(),
-        user_unit.root_module().path_string(),
-    ))
-}
-
 private let prepare_compilation(options InvocationOptions) Result[PreparedCompilation] = {
-    return when options.package_config_path in {
-        .Some(_) then prepare_package_compilation(options),
-        .None() then prepare_legacy_compilation(options),
-    }
+    return prepare_package_compilation(options)
 }
 
 private let run_check(options InvocationOptions) Int = {
@@ -627,13 +541,6 @@ private let run_check(options InvocationOptions) Int = {
     }
 
     debug_phase("check: done")
-    return 0
-}
-
-private let run_emit_ast(file_path String) Int = {
-    let source = read_source(file_path) or else { return 1 }
-    let program = parse_source(file_path, source) or else { return 1 }
-    print_program(program)
     return 0
 }
 

@@ -10,14 +10,6 @@ public enum AccessModifier: String, Sendable {
 
 // MARK: - Module System Types
 
-/// Using 声明的路径类型
-public enum UsingPathKind {
-  case path        // 标识符路径（非 Super）: Std.Io / Worker.run
-  case parent      // 父模块导入: Super.Sib / Super.Super.Uncle
-  case fileUsing   // 文件引用: using "file_name" / using "file_name" as Name
-  case modulePath  // 显式模块导入: using std::io { Reader, .. }
-}
-
 public enum UsingModuleItemKind {
   case symbol
   case allPublic
@@ -35,59 +27,34 @@ public struct UsingModuleItem {
   }
 }
 
+public enum UsingDeclarationKind {
+  case fileMerge(path: String)
+  case moduleImport(pathSegments: [String], items: [UsingModuleItem])
+}
+
 /// Using 声明 AST 节点
 public struct UsingDeclaration {
-  /// 路径类型
-  public let pathKind: UsingPathKind
-  
-  /// 模块路径段 (for external/parent paths)
-  /// - external: ["Std", "Text"]
-  /// - parent: ["Super", "Sibling"] 或 ["Super", "Super", "Uncle"]
-  /// - fileUsing: [] (unused, use fileName instead)
-  public let pathSegments: [String]
-  
-  /// 文件名 (for fileUsing only): using "file_name"
-  public let fileName: String?
-  
-  /// 可选别名: using "file" as Name / using Std.Io as Io
-  public let alias: String?
-
-  /// 显式成员导入: using Std.Io.Reader
-  /// nil 表示模块导入或文件引用
-  public let importedSymbol: String?
-  
-  /// 是否批量导入: using Std.Io.*
-  public let isBatchImport: Bool
-
-  /// 显式模块导入项: using std::io { Reader, .. }
-  public let moduleItems: [UsingModuleItem]
-  
-  /// 访问修饰符
-  public let access: AccessModifier
-  
-  /// 源码位置
+  public let kind: UsingDeclarationKind
   public let span: SourceSpan
-  
-  public init(
-    pathKind: UsingPathKind,
-    pathSegments: [String] = [],
-    fileName: String? = nil,
-    alias: String? = nil,
-    importedSymbol: String? = nil,
-    isBatchImport: Bool = false,
-    moduleItems: [UsingModuleItem] = [],
-    access: AccessModifier = .private,
-    span: SourceSpan
-  ) {
-    self.pathKind = pathKind
-    self.pathSegments = pathSegments
-    self.fileName = fileName
-    self.alias = alias
-    self.importedSymbol = importedSymbol
-    self.isBatchImport = isBatchImport
-    self.moduleItems = moduleItems
-    self.access = access
+
+  public init(kind: UsingDeclarationKind, span: SourceSpan) {
+    self.kind = kind
     self.span = span
+  }
+
+  public var filePath: String? {
+    guard case .fileMerge(let path) = kind else { return nil }
+    return path
+  }
+
+  public var modulePathSegments: [String] {
+    guard case .moduleImport(let pathSegments, _) = kind else { return [] }
+    return pathSegments
+  }
+
+  public var moduleItems: [UsingModuleItem] {
+    guard case .moduleImport(_, let items) = kind else { return [] }
+    return items
   }
 }
 
