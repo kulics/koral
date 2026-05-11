@@ -600,14 +600,23 @@ given CodeGen {
         self.buffer = saved_buffer
         self.indent = saved_indent
         // lambda_counter 已在生成过程中递增，保留新值
+        let lambda_preamble = "\n// Lambda function (no capture)\n"
+        let lambda_decl = "static \(return_c_type) \(name)(\(params_str));\n"
+        let lambda_header = "static \(return_c_type) \(name)(\(params_str)) {\n"
+        let lambda_footer = "}\n"
+        let mut additional_capacity = lambda_preamble.count() + lambda_decl.count() + lambda_header.count() + lambda_body.count() + lambda_footer.count()
+        if not nested_lambda_functions.is_empty() then {
+            additional_capacity += nested_lambda_functions.count()
+        }
+        saved_lambda_functions.reserve(saved_lambda_functions.count() + additional_capacity)
         if not nested_lambda_functions.is_empty() then {
             saved_lambda_functions.push_string(nested_lambda_functions)
         }
-        saved_lambda_functions.push_string("\n// Lambda function (no capture)\n")
-        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str));\n")
-        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
+        saved_lambda_functions.push_string(lambda_preamble)
+        saved_lambda_functions.push_string(lambda_decl)
+        saved_lambda_functions.push_string(lambda_header)
         saved_lambda_functions.push_string(lambda_body)
-        saved_lambda_functions.push_string("}\n")
+        saved_lambda_functions.push_string(lambda_footer)
         self.lambda_functions = saved_lambda_functions
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
@@ -678,15 +687,25 @@ given CodeGen {
         self.indent = saved_indent
         // lambda_counter 已在生成过程中递增，保留新值
         self.captured_var_aliases = saved_captured_var_aliases
+        let lambda_preamble = "\n// Lambda function (with capture)\n"
+        let lambda_decl = "static \(return_c_type) \(name)(\(params_str));\n"
+        let lambda_header = "static \(return_c_type) \(name)(\(params_str)) {\n"
+        let capture_header = "  struct \(env_struct_name)* __captured = (struct \(env_struct_name)*)__env;\n"
+        let lambda_footer = "}\n"
+        let mut additional_capacity = lambda_preamble.count() + lambda_decl.count() + lambda_header.count() + capture_header.count() + lambda_body.count() + lambda_footer.count()
+        if not nested_lambda_functions.is_empty() then {
+            additional_capacity += nested_lambda_functions.count()
+        }
+        saved_lambda_functions.reserve(saved_lambda_functions.count() + additional_capacity)
         if not nested_lambda_functions.is_empty() then {
             saved_lambda_functions.push_string(nested_lambda_functions)
         }
-        saved_lambda_functions.push_string("\n// Lambda function (with capture)\n")
-        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str));\n")
-        saved_lambda_functions.push_string("static \(return_c_type) \(name)(\(params_str)) {\n")
-        saved_lambda_functions.push_string("  struct \(env_struct_name)* __captured = (struct \(env_struct_name)*)__env;\n")
+        saved_lambda_functions.push_string(lambda_preamble)
+        saved_lambda_functions.push_string(lambda_decl)
+        saved_lambda_functions.push_string(lambda_header)
+        saved_lambda_functions.push_string(capture_header)
         saved_lambda_functions.push_string(lambda_body)
-        saved_lambda_functions.push_string("}\n")
+        saved_lambda_functions.push_string(lambda_footer)
         self.lambda_functions = saved_lambda_functions
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack

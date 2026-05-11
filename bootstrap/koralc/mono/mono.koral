@@ -2,6 +2,7 @@
 // This file defines the auxiliary types and the output structure produced
 // by the Monomorphizer after processing all instantiation requests.
 
+using Std.Container.*
 using "instantiation_request"
 using "generic_template_registry"
 using "codegen_view"
@@ -367,6 +368,8 @@ protected type MonomorphizerStorage(
     mut instantiated_types Dict[String, Type],
     mut instantiated_functions Dict[String, InstantiatedFunction],
     mut instantiated_function_symbols Dict[String, Symbol],
+    mut resolved_parameterized_types Dict[String, Type],
+    mut resolving_parameterized_type_keys Set[String],
     mut generated_layouts Set[String],
 
     // ── Output ───────────────────────────────────────────────────────────────
@@ -382,7 +385,7 @@ protected type MonomorphizerStorage(
     mut vtable_requests List[VtableRequest],
 
     // ── Work queue ───────────────────────────────────────────────────────────
-    mut pending_requests List[InstantiationRequest],
+    mut pending_requests Queue[InstantiationRequest],
     mut processed_request_keys Set[String],
     mut pending_request_keys Set[String],
 
@@ -516,7 +519,7 @@ given Monomorphizer {
 
         // Copy and deduplicate instantiation requests up front to avoid
         // pathological queue growth from repeated identical requests.
-        let mut requests = List[InstantiationRequest].new()
+        let mut requests = Queue[InstantiationRequest].with_capacity(input.instantiation_requests.count())
         let mut queued_keys = Set[String].new()
         for req in input.instantiation_requests then {
             let key = req.deduplication_key()
@@ -533,6 +536,8 @@ given Monomorphizer {
             Dict[String, Type].new(),
             Dict[String, InstantiatedFunction].new(),
             Dict[String, Symbol].new(),
+            Dict[String, Type].new(),
+            Set[String].new(),
             Set[String].new(),
             // output
             initial_nodes,
@@ -652,7 +657,9 @@ given Monomorphizer {
             }
 
             // Take the first request from the queue
-            let req = self.storage.pending_requests.take_at(0)
+            let req = self.storage.pending_requests.pop() or else {
+                panic("Monomorphization pending queue unexpectedly empty")
+            }
             let key = req.deduplication_key()
 
             // Deduplication check
@@ -717,7 +724,9 @@ given Monomorphizer {
                 panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
             }
 
-            let req = self.storage.pending_requests.take_at(0)
+            let req = self.storage.pending_requests.pop() or else {
+                panic("Monomorphization pending queue unexpectedly empty")
+            }
             let key = req.deduplication_key()
             if self.storage.processed_request_keys.contains(key) then {
                 continue

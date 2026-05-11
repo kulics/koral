@@ -278,7 +278,39 @@ private let resolve_def_id_backed_type(
 }
 
 public let resolve_parameterized_type(mono ref Monomorphizer, t Type) Type = {
-    return when t in {
+    when t in {
+        .IntType() then { return t },
+        .Int8Type() then { return t },
+        .Int16Type() then { return t },
+        .Int32Type() then { return t },
+        .Int64Type() then { return t },
+        .UIntType() then { return t },
+        .UInt8Type() then { return t },
+        .UInt16Type() then { return t },
+        .UInt32Type() then { return t },
+        .UInt64Type() then { return t },
+        .Float32Type() then { return t },
+        .Float64Type() then { return t },
+        .BoolType() then { return t },
+        .VoidType() then { return t },
+        .NeverType() then { return t },
+        .ModuleType(_) then { return t },
+        .TraitObject(_, _) then { return t },
+        .TypeVar(_) then { return t },
+        .Unknown() then { return t },
+        _ then {},
+    }
+    let cache_key = stable_type_key(t)
+    when mono.storage.resolved_parameterized_types.get(cache_key) in {
+        .Some(cached) then { return cached },
+        .None() then {},
+    }
+    if mono.storage.resolving_parameterized_type_keys.contains(cache_key) then {
+        return t
+    }
+    mono.storage.resolving_parameterized_type_keys.insert(cache_key)
+
+    let resolved = when t in {
         // GenericStruct: look up struct template and instantiate.
         .GenericStruct(template_name, args) then {
             // Trait names can appear in GenericStruct form during sema output
@@ -432,6 +464,10 @@ public let resolve_parameterized_type(mono ref Monomorphizer, t Type) Type = {
         // All other types: return unchanged.
         _ then t,
     }
+
+    mono.storage.resolving_parameterized_type_keys.remove(cache_key)
+    mono.storage.resolved_parameterized_types.insert(cache_key, resolved)
+    return resolved
 }
 
 // ── resolve_type_node ─────────────────────────────────────────────────────────
