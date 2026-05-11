@@ -50,10 +50,8 @@
 
 ## CLI Behavior (Swift Driver)
 - Shape:
-  - `koralc <file.koral> [options]` (default command: `build`)
-  - `koralc [build|check|run|emit-c] <file.koral> [options]`
-  - `koralc [build|check|run|emit-c] --package-config <koral.json> --target-module <module> [options]`
-- If command is omitted, the first arg must either be a `.koral` file or an option such as `--package-config`.
+  - `koralc [build|check|run|emit-c] --package-config <koral.json> [--target-module <module>] [options]`
+- If command is omitted, the first arg must be an option such as `--package-config`.
 - Options:
   - `-o`, `--output <dir>`
   - `--package-config <path>`
@@ -72,12 +70,11 @@
 ## CLI Behavior (Bootstrap Driver)
 - Entry executable is produced from `bootstrap/koralc/main.koral`.
 - Commands supported by `bootstrap/koralc/driver/run.koral`:
-  - `bootstrap-koralc --emit-ast <file.koral>`
-  - `bootstrap-koralc --emit-typed-ast <file.koral>|--package-config <koral.json> [options]`
-  - `bootstrap-koralc --resolve-module <file.koral>|--package-config <koral.json> [options]`
-  - `bootstrap-koralc --emit-c <file.koral>|--package-config <koral.json> [-o <dir>] [options]`
-  - `bootstrap-koralc check <file.koral>|--package-config <koral.json> [options]`
-  - `bootstrap-koralc build <file.koral>|--package-config <koral.json> [-o <dir>] [options]`
+  - `bootstrap-koralc --emit-typed-ast --package-config <koral.json> [options]`
+  - `bootstrap-koralc --resolve-module --package-config <koral.json> [options]`
+  - `bootstrap-koralc --emit-c --package-config <koral.json> [-o <dir>] [options]`
+  - `bootstrap-koralc check --package-config <koral.json> [options]`
+  - `bootstrap-koralc build --package-config <koral.json> [-o <dir>] [options]`
 - Bootstrap driver supports `--package-config`, `--target-module`, `--deps-root`, and `--std-config`, but still does not mirror Swift driver's `run` command or `-m` escape-analysis flag.
 - Set `KORAL_DEBUG_PHASE=1` to print phase markers during bootstrap debugging.
 

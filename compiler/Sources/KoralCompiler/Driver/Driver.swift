@@ -12,7 +12,6 @@ public class Driver {
   private var sourceManager = SourceManager()
 
   private struct InvocationOptions {
-    var legacyFilePath: String?
     var packageConfigPath: String?
     var targetModuleName: String?
     var depsRoot: String?
@@ -50,9 +49,6 @@ public class Driver {
       if args.count > 2 {
         remainingArgs = Array(args[2...])
       }
-    } else if commandStr.hasSuffix(".koral") {
-      mode = .build
-      remainingArgs = Array(args[1...])
     } else if commandStr.hasPrefix("-") {
       mode = .build
       remainingArgs = Array(args[1...])
@@ -129,17 +125,16 @@ public class Driver {
       } else if arg.hasPrefix("-") {
         i += 1
       } else {
-        if options.legacyFilePath == nil {
-          options.legacyFilePath = arg
-        }
-        i += 1
+        writeStderr("Unknown positional argument: \(arg)")
+        printUsage()
+        return
       }
     }
 
     options.escapeAnalysisReport = escapeAnalysisLevel > 0
 
-    if options.packageConfigPath == nil && options.legacyFilePath == nil {
-      writeStderr("Error: Missing input file or --package-config")
+    if options.packageConfigPath == nil {
+      writeStderr("Error: Missing --package-config")
       printUsage()
       return
     }
@@ -294,9 +289,6 @@ public class Driver {
         sourceManager.loadFile(name: displayName, content: source)
       }
     }
-    for (_, submodule) in module.submodules {
-      registerModuleSources(from: submodule, displayPrefix: displayPrefix)
-    }
   }
 
   private func sanitizeModuleArtifactName(_ moduleName: String) -> String {
@@ -346,7 +338,6 @@ public class Driver {
       let compilationUnit = try resolver.resolveModule(
         entryFile: spec.entryPath,
         rootModulePath: spec.pathSegments,
-        resolveModuleImports: false
       )
       let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
       for (node, sourceFile, modulePath) in nodesWithInfo {
@@ -380,171 +371,23 @@ public class Driver {
   }
 
   private func process(mode: DriverCommand, options: InvocationOptions) throws {
-    if let packageConfigPath = options.packageConfigPath {
-      try processPackage(
-        packageConfigPath: packageConfigPath,
-        targetModuleName: options.targetModuleName,
-        mode: mode,
-        outputDir: options.outputDir,
-        noStd: options.noStd,
-        escapeAnalysisReport: options.escapeAnalysisReport,
-        depsRoot: options.depsRoot,
-        stdConfigPath: options.stdConfigPath
-      )
-      return
-    }
-
-    guard let filePath = options.legacyFilePath else {
+    guard let packageConfigPath = options.packageConfigPath else {
       throw NSError(
         domain: "Driver",
         code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Missing legacy input file"]
+        userInfo: [NSLocalizedDescriptionKey: "Missing --package-config"]
       )
     }
 
-    try processLegacy(
-      file: filePath,
+    try processPackage(
+      packageConfigPath: packageConfigPath,
+      targetModuleName: options.targetModuleName,
       mode: mode,
       outputDir: options.outputDir,
       noStd: options.noStd,
-      escapeAnalysisReport: options.escapeAnalysisReport
-    )
-  }
-
-  private func processLegacy(file: String, mode: DriverCommand, outputDir: String? = nil, noStd: Bool = false, escapeAnalysisReport: Bool = false) throws {
-    let fileManager = FileManager.default
-    let inputURL = URL(fileURLWithPath: file).standardized
-    
-    let baseName = inputURL.deletingPathExtension().lastPathComponent
-    
-    let outputDirectory: URL
-    if let outDir = outputDir {
-        outputDirectory = URL(fileURLWithPath: outDir)
-        // Create output directory if it doesn't exist
-        if !fileManager.fileExists(atPath: outputDirectory.path) {
-            try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
-        }
-    } else {
-        outputDirectory = inputURL.deletingLastPathComponent()
-    }
-
-    let userDisplayName = inputURL.lastPathComponent
-    let stdDisplayName = getStdManifestPath() ?? "std/koral.json"
-
-    // Initialize module resolver
-    let resolver = initializeModuleResolver()
-    
-    var stdGlobalNodes: [GlobalNode] = []
-    var stdNodeSourceInfoList: [GlobalNodeSourceInfo] = []
-    var stdImportGraph = ImportGraph()
-    var stdRootModulePath: [String]? = nil
-    var loadedStdModulePaths: [[String]] = []
-    var extraLinkedLibraries: [String] = []
-    
-    if !noStd {
-      do {
-        guard let stdManifestPath = getStdManifestPath() else {
-          throw NSError(
-            domain: "Driver",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Could not locate std/koral.json"]
-          )
-        }
-        let stdManifest = try loadPackageManifest(at: stdManifestPath)
-        let loadedStd = try loadManifestModules(manifest: stdManifest, resolver: resolver)
-        stdGlobalNodes = loadedStd.globalNodes
-        stdNodeSourceInfoList = loadedStd.nodeSourceInfoList
-        stdImportGraph = loadedStd.importGraph
-        stdRootModulePath = loadedStd.rootModulePath
-        loadedStdModulePaths = loadedStd.loadedModulePaths
-        extraLinkedLibraries.append(contentsOf: loadedStd.linkedLibraries)
-      } catch let error as ModuleError {
-        throw DiagnosticError(
-          stage: .other,
-          fileName: stdDisplayName,
-          underlying: error,
-          sourceManager: sourceManager
-        )
-      }
-    }
-
-    // Compile user code
-    var allGlobalNodes: [GlobalNode] = stdGlobalNodes
-    var nodeSourceInfoList: [GlobalNodeSourceInfo] = stdNodeSourceInfoList
-    var userCompilationUnit: CompilationUnit? = nil
-    
-    do {
-      let compilationUnit = try resolver.resolveModule(entryFile: file)
-      userCompilationUnit = compilationUnit
-      
-      // Collect all global nodes from the compilation unit
-      allGlobalNodes = stdGlobalNodes + compilationUnit.getAllGlobalNodes()
-      
-      // Add user code nodes with source info
-      let userNodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
-      for (node, sourceFile, modulePath) in userNodesWithInfo {
-        nodeSourceInfoList.append(GlobalNodeSourceInfo(
-          sourceFile: sourceFile,
-          modulePath: modulePath,
-          node: node
-        ))
-      }
-      
-      // Register all source files with source manager for error rendering
-      func registerSources(from module: ModuleInfo) {
-        // Register entry file
-        if let source = try? String(contentsOfFile: module.entryFile, encoding: .utf8) {
-          let displayName = URL(fileURLWithPath: module.entryFile).lastPathComponent
-          sourceManager.loadFile(name: displayName, content: source)
-        }
-        // Register merged submodule entry files
-        for mergedSubmodule in module.mergedSubmodules {
-          if let source = try? String(contentsOfFile: mergedSubmodule, encoding: .utf8) {
-            let displayName = URL(fileURLWithPath: mergedSubmodule).lastPathComponent
-            sourceManager.loadFile(name: displayName, content: source)
-          }
-        }
-        // Register submodule files
-        for (_, submodule) in module.submodules {
-          registerSources(from: submodule)
-        }
-      }
-      registerSources(from: compilationUnit.rootModule)
-      
-    } catch let error as ModuleError {
-      throw DiagnosticError(
-        stage: .other,
-        fileName: userDisplayName,
-        underlying: error,
-        sourceManager: sourceManager
-      )
-    }
-    
-    var mergedImportGraph = ImportGraph()
-    mergedImportGraph.merge(stdImportGraph)
-    if let userCompilationUnit {
-      mergedImportGraph.merge(userCompilationUnit.importGraph)
-    }
-    if let stdRootModulePath, let userCompilationUnit {
-      injectStdPreludeImports(
-        stdRootPath: stdRootModulePath,
-        loadedModulePaths: loadedStdModulePaths + userCompilationUnit.loadedModules.values.map(\.path),
-        importGraph: &mergedImportGraph
-      )
-    }
-
-    try performCompilation(
-      baseName: baseName,
-      outputDirectory: outputDirectory,
-      mode: mode,
-      escapeAnalysisReport: escapeAnalysisReport,
-      stdDisplayName: stdDisplayName,
-      userDisplayName: userDisplayName,
-      stdGlobalNodes: stdGlobalNodes,
-      allGlobalNodes: allGlobalNodes,
-      nodeSourceInfoList: nodeSourceInfoList,
-      importGraph: mergedImportGraph,
-      extraLinkedLibraries: extraLinkedLibraries
+      escapeAnalysisReport: options.escapeAnalysisReport,
+      depsRoot: options.depsRoot,
+      stdConfigPath: options.stdConfigPath
     )
   }
 
@@ -604,8 +447,7 @@ public class Driver {
         let compilationUnit = try resolver.resolveModule(
           entryFile: spec.entryFile,
           rootModulePath: spec.pathSegments,
-          resolveModuleImports: false
-        )
+      )
         let nodesWithInfo = compilationUnit.getAllGlobalNodesWithSourceInfo()
         for (node, sourceFile, modulePath) in nodesWithInfo {
           let info = GlobalNodeSourceInfo(sourceFile: sourceFile, modulePath: modulePath, node: node)
@@ -983,8 +825,7 @@ public class Driver {
   func printUsage() {
     writeStdout(
       """
-      Usage: koralc [command] <file.koral> [options]
-             koralc [command] --package-config <koral.json> --target-module <module> [options]
+      Usage: koralc [command] --package-config <koral.json> [--target-module <module>] [options]
 
       Commands:
         build   Compile to executable (default)

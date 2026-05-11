@@ -5,11 +5,25 @@ public func printAST(_ node: ASTNode) {
   func printGlobalNode(_ node: GlobalNode) {
     switch node {
     case .usingDeclaration(let decl):
-      let pathStr = decl.pathSegments.joined(separator: ".")
-      let aliasStr = decl.alias.map { " = \($0)" } ?? ""
-      let batchStr = decl.isBatchImport ? ".*" : ""
-      print("\(indent)UsingDeclaration: \(decl.pathKind) \(pathStr)\(batchStr)\(aliasStr)")
-      print("\(indent)  Access: \(decl.access)")
+      switch decl.kind {
+      case .fileMerge(let path):
+        print("\(indent)UsingDeclaration: file \"\(path)\"")
+      case .moduleImport(let pathSegments, let items):
+        let pathStr = pathSegments.joined(separator: "::")
+        let itemStr = items.map { item in
+          switch item.kind {
+          case .allPublic:
+            return ".."
+          case .symbol:
+            let name = item.name ?? ""
+            if let alias = item.alias {
+              return "\(name) as \(alias)"
+            }
+            return name
+          }
+        }.joined(separator: ", ")
+        print("\(indent)UsingDeclaration: \(pathStr) { \(itemStr) }")
+      }
 
     case .foreignUsingDeclaration(let libraryName, _):
       print("\(indent)ForeignUsingDeclaration: \(libraryName)")

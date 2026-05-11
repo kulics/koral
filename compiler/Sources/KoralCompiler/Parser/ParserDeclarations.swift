@@ -882,8 +882,7 @@ extension Parser {
 
       let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
       return UsingDeclaration(
-        pathKind: .fileUsing,
-        fileName: fileName,
+        kind: .fileMerge(path: fileName),
         span: span
       )
     }
@@ -892,9 +891,7 @@ extension Parser {
       let (modulePath, moduleItems) = try parseExplicitModuleUsing()
       let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
       return UsingDeclaration(
-        pathKind: .modulePath,
-        pathSegments: modulePath,
-        moduleItems: moduleItems,
+        kind: .moduleImport(pathSegments: modulePath, items: moduleItems),
         span: span
       )
     }

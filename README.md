@@ -349,9 +349,6 @@ swift build -c debug
 ## Run the Compiler
 
 ```bash
-# Build a single-file program (default command)
-swift run koralc path/to/file.koral
-
 # Build a manifest-declared target module
 swift run koralc build --package-config path/to/koral.json --target-module app::main
 
@@ -364,12 +361,12 @@ swift run koralc emit-c --package-config path/to/koral.json --target-module app:
 
 ## Common Options
 
-- `-o, --output <dir>`: output directory (default: input file directory)
+- `-o, --output <dir>`: output directory
 - `--package-config <path>`: build from a package manifest
 - `--target-module <name>`: choose the manifest target module, for example `app::main`
 - `--deps-root <path>`: dependency root directory for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
-- `--no-std`: compile without loading `std/std.koral`
+- `--no-std`: compile without loading the std manifest
 - `-m` / `-m=<N>`: print escape analysis diagnostics (Go-style; `-m -m` or higher level currently same output)
 
 ## Test

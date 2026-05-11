@@ -37,9 +37,7 @@ given ModuleError {
 
 private type PendingUsing {
     Module(path_segments List[String], items List[UsingModuleItem]),
-    Path(access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String]),
-    Parent(access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], span SourceSpan),
-    File(access AccessModifier, file_name String, alias Option[String]),
+    File(file_name String),
 }
 
 // ── ModuleResolver ────────────────────────────────────────────────────────────
@@ -436,8 +434,8 @@ given ModuleResolver {
                 .Module(path_segments, items) then {
                     self.record_module_using(path_segments, items, module, unit, normalized_file)
                 },
-                .Path(access, path_segments, imported_symbol, is_batch, alias) then {
-                    when self.resolve_path_using(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file) in {
+                .File(file_name) then {
+                    when self.resolve_file_merge(file_name, module, unit, normalized_file) in {
                         .Ok(_) then {},
                         .Error(e) then {
                             self.storage.resolving_files.pop()
@@ -445,48 +443,6 @@ given ModuleResolver {
                         },
                     }
                 },
-                .Parent(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    when self.resolve_parent(path_segments, imported_symbol, is_batch, module, unit, normalized_file, span) in {
-                        .Ok(_) then {},
-                        .Error(e) then {
-                            self.storage.resolving_files.pop()
-                            return Result[Void].Error(e)
-                        },
-                    }
-                    self.record_parent_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file)
-                },
-                .File(access, file_name, alias) then {
-                    when alias in {
-                        .None() then {
-                            when self.resolve_file_merge(file_name, module, unit, normalized_file) in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    self.storage.resolving_files.pop()
-                                    return Result[Void].Error(e)
-                                },
-                            }
-                        },
-                        .Some(mod_name) then {
-                            let import_source_file = when access in {
-                                .Private() then Option[String].Some(normalized_file),
-                                _ then Option[String].None(),
-                            }
-                            let mut target_path = module.path()
-                            target_path.push(mod_name)
-                            unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-                            unit.add_symbol_import_edge(module.path(), module.path(), mod_name, ImportKind.MemberImport(), import_source_file, Option[String].None())
-
-                            when self.resolve_file_submodule(access, file_name, mod_name, module, unit, normalized_file) in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    self.storage.resolving_files.pop()
-                                    return Result[Void].Error(e)
-                                },
-                            }
-                        },
-                    }
-                },
-                _ then {},
             }
         }
 
@@ -518,17 +474,11 @@ given ModuleResolver {
         let mut pending = List[PendingUsing].new()
         for decl in program.declarations then {
             when decl in {
-                .ModuleUsingDecl(path_segments, items, span) then {
+                .ModuleUsingDecl(path_segments, items, _) then {
                     pending.push(.Module(path_segments, items))
                 },
-                .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    pending.push(.Path(access, path_segments, imported_symbol, is_batch, alias))
-                },
-                .ParentUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
-                    pending.push(.Parent(access, path_segments, imported_symbol, is_batch, alias, span))
-                },
-                .FileUsingDecl(access, file_name, alias, span) then {
-                    pending.push(.File(access, file_name, alias))
+                .FileUsingDecl(file_name, _) then {
+                    pending.push(.File(file_name))
                 },
                 _ then {
                     module.add_node(decl, normalized_file)
@@ -575,157 +525,6 @@ given ModuleResolver {
         let _ = self
     }
 
-    // Path using resolution: using Path.To.Thing (non-Super paths)
-    // 1. If first segment matches a known submodule, handle as local submodule import
-    // 2. Otherwise, try external module resolution
-    private resolve_path_using(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
-        if path_segments.is_empty() then {
-            return Result[Void].Ok({})
-        }
-
-        let first = path_segments[0]
-
-        // If first segment matches a known submodule, record as local submodule import
-        if module.has_submodule(first) then {
-            if is_batch then {
-                let mut current = module
-                for seg in path_segments then {
-                    if not current.has_submodule(seg) then {
-                        return Result[Void].Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
-                    }
-                    let mut next_path = current.path()
-                    next_path.push(seg)
-                    let next_key = join_path(next_path, ".")
-                    current = when unit.get_module(next_key) in {
-                        .Some(sub) then sub,
-                        .None() then {
-                            return Result[Void].Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
-                        },
-                    }
-                }
-            }
-
-            let import_source_file = when access in {
-                .Private() then Option[String].Some(current_file),
-                _ then Option[String].None(),
-            }
-
-            let mut target_path = module.path()
-            for seg in path_segments then { target_path.push(seg) }
-
-            if imported_symbol is .Some(sym) then {
-                unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
-            } else if is_batch then {
-                unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-            } else if path_segments.count() >= 2 then {
-                // using Worker.run -> member import of 'run' from submodule Worker
-                let sym = path_segments[path_segments.count() - 1]
-                let mut sym_target = module.path()
-                let mut j UInt = 0
-                for seg in path_segments then {
-                    if j < path_segments.count() - 1 then { sym_target.push(seg) }
-                    j += 1
-                }
-                unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
-            } else {
-                unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-            }
-            return Result[Void].Ok({})
-        }
-
-        // Record import edge for external path
-        self.record_path_import(access, path_segments, imported_symbol, is_batch, alias, module, unit, current_file)
-
-        // Try external module resolution
-        return self.resolve_external(access, path_segments, imported_symbol, is_batch, alias, module, unit, current_file)
-    }
-
-    // Record path import relationship into the ImportGraph.
-    private record_path_import(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Void = {
-        let import_source_file = when access in {
-            .Private() then Option[String].Some(current_file),
-            _ then Option[String].None(),
-        }
-        if path_segments.is_empty() then {
-            return
-        }
-
-        if imported_symbol is .Some(sym) then {
-            unit.add_symbol_import_edge(module.path(), path_segments, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
-            return
-        }
-
-        if is_batch then {
-            unit.add_import_edge(module.path(), path_segments, ImportKind.BatchImport(), import_source_file)
-        } else if path_segments.count() >= 2(UInt) then {
-            let sym = path_segments[path_segments.count() - 1(UInt)]
-            let mut sym_target = List[String].new()
-            let mut i UInt = 0
-            while i + 1(UInt) < path_segments.count() then {
-                sym_target.push(path_segments[i])
-                i += 1
-            }
-            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
-        } else {
-            unit.add_import_edge(module.path(), path_segments, ImportKind.ModuleImport(), import_source_file)
-        }
-
-        if alias is .Some(a) then {
-            unit.add_module_alias_edge(module.path(), a, path_segments, import_source_file)
-        }
-    }
-
-    // Record parent import relationship into the ImportGraph.
-    private record_parent_import(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Void = {
-        let import_source_file = when access in {
-            .Private() then Option[String].Some(current_file),
-            _ then Option[String].None(),
-        }
-
-        if path_segments.is_empty() then {
-            return
-        }
-
-        let mut current_path = module.path()
-        let mut segment_index UInt = 0
-        while segment_index < path_segments.count() and path_segments[segment_index] == "Super" then {
-            let _ = current_path.pop()
-            segment_index += 1
-        }
-
-        let mut target_path = current_path
-        let mut i = segment_index
-        while i < path_segments.count() then {
-            target_path.push(path_segments[i])
-            i += 1
-        }
-
-        if imported_symbol is .Some(sym) then {
-            unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
-            return
-        }
-
-        let remaining_count = path_segments.count() - segment_index
-        if is_batch then {
-            unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
-        } else if remaining_count >= 2(UInt) then {
-            let sym = path_segments[path_segments.count() - 1(UInt)]
-            let mut sym_target = current_path
-            let mut i = segment_index
-            while i + 1(UInt) < path_segments.count() then {
-                sym_target.push(path_segments[i])
-                i += 1
-            }
-            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
-        } else {
-            unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-        }
-
-        if alias is .Some(a) then {
-            unit.add_module_alias_edge(module.path(), a, target_path, import_source_file)
-        }
-    }
-
     // Resolve file merge: using "file_name"
     // Resolves a normalized relative source path against the current file's directory and merges it.
     private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
@@ -743,221 +542,6 @@ given ModuleResolver {
 
         module.add_merged_submodule(file_path)
         return self.resolve_file(file_path, module, unit)
-    }
-
-    // Resolve file submodule: using "file_name" as Name
-    // Locates file_name.koral (or file_name/file_name.koral) relative to the current file's directory
-    // and registers it as a named submodule.
-    private resolve_file_submodule(self, access AccessModifier, file_name String, mod_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
-        let current_dir = current_file.into_path().dir_name().to_string()
-        let import_source_file = when access in {
-            .Private() then Option[String].Some(current_file),
-            _ then Option[String].None(),
-        }
-
-        // Try directory entry first, then file entry
-        let dir_entry = current_dir + "/" + file_name + "/" + file_name + ".koral"
-        let file_entry = current_dir + "/" + file_name + ".koral"
-
-        let has_dir = path_exist(dir_entry.into_path())
-        let has_file = path_exist(file_entry.into_path())
-
-        if has_dir and has_file then {
-            return Result[Void].Error(box(
-                "Ambiguous module '\(mod_name)': both '\(file_entry)' and '\(dir_entry)' exist"
-            ))
-        }
-
-        let entry_file = if has_dir then dir_entry
-        else if has_file then file_entry
-        else {
-            return Result[Void].Error(box("Module file '\(file_name).koral' not found in '\(module.directory())'"))
-        }
-
-        if module.has_submodule(mod_name) then {
-            let mut existing_target = module.path()
-            existing_target.push(mod_name)
-            unit.add_module_alias_edge(module.path(), mod_name, existing_target, import_source_file)
-            // Still need to record access info even if submodule was loaded by another path
-            when module.get_submodule_access(mod_name) in {
-                .None() then {
-                    module.set_submodule_access(mod_name, ModuleAccessInfo(access, current_file))
-                },
-                .Some(_) then {},
-            }
-            return Result[Void].Ok({})
-        }
-
-        if module.has_merged_submodule(entry_file) then {
-            return Result[Void].Ok({})
-        }
-
-        let mut sub_path = module.path()
-        sub_path.push(mod_name)
-        let sub = ModuleInfo.new(sub_path, entry_file, false)
-        sub.set_parent(module)
-        module.add_submodule_name(mod_name)
-        unit.add_module(sub)
-        unit.add_module_alias_edge(module.path(), mod_name, sub_path, import_source_file)
-
-        let _ = self.resolve_file(entry_file, sub, unit) or return
-
-        when module.get_submodule_access(mod_name) in {
-            .None() then {
-                module.set_submodule_access(mod_name, ModuleAccessInfo(access, current_file))
-            },
-            .Some(_) then {},
-        }
-
-        return Result[Void].Ok({})
-    }
-
-    // Resolve external module: using std.io or using std.io.*
-    // Uses KORAL_HOME environment variable to locate the standard library
-    private resolve_external(self, access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
-        if path_segments.is_empty() then {
-            return Result[Void].Ok({})
-        }
-
-        let first_seg = path_segments[0]
-
-        let not_found = Result[Void].Error(box("External module '\(first_seg)' not found"))
-
-        // Reuse already loaded external modules first. Std is preloaded by the
-        // driver in normal builds, so using Std.X must not depend on KORAL_HOME.
-        let first_file_name = module_identifier_to_file_name(first_seg)
-        let first_pascal = module_file_name_to_identifier(first_file_name)
-        if unit.has_module(first_pascal) then {
-            return Result[Void].Ok({})
-        }
-
-        let std_entry_opt = find_external_module_entry(first_pascal)
-
-        let std_entry = std_entry_opt or else {
-            return not_found
-        }
-
-        if not path_exist(std_entry.into_path()) then {
-            return not_found
-        }
-
-        // 检查是否已加载（用 PascalCase 名作为 key）
-        let mut ext_path = List[String].new()
-        ext_path.push(first_pascal)
-        let ext_key = first_pascal
-        if unit.has_module(ext_key) then {
-            return Result[Void].Ok({})
-        }
-
-        // 加载外部模块
-        let ext_module = ModuleInfo.new(ext_path, std_entry, true)
-        unit.add_module(ext_module)
-
-        let _ = self.resolve_file(std_entry, ext_module, unit) or return
-
-        return Result[Void].Ok({})
-    }
-
-    // Resolve parent: using super.path or super.super.path
-    private resolve_parent(self, path_segments List[String], imported_symbol Option[String], is_batch Bool, module ModuleInfo, unit CompilationUnit, current_file String, span SourceSpan) Result[Void] = {
-        let mut current = module
-        let mut seg_idx = 0
-        let access_checker = AccessChecker.new()
-
-        // Walk up super chain
-        for seg in path_segments then {
-            if seg == "Super" then {
-                if current.parent() is .Some(p) then {
-                    current = p
-                } else {
-                    return Result[Void].Error(box(ModuleError.SuperOutOfBounds().message()))
-                }
-                seg_idx += 1
-            } else {
-                break
-            }
-        }
-
-        // Remaining segments: navigate down from current
-        let mut remaining = List[String].new()
-        let mut i = 0
-        for seg in path_segments then {
-            if i >= seg_idx then { remaining.push(seg) }
-            i += 1
-        }
-
-        if remaining.is_empty() then { return Result[Void].Ok({}) }
-
-        // Try to load submodules for remaining path
-        let remaining_count = remaining.count()
-        let mut remaining_index UInt = 0
-        for seg in remaining then {
-            if current.has_submodule(seg) then {
-                when current.get_submodule_access(seg) in {
-                    .Some(access_info) then {
-                        let _ = access_checker.check_module_access(
-                            seg,
-                            access_info.access,
-                            current.path(),
-                            access_info.defined_in_file,
-                            module.path(),
-                            current_file,
-                            span,
-                        ) or return
-                    },
-                    .None() then {},
-                }
-                let key = current.path_string() + "." + seg
-                when unit.get_module(key) in {
-                    .Some(sub) then { current = sub },
-                    .None() then { return Result[Void].Ok({}) },
-                }
-                remaining_index += 1
-                continue
-            }
-
-            let entry_file = when self.locate_child_module_entry(current.directory(), seg) in {
-                .Ok(f) then f,
-                .Error(_) then { return Result[Void].Ok({}) },
-            }
-
-            // 子模块合并后的目标不再是可导入子模块；若为末段，视为符号导入候选。
-            if current.has_merged_submodule(entry_file) then {
-                if not is_batch and imported_symbol is .None() and remaining_index == remaining_count - 1(UInt) then {
-                    return Result[Void].Ok({})
-                }
-                return Result[Void].Error(box(ModuleError.InvalidModulePath(join_path(path_segments, ".")).message()))
-            }
-
-            let mut sub_path = current.path()
-            sub_path.push(seg)
-            let sub = ModuleInfo.new(sub_path, entry_file, false)
-            sub.set_parent(current)
-            current.add_submodule_name(seg)
-            unit.add_module(sub)
-
-            let _ = self.resolve_file(entry_file, sub, unit) or return
-
-            when current.get_submodule_access(seg) in {
-                .Some(access_info) then {
-                    let _ = access_checker.check_module_access(
-                        seg,
-                        access_info.access,
-                        current.path(),
-                        access_info.defined_in_file,
-                        module.path(),
-                        current_file,
-                        span,
-                    ) or return
-                },
-                .None() then {},
-            }
-
-            current = sub
-            remaining_index += 1
-        }
-
-        return Result[Void].Ok({})
     }
 }
 

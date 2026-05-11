@@ -93,34 +93,6 @@ public class AccessChecker {
         }
     }
     
-    // MARK: - Re-export Check
-    
-    /// 检查重导出是否合法
-    /// - Parameters:
-    ///   - using: using 声明
-    ///   - module: 当前模块
-    ///   - unit: 编译单元
-    /// - Throws: AccessError 如果重导出不合法
-    public func checkReexport(
-        using: UsingDeclaration,
-        module: ModuleInfo,
-        unit: CompilationUnit
-    ) throws {
-        // 只有 public using 才是重导出
-        guard using.access == .public else { return }
-        
-        // 外部模块符号禁止重导出
-        if using.pathKind == .path {
-            throw AccessError.cannotReexportExternal(
-                path: using.pathSegments,
-                span: using.span
-            )
-        }
-        
-        // 同一编译单元内的符号可以重导出
-        // (submodule 和 parent 路径都在同一编译单元内)
-    }
-    
     // MARK: - Signature Visibility Check
     
     /// 检查函数签名的可见性一致性
@@ -201,29 +173,6 @@ public class AccessChecker {
         }
     }
     
-    // MARK: - Helper Methods
-    
-    /// 检查 child 是否是 parent 的子模块（或相同模块）
-    private func isSubmoduleOf(_ child: ModuleInfo, _ parent: ModuleInfo) -> Bool {
-        // 相同模块
-        if child === parent {
-            return true
-        }
-        
-        // 检查 child 的路径是否以 parent 的路径开头
-        if child.path.count <= parent.path.count {
-            return false
-        }
-        
-        for (i, segment) in parent.path.enumerated() {
-            if child.path[i] != segment {
-                return false
-            }
-        }
-        
-        return true
-    }
-    
     // MARK: - Default Access Modifiers
     
     /// 获取全局声明的默认访问修饰符
@@ -231,8 +180,8 @@ public class AccessChecker {
     /// - Returns: 默认访问修饰符
     public static func defaultAccess(for node: GlobalNode) -> AccessModifier {
         switch node {
-        case .usingDeclaration(let decl):
-            return decl.access
+        case .usingDeclaration:
+            return .private
         case .foreignUsingDeclaration:
             return .private
             

@@ -56,52 +56,66 @@ private type CommandExecution {
     InfrastructureError(message String),
 }
 
-private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) List[String] = {
+private let generated_case_manifest_path(output_dir Path) Path = {
+    return output_dir.join("koral.json")
+}
+
+private let ensure_generated_case_manifest(info CaseInfo, output_dir Path) Result[Path] = {
+    let manifest_path = generated_case_manifest_path(output_dir)
+    let entry_path = info.absolute_path.to_string().replace_all("\\", with: "/")
+    let content = "{\n"
+        + "  \"name\": \"compiler_runner_case\",\n"
+        + "  \"version\": \"0.0.0\",\n"
+        + "  \"entry\": \"case\",\n"
+        + "  \"modules\": {\n"
+        + "    \"case\": {\n"
+        + "      \"entry\": \"" + entry_path + "\"\n"
+        + "    }\n"
+        + "  }\n"
+        + "}\n"
+    write_text_file(manifest_path, content: content) or return
+    return Result[Path].Ok(manifest_path)
+}
+
+private let effective_case_manifest(config RunnerConfig, info CaseInfo, output_dir Path) Result[Path] = {
+    return when find_case_manifest(config, info) in {
+        .Some(manifest_path) then Result[Path].Ok(manifest_path),
+        .None then ensure_generated_case_manifest(info, output_dir),
+    }
+}
+
+private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
     let mut args = List[String].new()
-    when find_case_manifest(config, info) in {
-        .Some(manifest_path) then {
-            args.push("build")
-            args.push("--package-config")
-            args.push(manifest_path.to_string())
-            when find_case_deps_root(manifest_path) in {
-                .Some(deps_root) then {
-                    args.push("--deps-root")
-                    args.push(deps_root.to_string())
-                },
-                .None() then {},
-            }
+    let manifest_path = effective_case_manifest(config, info, output_dir) or return
+    args.push("build")
+    args.push("--package-config")
+    args.push(manifest_path.to_string())
+    when find_case_deps_root(manifest_path) in {
+        .Some(deps_root) then {
+            args.push("--deps-root")
+            args.push(deps_root.to_string())
         },
-        .None then {
-            args.push("build")
-            args.push(info.absolute_path.to_string())
-        },
+        .None() then {},
     }
     args.push("-o")
     args.push(output_dir.to_string())
-    return args
+    return Result[List[String]].Ok(args)
 }
 
-private let check_command_args_for_case(config RunnerConfig, info CaseInfo) List[String] = {
+private let check_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
     let mut args = List[String].new()
-    when find_case_manifest(config, info) in {
-        .Some(manifest_path) then {
-            args.push("check")
-            args.push("--package-config")
-            args.push(manifest_path.to_string())
-            when find_case_deps_root(manifest_path) in {
-                .Some(deps_root) then {
-                    args.push("--deps-root")
-                    args.push(deps_root.to_string())
-                },
-                .None() then {},
-            }
+    let manifest_path = effective_case_manifest(config, info, output_dir) or return
+    args.push("check")
+    args.push("--package-config")
+    args.push(manifest_path.to_string())
+    when find_case_deps_root(manifest_path) in {
+        .Some(deps_root) then {
+            args.push("--deps-root")
+            args.push(deps_root.to_string())
         },
-        .None then {
-            args.push("check")
-            args.push(info.absolute_path.to_string())
-        },
+        .None() then {},
     }
-    return args
+    return Result[List[String]].Ok(args)
 }
 
 private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
@@ -451,16 +465,27 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         and expectations.expect_exact_output.is_empty()
         and not has_runtime_expect_error(expectations.expect_error)
 
-    let mut build_args = if check_only_expect_error then check_command_args_for_case(config, info) else build_command_args_for_case(config, info, active_output_dir)
+    let mut build_args = when if check_only_expect_error
+        then check_command_args_for_case(config, info, active_output_dir)
+        else build_command_args_for_case(config, info, active_output_dir) in {
+        .Ok(args) then args,
+        .Error(err) then {
+            let duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to prepare case manifest: \(err.message())",
+                -1,
+                duration_ms,
+            )
+        },
+    }
     let mut compile_command_name = if check_only_expect_error then "check" else "build"
 
     if config.verbose then {
         println("RUN \(info.relative_path)")
-        if check_only_expect_error then {
-            println("  cmd: \(config.compiler_bin.to_string()) check \(info.absolute_path.to_string())")
-        } else {
-            println("  cmd: \(config.compiler_bin.to_string()) build \(info.absolute_path.to_string()) -o \(active_output_dir.to_string())")
-        }
+        println("  cmd: \(config.compiler_bin.to_string()) \(build_args.join_to_string(" "))")
     }
 
     let mut build_output = when execute_command_with_timeout(
@@ -516,7 +541,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         }
 
         active_output_dir = retry_output_dir
-        build_args = build_command_args_for_case(config, info, active_output_dir)
+        build_args = build_command_args_for_case(config, info, active_output_dir) or else {
+            let duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to prepare retry case manifest: \(it.message())",
+                build_exit_code,
+                duration_ms,
+            )
+        }
         compile_command_name = "build"
 
         build_output = when execute_command_with_timeout(
