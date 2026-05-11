@@ -1,7 +1,7 @@
 // Module Resolver - resolves using declarations and builds the module tree.
 // Mirrors compiler/Sources/KoralCompiler/Module/ModuleResolver.swift
 
-using Std.Os.*
+using std::os { .. }
 
 // ── ModuleError ───────────────────────────────────────────────────────────────
 
@@ -36,6 +36,7 @@ given ModuleError {
 }
 
 private type PendingUsing {
+    Module(path_segments List[String], items List[UsingModuleItem]),
     Path(access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String]),
     Parent(access AccessModifier, path_segments List[String], imported_symbol Option[String], is_batch Bool, alias Option[String], span SourceSpan),
     File(access AccessModifier, file_name String, alias Option[String]),
@@ -45,6 +46,7 @@ private type PendingUsing {
 
 protected type ModuleResolverStorage(
     mut resolving_files List[String],
+    mut manifest_module_aliases List[ResolvedModuleAliasRule],
 )
 
 public type ModuleResolver(protected mut storage mut ref ModuleResolverStorage)
@@ -61,8 +63,59 @@ public type ResolvedModuleGraph(
 
 given ModuleResolver {
     public new() ModuleResolver = {
-        let s = box(ModuleResolverStorage(List[String].new()))
+        let s = box(ModuleResolverStorage(List[String].new(), List[ResolvedModuleAliasRule].new()))
         return ModuleResolver(s)
+    }
+
+    public set_manifest_module_aliases(self mut ref, aliases List[ResolvedModuleAliasRule]) Void = {
+        self.storage.manifest_module_aliases = aliases
+    }
+
+    private resolve_manifest_aliased_module_path(self ref, path_segments List[String]) List[String] = {
+        if self.storage.manifest_module_aliases.is_empty() then {
+            return path_segments
+        }
+
+        let mut best_match_count Int = -1
+        let mut best_target = path_segments
+        for rule in self.storage.manifest_module_aliases then {
+            let alias_count = rule.alias_path_segments.count()
+            if path_segments.count() < alias_count then {
+                continue
+            }
+
+            let mut matched = true
+            let mut i UInt = 0
+            while i < alias_count then {
+                if path_segments[i] <> rule.alias_path_segments[i] then {
+                    matched = false
+                    break
+                }
+                i += 1
+            }
+            if not matched then {
+                continue
+            }
+
+            let alias_len = alias_count(Int)
+            if alias_len <= best_match_count then {
+                continue
+            }
+
+            let mut resolved = List[String].new()
+            for segment in rule.target_path_segments then {
+                resolved.push(segment)
+            }
+            let mut j = alias_count
+            while j < path_segments.count() then {
+                resolved.push(path_segments[j])
+                j += 1
+            }
+            best_match_count = alias_len
+            best_target = resolved
+        }
+
+        return best_target
     }
 
     // Locate child module entry: dir/<name>/<name>.koral or dir/<name>.koral
@@ -131,7 +184,7 @@ given ModuleResolver {
     }
 
     // Main entry: resolve a module from its entry file.
-    public resolve_module(self, entry_file String) Result[CompilationUnit] = {
+    public resolve_module_with_path(self, entry_file String, root_module_path Option[List[String]]) Result[CompilationUnit] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(e) then { return Result[CompilationUnit].Error(box("Cannot resolve path: \(entry_file)")) },
@@ -145,14 +198,24 @@ given ModuleResolver {
             return Result[CompilationUnit].Error(box("Invalid entry file name '\(filename)': \(reason)"))
         }
 
-        let mut root_path = List[String].new()
-        root_path.push(module_file_name_to_identifier(filename))
+        let mut root_path = when root_module_path in {
+            .Some(path) then path,
+            .None() then {
+                let mut default_path = List[String].new()
+                default_path.push(module_file_name_to_identifier(filename))
+                yield default_path
+            },
+        }
         let root = ModuleInfo.new(root_path, abs_path, false)
         let unit = CompilationUnit.new(root)
 
         let _ = self.resolve_file(abs_path, root, unit) or return
 
         return Result[CompilationUnit].Ok(unit)
+    }
+
+    public resolve_module(self, entry_file String) Result[CompilationUnit] = {
+        return self.resolve_module_with_path(entry_file, Option[List[String]].None())
     }
 
     public resolve_for_typecheck(self, entry_file String, no_std Bool) Result[ResolvedModuleGraph] = {
@@ -370,6 +433,9 @@ given ModuleResolver {
 
         for using_decl in pending then {
             when using_decl in {
+                .Module(path_segments, items) then {
+                    self.record_module_using(path_segments, items, module, unit, normalized_file)
+                },
                 .Path(access, path_segments, imported_symbol, is_batch, alias) then {
                     when self.resolve_path_using(access, path_segments, imported_symbol, is_batch, alias, module, unit, normalized_file) in {
                         .Ok(_) then {},
@@ -408,7 +474,7 @@ given ModuleResolver {
                             let mut target_path = module.path()
                             target_path.push(mod_name)
                             unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
-                            unit.add_symbol_import_edge(module.path(), module.path(), mod_name, ImportKind.MemberImport(), import_source_file)
+                            unit.add_symbol_import_edge(module.path(), module.path(), mod_name, ImportKind.MemberImport(), import_source_file, Option[String].None())
 
                             when self.resolve_file_submodule(access, file_name, mod_name, module, unit, normalized_file) in {
                                 .Ok(_) then {},
@@ -452,6 +518,9 @@ given ModuleResolver {
         let mut pending = List[PendingUsing].new()
         for decl in program.declarations then {
             when decl in {
+                .ModuleUsingDecl(path_segments, items, span) then {
+                    pending.push(.Module(path_segments, items))
+                },
                 .PathUsingDecl(access, path_segments, imported_symbol, is_batch, alias, span) then {
                     pending.push(.Path(access, path_segments, imported_symbol, is_batch, alias))
                 },
@@ -469,6 +538,41 @@ given ModuleResolver {
 
         module_debug("[module] decl-loop: done")
         return Result[List[PendingUsing]].Ok(pending)
+    }
+
+    private record_module_using(
+        self,
+        path_segments List[String],
+        items List[UsingModuleItem],
+        module ModuleInfo,
+        unit CompilationUnit,
+        current_file String,
+    ) Void = {
+        let import_source_file = Option[String].Some(current_file)
+        let target_path = self.resolve_manifest_aliased_module_path(path_segments)
+        for item in items then {
+            when item.kind in {
+                .AllPublic() then {
+                    unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
+                },
+                .Symbol() then {
+                    when item.name in {
+                        .Some(symbol_name) then {
+                            unit.add_symbol_import_edge(
+                                module.path(),
+                                target_path,
+                                item.alias or else symbol_name,
+                                ImportKind.MemberImport(),
+                                import_source_file,
+                                Option[String].Some(symbol_name),
+                            )
+                        },
+                        .None() then {},
+                    }
+                },
+            }
+        }
+        let _ = self
     }
 
     // Path using resolution: using Path.To.Thing (non-Super paths)
@@ -510,7 +614,7 @@ given ModuleResolver {
             for seg in path_segments then { target_path.push(seg) }
 
             if imported_symbol is .Some(sym) then {
-                unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
+                unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
             } else if is_batch then {
                 unit.add_import_edge(module.path(), target_path, ImportKind.BatchImport(), import_source_file)
             } else if path_segments.count() >= 2 then {
@@ -522,7 +626,7 @@ given ModuleResolver {
                     if j < path_segments.count() - 1 then { sym_target.push(seg) }
                     j += 1
                 }
-                unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
+                unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
             } else {
                 unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
             }
@@ -547,7 +651,7 @@ given ModuleResolver {
         }
 
         if imported_symbol is .Some(sym) then {
-            unit.add_symbol_import_edge(module.path(), path_segments, sym, ImportKind.MemberImport(), import_source_file)
+            unit.add_symbol_import_edge(module.path(), path_segments, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
             return
         }
 
@@ -561,7 +665,7 @@ given ModuleResolver {
                 sym_target.push(path_segments[i])
                 i += 1
             }
-            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
+            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
         } else {
             unit.add_import_edge(module.path(), path_segments, ImportKind.ModuleImport(), import_source_file)
         }
@@ -597,7 +701,7 @@ given ModuleResolver {
         }
 
         if imported_symbol is .Some(sym) then {
-            unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file)
+            unit.add_symbol_import_edge(module.path(), target_path, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
             return
         }
 
@@ -612,7 +716,7 @@ given ModuleResolver {
                 sym_target.push(path_segments[i])
                 i += 1
             }
-            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file)
+            unit.add_symbol_import_edge(module.path(), sym_target, sym, ImportKind.MemberImport(), import_source_file, Option[String].None())
         } else {
             unit.add_import_edge(module.path(), target_path, ImportKind.ModuleImport(), import_source_file)
         }
@@ -623,24 +727,13 @@ given ModuleResolver {
     }
 
     // Resolve file merge: using "file_name"
-    // Locates file_name.koral (or file_name/file_name.koral) relative to the current file's directory and merges it.
+    // Resolves a normalized relative source path against the current file's directory and merges it.
     private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string()
-        let file_entry = current_dir + "/" + file_name + ".koral"
-        let dir_entry = current_dir + "/" + file_name + "/" + file_name + ".koral"
+        let merge_path = if file_name.ends_with(".koral") then file_name else file_name + ".koral"
+        let file_path = current_dir.into_path().join(merge_path).normalize().to_string()
 
-        let has_file = path_exist(file_entry.into_path())
-        let has_dir = path_exist(dir_entry.into_path())
-
-        if has_file and has_dir then {
-            return Result[Void].Error(box(
-                "Ambiguous module '\(file_name)': both '\(file_entry)' and '\(dir_entry)' exist"
-            ))
-        }
-
-        let file_path = if has_file then file_entry
-        else if has_dir then dir_entry
-        else {
+        if not path_exist(file_path.into_path()) then {
             return Result[Void].Error(box("File '\(file_name).koral' not found in '\(current_dir)'"))
         }
 

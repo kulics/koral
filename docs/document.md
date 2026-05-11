@@ -35,18 +35,26 @@ Assuming you have a file named `hello.koral`.
     ```bash
     koralc hello.koral
     ```
-2.  **Compile and run**: Use the `run` command to compile and execute in one step.
+2.  **Build a manifest-declared module**: Use package mode when your project has explicit modules in `koral.json`.
     ```bash
-    koralc run hello.koral
+    koralc build --package-config koral.json --target-module app::main
     ```
-3.  **Emit C only**: Use `emit-c` to generate C source.
+3.  **Compile and run**: Use the `run` command to compile and execute in one step.
     ```bash
-    koralc emit-c hello.koral -o out
+    koralc run --package-config koral.json --target-module app::main
+    ```
+4.  **Emit C only**: Use `emit-c` to generate C source.
+    ```bash
+    koralc emit-c --package-config koral.json --target-module app::main -o out
     ```
 
 Common options:
 
 - `-o, --output <dir>`: output directory (default: input file directory)
+- `--package-config <path>`: build from a package manifest
+- `--target-module <name>`: choose the manifest target module
+- `--deps-root <path>`: dependency root for manifest-driven builds
+- `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading `std/std.koral`
 - `-m` / `-m=<N>`: print escape-analysis diagnostics
 
@@ -1765,21 +1773,21 @@ Koral provides a powerful module system for organizing code across multiple file
 
 ### Module Concepts
 
-A **module** in Koral consists of an entry file and all modules it depends on through `using` declarations.
+A **module** in Koral is an explicit build unit declared in `koral.json` (or `std/koral.json` for the standard library). A module consists of its entry file plus any files merged into it via `using "path"`.
 
-- **Root Module**: The module formed by the compilation entry file and its dependencies
-- **Submodule**: Either a sibling file module (`<name>.koral`) or a subdirectory module (`<name>/<name>.koral`)
-- **External Module**: Modules from outside the current compilation unit (e.g., standard library)
+- **Target module**: The module selected by `--target-module`
+- **Peer module**: Another manifest-declared module in the same package
+- **External module**: A module coming from std or another package dependency
 
 Entry filename constraints:
 
 - Module entry file basename must start with a lowercase letter.
 - Remaining characters may only be lowercase letters, digits, or `_`.
-- In source code, module path segments use PascalCase symbols (for example, `my_tools.koral` is referenced as `MyTools`).
+- Source-level module names come from the manifest and use `::` separators (for example, `app::models`, `std::io`).
 
 ### Using Declarations
 
-The `using` keyword is used to import modules and symbols. All `using` declarations must appear at the beginning of a file, before any other declarations.
+The `using` keyword is used for file merge and explicit symbol import. All `using` declarations must appear at the beginning of a file, before any other declarations.
 
 #### File Merge
 
@@ -1787,105 +1795,47 @@ Use string syntax to merge another file into the current module scope:
 
 ```koral
 using "utils"        // Merges utils.koral into current module
-using "helpers"      // Merges helpers.koral into current module
+using "./helpers"    // Relative paths are allowed
+using "../shared/format"
 ```
 
-Note: file merge syntax (`using "file"`) does not support access modifiers.
+File merge rules:
 
-Merge targets can be either:
-- a sibling file (`utils.koral`), or
-- a subdirectory module entry (`utils/utils.koral`).
+1. The path is resolved relative to the current file's directory.
+2. The string names a source file without the `.koral` suffix.
+3. Relative segments such as `.` and `..` are allowed.
+4. File merge does not create a namespace, alias, or export surface.
+5. Merged files share the same module scope, so `protected` declarations remain visible across files in that module.
 
-File lookup is relative to the current file's directory. The string content is the literal file name (without `.koral` extension) — no case conversion is performed.
+#### Module Symbol Import
 
-Merged files share the same module scope — their `public` and `protected` symbols are mutually visible.
-
-#### Submodule Declaration
-
-Use `using "file" as Name` to declare a named submodule:
+Import public symbols from another module with explicit braces:
 
 ```koral
-using "models" as Models                // Declare Models submodule (private)
-protected using "models" as Models      // Declare and share within current module
-public using "models" as Models         // Declare and expose to external modules
-```
-
-Access submodule members using dot notation:
-
-```koral
-public using "models" as Models
-let user = Models.User("Alice")
-```
-
-After declaring a submodule, you can import specific members or batch import from it:
-
-```koral
-using Models.User      // Import specific member
-using Models.*         // Batch import all public members
-```
-
-#### Parent Module Access
-
-Use `Super` chains to access parent modules within the same compilation unit:
-
-```koral
-using Super.Sibling            // Import from parent module
-using Super.Super.Uncle        // Import from grandparent module
-```
-
-#### External Module Import
-
-Import external modules with module-tree paths:
-
-```koral
-using Std                   // Import Std module
-using Std.List              // Import Std.List module
-using Std.Io as Io          // Import module with alias
+using std::io { Reader }
+using std::json { parse, Value }
+using std::io { Reader as IoReader, Writer }
+using std::io { .. }
 ```
 
 Notes:
 
-- In std submodules, `public` symbols exported from root `Std` are default-visible and do not require redundant re-imports.
-- Alias syntax is `using module.path as alias`.
-- Alias casing must match the referenced identifier's first letter:
-    - uppercase identifier -> alias starts uppercase
-    - lowercase identifier -> alias starts lowercase
+1. `using module { symbol-list }` imports only public symbols from that module.
+2. `as` applies per imported symbol, not to the module itself.
+3. `using module { .. }` imports all public symbols, and `..` must appear alone.
+4. Imported names are file-local bindings and are not re-exported automatically.
+5. Module legality is checked against manifest `deps`; the compiler does not infer modules from directory structure.
 
-#### Explicitly Qualified Types (`module.Type` / `module.Type[T]`)
+Removed source forms:
 
-You can explicitly qualify a type with a module prefix in type positions:
-
-```koral
-public using "models" as Models
-
-let user Models.User = Models.User("Alice")
-let boxes Models.Box[Int] = Models.Box[Int].new()
-```
-
-Legality rules:
-
-1. `module` must resolve to an imported module symbol.
-2. `Type` must belong to that module (ownership check).
-3. The type must be visible from the current module (private types are not accessible).
-4. For `module.Type[T]`, generic argument count and constraints are validated after ownership check.
-
-Error model (normalized):
-
-- Module not found/imported: `Undefined variable: <module>`
-- Type not owned/exported by module: `Type '<Type>' is not a public type of module '<module>'` or
-    `Type '<Type>' does not belong to module '<module>'`
-- Generic mismatch: standard generic-arity / constraint diagnostics
-
-#### Foreign Using
-
-Use `foreign using` to declare external shared libraries (`.so` / `.dylib` / `.dll`) to link against. The compiler automatically adds `-l` flags during the linking phase:
-
-```koral
-foreign using "m"        // Link libm (math library), equivalent to -lm
-foreign using "pthread"  // Link libpthread
-```
-
-> Note: `foreign using` does not import header files. It tells the linker which library to link. C function declarations are done via `foreign let`.
+- `using "file" as Name`
+- `using Super...`
+- bare module imports such as `using Std.Io`
+- member imports such as `using Std.Io.Reader`
+- batch imports such as `using Std.Io.*`
+- module alias imports such as `using Std.Io as Io`
+- `public using ...` / `protected using ...` / `private using ...`
+- `foreign using ...`
 
 ### Access Modifiers
 
@@ -1894,7 +1844,7 @@ Koral provides three access levels to control symbol visibility:
 | Modifier | Visibility |
 |----------|------------|
 | `public` | Accessible from anywhere |
-| `protected` | Accessible within current module and all submodules |
+| `protected` | Accessible within the current module compilation unit |
 | `private` | Accessible only within the same file |
 
 #### Default Access Levels
@@ -1906,7 +1856,6 @@ Koral provides three access levels to control symbol visibility:
 | Enum constructor fields | `public` |
 | Member functions (in `given` blocks) | `protected` |
 | Trait methods | `public` |
-| Using declarations | `private` |
 
 Direct struct construction `Type(...)` is only allowed when all referenced fields are visible at the call site.
 If a type has inaccessible `private`/`protected` fields, use an exposed public factory method.
@@ -1915,27 +1864,51 @@ If a type has inaccessible `private`/`protected` fields, use an exposed public f
 
 ```
 my_project/
-├── main.koral           # Root module entry
-├── utils.koral          # Merged into root module
+├── koral.json
+├── main.koral           # app::main entry
+├── utils.koral          # merged into app::main
 ├── models/
-│   ├── models.koral     # models submodule entry
-│   ├── user.koral       # Merged into models module
-│   └── post.koral       # Merged into models module
+│   ├── models.koral     # app::models entry
+│   └── user.koral       # merged into app::models
 └── services/
-    ├── services.koral   # services submodule entry
-    └── auth.koral       # Merged into services module
+    └── services.koral   # app::services entry
+```
+
+```json
+{
+  "name": "MyProject",
+  "version": "0.1.0",
+  "entry": "app::main",
+  "modules": {
+    "app::main": {
+      "entry": "main.koral",
+      "deps": ["std", "app::models", "app::services"],
+      "links": []
+    },
+    "app::models": {
+      "entry": "models/models.koral",
+      "deps": ["std"],
+      "links": []
+    },
+    "app::services": {
+      "entry": "services/services.koral",
+      "deps": ["std", "app::models"],
+      "links": []
+    }
+  }
+}
 ```
 
 ```koral
 // main.koral
-using Std
 using "utils"
-public using "models" as Models
-public using "services" as Services
+using app::models { User }
+using app::services { authenticate }
+using std { .. }
 
 public let main() = {
-    let user = Models.User.new("Alice")
-    if Services.authenticate(user) then {
+    let user = User.new("Alice")
+    if authenticate(user) then {
         println("Welcome!")
     }
 }
@@ -1945,23 +1918,29 @@ public let main() = {
 
 Koral supports interoperability with C through the `foreign` keyword.
 
-### Foreign Using (Linking External Libraries)
+### Linking External Libraries
 
-Use `foreign using` to declare shared libraries to link against:
+Native libraries are declared in package or module `links` inside `koral.json` / `std/koral.json`:
 
-```koral
-foreign using "m"  // Link libm (math library)
+```json
+{
+  "modules": {
+    "app::main": {
+      "entry": "main.koral",
+      "deps": ["std"],
+      "links": ["m"]
+    }
+  }
+}
 ```
 
-The compiler automatically adds `-lm` during the linking phase. `libc` is implicitly linked by default and does not need to be declared.
+The compiler adds linker flags from the resolved manifest graph. `libc` is implicitly linked by default and does not need to be declared.
 
 ### Foreign Functions
 
 Declare external C functions:
 
 ```koral
-foreign using "m"
-
 foreign let sin(x Float64) Float64
 foreign let exit(code Int) Never
 foreign let abort() Never
@@ -1973,7 +1952,7 @@ Declare external C types:
 
 ```koral
 // Opaque type (no fields)
-foreign type CFile
+foreign type CFile {}
 
 // FFI struct with fields (aligned with C layout)
 foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)

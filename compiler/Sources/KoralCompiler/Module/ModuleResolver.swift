@@ -347,6 +347,11 @@ public class CompilationUnit {
 
 /// 模块解析器
 public class ModuleResolver {
+    public enum ModuleImportResolutionMode {
+        case legacy
+        case manifest
+    }
+
     /// 标准库路径
     private var stdLibPath: String?
     
@@ -358,10 +363,36 @@ public class ModuleResolver {
     
     /// 文件管理器
     private let fileManager = FileManager.default
+
+    private var moduleImportResolutionMode: ModuleImportResolutionMode = .legacy
+    public var manifestModuleAliases: [ResolvedModuleAliasRule] = []
     
     public init(stdLibPath: String? = nil, externalPaths: [String] = []) {
         self.stdLibPath = stdLibPath
         self.externalPaths = externalPaths
+    }
+
+    private func resolveManifestAliasedModulePath(_ pathSegments: [String]) -> [String] {
+        guard !manifestModuleAliases.isEmpty else {
+            return pathSegments
+        }
+
+        let sortedRules = manifestModuleAliases.sorted {
+            if $0.aliasPathSegments.count == $1.aliasPathSegments.count {
+                return $0.aliasFullName < $1.aliasFullName
+            }
+            return $0.aliasPathSegments.count > $1.aliasPathSegments.count
+        }
+
+        for rule in sortedRules {
+            guard pathSegments.count >= rule.aliasPathSegments.count else {
+                continue
+            }
+            if Array(pathSegments.prefix(rule.aliasPathSegments.count)) == rule.aliasPathSegments {
+                return rule.targetPathSegments + Array(pathSegments.dropFirst(rule.aliasPathSegments.count))
+            }
+        }
+        return pathSegments
     }
     
     /// 定位子模块入口文件。
@@ -448,7 +479,11 @@ public class ModuleResolver {
     /// 解析模块入口
     /// - Parameter entryFile: 入口文件路径
     /// - Returns: 编译单元
-    public func resolveModule(entryFile: String) throws -> CompilationUnit {
+    public func resolveModule(
+        entryFile: String,
+        rootModulePath: [String]? = nil,
+        resolveModuleImports: Bool = true
+    ) throws -> CompilationUnit {
         let absolutePath = URL(fileURLWithPath: entryFile).standardized.path
         
         // 提取文件名（不含扩展名）
@@ -461,16 +496,20 @@ public class ModuleResolver {
             throw ModuleError.invalidEntryFileName(filename: filename, reason: error)
         }
 
-        let rootModuleName = moduleFileNameToIdentifier(filename)
+        let rootModulePath = rootModulePath ?? [moduleFileNameToIdentifier(filename)]
         
         // 创建根模块，path 包含文件名
         let rootModule = ModuleInfo(
-            path: [rootModuleName],
+            path: rootModulePath,
             entryFile: absolutePath,
             isExternal: false
         )
         
         let unit = CompilationUnit(rootModule: rootModule)
+
+        let previousMode = moduleImportResolutionMode
+        moduleImportResolutionMode = resolveModuleImports ? .legacy : .manifest
+        defer { moduleImportResolutionMode = previousMode }
         
         // 解析入口文件
         try resolveFile(file: absolutePath, module: rootModule, unit: unit)
@@ -541,17 +580,13 @@ public class ModuleResolver {
         
         switch using.pathKind {
         case .fileUsing:
-            if let alias = using.alias {
-                // using "file" as Name → submodule export
-                try resolveFileSubmodule(using: using, fileName: using.fileName!, moduleName: alias, module: module, unit: unit, currentFile: currentFile)
-            } else {
-                // using "file" → file merge
-                try resolveFileMerge(using: using, fileName: using.fileName!, module: module, unit: unit, currentFile: currentFile)
-            }
+            try resolveFileMerge(using: using, fileName: using.fileName!, module: module, unit: unit, currentFile: currentFile)
         case .path:
-            try resolvePathUsing(using: using, module: module, unit: unit, currentFile: currentFile)
+            return
         case .parent:
-            try resolveParent(using: using, module: module, unit: unit, currentFile: currentFile)
+            return
+        case .modulePath:
+            return
         }
     }
     
@@ -562,132 +597,36 @@ public class ModuleResolver {
         unit: CompilationUnit,
         currentFile: String
     ) {
-        let effectiveAccess: AccessModifier = using.access
-        let importSourceFile: String? = effectiveAccess == .private ? currentFile : nil
+        let importSourceFile: String? = currentFile
 
         switch using.pathKind {
         case .fileUsing:
-            if let alias = using.alias {
-                // File submodule: using "file" as Name → record module import
-                var targetPath = module.path
-                targetPath.append(alias)
-                unit.importGraph.addModuleImport(
-                    from: module.path,
-                    to: targetPath,
-                    kind: .moduleImport,
-                    sourceFile: importSourceFile
-                )
-                // Also record the last segment as a symbol import so the module name is directly usable
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: module.path,
-                    symbol: alias,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
-            }
-            // File merge (no alias): treated as local, no import graph entry needed
-            
+            return
         case .parent:
-            // 父级导入：模块导入 / 批量导入 / 显式符号导入
-            var current = module
-            var segmentIndex = 0
-            
-            // 处理 super 链
-            while segmentIndex < using.pathSegments.count
-                && using.pathSegments[segmentIndex] == "Super" {
-                if let parent = current.parent {
-                    current = parent
-                }
-                segmentIndex += 1
-            }
-            
-            // 处理剩余路径
-            var targetPath = current.path
-            let remainingSegments = segmentIndex < using.pathSegments.count
-                ? Array(using.pathSegments[segmentIndex...])
-                : []
-            targetPath.append(contentsOf: remainingSegments)
-
-            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: targetPath,
-                    symbol: importedSymbol,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
-                break
-            }
-            
-            if using.isBatchImport {
-                // 批量导入
-                unit.importGraph.addModuleImport(
-                    from: module.path,
-                    to: targetPath,
-                    kind: .batchImport,
-                    sourceFile: importSourceFile
-                )
-            } else {
-                // 非批量导入：只记录模块导入。
-                // 成员导入必须由 parser 显式设置 importedSymbol。
-                unit.importGraph.addModuleImport(
-                    from: module.path,
-                    to: targetPath,
-                    kind: .moduleImport,
-                    sourceFile: importSourceFile
-                )
-            }
-
-            if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
-                var aliasTarget = current.path
-                aliasTarget.append(contentsOf: remainingSegments)
-                unit.importGraph.addModuleAlias(
-                    module: module.path,
-                    alias: alias,
-                    target: aliasTarget,
-                    sourceFile: importSourceFile
-                )
-            }
-            
+            return
         case .path:
-            // 路径导入（外部或本地子模块）
-            guard !using.pathSegments.isEmpty else { return }
-
-            if let importedSymbol = using.importedSymbol, !importedSymbol.isEmpty {
-                unit.importGraph.addSymbolImport(
-                    module: module.path,
-                    target: using.pathSegments,
-                    symbol: importedSymbol,
-                    kind: .memberImport,
-                    sourceFile: importSourceFile
-                )
-                break
-            }
-            
-            if using.isBatchImport {
+            return
+        case .modulePath:
+            let resolvedTargetPath = resolveManifestAliasedModulePath(using.pathSegments)
+            if using.moduleItems.contains(where: { $0.kind == .allPublic }) {
                 unit.importGraph.addModuleImport(
                     from: module.path,
-                    to: using.pathSegments,
+                    to: resolvedTargetPath,
                     kind: .batchImport,
                     sourceFile: importSourceFile
                 )
             } else {
-                unit.importGraph.addModuleImport(
-                    from: module.path,
-                    to: using.pathSegments,
-                    kind: .moduleImport,
-                    sourceFile: importSourceFile
-                )
-            }
-
-            if using.importedSymbol == nil, let alias = using.alias, !alias.isEmpty {
-                unit.importGraph.addModuleAlias(
-                    module: module.path,
-                    alias: alias,
-                    target: using.pathSegments,
-                    sourceFile: importSourceFile
-                )
+                for item in using.moduleItems where item.kind == .symbol {
+                    guard let symbolName = item.name else { continue }
+                    unit.importGraph.addSymbolImport(
+                        module: module.path,
+                        target: resolvedTargetPath,
+                        symbol: item.alias ?? symbolName,
+                        originalSymbol: symbolName,
+                        kind: .memberImport,
+                        sourceFile: importSourceFile
+                    )
+                }
             }
         }
     }
@@ -701,26 +640,13 @@ public class ModuleResolver {
         currentFile: String
     ) throws {
         let currentDir = URL(fileURLWithPath: currentFile).deletingLastPathComponent().path
-        let fileEntry = currentDir + "/" + fileName + ".koral"
-        let dirEntry = currentDir + "/" + fileName + "/" + fileName + ".koral"
-        
-        let hasFile = FileManager.default.fileExists(atPath: fileEntry)
-        let hasDir = FileManager.default.fileExists(atPath: dirEntry)
-        
-        if hasFile && hasDir {
-            throw ModuleError.ambiguousModuleEntry(
-                moduleName: fileName,
-                fileEntry: fileEntry,
-                directoryEntry: dirEntry
-            )
-        }
-        
-        let filePath: String
-        if hasFile {
-            filePath = fileEntry
-        } else if hasDir {
-            filePath = dirEntry
-        } else {
+        let mergePath = fileName.hasSuffix(".koral") ? fileName : fileName + ".koral"
+        let filePath = URL(fileURLWithPath: currentDir)
+            .appendingPathComponent(mergePath)
+            .standardized
+            .path
+
+        guard FileManager.default.fileExists(atPath: filePath) else {
             throw ModuleError.fileNotFound(fileName, searchPath: currentDir)
         }
         

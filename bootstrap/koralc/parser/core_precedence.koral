@@ -503,189 +503,141 @@ given Parser {
         return .Ok(members)
     }
 
+    private parse_module_using_items(self mut ref) Result[List[UsingModuleItem]] = {
+        let mut items = List[UsingModuleItem].new()
+        let mut saw_all_public = false
+
+        if self.current().kind is .LBrace() then {
+            self.advance()
+        } else {
+            return .Error(box("Expected '{' after module path in using declaration"))
+        }
+
+        while true then {
+            when self.current().kind in {
+                .RBrace() then {
+                    self.advance()
+                    break
+                },
+                .Range() then {
+                    if not items.is_empty() then {
+                        return .Error(box("'..' must be the only item in a module import list"))
+                    }
+                    self.advance()
+                    items.push(UsingModuleItem(UsingModuleItemKind.AllPublic(), Option[String].None(), Option[String].None()))
+                    saw_all_public = true
+                },
+                .Identifier(name) then {
+                    if saw_all_public then {
+                        return .Error(box("'..' must not be combined with other imports"))
+                    }
+                    self.advance()
+                    let alias = when self.current().kind in {
+                        .KwAs() then {
+                            self.advance()
+                            let alias_name = self.expect_identifier("using alias") or else {
+                                return .Error(box("parse declaration error"))
+                            }
+                            let name_is_upper = self.is_upper_first(name)
+                            let alias_is_upper = self.is_upper_first(alias_name)
+                            if name_is_upper <> alias_is_upper then {
+                                if name_is_upper then {
+                                    return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase"))
+                                }
+                                return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"))
+                            }
+                            yield Option[String].Some(alias_name)
+                        },
+                        _ then Option[String].None(),
+                    }
+                    items.push(UsingModuleItem(UsingModuleItemKind.Symbol(), Option[String].Some(name), alias))
+                },
+                _ then {
+                    return .Error(box("Expected import item in using declaration"))
+                },
+            }
+
+            when self.current().kind in {
+                .Comma() then {
+                    if saw_all_public then {
+                        return .Error(box("'..' must not be combined with other imports"))
+                    }
+                    self.advance()
+                },
+                .RBrace() then {},
+                _ then {
+                    return .Error(box("Expected ',' or '}' in using declaration"))
+                },
+            }
+        }
+
+        if items.is_empty() then {
+            return .Error(box("using declaration requires at least one import item"))
+        }
+
+        return .Ok(items)
+    }
+
     private parse_using_decl(self mut ref, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
+
+        if has_explicit_access then {
+            return .Error(box("access modifier on using declaration is not supported"))
+        }
+        if is_foreign then {
+            return .Error(box("Unexpected token: using"))
+        }
+        if is_intrinsic then {
+            return .Error(box("intrinsic using declaration is not supported"))
+        }
 
         // Check if the next token is a string literal → file-based using
         when self.current().kind in {
             .StringLiteral(file_name) then {
                 self.advance()
 
-                // Parse optional alias: using "file" as Name
-                let alias = when self.current().kind in {
-                    .KwAs() then {
-                        self.advance()
-                        let a = self.expect_identifier("using alias") or else {
-                            return .Error(box("parse declaration error"))
-                        }
-                        yield Option[String].Some(a)
-                    },
-                    _ then Option[String].None(),
-                }
-
-                // Validate: alias must start with uppercase
-                if alias is .Some(alias_name) then {
-                    let alias_runes = alias_name.to_runes()
-                    if not alias_runes.is_empty() and not alias_runes[0].is_ascii_uppercase() then {
-                        return .Error(box("Using alias '\(alias_name)' must start with an uppercase letter"))
-                    }
-                }
-
-                // Validate: merge (no alias) cannot have explicit access modifier
-                if alias is .None() and has_explicit_access then {
-                    return .Error(box("file merge (using \"...\") cannot use explicit access modifier"))
+                if self.current().kind is .KwAs() then {
+                    return .Error(box("file merge syntax no longer supports aliases; declare a module in koral.json instead"))
                 }
 
                 self.consume_semicolon()
-                let base = Decl.FileUsingDecl(access, file_name, alias, self.span_from_start(start))
-                return self.wrap_decl(access, is_foreign, is_intrinsic, base)
+                return .Ok(Decl.FileUsingDecl(AccessModifier.Private(), file_name, Option[String].None(), self.span_from_start(start)))
             },
             _ then {},
         }
 
-        // Otherwise, parse identifier-based using (external / parent)
         let mut path_segments = List[String].new()
-        let mut is_batch = false
-        let mut alias = Option[String].None()
-        let mut expect_segment = true
-
-        while true then {
-            if not expect_segment and self.should_terminate_statement() then {
-                break
-            }
-            when self.current().kind in {
-                .Eof() then {
-                    return .Error(box("Unexpected EOF in using declaration"))
-                },
-                .Semicolon() then {
-                    break
-                },
-                .KwAs() then {
-                    if expect_segment then {
-                        return .Error(box("Expected path segment before alias in using declaration"))
-                    }
-                    self.advance()
-                    let a = self.expect_identifier("using alias") or else {
-                        return .Error(box("parse declaration error"))
-                    }
-                    alias = .Some(a)
-                },
-                .Dot() then {
-                    if self.peek_kind() is .Some(.Star()) then {
-                        if expect_segment then {
-                            return .Error(box("Expected path before '.*' in using declaration"))
-                        }
-                        self.advance()
-                        self.advance()
-                        is_batch = true
-                        expect_segment = false
-                    } else {
-                        self.advance()
-                        expect_segment = true
-                    }
-                },
-                .KwSuper() then {
-                    if not expect_segment then {
-                        return .Error(box("Expected '.' between using path segments"))
-                    }
-                    path_segments.push("Super")
-                    self.advance()
-                    expect_segment = false
-                },
-                .KwSelfType() then {
-                    if not expect_segment then {
-                        return .Error(box("Expected '.' between using path segments"))
-                    }
-                    path_segments.push("Self")
-                    self.advance()
-                    expect_segment = false
-                },
-                .Identifier(name) then {
-                    if not expect_segment then {
-                        return .Error(box("Expected '.' between using path segments"))
-                    }
-                    path_segments.push(name)
-                    self.advance()
-                    expect_segment = false
-                },
-                _ then {
-                    return .Error(box("Unexpected token in using declaration: \(token_text(self.current()))"))
-                },
-            }
-        }
-
-        if path_segments.is_empty() then {
-            return .Error(box("using declaration requires module path"))
-        }
-
-        if is_batch then {
-            if alias is .Some(_) then {
-                return .Error(box("using batch import cannot use alias"))
-            }
-            if path_segments.count() > 1(UInt) then {
-                if path_segments[0(UInt)] == "Std" and path_segments[1(UInt)] == "Utils" then {
-                    return .Error(box("Invalid module path: 'Std.Utils'"))
+        when self.current().kind in {
+            .KwSelfType() then {
+                return .Error(box("Unexpected token: Self"))
+            },
+            .KwSuper() then {
+                return .Error(box("Unexpected token: Super"))
+            },
+            .Identifier(name) then {
+                path_segments.push(module_file_name_to_identifier(name))
+                self.advance()
+                if self.current().kind is not .DoubleColon() and self.current().kind is not .LBrace() then {
+                    return .Error(box("Unexpected token: Identifier(\(name))"))
                 }
-            }
+            },
+            _ then {
+                return .Error(box("using declaration requires a module path like std::io { Reader }"))
+            },
         }
 
-        // Validate alias case matches the referenced identifier's case.
-        if alias is .Some(alias_name) then {
-            let last_segment = path_segments[path_segments.count() - 1(UInt)]
-            let alias_runes = alias_name.to_runes()
-            let ref_runes = last_segment.to_runes()
-            if not alias_runes.is_empty() and not ref_runes.is_empty() then {
-                let alias_upper = alias_runes[0].is_ascii_uppercase()
-                let ref_upper = ref_runes[0].is_ascii_uppercase()
-                if alias_upper <> ref_upper then {
-                    if ref_upper then {
-                        return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(last_segment)' starts with uppercase"))
-                    } else {
-                        return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(last_segment)' starts with lowercase"))
-                    }
-                }
+        while self.current().kind is .DoubleColon() then {
+            self.advance()
+            let segment = self.expect_identifier("module path segment") or else {
+                return .Error(box("parse declaration error"))
             }
+            path_segments.push(module_file_name_to_identifier(segment))
         }
 
-        let first = path_segments[0]
-
-        // Self is no longer valid in identifier-based using
-        if first == "Self" then {
-            return .Error(box("'Self' is not allowed in using declarations. Use string syntax: using \"file_name\" or using \"file_name\" as Name"))
-        }
-
-        if first == "Super" then {
-            let mut has_concrete = false
-            let mut seen_non_super = false
-            for seg in path_segments then {
-                if not (seg == "Super") then {
-                    has_concrete = true
-                    seen_non_super = true
-                } else if seen_non_super then {
-                    return .Error(box("'Super' can only appear as leading segments in using declaration"))
-                }
-            }
-            if not has_concrete then {
-                return .Error(box("using declaration with 'Super' requires concrete item"))
-            }
-        } else {
-            let mut i UInt = 1
-            while i < path_segments.count() then {
-                if path_segments[i] == "Super" then {
-                    return .Error(box("'Super' can only appear as leading segments in using declaration"))
-                }
-                i += 1
-            }
-        }
-
+        let items = self.parse_module_using_items() or return
         self.consume_semicolon()
-        let base = if first == "Super" then {
-            yield Decl.ParentUsingDecl(access, path_segments, Option[String].None(), is_batch, alias, self.span_from_start(start))
-        } else {
-            yield Decl.PathUsingDecl(access, path_segments, Option[String].None(), is_batch, alias, self.span_from_start(start))
-        }
-        return self.wrap_decl(access, is_foreign, is_intrinsic, base)
+        return .Ok(Decl.ModuleUsingDecl(path_segments, items, self.span_from_start(start)))
     }
 
     private parse_trait_decl(self mut ref, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
@@ -815,6 +767,7 @@ given Parser {
                 .PathUsingDecl(_, _, _, _, _, _) then true,
                 .ParentUsingDecl(_, _, _, _, _, _) then true,
                 .FileUsingDecl(_, _, _, _) then true,
+                .ModuleUsingDecl(_, _, _) then true,
                 .ForeignUsingDecl(_, _, _) then true,
                 _ then false,
             }
@@ -1057,6 +1010,7 @@ let token_text(token Token) String = {
         .LessEqual() then "<=",
         .Comma() then ",",
         .Dot() then ".",
+        .DoubleColon() then "::",
         .Colon() then ":",
         .Semicolon() then ";",
         .LParen() then "(",

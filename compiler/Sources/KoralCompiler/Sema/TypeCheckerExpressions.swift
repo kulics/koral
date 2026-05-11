@@ -5381,7 +5381,7 @@ extension TypeChecker {
     let hasMemberImport = importGraph.symbolImports.contains { symbolImport in
       symbolImport.module == currentModulePath
         && symbolImport.target == modulePath
-        && symbolImport.symbol == symbolName
+        && (symbolImport.symbol == symbolName || symbolImport.originalSymbol == symbolName)
         && (symbolImport.sourceFile == nil || symbolImport.sourceFile == currentSourceFile)
         && (symbolImport.kind == .memberImport || symbolImport.kind == .batchImport)
     }

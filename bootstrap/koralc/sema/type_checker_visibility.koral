@@ -324,6 +324,47 @@ given TypeChecker {
         }
     }
 
+    protected imported_alias_original_name(self, alias String) Option[String] = {
+        return when self.storage.import_graph in {
+            .Some(graph) then {
+                let current_module = self.storage.module_path
+                let current_file = Option[String].Some(self.storage.file_path)
+                let mut index Int = graph.symbol_imports.count()(Int)
+                while index > 0 then {
+                    index -= 1
+                    let entry = graph.symbol_imports[index(UInt)]
+                    if string_list_eq(entry.module, current_module) and
+                       source_file_matches(entry.source_file, current_file) and
+                       entry.symbol == alias then {
+                        return Option[String].Some(entry.original_symbol)
+                    }
+                }
+                yield Option[String].None()
+            },
+            .None() then Option[String].None(),
+        }
+    }
+
+    protected resolve_imported_alias_symbol(self, alias String) Option[Symbol] = {
+        let original = self.imported_alias_original_name(alias) or else {
+            return Option[Symbol].None()
+        }
+        return when self.lookup_current_file_symbol(original) in {
+            .Some(sym) then Option[Symbol].Some(sym),
+            .None() then self.storage.global_scope.lookup(original),
+        }
+    }
+
+    protected resolve_imported_alias_type(self, alias String) Option[Type] = {
+        let original = self.imported_alias_original_name(alias) or else {
+            return Option[Type].None()
+        }
+        return when self.lookup_current_file_type_symbol(original) in {
+            .Some(t) then Option[Type].Some(t),
+            .None() then self.storage.global_scope.lookup_type(original),
+        }
+    }
+
     protected resolve_visible_symbol_path(self, path List[String]) Option[Symbol] = {
         if path.is_empty() then {
             return Option[Symbol].None()

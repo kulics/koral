@@ -2,7 +2,7 @@
 // Koral Build System - init Command
 // ============================================================================
 
-using Std.Os.*
+using std::os { .. }
 
 /// Initialize a new Koral project
 /// koral init [project-name]
@@ -26,8 +26,9 @@ public let cmd_init(args List[String]) Int = {
     }
 
     // Convert names
-    let module_name = project_name_to_module_name(project_name)
-    let entry_name = project_name_to_entry_name(project_name)
+    let package_name = project_name_to_module_name(project_name)
+    let module_name = project_name_to_entry_name(project_name)
+    let entry_path = "src/main.koral"
 
     // Create project directory if a name argument was provided
     if args.count() > 0 then {
@@ -50,10 +51,14 @@ public let cmd_init(args List[String]) Int = {
         }
 
         // Generate koral.json
+        let mut modules = Dict[String, ModuleConfig].new()
+        modules.insert(module_name, ModuleConfig(entry_path, List[String].new(), List[String].new()))
         let config = ProjectConfig(
-            module_name,
+            package_name,
             "0.1.0",
-            "src/" + entry_name + ".koral",
+            module_name,
+            List[String].new(),
+            modules,
             Dict[String, DepConfig].new(),
         )
         save_config(target_dir, config) or else {
@@ -62,9 +67,9 @@ public let cmd_init(args List[String]) Int = {
         }
 
         // Generate entry file
-        let entry_path = target_dir + "/src/" + entry_name + ".koral"
-        let entry_content = "public let main() Int = {\n    println(\"Hello, Koral!\")\n    return 0\n}\n"
-        write_text_file(entry_path.into_path(), content: entry_content) or else {
+        let entry_file_path = target_dir + "/" + entry_path
+        let entry_content = "using std { .. }\n\npublic let main() Int = {\n    println(\"Hello, Koral!\")\n    return 0\n}\n"
+        write_text_file(entry_file_path.into_path(), content: entry_content) or else {
             eprintln("error: failed to write entry file: \(it.message())")
             return 1
         }
@@ -77,6 +82,6 @@ public let cmd_init(args List[String]) Int = {
         }
     }
 
-    status_msg("Created", "\(module_name) v0.1.0 (\(target_dir)/)")
+    status_msg("Created", "\(package_name) v0.1.0 (\(target_dir)/)")
     return 0
 }

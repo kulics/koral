@@ -37,11 +37,11 @@
 - Module entry file names must be valid module names: start with a lowercase letter, followed only by lowercase letters, digits, or `_`; otherwise `invalidEntryFileName` is reported.
 - External module lookup order: stdlib path first, then `externalPaths`; if unresolved, throws `externalModuleNotFound`.
 - File-based using (`using "file"`) resolves relative to the current file's directory, not the module root.
-- `using "file"` (no alias) merges the file into the current module (shared `protected` scope).
-- `using "file" as Name` (with alias) declares a named submodule.
-- Explicit member imports are parser-normalized now: `using Std.Io.Reader` and `using Super.Mod.Symbol` set `importedSymbol` explicitly instead of relying on resolver inference.
-- `using path as alias` enforces case matching against the referenced identifier (the last remaining path segment after parser normalization): uppercase targets require uppercase aliases, lowercase targets require lowercase aliases.
-- `Self` is no longer valid in `using` declarations; use string syntax instead.
+- `using "file"` merges the file into the current module; it does not create a namespace or submodule.
+- Cross-module imports must use explicit module syntax: `using std::io { Reader }`, `using std::io { Reader as IoReader }`, or `using std::io { .. }`.
+- `..` must be the only item inside a module import list.
+- Imported symbols are file-local bindings and are never re-exported automatically.
+- Module identity comes from `koral.json` / `std/koral.json`; do not reintroduce removed source forms such as `using "file" as Name`, `using Super...`, `using Std.Io`, `using Std.Io as Io`, `using Std.Io.*`, `public using ...`, or `foreign using`.
 
 ## Language Notes That Commonly Drift
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
@@ -52,9 +52,14 @@
 - Shape:
   - `koralc <file.koral> [options]` (default command: `build`)
   - `koralc [build|check|run|emit-c] <file.koral> [options]`
-- If command omitted, first arg must end with `.koral`.
+  - `koralc [build|check|run|emit-c] --package-config <koral.json> --target-module <module> [options]`
+- If command is omitted, the first arg must either be a `.koral` file or an option such as `--package-config`.
 - Options:
   - `-o`, `--output <dir>`
+  - `--package-config <path>`
+  - `--target-module <name>`
+  - `--deps-root <path>`
+  - `--std-config <path>`
   - `--no-std`
   - `-m` / `-m=<N>`: print escape-analysis diagnostics
 - Output:
@@ -68,20 +73,19 @@
 - Entry executable is produced from `bootstrap/koralc/main.koral`.
 - Commands supported by `bootstrap/koralc/driver/run.koral`:
   - `bootstrap-koralc --emit-ast <file.koral>`
-  - `bootstrap-koralc --emit-typed-ast <file.koral> [--no-std]`
-  - `bootstrap-koralc --resolve-module <file.koral>`
-  - `bootstrap-koralc --emit-c <file.koral> [-o <dir>] [--no-std]`
-  - `bootstrap-koralc check <file.koral> [--no-std]`
-  - `bootstrap-koralc build <file.koral> [-o <dir>] [--no-std]`
-- Bootstrap driver does not currently mirror Swift driver's `run` command or `-m` escape-analysis flag.
+  - `bootstrap-koralc --emit-typed-ast <file.koral>|--package-config <koral.json> [options]`
+  - `bootstrap-koralc --resolve-module <file.koral>|--package-config <koral.json> [options]`
+  - `bootstrap-koralc --emit-c <file.koral>|--package-config <koral.json> [-o <dir>] [options]`
+  - `bootstrap-koralc check <file.koral>|--package-config <koral.json> [options]`
+  - `bootstrap-koralc build <file.koral>|--package-config <koral.json> [-o <dir>] [options]`
+- Bootstrap driver supports `--package-config`, `--target-module`, `--deps-root`, and `--std-config`, but still does not mirror Swift driver's `run` command or `-m` escape-analysis flag.
 - Set `KORAL_DEBUG_PHASE=1` to print phase markers during bootstrap debugging.
 
 ## Toolchain and Runtime
 - `koralc` invokes `clang` directly; ensure it is in `PATH`.
 - Bootstrap `build` also invokes `clang` directly.
 - If present, `std/koral_runtime.c` is passed to clang.
-- Swift driver: `foreign using "x"` appends `-lx` (except implicit libc `c`).
-- Bootstrap codegen emits `// Link: -lx` comments in generated C; bootstrap driver currently does not parse those comments into linker flags.
+- Native link inputs come from resolved manifest `links` on package/module configs.
 - Windows: drivers auto-add `-lbcrypt` and `-lws2_32` when needed.
 
 ## Stdlib Resolution
@@ -91,17 +95,17 @@ Lookup order for stdlib root / `std/std.koral`:
 3. `../std/`
 4. `../../std/`
 
-If not found from current working directory, set `KORAL_HOME` to repo root. Swift driver hard-fails when std cannot be found; bootstrap probes can use `--no-std` when isolating frontend issues.
+If not found from current working directory, set `KORAL_HOME` to repo root. Swift driver expects both `std/std.koral` and `std/koral.json`; bootstrap probes can use `--no-std` when isolating frontend issues.
 
 ## Testing in This Repo
 Run under `compiler/`:
 1. `swift build -c debug`
 2. `cd ..`
-3. `compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner`
-4. `./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8`
+3. `compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner`
+4. `./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8`
 
 Notes:
-- The only supported test entry is `tests/compiler-runner/main.koral`.
+- The supported shared runner package is `tests/compiler-runner/koral.json` targeting module `compiler_runner`.
 - Cases: `tests/compiler-cases/`
 - Expectations from comments:
   - `// EXPECT: ...`
@@ -114,7 +118,7 @@ Notes:
 
 ## Bootstrap Debugging
 - Shared integration cases live under `tests/compiler-cases/`; no separate bootstrap test entry remains.
-- Build trust boundary: use the Swift-hosted `bin/koralc.exe` (or `compiler/.build/.../koralc`) to build `bootstrap/koralc/main.koral` and `tests/compiler-runner/main.koral` during normal bootstrap testing and debugging.
+- Build trust boundary: use the Swift-hosted `bin/koralc.exe` (or `compiler/.build/.../koralc`) to build `bootstrap/koral.json` target `koralc` and `tests/compiler-runner/koral.json` target `compiler_runner` during normal bootstrap testing and debugging.
 - Do not switch normal bootstrap test execution over to a bootstrap-built bootstrap compiler or bootstrap-built runner unless the task is explicitly self-hosting validation; next-stage bootstrap artifacts are not assumed stable enough to be the default harness.
 - When debugging bootstrap frontend failures, prefer `--emit-typed-ast` before full `build`; it isolates module resolution / sema progress from later clang or link failures.
 - For self-hosting regressions, compare Swift-side implementation and bootstrap counterpart rather than patching only one compiler unless the task is explicitly bootstrap-only.

@@ -2,13 +2,21 @@
 // Koral Build System - Project Configuration
 // ============================================================================
 
-using Std.Json.*
-using Std.Os.*
+using std::json { .. }
+using std::os { .. }
+
+public type ModuleConfig(
+    entry String,
+    deps List[String],
+    links List[String],
+)
 
 public type ProjectConfig(
     name String,
     version String,
     entry String,
+    links List[String],
+    modules Dict[String, ModuleConfig],
     dependencies Dict[String, DepConfig],
 )
 
@@ -16,28 +24,116 @@ public type DepConfig(
     name String,
     git String,
     version String,
+    module_aliases Dict[String, String],
 )
 
-/// Convert a module name (e.g. "MyApp") to underscore format (e.g. "my_app")
-private let module_name_to_underscore(name String) String = {
-    let mut result = String.new()
-    let mut i UInt = 0
-    while i < name.count() then {
-        let byte = name[i]
-        if byte >= 'A' and byte <= 'Z' then {
-            if i > 0 then {
-                result.push_byte('_')
-            }
-            result.push_byte(byte + 32)
-        } else {
-            result.push_byte(byte)
+private let is_valid_module_segment(segment String) Bool = {
+    if segment.count() == 0 then {
+        return false
+    }
+
+    let first = segment.get(0) or else { return false }
+    if first < 'a' or first > 'z' then {
+        return false
+    }
+
+    let mut i UInt = 1
+    while i < segment.count() then {
+        let ch = segment[i]
+        let is_lower = ch >= 'a' and ch <= 'z'
+        let is_digit = ch >= '0' and ch <= '9'
+        let is_underscore = ch == '_'
+        if not is_lower and not is_digit and not is_underscore then {
+            return false
         }
         i += 1
     }
-    return result
+
+    return true
 }
 
-/// Load project configuration from koral.json
+private let is_valid_module_full_name(name String) Bool = {
+    if name.count() == 0 then {
+        return false
+    }
+
+    for segment in name.split("::") then {
+        if not is_valid_module_segment(segment) then {
+            return false
+        }
+    }
+    return true
+}
+
+private let json_string_array(values List[String]) ref JsonValue = {
+    let mut arr = List[ref JsonValue].new()
+    let mut i UInt = 0
+    while i < values.count() then {
+        arr.push(box(JsonValue.String(values[i])))
+        i += 1
+    }
+    return box(JsonValue.Array(arr))
+}
+
+private let load_string_array_field(
+    value ref JsonValue,
+    field_name String,
+    context String,
+) Result[List[String]] = {
+    let arr = value.val.as_array() or else {
+        return Result[List[String]].Error(box("error: '\(field_name)' in \(context) must be an array"))
+    }
+
+    let mut out = List[String].new()
+    let mut i UInt = 0
+    while i < arr.count() then {
+        let item = arr[i].val.as_string() or else {
+            return Result[List[String]].Error(box("error: '\(field_name)[\(i)]' in \(context) must be a string"))
+        }
+        out.push(item)
+        i += 1
+    }
+    return Result[List[String]].Ok(out)
+}
+
+private let load_string_dict_field(
+    value ref JsonValue,
+    field_name String,
+    context String,
+) Result[Dict[String, String]] = {
+    let obj = value.val.as_object() or else {
+        return Result[Dict[String, String]].Error(box("error: '\(field_name)' in \(context) must be an object"))
+    }
+
+    let mut out = Dict[String, String].new()
+    let mut iter = obj.iterator()
+    while iter.next() is .Some(entry) then {
+        let str_value = entry.second.val.as_string() or else {
+            return Result[Dict[String, String]].Error(box("error: '\(field_name).\(entry.first)' in \(context) must be a string"))
+        }
+        out.insert(entry.first, str_value)
+    }
+    return Result[Dict[String, String]].Ok(out)
+}
+
+public let default_target_module(config ProjectConfig) Result[String] = {
+    if not config.entry.is_empty() then {
+        if config.modules.contains(config.entry) then {
+            return Result[String].Ok(config.entry)
+        }
+        return Result[String].Error(box("error: default target module '\(config.entry)' is not declared in koral.json"))
+    }
+
+    if config.modules.count() == 1 then {
+        let mut iter = config.modules.iterator()
+        if iter.next() is .Some(entry) then {
+            return Result[String].Ok(entry.first)
+        }
+    }
+
+    return Result[String].Error(box("error: missing default target module; set top-level 'entry' to a module name or pass --module"))
+}
+
 public let load_config(project_dir String) Result[ProjectConfig] = {
     let config_path = project_dir + "/koral.json"
 
@@ -46,49 +142,89 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
     }
 
     let text = read_text_file(config_path.into_path()) or return
-
     let json = JsonValue.parse(text) or return
-
     let obj = json.as_object() or else {
         return .Error(box("error: koral.json must be a JSON object"))
     }
 
-    // Extract required "name" field
-    let name_val = json.get_field("name") or else {
+    let name_ref = json.get_field("name") or else {
         return .Error(box("error: missing required field 'name' in koral.json"))
     }
-    let name = name_val.val.as_string() or else {
+    let name = name_ref.val.as_string() or else {
         return .Error(box("error: 'name' must be a string in koral.json"))
     }
     if not is_valid_module_name(name) then {
-        return .Error(box("error: invalid module name '\(name)'. Must match [A-Z][a-zA-Z0-9]*"))
+        return .Error(box("error: invalid package name '\(name)'. Must match [A-Z][a-zA-Z0-9]*"))
     }
 
-    // Extract required "version" field
-    let version_val = json.get_field("version") or else {
+    let version_ref = json.get_field("version") or else {
         return .Error(box("error: missing required field 'version' in koral.json"))
     }
-    let version = version_val.val.as_string() or else {
+    let version = version_ref.val.as_string() or else {
         return .Error(box("error: 'version' must be a string in koral.json"))
     }
 
-    // Extract optional "entry" field with default
     let entry = when json.get_field("entry") in {
         .Some(entry_ref) then {
-            yield entry_ref.val.as_string() or else {
+            let value = entry_ref.val.as_string() or else {
                 return .Error(box("error: 'entry' must be a string in koral.json"))
             }
+            yield value
         },
-        .None then {
-            let underscore_name = module_name_to_underscore(name)
-            yield "src/" + underscore_name + ".koral"
-        },
+        .None then "",
     }
-    if not entry.ends_with(".koral") then {
-        return .Error(box("error: entry file must end with .koral"))
+    if not entry.is_empty() and not is_valid_module_full_name(entry) then {
+        return .Error(box("error: 'entry' must be a module full name such as 'app' or 'app::main'"))
     }
 
-    // Extract optional "dependencies" field
+    let links = when json.get_field("links") in {
+        .Some(value_ref) then load_string_array_field(value_ref, "links", "koral.json") or return,
+        .None then List[String].new(),
+    }
+
+    let modules_ref = json.get_field("modules") or else {
+        return .Error(box("error: missing required field 'modules' in koral.json"))
+    }
+    let modules_obj = modules_ref.val.as_object() or else {
+        return .Error(box("error: 'modules' must be an object in koral.json"))
+    }
+
+    let mut modules = Dict[String, ModuleConfig].new()
+    let mut module_iter = modules_obj.iterator()
+    while module_iter.next() is .Some(module_entry) then {
+        let module_name = module_entry.first
+        if not is_valid_module_full_name(module_name) then {
+            return .Error(box("error: invalid module name '\(module_name)'; use lower_snake segments joined by '::'"))
+        }
+
+        let module_obj = module_entry.second.val.as_object() or else {
+            return .Error(box("error: module '\(module_name)' must be an object"))
+        }
+        let module_json = module_entry.second.val
+
+        let entry_ref = module_json.get_field("entry") or else {
+            return .Error(box("error: module '\(module_name)' is missing required field 'entry'"))
+        }
+        let module_entry_path = entry_ref.val.as_string() or else {
+            return .Error(box("error: module '\(module_name)' field 'entry' must be a string"))
+        }
+        if not module_entry_path.ends_with(".koral") then {
+            return .Error(box("error: module '\(module_name)' entry must end with .koral"))
+        }
+
+        let deps = when module_json.get_field("deps") in {
+            .Some(value_ref) then load_string_array_field(value_ref, "deps", "module '\(module_name)'") or return,
+            .None then List[String].new(),
+        }
+        let links = when module_json.get_field("links") in {
+            .Some(value_ref) then load_string_array_field(value_ref, "links", "module '\(module_name)'") or return,
+            .None then List[String].new(),
+        }
+
+        modules.insert(module_name, ModuleConfig(module_entry_path, deps, links))
+        let _ = module_obj
+    }
+
     let mut dependencies = Dict[String, DepConfig].new()
     when json.get_field("dependencies") in {
         .Some(deps_ref) then {
@@ -98,64 +234,87 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             let mut iter = deps_obj.iterator()
             while iter.next() is .Some(dep_entry) then {
                 let dep_key = dep_entry.first
-                let dep_val = dep_entry.second
+                let dep_json = dep_entry.second.val
 
-                // Extract dep "name"
-                let dep_name_val = dep_val.val.get_field("name") or else {
+                let dep_name_ref = dep_json.get_field("name") or else {
                     return .Error(box("error: dependency '\(dep_key)' missing 'name' field"))
                 }
-                let dep_name = dep_name_val.val.as_string() or else {
+                let dep_name = dep_name_ref.val.as_string() or else {
                     return .Error(box("error: dependency '\(dep_key)' 'name' must be a string"))
                 }
                 if not is_valid_module_name(dep_name) then {
-                    return .Error(box("error: invalid module name '\(dep_name)' for dependency '\(dep_key)'. Must match [A-Z][a-zA-Z0-9]*"))
+                    return .Error(box("error: invalid dependency package name '\(dep_name)'"))
                 }
 
-                // Extract dep "git"
-                let dep_git_val = dep_val.val.get_field("git") or else {
+                let dep_git_ref = dep_json.get_field("git") or else {
                     return .Error(box("error: dependency '\(dep_key)' missing 'git' field"))
                 }
-                let dep_git = dep_git_val.val.as_string() or else {
+                let dep_git = dep_git_ref.val.as_string() or else {
                     return .Error(box("error: dependency '\(dep_key)' 'git' must be a string"))
                 }
 
-                // Extract dep "version"
-                let dep_version_val = dep_val.val.get_field("version") or else {
+                let dep_version_ref = dep_json.get_field("version") or else {
                     return .Error(box("error: dependency '\(dep_key)' missing 'version' field"))
                 }
-                let dep_version = dep_version_val.val.as_string() or else {
+                let dep_version = dep_version_ref.val.as_string() or else {
                     return .Error(box("error: dependency '\(dep_key)' 'version' must be a string"))
                 }
 
-                dependencies.insert(dep_key, DepConfig(dep_name, dep_git, dep_version))
+                let module_aliases = when dep_json.get_field("module_aliases") in {
+                    .Some(value_ref) then load_string_dict_field(value_ref, "module_aliases", "dependency '\(dep_key)'") or return,
+                    .None then Dict[String, String].new(),
+                }
+
+                dependencies.insert(dep_key, DepConfig(dep_name, dep_git, dep_version, module_aliases))
             }
         },
         .None then {},
     }
 
-    return .Ok(ProjectConfig(name, version, entry, dependencies))
+    if entry.is_empty() and modules.count() <> 1 then {
+        return .Error(box("error: top-level 'entry' is required when koral.json declares multiple modules"))
+    }
+
+    return .Ok(ProjectConfig(name, version, entry, links, modules, dependencies))
 }
 
-/// Save project configuration to koral.json
 public let save_config(project_dir String, config ProjectConfig) Result[Void] = {
     let mut obj = Dict[String, ref JsonValue].new()
     obj.insert("name", box(JsonValue.String(config.name)))
     obj.insert("version", box(JsonValue.String(config.version)))
     obj.insert("entry", box(JsonValue.String(config.entry)))
+    obj.insert("links", json_string_array(config.links))
 
-    if config.dependencies.count() > 0 then {
-        let mut deps_obj = Dict[String, ref JsonValue].new()
-        let mut iter = config.dependencies.iterator()
-        while iter.next() is .Some(dep_entry) then {
-            let dep = dep_entry.second
-            let mut dep_obj = Dict[String, ref JsonValue].new()
-            dep_obj.insert("name", box(JsonValue.String(dep.name)))
-            dep_obj.insert("git", box(JsonValue.String(dep.git)))
-            dep_obj.insert("version", box(JsonValue.String(dep.version)))
-            deps_obj.insert(dep_entry.first, box(JsonValue.Object(dep_obj)))
-        }
-        obj.insert("dependencies", box(JsonValue.Object(deps_obj)))
+    let mut modules_obj = Dict[String, ref JsonValue].new()
+    let mut module_iter = config.modules.iterator()
+    while module_iter.next() is .Some(module_entry) then {
+        let module = module_entry.second
+        let mut module_json = Dict[String, ref JsonValue].new()
+        module_json.insert("entry", box(JsonValue.String(module.entry)))
+        module_json.insert("deps", json_string_array(module.deps))
+        module_json.insert("links", json_string_array(module.links))
+        modules_obj.insert(module_entry.first, box(JsonValue.Object(module_json)))
     }
+    obj.insert("modules", box(JsonValue.Object(modules_obj)))
+
+    let mut deps_obj = Dict[String, ref JsonValue].new()
+    let mut dep_iter = config.dependencies.iterator()
+    while dep_iter.next() is .Some(dep_entry) then {
+        let dep = dep_entry.second
+        let mut dep_json = Dict[String, ref JsonValue].new()
+        dep_json.insert("name", box(JsonValue.String(dep.name)))
+        dep_json.insert("git", box(JsonValue.String(dep.git)))
+        dep_json.insert("version", box(JsonValue.String(dep.version)))
+
+        let mut aliases_obj = Dict[String, ref JsonValue].new()
+        let mut alias_iter = dep.module_aliases.iterator()
+        while alias_iter.next() is .Some(alias_entry) then {
+            aliases_obj.insert(alias_entry.first, box(JsonValue.String(alias_entry.second)))
+        }
+        dep_json.insert("module_aliases", box(JsonValue.Object(aliases_obj)))
+        deps_obj.insert(dep_entry.first, box(JsonValue.Object(dep_json)))
+    }
+    obj.insert("dependencies", box(JsonValue.Object(deps_obj)))
 
     let json = JsonValue.Object(obj)
     let text = json.to_string_pretty() + "\n"

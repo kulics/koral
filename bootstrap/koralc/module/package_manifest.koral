@@ -1,0 +1,558 @@
+using std::json { .. }
+using std::os { .. }
+
+public type PackageDependencyConfig(
+    key String,
+    name String,
+    module_aliases Dict[String, String],
+)
+
+public type PackageModuleConfig(
+    full_name String,
+    path_segments List[String],
+    entry_path String,
+    deps List[String],
+    links List[String],
+)
+
+public type PackageManifest(
+    manifest_path String,
+    package_root String,
+    name String,
+    default_target_module_name Option[String],
+    links List[String],
+    modules Dict[String, PackageModuleConfig],
+    dependencies Dict[String, PackageDependencyConfig],
+)
+
+public type ResolvedPackageKind {
+    Root(),
+    Std(),
+    Dependency(key String),
+}
+
+public type ResolvedModuleAliasRule(
+    alias_full_name String,
+    alias_path_segments List[String],
+    target_full_name String,
+    target_path_segments List[String],
+)
+
+public type ResolvedModuleSpec(
+    full_name String,
+    path_segments List[String],
+    entry_file String,
+    deps List[String],
+    links List[String],
+    visible_module_aliases List[ResolvedModuleAliasRule],
+    package_name String,
+    package_root String,
+    package_kind ResolvedPackageKind,
+)
+
+public type ResolvedPackageGraph(
+    target_module_name String,
+    modules_by_name Dict[String, ResolvedModuleSpec],
+    reachable_module_names List[String],
+    root_manifest_path String,
+    std_manifest_path Option[String],
+    std_root_module_name Option[String],
+)
+
+private let load_manifest_string_array(value ref JsonValue, path String) Result[List[String]] = {
+    let arr = value.val.as_array() or else {
+        return Result[List[String]].Error(box("Invalid manifest field '\(path)': expected string array"))
+    }
+    let mut out = List[String].new()
+    let mut i UInt = 0
+    while i < arr.count() then {
+        let item = arr[i].val.as_string() or else {
+            return Result[List[String]].Error(box("Invalid manifest field '\(path)[\(i)]': expected string"))
+        }
+        out.push(item)
+        i += 1
+    }
+    return Result[List[String]].Ok(out)
+}
+
+private let load_manifest_string_dict(value ref JsonValue, path String) Result[Dict[String, String]] = {
+    let obj = value.val.as_object() or else {
+        return Result[Dict[String, String]].Error(box("Invalid manifest field '\(path)': expected object"))
+    }
+    let mut out = Dict[String, String].new()
+    let mut iter = obj.iterator()
+    while iter.next() is .Some(entry) then {
+        let str_value = entry.second.val.as_string() or else {
+            return Result[Dict[String, String]].Error(box("Invalid manifest field '\(path).\(entry.first)': expected string"))
+        }
+        out.insert(entry.first, str_value)
+    }
+    return Result[Dict[String, String]].Ok(out)
+}
+
+private let is_valid_manifest_module_segment(segment String) Bool = {
+    if segment.is_empty() then {
+        return false
+    }
+    let first = segment[0(UInt)]
+    if first < 'a' or first > 'z' then {
+        return false
+    }
+    let mut i UInt = 0
+    while i < segment.count() then {
+        let ch = segment[i]
+        let is_lower = ch >= 'a' and ch <= 'z'
+        let is_digit = ch >= '0' and ch <= '9'
+        let is_underscore = ch == '_'
+        if not is_lower and not is_digit and not is_underscore then {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+public let parse_manifest_module_name(name String) Option[List[String]] = {
+    if name.is_empty() then {
+        return Option[List[String]].None()
+    }
+    let mut segments = List[String].new()
+    for raw_segment in name.split("::") then {
+        if raw_segment.is_empty() or not is_valid_manifest_module_segment(raw_segment) then {
+            return Option[List[String]].None()
+        }
+        segments.push(module_file_name_to_identifier(raw_segment))
+    }
+    if segments.is_empty() then {
+        return Option[List[String]].None()
+    }
+    return Option[List[String]].Some(segments)
+}
+
+public let default_target_module_name(manifest PackageManifest) Result[String] = {
+    when manifest.default_target_module_name in {
+        .Some(module_name) then {
+            if manifest.modules.get(module_name) is .Some(_) then {
+                return Result[String].Ok(module_name)
+            }
+        },
+        .None() then {},
+    }
+
+    if manifest.modules.count() == 1 then {
+        let mut iter = manifest.modules.iterator()
+        if iter.next() is .Some(entry) then {
+            return Result[String].Ok(entry.first)
+        }
+    }
+
+    return Result[String].Error(box("missing default target module; pass --target-module"))
+}
+
+public let load_package_manifest(manifest_path String) Result[PackageManifest] = {
+    let absolute_manifest_path = when absolute_path(manifest_path.into_path()) in {
+        .Ok(path) then path.to_string(),
+        .Error(_) then manifest_path,
+    }
+    if not path_exist(absolute_manifest_path.into_path()) then {
+        return Result[PackageManifest].Error(box("Manifest file not found: \(absolute_manifest_path)"))
+    }
+
+    let text = read_text_file(absolute_manifest_path.into_path()) or return
+    let json = JsonValue.parse(text) or return
+    let obj = json.as_object() or else {
+        return Result[PackageManifest].Error(box("Invalid manifest JSON: \(absolute_manifest_path)"))
+    }
+
+    let name_ref = json.get_field("name") or else {
+        return Result[PackageManifest].Error(box("Invalid manifest field 'name': missing required string"))
+    }
+    let name = name_ref.val.as_string() or else {
+        return Result[PackageManifest].Error(box("Invalid manifest field 'name': expected string"))
+    }
+
+    let default_target_module_name = when json.get_field("entry") in {
+        .Some(entry_ref) then {
+            let value = entry_ref.val.as_string() or else {
+                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': expected string"))
+            }
+            yield Option[String].Some(value)
+        },
+        .None then Option[String].None(),
+    }
+
+    let links = when json.get_field("links") in {
+        .Some(value_ref) then load_manifest_string_array(value_ref, "links") or return,
+        .None then List[String].new(),
+    }
+
+    let mut dependencies = Dict[String, PackageDependencyConfig].new()
+    when json.get_field("dependencies") in {
+        .Some(dep_ref) then {
+            let dep_obj = dep_ref.val.as_object() or else {
+                return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies': expected object"))
+            }
+            let mut iter = dep_obj.iterator()
+            while iter.next() is .Some(dep_entry) then {
+                let dep_json = dep_entry.second.val
+                let dep_name_ref = dep_json.get_field("name") or else {
+                    return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies.\(dep_entry.first).name': missing required string"))
+                }
+                let dep_name = dep_name_ref.val.as_string() or else {
+                    return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies.\(dep_entry.first).name': expected string"))
+                }
+                let module_aliases = when dep_json.get_field("module_aliases") in {
+                    .Some(value_ref) then load_manifest_string_dict(value_ref, "dependencies.\(dep_entry.first).module_aliases") or return,
+                    .None then Dict[String, String].new(),
+                }
+                dependencies.insert(dep_entry.first, PackageDependencyConfig(dep_entry.first, dep_name, module_aliases))
+            }
+        },
+        .None then {},
+    }
+
+    let mut modules = Dict[String, PackageModuleConfig].new()
+    when json.get_field("modules") in {
+        .Some(modules_ref) then {
+            let modules_obj = modules_ref.val.as_object() or else {
+                return Result[PackageManifest].Error(box("Invalid manifest field 'modules': expected object"))
+            }
+            let mut iter = modules_obj.iterator()
+            while iter.next() is .Some(module_entry) then {
+                let module_name = module_entry.first
+                let path_segments = parse_manifest_module_name(module_name) or else {
+                    return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name)': module name must be lower_snake segments joined by '::'"))
+                }
+                let module_json = module_entry.second.val
+                let entry_ref = module_json.get_field("entry") or else {
+                    return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name).entry': missing required string"))
+                }
+                let entry_rel = entry_ref.val.as_string() or else {
+                    return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name).entry': expected string"))
+                }
+                let entry_abs = absolute_manifest_path.into_path().dir_name().join(entry_rel).normalize().to_string()
+                let deps = when module_json.get_field("deps") in {
+                    .Some(value_ref) then load_manifest_string_array(value_ref, "modules.\(module_name).deps") or return,
+                    .None then List[String].new(),
+                }
+                let module_links = when module_json.get_field("links") in {
+                    .Some(value_ref) then load_manifest_string_array(value_ref, "modules.\(module_name).links") or return,
+                    .None then List[String].new(),
+                }
+                modules.insert(module_name, PackageModuleConfig(module_name, path_segments, entry_abs, deps, module_links))
+            }
+        },
+        .None then {},
+    }
+
+    when default_target_module_name in {
+        .Some(module_name) then {
+            if parse_manifest_module_name(module_name) is .None() then {
+                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': expected module full name such as 'app' or 'app::main'"))
+            }
+            if modules.get(module_name) is .None() then {
+                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': default target module '\(module_name)' is not declared in 'modules'"))
+            }
+        },
+        .None() then {
+            if modules.count() > 1 then {
+                return Result[PackageManifest].Error(box("Invalid manifest field 'entry': required when manifest declares multiple modules"))
+            }
+        },
+    }
+
+    return Result[PackageManifest].Ok(PackageManifest(
+        absolute_manifest_path,
+        absolute_manifest_path.into_path().dir_name().to_string(),
+        name,
+        default_target_module_name,
+        links,
+        modules,
+        dependencies,
+    ))
+}
+
+private let add_manifest_modules(
+    manifest PackageManifest,
+    package_kind ResolvedPackageKind,
+    modules_by_name mut ref Dict[String, ResolvedModuleSpec],
+) Void = {
+    let mut iter = manifest.modules.iterator()
+    while iter.next() is .Some(entry) then {
+        let module = entry.second
+        let mut all_links = List[String].new()
+        for link in manifest.links then { all_links.push(link) }
+        for link in module.links then { all_links.push(link) }
+        modules_by_name.insert(entry.first, ResolvedModuleSpec(
+            module.full_name,
+            module.path_segments,
+            module.entry_path,
+            module.deps,
+            all_links,
+            List[ResolvedModuleAliasRule].new(),
+            manifest.name,
+            manifest.package_root,
+            package_kind,
+        ))
+    }
+}
+
+private let build_dependency_alias_rules(
+    root_manifest PackageManifest,
+    dependency_manifests Dict[String, PackageManifest],
+    existing_module_names Set[String],
+) Result[List[ResolvedModuleAliasRule]] = {
+    let mut rules = List[ResolvedModuleAliasRule].new()
+    let mut claimed_alias_names = existing_module_names
+
+    let mut dep_iter = root_manifest.dependencies.iterator()
+    while dep_iter.next() is .Some(dep_entry) then {
+        let dep_manifest = dependency_manifests.get(dep_entry.first) or else {
+            continue
+        }
+
+        let mut alias_iter = dep_entry.second.module_aliases.iterator()
+        while alias_iter.next() is .Some(alias_entry) then {
+            let published_name = alias_entry.first
+            let alias_name = alias_entry.second
+
+            let published_segments = parse_manifest_module_name(published_name) or else {
+                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                    "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': published module name must be lower_snake segments joined by '::'"
+                ))
+            }
+            let alias_segments = parse_manifest_module_name(alias_name) or else {
+                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                    "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': alias must be lower_snake segments joined by '::'"
+                ))
+            }
+
+            if dep_manifest.modules.get(published_name) is .None() then {
+                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                    "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': dependency '\(dep_entry.first)' does not publish module '\(published_name)'"
+                ))
+            }
+
+            if claimed_alias_names.contains(alias_name) then {
+                return Result[List[ResolvedModuleAliasRule]].Error(box(
+                    "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': alias '\(alias_name)' conflicts with an existing module name"
+                ))
+            }
+            claimed_alias_names.insert(alias_name)
+
+            let mut alias_path_segments = List[String].new()
+            for segment in alias_segments then {
+                alias_path_segments.push(module_file_name_to_identifier(segment))
+            }
+            let mut target_path_segments = List[String].new()
+            for segment in published_segments then {
+                target_path_segments.push(module_file_name_to_identifier(segment))
+            }
+
+            rules.push(ResolvedModuleAliasRule(
+                alias_name,
+                alias_path_segments,
+                published_name,
+                target_path_segments,
+            ))
+        }
+    }
+
+    return Result[List[ResolvedModuleAliasRule]].Ok(rules)
+}
+
+private let rewrite_module_dependency_names(
+    deps List[String],
+    alias_rules List[ResolvedModuleAliasRule],
+) List[String] = {
+    if alias_rules.is_empty() then {
+        return deps
+    }
+
+    let mut out = List[String].new()
+    for dep in deps then {
+        let mut rewritten = dep
+        let mut best_alias_len Int = -1
+        for rule in alias_rules then {
+            let mut candidate = Option[String].None()
+            if dep == rule.alias_full_name then {
+                candidate = Option[String].Some(rule.target_full_name)
+            } else {
+                let alias_prefix = rule.alias_full_name + "::"
+                if dep.starts_with(alias_prefix) then {
+                    candidate = Option[String].Some(
+                        rule.target_full_name + "::" + dep.substring(.From(alias_prefix.count()))
+                    )
+                }
+            }
+            when candidate in {
+                .Some(value) then {
+                    let alias_len = rule.alias_full_name.count()(Int)
+                    if alias_len > best_alias_len then {
+                        best_alias_len = alias_len
+                        rewritten = value
+                    }
+                },
+                .None() then {},
+            }
+        }
+        out.push(rewritten)
+    }
+    return out
+}
+
+private let validate_resolved_module_graph(
+    modules_by_name Dict[String, ResolvedModuleSpec],
+    name String,
+    visiting mut ref Set[String],
+    visited mut ref Set[String],
+    stack mut ref List[String],
+) Result[Void] = {
+    if visited.contains(name) then {
+        return Result[Void].Ok({})
+    }
+    if visiting.contains(name) then {
+        let mut cycle = stack.join_to_string(" -> ")
+        if not cycle.is_empty() then {
+            cycle.push_string(" -> ")
+        }
+        cycle.push_string(name)
+        return Result[Void].Error(box("Cyclic module dependency: \(cycle)"))
+    }
+
+    let spec = modules_by_name.get(name) or else {
+        return Result[Void].Error(box("Target module '\(name)' not found in resolved module graph"))
+    }
+
+    visiting.insert(name)
+    stack.push(name)
+    for dep in spec.deps then {
+        if modules_by_name.get(dep) is .None() then {
+            return Result[Void].Error(box("Module '\(name)' depends on unknown module '\(dep)'"))
+        }
+        let _ = validate_resolved_module_graph(modules_by_name, dep, visiting, visited, stack) or return
+    }
+    let _ = stack.pop()
+    visiting.remove(name)
+    visited.insert(name)
+    return Result[Void].Ok({})
+}
+
+private let collect_reachable_modules(
+    modules_by_name Dict[String, ResolvedModuleSpec],
+    name String,
+    reachable mut ref Set[String],
+) Void = {
+    if reachable.contains(name) then {
+        return
+    }
+    reachable.insert(name)
+    let spec = modules_by_name.get(name) or else { return }
+    for dep in spec.deps then {
+        collect_reachable_modules(modules_by_name, dep, reachable)
+    }
+}
+
+public let load_resolved_package_graph(
+    root_manifest_path String,
+    target_module_name String,
+    std_manifest_path Option[String],
+    deps_root Option[String],
+) Result[ResolvedPackageGraph] = {
+    let root_manifest = load_package_manifest(root_manifest_path) or return
+    let mut modules_by_name = Dict[String, ResolvedModuleSpec].new()
+    add_manifest_modules(root_manifest, ResolvedPackageKind.Root(), modules_by_name.ref)
+    let mut dependency_manifests = Dict[String, PackageManifest].new()
+
+    let mut resolved_std_manifest_path = Option[String].None()
+    let mut std_root_module_name = Option[String].None()
+    when std_manifest_path in {
+        .Some(path) then {
+            let std_manifest = load_package_manifest(path) or return
+            add_manifest_modules(std_manifest, ResolvedPackageKind.Std(), modules_by_name.ref)
+            resolved_std_manifest_path = Option[String].Some(std_manifest.manifest_path)
+            let mut iter = std_manifest.modules.iterator()
+            while iter.next() is .Some(entry) then {
+                if not entry.first.contains("::") then {
+                    std_root_module_name = Option[String].Some(entry.first)
+                    break
+                }
+            }
+        },
+        .None() then {},
+    }
+
+    when deps_root in {
+        .Some(root) then {
+            let mut iter = root_manifest.dependencies.iterator()
+            while iter.next() is .Some(dep_entry) then {
+                let dep_manifest_path = root.into_path().join(dep_entry.first).join("koral.json").normalize().to_string()
+                if not path_exist(dep_manifest_path.into_path()) then {
+                    continue
+                }
+                let dep_manifest = load_package_manifest(dep_manifest_path) or return
+                dependency_manifests.insert(dep_entry.first, dep_manifest)
+                add_manifest_modules(dep_manifest, ResolvedPackageKind.Dependency(dep_entry.first), modules_by_name.ref)
+            }
+        },
+        .None() then {},
+    }
+
+    let mut existing_module_names = Set[String].new()
+    let mut name_iter = modules_by_name.iterator()
+    while name_iter.next() is .Some(entry) then {
+        existing_module_names.insert(entry.first)
+    }
+    let alias_rules = build_dependency_alias_rules(root_manifest, dependency_manifests, existing_module_names) or return
+    if not alias_rules.is_empty() then {
+        let mut root_iter = root_manifest.modules.iterator()
+        while root_iter.next() is .Some(root_entry) then {
+            when modules_by_name.get(root_entry.first) in {
+                .Some(spec) then {
+                    modules_by_name.insert(root_entry.first, ResolvedModuleSpec(
+                        spec.full_name,
+                        spec.path_segments,
+                        spec.entry_file,
+                        rewrite_module_dependency_names(spec.deps, alias_rules),
+                        spec.links,
+                        alias_rules,
+                        spec.package_name,
+                        spec.package_root,
+                        spec.package_kind,
+                    ))
+                },
+                .None() then {},
+            }
+        }
+    }
+
+    if modules_by_name.get(target_module_name) is .None() then {
+        return Result[ResolvedPackageGraph].Error(box("Target module '\(target_module_name)' not found in resolved module graph"))
+    }
+
+    let mut visiting = Set[String].new()
+    let mut visited = Set[String].new()
+    let mut stack = List[String].new()
+    let mut iter = modules_by_name.iterator()
+    while iter.next() is .Some(entry) then {
+        let _ = validate_resolved_module_graph(modules_by_name, entry.first, visiting.ref, visited.ref, stack.ref) or return
+    }
+
+    let mut reachable = Set[String].new()
+    collect_reachable_modules(modules_by_name, target_module_name, reachable.ref)
+    let mut reachable_names = List[String].new()
+    let mut reachable_iter = reachable.iterator()
+    while reachable_iter.next() is .Some(name) then {
+        reachable_names.push(name)
+    }
+    reachable_names.sort()
+
+    return Result[ResolvedPackageGraph].Ok(ResolvedPackageGraph(
+        target_module_name,
+        modules_by_name,
+        reachable_names,
+        root_manifest.manifest_path,
+        resolved_std_manifest_path,
+        std_root_module_name,
+    ))
+}

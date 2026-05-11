@@ -3,7 +3,7 @@
 `tests/` is the only supported test entry for this repository.
 
 - `tests/compiler-cases/`: shared Koral integration cases
-- `tests/compiler-runner/`: shared Koral test runner entry at `tests/compiler-runner/main.koral`
+- `tests/compiler-runner/`: shared Koral test runner package at `tests/compiler-runner/koral.json`
 - `tests/compiler-cases_output/`: runner reports and temporary outputs
 
 ## Prepare compiler binaries
@@ -19,13 +19,13 @@ cd ..
 Build the shared test runner:
 
 ```bash
-compiler/.build/debug/koralc build tests/compiler-runner/main.koral -o bin/compiler-test-runner
+compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
 ```
 
 If you want to test the bootstrap compiler, build its `koralc` entry too:
 
 ```bash
-compiler/.build/debug/koralc build bootstrap/koralc/main.koral -o bin/bootstrap
+compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
 ```
 
 ## Parallel execution
@@ -35,19 +35,19 @@ The shared runner supports parallel execution with `-j <N>` or `-j=<N>`.
 Run against the Swift compiler:
 
 ```bash
-./bin/compiler-test-runner/main.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
 ```
 
 Run against the bootstrap compiler:
 
 ```bash
-./bin/compiler-test-runner/main.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/main.exe -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
 ```
 
 Run against a custom compiler binary:
 
 ```bash
-./bin/compiler-test-runner/main.exe --compiler custom --compiler-bin <path-to-compiler> -j=8
+./bin/compiler-test-runner/compiler_runner.exe --compiler custom --compiler-bin <path-to-compiler> -j=8
 ```
 
 Useful flags:

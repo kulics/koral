@@ -1,7 +1,7 @@
 // Module system data structures.
 // Mirrors compiler/Sources/KoralCompiler/Module/ModuleResolver.swift
 
-using Std.Os.*
+using std::os { .. }
 
 // ── ImportKind ────────────────────────────────────────────────────────────────
 
@@ -25,6 +25,7 @@ public type SymbolImportEdge(
     module List[String],
     target List[String],
     symbol String,
+    original_symbol String,
     kind ImportKind,
     source_file Option[String],
 )
@@ -57,8 +58,16 @@ given ImportGraph {
         self.edges.push(ImportEdge(from, to, kind, source_file))
     }
 
-    public add_symbol_import(self mut ref, module List[String], target List[String], symbol String, kind ImportKind, source_file Option[String]) Void = {
-        self.symbol_imports.push(SymbolImportEdge(module, target, symbol, kind, source_file))
+    public add_symbol_import(
+        self mut ref,
+        module List[String],
+        target List[String],
+        symbol String,
+        kind ImportKind,
+        source_file Option[String],
+        original_symbol Option[String],
+    ) Void = {
+        self.symbol_imports.push(SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file))
     }
 
     public add_module_alias(self mut ref, module List[String], alias String, target List[String], source_file Option[String]) Void = {
@@ -91,7 +100,7 @@ given ImportGraph {
                 for si in self.symbol_imports then {
                     if string_list_eq(si.module, in_module) and
                        string_list_eq(si.target, symbol_module_path) and
-                       si.symbol == name and
+                       (si.symbol == name or si.original_symbol == name) and
                        source_file_matches(si.source_file, in_source_file) then {
                         return si.kind
                     }
@@ -266,8 +275,16 @@ given CompilationUnit {
         self.storage.import_graph.add_module_import(from, to, kind, source_file)
     }
 
-    public add_symbol_import_edge(self, module List[String], target List[String], symbol String, kind ImportKind, source_file Option[String]) Void = {
-        self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file)
+    public add_symbol_import_edge(
+        self,
+        module List[String],
+        target List[String],
+        symbol String,
+        kind ImportKind,
+        source_file Option[String],
+        original_symbol Option[String],
+    ) Void = {
+        self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file, original_symbol)
     }
 
     public add_module_alias_edge(self, module List[String], alias String, target List[String], source_file Option[String]) Void = {
