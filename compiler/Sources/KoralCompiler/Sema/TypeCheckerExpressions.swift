@@ -6862,15 +6862,181 @@ extension TypeChecker {
     guard !parts.isEmpty else {
       return .stringLiteral(value: "", type: builtinStringType())
     }
-
-    var result = try convertInterpolatedPartToString(parts[0], span: span)
-
-    for part in parts.dropFirst() {
-      let rhs = try convertInterpolatedPartToString(part, span: span)
-      result = try buildArithmeticExpression(op: .plus, lhs: result, rhs: rhs)
+    if parts.count == 1 {
+      return try convertInterpolatedPartToString(parts[0], span: span)
     }
 
-    return result
+    let stringType = builtinStringType()
+    let uintType: Type = .uint
+    let mutBytePtrType: Type = .mutablePointer(element: .uint8)
+
+    func nextInterpSymbol(_ prefix: String, type: Type, mutable: Bool = false) -> Symbol {
+      let symbol = makeLocalSymbol(
+        name: "__interp_\(prefix)_\(synthesizedTempIndex)",
+        type: type,
+        kind: .variable(mutable ? .MutableValue : .Value)
+      )
+      synthesizedTempIndex += 1
+      return symbol
+    }
+
+    guard let countMethod = try lookupConcreteMethodSymbol(on: stringType, name: "count") else {
+      throw SemanticError(.generic("Missing method 'count' for type 'String'"), span: span)
+    }
+    guard let borrowPtrMethod = try lookupConcreteMethodSymbol(on: stringType, name: "borrow_ptr") else {
+      throw SemanticError(.generic("Missing method 'borrow_ptr' for type 'String'"), span: span)
+    }
+
+    var statements: [TypedStatementNode] = []
+    var partSymbols: [Symbol] = []
+
+    for part in parts {
+      if case .literal(let value) = part, value.isEmpty {
+        continue
+      }
+
+      let stringPart = try convertInterpolatedPartToString(part, span: span)
+      let partSymbol = nextInterpSymbol("part", type: stringPart.type)
+      statements.append(
+        .variableDeclaration(identifier: partSymbol, value: stringPart, mutable: false)
+      )
+      partSymbols.append(partSymbol)
+    }
+
+    guard !partSymbols.isEmpty else {
+      return .stringLiteral(value: "", type: stringType)
+    }
+
+    let firstPartExpr = TypedExpressionNode.variable(identifier: partSymbols[0])
+    var totalExpr = try buildConcreteMethodCall(
+      base: firstPartExpr,
+      method: countMethod,
+      arguments: []
+    )
+
+    for partSymbol in partSymbols.dropFirst() {
+      let partExpr = TypedExpressionNode.variable(identifier: partSymbol)
+      let partCount = try buildConcreteMethodCall(
+        base: partExpr,
+        method: countMethod,
+        arguments: []
+      )
+      totalExpr = .arithmeticExpression(
+        left: totalExpr,
+        op: .plus,
+        right: partCount,
+        type: uintType
+      )
+    }
+
+    let totalSymbol = nextInterpSymbol("total", type: uintType)
+    statements.append(
+      .variableDeclaration(identifier: totalSymbol, value: totalExpr, mutable: false)
+    )
+
+    let totalVar = TypedExpressionNode.variable(identifier: totalSymbol)
+    let oneUInt = TypedExpressionNode.integerLiteral(value: "1", type: uintType)
+    let capExpr = TypedExpressionNode.arithmeticExpression(
+      left: totalVar,
+      op: .plus,
+      right: oneUInt,
+      type: uintType
+    )
+    let dataAlloc = TypedExpressionNode.intrinsicCall(
+      .allocMemory(count: capExpr, resultType: mutBytePtrType)
+    )
+    let dataSymbol = nextInterpSymbol("data", type: mutBytePtrType)
+    statements.append(
+      .variableDeclaration(identifier: dataSymbol, value: dataAlloc, mutable: false)
+    )
+
+    let zeroUInt = TypedExpressionNode.integerLiteral(value: "0", type: uintType)
+    let offsetSymbol = nextInterpSymbol("offset", type: uintType, mutable: true)
+    statements.append(
+      .variableDeclaration(identifier: offsetSymbol, value: zeroUInt, mutable: true)
+    )
+
+    for partSymbol in partSymbols {
+      let partExpr = TypedExpressionNode.variable(identifier: partSymbol)
+      let partLenExpr = try buildConcreteMethodCall(
+        base: partExpr,
+        method: countMethod,
+        arguments: []
+      )
+      let partLenSymbol = nextInterpSymbol("len", type: uintType)
+      statements.append(
+        .variableDeclaration(identifier: partLenSymbol, value: partLenExpr, mutable: false)
+      )
+
+      let dataVar = TypedExpressionNode.variable(identifier: dataSymbol)
+      let offsetVar = TypedExpressionNode.variable(identifier: offsetSymbol)
+      let partLenVar = TypedExpressionNode.variable(identifier: partLenSymbol)
+      let destExpr = TypedExpressionNode.arithmeticExpression(
+        left: dataVar,
+        op: .plus,
+        right: offsetVar,
+        type: mutBytePtrType
+      )
+      let sourceExpr = try buildConcreteMethodCall(
+        base: partExpr,
+        method: borrowPtrMethod,
+        arguments: []
+      )
+      let copyExpr = TypedExpressionNode.intrinsicCall(
+        .copyMemory(dest: destExpr, source: sourceExpr, count: partLenVar)
+      )
+      statements.append(.expression(copyExpr))
+
+      let newOffset = TypedExpressionNode.arithmeticExpression(
+        left: offsetVar,
+        op: .plus,
+        right: partLenVar,
+        type: uintType
+      )
+      statements.append(
+        .assignment(
+          target: .variable(identifier: offsetSymbol),
+          operator: nil,
+          value: newOffset
+        )
+      )
+    }
+
+    let finalData = TypedExpressionNode.variable(identifier: dataSymbol)
+    let finalTotal = TypedExpressionNode.variable(identifier: totalSymbol)
+    let endPtrExpr = TypedExpressionNode.arithmeticExpression(
+      left: finalData,
+      op: .plus,
+      right: finalTotal,
+      type: mutBytePtrType
+    )
+    let zeroByte = TypedExpressionNode.integerLiteral(value: "0", type: .uint8)
+    let initExpr = TypedExpressionNode.intrinsicCall(
+      .initMemory(ptr: endPtrExpr, val: zeroByte)
+    )
+    statements.append(.expression(initExpr))
+
+    let finalCap = TypedExpressionNode.arithmeticExpression(
+      left: TypedExpressionNode.variable(identifier: totalSymbol),
+      op: .plus,
+      right: TypedExpressionNode.integerLiteral(value: "1", type: uintType),
+      type: uintType
+    )
+    let builtString = TypedExpressionNode.staticMethodCall(
+      baseType: stringType,
+      methodName: "from_owned_utf8_ptr_unchecked",
+      typeArgs: [],
+      methodTypeArgs: [],
+      arguments: [
+        TypedExpressionNode.variable(identifier: dataSymbol),
+        TypedExpressionNode.variable(identifier: totalSymbol),
+        finalCap,
+      ],
+      type: stringType
+    )
+    statements.append(.expression(builtString))
+
+    return .blockExpression(statements: statements, type: stringType)
   }
 
   private func convertInterpolatedPartToString(
