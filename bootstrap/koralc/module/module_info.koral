@@ -30,19 +30,11 @@ public type SymbolImportEdge(
     source_file Option[String],
 )
 
-public type ModuleAliasEdge(
-    module List[String],
-    alias String,
-    target List[String],
-    source_file Option[String],
-)
-
 // ── ImportGraph ───────────────────────────────────────────────────────────────
 
 public type ImportGraph(
     mut edges List[ImportEdge],
     mut symbol_imports List[SymbolImportEdge],
-    mut module_aliases List[ModuleAliasEdge],
 )
 
 given ImportGraph {
@@ -50,7 +42,6 @@ given ImportGraph {
         return ImportGraph(
             List[ImportEdge].new(),
             List[SymbolImportEdge].new(),
-            List[ModuleAliasEdge].new()
         )
     }
 
@@ -70,10 +61,6 @@ given ImportGraph {
         self.symbol_imports.push(SymbolImportEdge(module, target, symbol, original_symbol or else symbol, kind, source_file))
     }
 
-    public add_module_alias(self mut ref, module List[String], alias String, target List[String], source_file Option[String]) Void = {
-        self.module_aliases.push(ModuleAliasEdge(module, alias, target, source_file))
-    }
-
     // 合并另一个 ImportGraph 的所有边
     // 用于将标准库导入图合并到用户代码导入图
     public merge(self mut ref, other ImportGraph) Void = {
@@ -82,9 +69,6 @@ given ImportGraph {
         }
         for si in other.symbol_imports then {
             self.symbol_imports.push(si)
-        }
-        for ma in other.module_aliases then {
-            self.module_aliases.push(ma)
         }
     }
 
@@ -139,6 +123,7 @@ given ImportGraph {
 public type LoadedNode(
     decl Decl,
     source_file String,
+    package_id String,
 )
 
 // ── ModuleInfo ────────────────────────────────────────────────────────────────
@@ -200,7 +185,7 @@ given ModuleInfo {
     }
 
     public add_node(self, decl Decl, source_file String) Void = {
-        self.storage.global_nodes.push(LoadedNode(decl, source_file))
+        self.storage.global_nodes.push(LoadedNode(decl, source_file, ""))
     }
 }
 
@@ -247,10 +232,6 @@ given CompilationUnit {
         original_symbol Option[String],
     ) Void = {
         self.storage.import_graph.add_symbol_import(module, target, symbol, kind, source_file, original_symbol)
-    }
-
-    public add_module_alias_edge(self, module List[String], alias String, target List[String], source_file Option[String]) Void = {
-        self.storage.import_graph.add_module_alias(module, alias, target, source_file)
     }
 
     // 合并另一个编译单元的导入图（用于标准库合并）

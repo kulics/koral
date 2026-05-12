@@ -41,7 +41,7 @@ public struct PackageModuleConfig {
   public let fullName: String
   public let pathSegments: [String]
   public let entryPath: String
-  public let deps: [String]
+  public let requires: [String]
   public let links: [String]
 }
 
@@ -66,7 +66,7 @@ public struct ResolvedModuleSpec {
   public let fullName: String
   public let pathSegments: [String]
   public let entryFile: String
-  public let deps: [String]
+  public let requires: [String]
   public let links: [String]
   public let visibleModuleAliases: [ResolvedModuleAliasRule]
   public let packageName: String
@@ -250,13 +250,13 @@ public func loadPackageManifest(at manifestPath: String) throws -> PackageManife
         throw PackageManifestError.duplicateModuleEntry(entryPath)
       }
 
-      let deps = try optionalStringArray(moduleConfigObject["deps"], path: "modules.\(moduleName).deps")
+      let requires = try optionalStringArray(moduleConfigObject["requires"], path: "modules.\(moduleName).requires")
       let links = try optionalStringArray(moduleConfigObject["links"], path: "modules.\(moduleName).links")
       modules[moduleName] = PackageModuleConfig(
         fullName: moduleName,
         pathSegments: pathSegments.map(moduleFileNameToIdentifier),
         entryPath: absoluteEntry,
-        deps: deps,
+        requires: requires,
         links: links
       )
     }
@@ -304,7 +304,7 @@ private func addManifestModules(
       fullName: name,
       pathSegments: module.pathSegments,
       entryFile: module.entryPath,
-      deps: module.deps,
+      requires: module.requires,
       links: manifest.links + module.links,
       visibleModuleAliases: [],
       packageName: manifest.name,
@@ -372,12 +372,12 @@ private func buildDependencyAliasRules(
   return rules
 }
 
-private func rewriteModuleDependencyNames(
-  _ dependencies: [String],
+private func rewriteModuleRequirementNames(
+  _ requirements: [String],
   using aliasRules: [ResolvedModuleAliasRule]
 ) -> [String] {
   guard !aliasRules.isEmpty else {
-    return dependencies
+    return requirements
   }
 
   let sortedRules = aliasRules.sorted {
@@ -388,29 +388,29 @@ private func rewriteModuleDependencyNames(
   }
 
   var rewritten: [String] = []
-  for dependency in dependencies {
-    var rewrittenDependency = dependency
+  for requirement in requirements {
+    var rewrittenRequirement = requirement
     for aliasRule in sortedRules {
-      if dependency == aliasRule.aliasFullName {
-        rewrittenDependency = aliasRule.targetFullName
+      if requirement == aliasRule.aliasFullName {
+        rewrittenRequirement = aliasRule.targetFullName
         break
       }
       let aliasPrefix = aliasRule.aliasFullName + "::"
-      if dependency.hasPrefix(aliasPrefix) {
-        rewrittenDependency = aliasRule.targetFullName + "::" + dependency.dropFirst(aliasPrefix.count)
+      if requirement.hasPrefix(aliasPrefix) {
+        rewrittenRequirement = aliasRule.targetFullName + "::" + requirement.dropFirst(aliasPrefix.count)
         break
       }
     }
-    rewritten.append(rewrittenDependency)
+    rewritten.append(rewrittenRequirement)
   }
   return rewritten
 }
 
 private func validateResolvedModuleGraph(_ modulesByName: [String: ResolvedModuleSpec]) throws {
   for (name, module) in modulesByName {
-    for dependency in module.deps {
-      guard modulesByName[dependency] != nil else {
-        throw PackageManifestError.unknownModuleDependency(module: name, dependency: dependency)
+    for requirement in module.requires {
+      guard modulesByName[requirement] != nil else {
+        throw PackageManifestError.unknownModuleDependency(module: name, dependency: requirement)
       }
     }
   }
@@ -438,8 +438,8 @@ private func validateResolvedModuleGraph(_ modulesByName: [String: ResolvedModul
       visited.insert(moduleName)
     }
 
-    for dependency in modulesByName[moduleName]?.deps ?? [] {
-      try visit(dependency)
+    for requirement in modulesByName[moduleName]?.requires ?? [] {
+      try visit(requirement)
     }
   }
 
@@ -504,7 +504,7 @@ public func loadResolvedPackageGraph(
         fullName: spec.fullName,
         pathSegments: spec.pathSegments,
         entryFile: spec.entryFile,
-        deps: rewriteModuleDependencyNames(spec.deps, using: aliasRules),
+        requires: rewriteModuleRequirementNames(spec.requires, using: aliasRules),
         links: spec.links,
         visibleModuleAliases: aliasRules,
         packageName: spec.packageName,
@@ -523,8 +523,8 @@ public func loadResolvedPackageGraph(
   var reachable = Set<String>()
   func markReachable(_ moduleName: String) {
     guard reachable.insert(moduleName).inserted else { return }
-    for dependency in modulesByName[moduleName]?.deps ?? [] {
-      markReachable(dependency)
+    for requirement in modulesByName[moduleName]?.requires ?? [] {
+      markReachable(requirement)
     }
   }
   markReachable(targetModuleName)

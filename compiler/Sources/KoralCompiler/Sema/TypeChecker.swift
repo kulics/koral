@@ -6,12 +6,15 @@ public struct GlobalNodeSourceInfo {
   public let sourceFile: String
   /// 模块路径
   public let modulePath: [String]
+  /// Package identity used by package-scoped access (`protected public`).
+  public let packageID: String
   /// 全局节点
   public let node: GlobalNode
   
-  public init(sourceFile: String, modulePath: [String], node: GlobalNode) {
+  public init(sourceFile: String, modulePath: [String], packageID: String = "", node: GlobalNode) {
     self.sourceFile = sourceFile
     self.modulePath = modulePath
+    self.packageID = packageID
     self.node = node
   }
 }
@@ -627,48 +630,21 @@ public class TypeChecker {
   
   /// 当前正在处理的节点的模块路径
   var currentModulePath: [String] = []
+
+  /// 当前正在处理的节点所属 package。
+  var currentPackageID: String = ""
   
   /// 模块导入图（用于可见性检查）
   var importGraph: ImportGraph? = nil
   
-  /// 模块符号映射：模块路径 -> 模块符号信息
-  /// 用于通过模块前缀访问导入模块符号
+  /// 模块公开符号映射：模块路径 -> 模块公开符号信息
+  /// 用于显式 using module { symbol } 导入绑定
   var moduleSymbols: [String: ModuleSymbolInfo] = [:]
   
   /// 当前正在处理的声明是否来自标准库
   /// 基于声明索引判断：索引小于 coreGlobalCount 的声明来自标准库
   var isCurrentDeclStdLib: Bool = false
   
-  /// 检查当前声明是否来自子模块
-  /// 子模块的 modulePath 长度大于 1（根模块路径长度为 1，如 ["expr_eval"]）
-  /// 子模块路径长度为 2+，如 ["expr_eval", "frontend"]
-  var isCurrentDeclFromSubmodule: Bool {
-    return currentModulePath.count > 1
-  }
-  
-  /// 检查符号的模块是否可以从当前模块直接访问
-  /// 允许访问的情况：
-  /// 1. 符号与当前代码在同一模块（modulePath 相同）
-  /// 2. 符号来自标准库根模块（modulePath 为 ["Std"]）
-  func isModuleAccessible(symbolModulePath: [String], currentModulePath: [String]) -> Bool {
-    // 空路径总是可访问（局部变量/参数）
-    if symbolModulePath.isEmpty {
-      return true
-    }
-    
-    // 同一模块
-    if symbolModulePath == currentModulePath {
-      return true
-    }
-    
-    // 标准库根模块的符号总是可访问
-    if symbolModulePath.count == 1 && symbolModulePath[0] == "Std" {
-      return true
-    }
-    
-    return false
-  }
-
   // MARK: - FFI Type Compatibility
 
   func isFfiCompatibleType(_ type: Type) -> Bool {
@@ -711,7 +687,7 @@ public class TypeChecker {
     }
   }
   
-  /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
+  /// 检查符号是否可由当前位置直接引用
   /// 
   // MARK: - Visibility Checker
   
@@ -720,18 +696,17 @@ public class TypeChecker {
   /// **Validates: Requirements 6.1, 6.2, 6.3, 6.5**
   lazy var visibilityChecker = VisibilityChecker(context: context)
   
-  /// 检查符号是否可以从当前位置直接访问（不需要模块前缀）
+  /// 检查符号是否可由当前位置直接引用
   /// 
   /// 允许直接访问的情况：
   /// 1. 符号与当前代码在同一模块（modulePath 相同）
-  /// 2. 符号来自父模块（符号的 modulePath 是当前 modulePath 的前缀）
-  /// 3. 符号来自标准库（modulePath 为 ["Std"] 或以 "Std" 开头）
-  /// 4. 符号是局部变量/参数（modulePath 为空）
+  /// 2. 符号通过当前文件的 using 声明显式导入
+  /// 3. 符号是局部变量/参数（modulePath 为空）
   /// 
   /// 不允许直接访问的情况：
-  /// 1. 符号来自子模块（需要通过 module.symbol 访问）
-  /// 2. 符号来自兄弟模块（需要通过 module.symbol 访问）
-  /// 3. 符号来自外部模块（需要通过 module.symbol 访问）
+  /// 1. 符号来自未在当前文件显式导入的子模块
+  /// 2. 符号来自未在当前文件显式导入的兄弟模块
+  /// 3. 符号来自未在当前文件显式导入的外部模块
   func canAccessSymbolDirectly(symbolModulePath: [String], currentModulePath: [String], symbolName: String? = nil) -> Bool {
     return visibilityChecker.canAccessDirectly(
       symbolModulePath: symbolModulePath,
@@ -743,24 +718,8 @@ public class TypeChecker {
     )
   }
   
-  /// 获取访问符号所需的模块前缀
-  /// 
-  /// 例如：
-  /// - 当前在 ["expr_eval"]，符号在 ["expr_eval", "frontend"]
-  ///   返回 "frontend"
-  /// - 当前在 ["expr_eval", "backend"]，符号在 ["expr_eval", "frontend"]
-  ///   返回 "frontend"
-  /// - 当前在 ["expr_eval"]，符号在 ["other_module"]
-  ///   返回 "other_module"
-  func getRequiredModulePrefix(symbolModulePath: [String], currentModulePath: [String]) -> String {
-    return visibilityChecker.getRequiredPrefix(
-      symbolModulePath: symbolModulePath,
-      currentModulePath: currentModulePath
-    )
-  }
-  
   /// 检查类型的模块可见性
-  /// 如果类型来自子模块或兄弟模块，需要使用模块前缀访问
+  /// 如果类型来自其它模块，必须通过当前文件的 using 声明显式导入
   func checkTypeVisibility(type: Type, typeName: String) throws {
     // 局部类型绑定（如泛型替换、Self 绑定）不需要检查模块可见性
     let isLocalBinding = currentScope.isLocalTypeBinding(typeName)
@@ -977,6 +936,7 @@ public class TypeChecker {
       kind: kind,
       access: access,
       span: currentSpan,
+      packageID: currentPackageID,
       isMutable: isMutable
     )
   }
@@ -1009,6 +969,7 @@ public class TypeChecker {
       kind: .type(kind),
       sourceFile: sourceFile,
       access: access,
+      packageID: currentPackageID,
       span: .unknown
     )
   }
@@ -1103,16 +1064,10 @@ public class TypeChecker {
       return isSameSourceFile(defSourceFile, currentSourceFile)
     case .protected:
       let defModulePath = context.getModulePath(defId) ?? []
-      if defModulePath == currentModulePath {
-        return true
-      }
-      if currentModulePath.count > defModulePath.count {
-        let prefix = Array(currentModulePath.prefix(defModulePath.count))
-        if prefix == defModulePath {
-          return true
-        }
-      }
-      return false
+      return defModulePath == currentModulePath
+    case .protectedPublic:
+      guard !currentPackageID.isEmpty else { return false }
+      return context.getPackageID(defId) == currentPackageID
     }
   }
 
@@ -1125,7 +1080,7 @@ public class TypeChecker {
     span: SourceSpan
   ) throws {
     if let blocked = members.first(where: { !isFieldAccessibleFromCurrentContext(fieldAccess: $0.access, defId: defId) }) {
-      let accessLabel = blocked.access == .private ? "private" : "protected"
+      let accessLabel = blocked.access.description
       throw SemanticError(
         .generic("Cannot directly construct type '\(typeName)' because field '\(blocked.name)' is \(accessLabel). Use a public factory method instead."),
         span: span

@@ -25,9 +25,6 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)UsingDeclaration: \(pathStr) { \(itemStr) }")
       }
 
-    case .foreignUsingDeclaration(let libraryName, _):
-      print("\(indent)ForeignUsingDeclaration: \(libraryName)")
-      
     case .globalVariableDeclaration(let name, let type, let value, let mutable, let access, _):
       print("\(indent)GlobalVariableDeclaration:")
       print("\(indent)  Access: \(access)")

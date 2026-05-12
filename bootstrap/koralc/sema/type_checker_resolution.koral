@@ -51,30 +51,6 @@ given TypeChecker {
                 let resolved_ret = self.resolve_type(return_type.val)
                 return make_function_type(resolved_params, resolved_ret)
             },
-            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
-            .ModuleQualifiedGeneric(_, base, args) then {
-                let mut resolved_args = List[Type].new()
-                for a in args then {
-                    resolved_args.push(self.resolve_type(a.val))
-                }
-                let base_type = self.resolve_module_qualified_type(
-                    when node in {
-                        .ModuleQualifiedGeneric(module_name, _, _) then module_name,
-                        _ then "",
-                    },
-                    base,
-                )
-                if base_type is .Unknown() then {
-                    return Type.Unknown()
-                }
-                if self.storage.trait_registry.get(base) is .Some(_) then {
-                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                }
-                if self.canonicalize_alias_type(base_type) is .EnumType(_) then {
-                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
-                }
-                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
-            },
         }
     }
 
@@ -124,30 +100,6 @@ given TypeChecker {
                 }
                 let resolved_ret = self.resolve_type_with_bindings(return_type.val, bindings)
                 return make_function_type(resolved_params, resolved_ret)
-            },
-            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
-            .ModuleQualifiedGeneric(_, base, args) then {
-                let mut resolved_args = List[Type].new()
-                for a in args then {
-                    resolved_args.push(self.resolve_type_with_bindings(a.val, bindings))
-                }
-                let base_type = self.resolve_module_qualified_type(
-                    when node in {
-                        .ModuleQualifiedGeneric(module_name, _, _) then module_name,
-                        _ then "",
-                    },
-                    base,
-                )
-                if base_type is .Unknown() then {
-                    return Type.Unknown()
-                }
-                if self.storage.trait_registry.get(base) is .Some(_) then {
-                    return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                }
-                if self.canonicalize_alias_type(base_type) is .EnumType(_) then {
-                    return Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
-                }
-                return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
             },
         }
     }
@@ -215,29 +167,6 @@ given TypeChecker {
                 }
                 let resolved_ret = self.resolve_type_in_scope(return_type.val, scope)
                 return make_function_type(resolved_params, resolved_ret)
-            },
-            .ModuleQualified(module_name, name) then self.resolve_module_qualified_type(module_name, name),
-            .ModuleQualifiedGeneric(_, base, args) then {
-                let mut resolved_args = List[Type].new()
-                for a in args then {
-                    resolved_args.push(self.resolve_type_in_scope(a.val, scope))
-                }
-                return when node in {
-                    .ModuleQualifiedGeneric(module_name, _, _) then {
-                        let base_type = self.resolve_module_qualified_type(module_name, base)
-                        if base_type is .Unknown() then { return Type.Unknown() }
-
-                        if self.storage.trait_registry.get(base) is .Some(_) then {
-                            return Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                        }
-                        let resolved_type = if self.canonicalize_alias_type(base_type) is .EnumType(_)
-                            then Type.GenericEnum(base, self.to_type_ref_list_in_resolution(resolved_args))
-                            else Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
-
-                        return resolved_type
-                    },
-                    _ then Type.Unknown(),
-                }
             },
         }
     }
@@ -419,30 +348,6 @@ given TypeChecker {
                 .None() then Option[List[String]].None(),
             },
             _ then Option[List[String]].None(),
-        }
-    }
-
-    private resolve_module_qualified_type(self, module_name String, type_name String) Type = {
-        let module_sym = when self.resolve_module_symbol(module_name) in {
-            .Some(sym) then sym,
-            .None() then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Module '\(module_name)' is not imported"))
-                return Type.Unknown()
-            },
-        }
-        let member_sym = when self.lookup_module_member_symbol(module_sym, type_name) in {
-            .Some(sym) then sym,
-            .None() then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Type '\(type_name)' does not belong to module '\(module_name)'"))
-                return Type.Unknown()
-            },
-        }
-        return when member_sym.kind in {
-            .TypeSymbol() then self.canonicalize_alias_type(member_sym.symbol_type),
-            _ then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "'\(type_name)' in module '\(module_name)' is not a type"))
-                yield Type.Unknown()
-            },
         }
     }
 

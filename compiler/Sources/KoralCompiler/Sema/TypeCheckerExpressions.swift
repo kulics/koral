@@ -1544,22 +1544,19 @@ extension TypeChecker {
 
       let hasLocal = currentScope.lookupWithInfoLocal(name, sourceFile: currentSourceFile) != nil
       
-      // 判断是否是全局符号（需要模块路径前缀）
+      // 判断是否是全局符号（需要模块可见性检查）
       // 局部变量和参数：modulePath 为空且 sourceFile 为空
       // 全局符号：有 modulePath 或有 sourceFile（private 符号）
       let isGlobalSymbol = !info.modulePath.isEmpty || info.isPrivate || info.sourceFile != nil
       let symbolModulePath = isGlobalSymbol ? (info.modulePath.isEmpty ? currentModulePath : info.modulePath) : []
       let symbolSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : ""
       
-      // 模块可见性检查：
-      // 只有同一模块或父模块的符号可以直接访问
-      // 子模块或兄弟模块的符号需要通过模块前缀访问
+      // 模块可见性检查：其它模块的符号必须在当前文件通过 using 显式导入。
       if !symbolModulePath.isEmpty && !currentModulePath.isEmpty {
         // 检查符号是否可以从当前模块直接访问（传递符号名用于成员导入检查）
         if !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
-          // 找到需要使用的模块前缀
-          let modulePrefix = getRequiredModulePrefix(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath)
-          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePrefix)'. Use '\(modulePrefix).\(name)' to access it."), span: currentSpan)
+          let modulePath = symbolModulePath.joined(separator: "::")
+          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePath)'. Import it explicitly with `using \(modulePath) { \(name) }`."), span: currentSpan)
         }
       }
       
@@ -1571,6 +1568,7 @@ extension TypeChecker {
         kind: fallbackDefKind,
         sourceFile: symbolSourceFile,
         access: info.isPrivate ? .private : .protected,
+        packageID: currentPackageID,
         span: currentSpan
       )
 
@@ -3077,224 +3075,6 @@ extension TypeChecker {
 
     // Compiler protocol methods are blocked after concrete method resolution,
     // based on structural method kind metadata rather than name checks.
-    // Check if callee is a module-qualified static method call (e.g., module.Type.method())
-    if case .memberPath(let baseExpr, let path) = callee,
-       case .identifier(let moduleName) = baseExpr,
-       path.count >= 2 {
-      if let moduleInfo = try? resolveModuleInfo(for: moduleName) {
-        if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: moduleName) {
-          throw SemanticError(.generic("Module '\(moduleName)' is not imported"), span: currentSpan)
-        }
-        let typeName = path[0]
-        let methodName = path[1]
-        
-        // Look up the type in the module's public types
-        if let type = moduleInfo.publicTypes[typeName] {
-          if case .structure(let defId) = type {
-            let access = context.getAccess(defId) ?? .protected
-            if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: defId) {
-              let accessLabel = access == .private ? "private" : "protected"
-              throw SemanticError(.generic(
-                "Cannot access \(accessLabel) symbol '\(typeName)' of module '\(moduleName)'"
-              ), span: currentSpan)
-            }
-          }
-          // Handle concrete struct types
-          if case .structure(let defId) = type {
-            let typeName = context.getName(defId) ?? ""
-            // Look up static method on the struct using simple name (how extensionMethods is keyed)
-            if let methods = extensionMethods[typeName], let methodSym = methods[methodName] {
-              // Check if it's a static method (no self parameter or first param is not self)
-              let isStatic: Bool
-              if case .function(let params, _) = methodSym.type {
-                _ = params
-                isStatic = !isReceiverStyleMethod(methodSym)
-              } else {
-                isStatic = true
-              }
-              
-              if isStatic {
-                
-                guard case .function(let params, let returnType) = methodSym.type else {
-                  throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
-                }
-                
-                if arguments.count != params.count {
-                  throw SemanticError.invalidArgumentCount(
-                    function: methodName,
-                    expected: params.count,
-                    got: arguments.count
-                  )
-                }
-                
-                var typedArguments: [TypedExpressionNode] = []
-                for (arg, param) in zip(arguments, params) {
-                  var typedArg = try inferTypedExpression(arg)
-                  typedArg = try coerceLiteral(typedArg, to: param.type)
-                  if typedArg.type != param.type {
-                    throw SemanticError.typeMismatch(
-                      expected: param.type.description,
-                      got: typedArg.type.description
-                    )
-                  }
-                  typedArguments.append(typedArg)
-                }
-                
-                return .staticMethodCall(
-                  baseType: type,
-                  methodName: methodName,
-                  typeArgs: [],
-                  methodTypeArgs: [],
-                  arguments: typedArguments,
-                  type: returnType
-                )
-              }
-            }
-          }
-          
-          // Handle concrete enum types
-          if case .`enum`(let defId) = type {
-            let enumCases = context.getEnumCases(defId) ?? []
-            // Check if it's a enum case constructor
-            if let c = enumCases.first(where: { $0.name == methodName }) {
-              let params = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
-              
-              if arguments.count != params.count {
-                throw SemanticError.invalidArgumentCount(
-                  function: "\(typeName).\(methodName)",
-                  expected: params.count,
-                  got: arguments.count
-                )
-              }
-              
-              // Validate named argument labels for enum case construction
-              try validateNamedArguments(
-                callArgs: callArgs,
-                parameters: c.parameters.map { (name: $0.name, named: $0.named) },
-                callDescription: "\(typeName).\(methodName)"
-              )
-              
-              var typedArgs: [TypedExpressionNode] = []
-              for (arg, param) in zip(arguments, params) {
-                var typedArg = try inferTypedExpression(arg)
-                typedArg = try coerceLiteral(typedArg, to: param.type)
-                if typedArg.type != param.type {
-                  throw SemanticError.typeMismatch(
-                    expected: param.type.description, got: typedArg.type.description)
-                }
-                typedArgs.append(typedArg)
-              }
-              
-              return .enumConstruction(type: type, caseName: methodName, arguments: typedArgs)
-            }
-            
-            // Look up static method on the enum using simple name
-            let enumName = context.getName(defId) ?? ""
-            if let methods = extensionMethods[enumName], let methodSym = methods[methodName] {
-              let isStatic: Bool
-              if case .function(let params, _) = methodSym.type {
-                _ = params
-                isStatic = !isReceiverStyleMethod(methodSym)
-              } else {
-                isStatic = true
-              }
-              
-              if isStatic {
-                
-                guard case .function(let params, let returnType) = methodSym.type else {
-                  throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
-                }
-                
-                if arguments.count != params.count {
-                  throw SemanticError.invalidArgumentCount(
-                    function: methodName,
-                    expected: params.count,
-                    got: arguments.count
-                  )
-                }
-                
-                var typedArguments: [TypedExpressionNode] = []
-                for (arg, param) in zip(arguments, params) {
-                  var typedArg = try inferTypedExpression(arg)
-                  typedArg = try coerceLiteral(typedArg, to: param.type)
-                  if typedArg.type != param.type {
-                    throw SemanticError.typeMismatch(
-                      expected: param.type.description,
-                      got: typedArg.type.description
-                    )
-                  }
-                  typedArguments.append(typedArg)
-                }
-                
-                return .staticMethodCall(
-                  baseType: type,
-                  methodName: methodName,
-                  typeArgs: [],
-                  methodTypeArgs: [],
-                  arguments: typedArguments,
-                  type: returnType
-                )
-              }
-            }
-          }
-        }
-        
-        // Also try looking up the type from global scope (for types not yet in module's publicTypes)
-        if let type = currentScope.lookupType(typeName) {
-          try checkTypeVisibility(type: type, typeName: typeName)
-          if case .structure(let defId) = type {
-            let name = context.getName(defId) ?? ""
-            if let methods = extensionMethods[name], let methodSym = methods[methodName] {
-              let isStatic: Bool
-              if case .function(let params, _) = methodSym.type {
-                _ = params
-                isStatic = !isReceiverStyleMethod(methodSym)
-              } else {
-                isStatic = true
-              }
-              
-              if isStatic {
-                
-                guard case .function(let params, let returnType) = methodSym.type else {
-                  throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
-                }
-                
-                if arguments.count != params.count {
-                  throw SemanticError.invalidArgumentCount(
-                    function: methodName,
-                    expected: params.count,
-                    got: arguments.count
-                  )
-                }
-                
-                var typedArguments: [TypedExpressionNode] = []
-                for (arg, param) in zip(arguments, params) {
-                  var typedArg = try inferTypedExpression(arg)
-                  typedArg = try coerceLiteral(typedArg, to: param.type)
-                  if typedArg.type != param.type {
-                    throw SemanticError.typeMismatch(
-                      expected: param.type.description,
-                      got: typedArg.type.description
-                    )
-                  }
-                  typedArguments.append(typedArg)
-                }
-                
-                return .staticMethodCall(
-                  baseType: type,
-                  methodName: methodName,
-                  typeArgs: [],
-                  methodTypeArgs: [],
-                  arguments: typedArguments,
-                  type: returnType
-                )
-              }
-            }
-          }
-        }
-      }
-    }
-    
     // Static trait method calls on generic parameter types (e.g., T.method())
     if case .memberPath(let baseExpr, let path) = callee,
        case .identifier(let baseName) = baseExpr,
@@ -5000,112 +4780,14 @@ extension TypeChecker {
       }
     }
 
-    // 2. Check if baseExpr is a module symbol for member access (e.g., child.child_value() or module.Type.method())
-    if case .identifier(let name) = baseExpr {
-      if let moduleInfo = try? resolveModuleInfo(for: name) {
-        if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: name) {
-          throw SemanticError(.generic("Module '\(name)' is not imported"), span: currentSpan)
-        }
-        if path.count == 1 {
-          let memberName = path[0]
-          // Look up the member in the module's public symbols
-          if let memberSymbol = moduleInfo.publicSymbols[memberName] {
-            let access = context.getAccess(memberSymbol.defId) ?? .protected
-            if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: memberSymbol.defId) {
-              let accessLabel = access == .private ? "private" : "protected"
-              throw SemanticError(.generic(
-                "Cannot access \(accessLabel) symbol '\(memberName)' of module '\(name)'"
-              ), span: currentSpan)
-            }
-            return .variable(identifier: memberSymbol)
-          }
-          // Look up the member in the module's public types
-          if let memberType = moduleInfo.publicTypes[memberName] {
-            // Return a type symbol
-            let defId = defIdMap.lookup(
-              modulePath: moduleInfo.modulePath,
-              name: memberName,
-              sourceFile: nil
-            ) ?? defIdMap.allocate(
-              modulePath: moduleInfo.modulePath,
-              name: memberName,
-              kind: .type(.structure),
-              sourceFile: ""
-            )
-            if defIdMap.getSymbolType(defId) == nil {
-              defIdMap.addSymbolInfo(
-                defId: defId,
-                type: memberType,
-                kind: .type,
-                isMutable: false
-              )
-            }
-            let typeSymbol = Symbol(
-              defId: defId,
-              type: memberType,
-              kind: .type
-            )
-            let access = context.getAccess(typeSymbol.defId) ?? .protected
-            if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: typeSymbol.defId) {
-              let accessLabel = access == .private ? "private" : "protected"
-              throw SemanticError(.generic(
-                "Cannot access \(accessLabel) symbol '\(memberName)' of module '\(name)'"
-              ), span: currentSpan)
-            }
-            return .variable(identifier: typeSymbol)
-          }
-          throw SemanticError.undefinedMember(memberName, name)
-        } else if path.count >= 2 {
-          // Handle module.Type.method() or module.Type.field
-          let typeName = path[0]
-          let remainingPath = Array(path.dropFirst())
-          
-          // First, try to find the type in the module's public types
-          if let memberType = moduleInfo.publicTypes[typeName] {
-            if case .structure(let defId) = memberType {
-              let access = context.getAccess(defId) ?? .protected
-              if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: defId) {
-                let accessLabel = access == .private ? "private" : "protected"
-                throw SemanticError(.generic(
-                  "Cannot access \(accessLabel) symbol '\(typeName)' of module '\(name)'"
-                ), span: currentSpan)
-              }
-            }
-            // Now handle the remaining path as a type member access
-            if let result = try inferTypeMemberPath(type: memberType, typeName: typeName, path: remainingPath) {
-              return result
-            }
-          }
-          
-          // If not found in module's public types, try global scope
-          // (for types that haven't been fully registered in the module yet)
-          if let type = currentScope.lookupType(typeName) {
-            if let result = try inferTypeMemberPath(type: type, typeName: typeName, path: remainingPath) {
-              return result
-            }
-          }
-          
-          // Try generic struct template
-          if currentScope.lookupGenericStructTemplate(typeName) != nil {
-            // For generic types, we need type arguments
-            // This case handles module.GenericType.method() without explicit type args
-            // which is typically an error, but we'll let inferTypeMemberPath handle it
-            throw SemanticError.undefinedType("\(name).\(typeName)")
-          }
-          
-          throw SemanticError.undefinedMember(typeName, name)
-        }
-      }
-    }
-    
-    // 3. Check if baseExpr is a Type (Identifier) for static method access
+    // 2. Check if baseExpr is a Type (Identifier) for static method access
     if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
       if let result = try inferTypeMemberPath(type: type, typeName: name, path: path) {
         return result
       }
     }
 
-    // 4. Enum Constructor Access via member path (e.g., EnumType.CaseName)
+    // 3. Enum Constructor Access via member path (e.g., EnumType.CaseName)
     if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
       if path.count == 1 {
         let memberName = path[0]
@@ -5120,7 +4802,7 @@ extension TypeChecker {
       }
     }
     
-    // 5. Generic Enum Constructor Access with type inference from return type context
+    // 4. Generic Enum Constructor Access with type inference from return type context
     // e.g., Result.Ok(x) when return type is [T, E]Result
     if case .identifier(let name) = baseExpr,
        let template = currentScope.lookupGenericEnumTemplate(name),
@@ -5322,80 +5004,15 @@ extension TypeChecker {
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return defSourceFile == currentSourceFile
     case .protected:
-      // Protected: accessible from the same module or submodule
+      // Protected: accessible from the same logical module only.
       let defModulePath = context.getModulePath(defId) ?? []
-      // Same module
-      if defModulePath == currentModulePath {
-        return true
-      }
-      // Current module is a submodule of the definition's module
-      if currentModulePath.count > defModulePath.count {
-        let prefix = Array(currentModulePath.prefix(defModulePath.count))
-        if prefix == defModulePath {
-          return true
-        }
-      }
-      return false
+      return defModulePath == currentModulePath
+    case .protectedPublic:
+      guard !currentPackageID.isEmpty else { return false }
+      return context.getPackageID(defId) == currentPackageID
     }
   }
 
-  private func isSymbolAccessibleForModuleAccess(symbolAccess: AccessModifier, defId: DefId) -> Bool {
-    switch symbolAccess {
-    case .public:
-      return true
-    case .private:
-      let defSourceFile = context.getSourceFile(defId) ?? ""
-      return defSourceFile == currentSourceFile
-    case .protected:
-      let defModulePath = context.getModulePath(defId) ?? []
-      if defModulePath == currentModulePath {
-        return true
-      }
-      if currentModulePath.count > defModulePath.count {
-        let prefix = Array(currentModulePath.prefix(defModulePath.count))
-        if prefix == defModulePath {
-          return true
-        }
-      }
-      return false
-    }
-  }
-
-  func isModuleSymbolImported(_ modulePath: [String], symbolName: String) -> Bool {
-    if modulePath == currentModulePath {
-      return true
-    }
-
-    guard let importGraph else {
-      return false
-    }
-
-    if let aliasedModulePath = importGraph.resolveAliasedModule(
-      alias: symbolName,
-      inModule: currentModulePath,
-      inSourceFile: currentSourceFile
-    ), aliasedModulePath == modulePath {
-      return true
-    }
-
-    let hasMemberImport = importGraph.symbolImports.contains { symbolImport in
-      symbolImport.module == currentModulePath
-        && symbolImport.target == modulePath
-        && (symbolImport.symbol == symbolName || symbolImport.originalSymbol == symbolName)
-        && (symbolImport.sourceFile == nil || symbolImport.sourceFile == currentSourceFile)
-        && (symbolImport.kind == .memberImport || symbolImport.kind == .batchImport)
-    }
-
-    let hasModuleImport = importGraph.edges.contains { edge in
-      edge.source == currentModulePath
-        && edge.target == modulePath
-        && (edge.sourceFile == nil || edge.sourceFile == currentSourceFile)
-        && (edge.kind == .moduleImport || edge.kind == .batchImport)
-    }
-
-    return hasModuleImport || hasMemberImport
-  }
-  
   /// Helper to infer generic instantiation member path
   private func inferGenericInstantiationMemberPath(baseName: String, args: [TypeNode], path: [String]) throws -> TypedExpressionNode? {
     if let template = currentScope.lookupGenericStructTemplate(baseName) {
@@ -5812,53 +5429,6 @@ extension TypeChecker {
       )
     }
 
-    if resolvedTypeArgs.isEmpty,
-       let moduleInfo = try? resolveModuleInfo(for: typeName) {
-      if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: typeName) {
-        throw SemanticError(.generic("Module '\(typeName)' is not imported"), span: currentSpan)
-      }
-      if let memberSymbol = moduleInfo.publicSymbols[methodName] {
-        let access = context.getAccess(memberSymbol.defId) ?? .protected
-        if !isSymbolAccessibleForModuleAccess(symbolAccess: access, defId: memberSymbol.defId) {
-          let accessLabel = access == .private ? "private" : "protected"
-          throw SemanticError(.generic(
-            "Cannot access \(accessLabel) symbol '\(methodName)' of module '\(typeName)'"
-          ), span: currentSpan)
-        }
-
-        guard case .function(let params, let returnType) = memberSymbol.type else {
-          throw SemanticError.undefinedMember(methodName, typeName)
-        }
-
-        if arguments.count != params.count {
-          throw SemanticError.invalidArgumentCount(
-            function: methodName,
-            expected: params.count,
-            got: arguments.count
-          )
-        }
-
-        var typedArguments: [TypedExpressionNode] = []
-        for (arg, param) in zip(arguments, params) {
-          var typedArg = try inferTypedExpression(arg)
-          typedArg = try coerceLiteral(typedArg, to: param.type)
-          if typedArg.type != param.type {
-            throw SemanticError.typeMismatch(
-              expected: param.type.description,
-              got: typedArg.type.description
-            )
-          }
-          typedArguments.append(typedArg)
-        }
-
-        return .call(
-          callee: .variable(identifier: memberSymbol),
-          arguments: typedArguments,
-          type: returnType
-        )
-      }
-    }
-    
     throw SemanticError.undefinedType(typeName)
   }
   

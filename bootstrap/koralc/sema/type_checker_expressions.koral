@@ -212,11 +212,7 @@ given TypeChecker {
         let global_sym_opt = self.storage.global_scope.lookup(name)
         let raw_file_sym_opt = self.lookup_current_file_symbol(name)
         let alias_sym_opt = self.resolve_imported_alias_symbol(name)
-        let file_sym_opt = if local_sym_opt is .None() and raw_file_sym_opt is .Some(file_sym) and global_sym_opt is .Some(global_sym)
-            then if file_sym.kind is .Function() and global_sym.kind is .Function() and self.def_id_is_in_std_module(global_sym.def_id)
-                then Option[Symbol].None()
-                else raw_file_sym_opt
-            else raw_file_sym_opt
+        let file_sym_opt = raw_file_sym_opt
         let sym = if local_sym_opt is .Some(s) then s
         else if file_sym_opt is .Some(s) then s
         else if global_sym_opt is .Some(s) then s
@@ -230,14 +226,6 @@ given TypeChecker {
             let fallback_type = if resolved_named_type_opt is .Some(t) then t
             else if fallback_type_opt is .Some(t) then t
             else Type.Unknown()
-            if not is_type_name and is_upper then {
-                when self.resolve_module_symbol(name) in {
-                    .Some(module_sym) then {
-                        return make_typed_expr(TypedExprKind.Variable(box(module_sym)), module_sym.symbol_type)
-                    },
-                    .None() then {},
-                }
-            }
             if is_type_name then {
                 self.check_type_visibility(fallback_type, name, scope)
             }
@@ -430,24 +418,6 @@ given TypeChecker {
         let typed_base = when base in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             _ then self.check_expr_core_ref(base, .None(), scope),
-        }
-        let module_member_opt = self.lookup_module_member_by_type(typed_base.expr_type, member)
-        if module_member_opt is .Some(module_member_sym) then {
-            return make_typed_expr(TypedExprKind.Variable(box(module_member_sym)), module_member_sym.symbol_type)
-        }
-        when typed_base.expr_type in {
-            .ModuleType(info) then {
-                let module_display = if info.module_path.is_empty() then "<module>" else info.module_path.join_to_string(".")
-                self.storage.diagnostics.push(
-                    make_diagnostic(
-                        DiagnosticStage.Semantic(),
-                        self.storage.file_path,
-                        "Undefined symbol '\(member)' in module '\(module_display)'"
-                    )
-                )
-                return make_typed_expr(TypedExprKind.MemberPath(box(typed_base), List[String].new()), Type.Unknown())
-            },
-            _ then {},
         }
         let member_type = when typed_base.expr_type in {
             .PointerType(inner) then {

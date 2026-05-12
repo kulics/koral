@@ -438,8 +438,13 @@ given Parser {
                 },
                 .KwProtected() then {
                     has_explicit_access = true
-                    access = AccessModifier.Protected()
                     self.advance()
+                    if self.current().kind is .KwPublic() then {
+                        access = AccessModifier.ProtectedPublic()
+                        self.advance()
+                    } else {
+                        access = AccessModifier.Protected()
+                    }
                 },
                 .KwPrivate() then {
                     has_explicit_access = true
@@ -603,26 +608,6 @@ given Parser {
             },
             .Identifier(module_or_name) then {
                 self.advance()
-
-                if self.current().kind is .Dot() then {
-                    self.advance()
-                    let name = self.expect_identifier("qualified type name") or else {
-                        return .Error(box("Expected qualified type name"))
-                    }
-                    if not self.is_upper_first(name) then {
-                        let mut message = "Type name '"
-                        message.push_string(name)
-                        message.push_string("' must start with an uppercase letter")
-                        return .Error(box(message))
-                    }
-                    if self.current().kind is .LBracket() then {
-                        let args = self.parse_type_arg_list() or else {
-                            return .Error(box("parse type error"))
-                        }
-                        return .Ok(TypeNode.ModuleQualifiedGeneric(module_or_name, name, args))
-                    }
-                    return .Ok(TypeNode.ModuleQualified(module_or_name, name))
-                }
 
                 if module_or_name == "Func" and self.current().kind is .LBracket() then {
                     let args = self.parse_type_arg_list() or else {

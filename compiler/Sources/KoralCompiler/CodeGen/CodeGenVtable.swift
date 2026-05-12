@@ -328,37 +328,6 @@ extension CodeGen {
       // Self should not appear in non-receiver positions for object-safe traits
       return nil
       
-    case .moduleQualified(let module, let name):
-      if let defId = context.lookupDefId(modulePath: [module], name: name, sourceFile: nil) {
-        if let kind = context.getKind(defId) {
-          switch kind {
-          case .type(.structure):
-            return .structure(defId: defId)
-          case .type(.`enum`):
-            return .`enum`(defId: defId)
-          default:
-            break
-          }
-        }
-      }
-      return nil
-      
-    case .moduleQualifiedGeneric(let module, let base, let args):
-      let resolvedArgs = args.compactMap { resolveTypeNodeForVtable($0, traitTypeParamSubstitution: traitTypeParamSubstitution) }
-      guard resolvedArgs.count == args.count else { return nil }
-      if let defId = context.lookupDefId(modulePath: [module], name: base, sourceFile: nil) {
-        if let kind = context.getKind(defId) {
-          switch kind {
-          case .type(.structure), .genericTemplate(.structure):
-            return .genericStruct(template: base, args: resolvedArgs)
-          case .type(.`enum`), .genericTemplate(.`enum`):
-            return .genericEnum(template: base, args: resolvedArgs)
-          default:
-            break
-          }
-        }
-      }
-      return nil
     }
   }
   

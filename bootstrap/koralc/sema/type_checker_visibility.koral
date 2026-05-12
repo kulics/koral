@@ -118,24 +118,11 @@ given TypeChecker {
             },
             .Protected() then {
                 let def_module_path = self.context().get_module_path(def_id) or else List[String].new()
-                if string_list_eq(def_module_path, self.storage.module_path) then {
-                    return true
-                }
-                if self.storage.module_path.count() > def_module_path.count() then {
-                    let mut matches_prefix = true
-                    let mut i UInt = 0
-                    while i < def_module_path.count() then {
-                        if self.storage.module_path[i] <> def_module_path[i] then {
-                            matches_prefix = false
-                            break
-                        }
-                        i += 1
-                    }
-                    if matches_prefix then {
-                        return true
-                    }
-                }
-                yield false
+                yield string_list_eq(def_module_path, self.storage.module_path)
+            },
+            .ProtectedPublic() then {
+                let def_package_id = self.context().get_package_id(def_id) or else ""
+                yield not self.storage.package_id.is_empty() and def_package_id == self.storage.package_id
             },
         }
     }
@@ -147,6 +134,7 @@ given TypeChecker {
                     if not self.is_field_accessible_from_current_context(field.access, def_id) then {
                         let access_label = when field.access in {
                             .Private() then "private",
+                            .ProtectedPublic() then "protected public",
                             _ then "protected",
                         }
                         self.storage.diagnostics.push(
@@ -161,13 +149,6 @@ given TypeChecker {
                 }
             },
             .None() then {},
-        }
-    }
-
-    protected def_id_is_in_std_module(self, def_id DefId) Bool = {
-        return when self.context().get_module_path(def_id) in {
-            .Some(module_path) then module_path.count() > 0(UInt) and module_path[0(UInt)] == "Std",
-            .None() then false,
         }
     }
 
@@ -254,76 +235,6 @@ given TypeChecker {
         }
     }
 
-    protected resolve_visible_module_path(self, module_name String) Option[List[String]] = {
-        if module_name == "Std" then {
-            let mut path = List[String].new()
-            path.push("Std")
-            return Option[List[String]].Some(path)
-        }
-
-        return when self.storage.import_graph in {
-            .Some(graph) then {
-                let current_module = self.storage.module_path
-                let current_file = Option[String].Some(self.storage.file_path)
-
-                let mut alias_idx Int = graph.module_aliases.count()(Int)
-                while alias_idx > 0 then {
-                    alias_idx -= 1
-                    let entry = graph.module_aliases[alias_idx(UInt)]
-                    if string_list_eq(entry.module, current_module) and
-                       source_file_matches(entry.source_file, current_file) and
-                       entry.alias == module_name then {
-                        return Option[List[String]].Some(entry.target)
-                    }
-                }
-
-                for si in graph.symbol_imports then {
-                    if string_list_eq(si.module, current_module) and
-                       source_file_matches(si.source_file, current_file) and
-                       si.symbol == module_name then {
-                        return Option[List[String]].Some(si.target)
-                    }
-                }
-
-                for edge in graph.edges then {
-                    if string_list_eq(edge.source, current_module) and
-                       source_file_matches(edge.source_file, current_file) and
-                       edge.target.count() > 0(UInt) and
-                       edge.target[edge.target.count() - 1(UInt)] == module_name then {
-                        return Option[List[String]].Some(edge.target)
-                    }
-                }
-
-                return Option[List[String]].None()
-            },
-            .None() then Option[List[String]].None(),
-        }
-    }
-
-    protected resolve_module_symbol(self, module_name String) Option[Symbol] = {
-        let module_path_opt = if module_name == "Std" then {
-            let mut std_path = List[String].new()
-            std_path.push("Std")
-            yield Option[List[String]].Some(std_path)
-        } else if self.storage.module_path.count() > 0(UInt) and self.storage.module_path[0(UInt)] == module_name then {
-            let mut root_path = List[String].new()
-            root_path.push(module_name)
-            yield Option[List[String]].Some(root_path)
-        } else {
-            yield self.resolve_visible_module_path(module_name)
-        }
-
-        return when module_path_opt in {
-            .Some(module_path) then {
-                let mut context = self.context()
-                let def_id = context.allocate_unindexed(module_name, DefKind.Module())
-                let module_type = Type.ModuleType(ModuleSymbolInfo(module_path))
-                yield Option[Symbol].Some(Symbol(def_id, module_type, SymbolKind.Module()))
-            },
-            .None() then Option[Symbol].None(),
-        }
-    }
-
     protected imported_alias_original_name(self, alias String) Option[String] = {
         return when self.storage.import_graph in {
             .Some(graph) then {
@@ -362,120 +273,6 @@ given TypeChecker {
         return when self.lookup_current_file_type_symbol(original) in {
             .Some(t) then Option[Type].Some(t),
             .None() then self.storage.global_scope.lookup_type(original),
-        }
-    }
-
-    protected resolve_visible_symbol_path(self, path List[String]) Option[Symbol] = {
-        if path.is_empty() then {
-            return Option[Symbol].None()
-        }
-
-        let root_name = path[0(UInt)]
-        let mut root_symbol_opt = Option[Symbol].None()
-        when self.resolve_module_symbol(root_name) in {
-            .Some(module_symbol) then {
-                root_symbol_opt = Option[Symbol].Some(module_symbol)
-            },
-            .None() then {},
-        }
-        if root_symbol_opt is .None() then {
-            return Option[Symbol].None()
-        }
-        let mut current_symbol = when root_symbol_opt in {
-            .Some(module_symbol) then module_symbol,
-            .None() then {
-                return Option[Symbol].None()
-            },
-        }
-
-        let mut idx UInt = 1(UInt)
-        while idx < path.count() then {
-            let seg = path[idx]
-            let mut next_symbol_opt = Option[Symbol].None()
-            when self.lookup_module_member_symbol(current_symbol, seg) in {
-                .Some(next_symbol) then {
-                    next_symbol_opt = Option[Symbol].Some(next_symbol)
-                },
-                .None() then {},
-            }
-            if next_symbol_opt is .None() then {
-                return Option[Symbol].None()
-            }
-            current_symbol = when next_symbol_opt in {
-                .Some(next_symbol) then next_symbol,
-                .None() then {
-                    return Option[Symbol].None()
-                },
-            }
-            idx += 1
-        }
-
-        return Option[Symbol].Some(current_symbol)
-    }
-
-    private qualified_name_to_path(self, name String) List[String] = {
-        let mut path = List[String].new()
-        let mut segment = String.new()
-        for ch in name.to_runes() then {
-            if ch == '.' then {
-                if not segment.is_empty() then {
-                    path.push(segment)
-                    segment = String.new()
-                }
-            } else {
-                segment.push_rune(ch)
-            }
-        }
-        if not segment.is_empty() then {
-            path.push(segment)
-        }
-        let _ = self
-        return path
-    }
-
-    protected qualified_name_path(self, name String) List[String] = {
-        return self.qualified_name_to_path(name)
-    }
-
-    protected resolve_visible_symbol_qualified_name(self, name String) Option[Symbol] = {
-        let path = self.qualified_name_to_path(name)
-        if path.count() <= 1(UInt) then {
-            return Option[Symbol].None()
-        }
-        return self.resolve_visible_symbol_path(path)
-    }
-
-    protected module_path_from_module_symbol(self, module_symbol Symbol) Option[List[String]] = {
-        return when module_symbol.symbol_type in {
-            .ModuleType(info) then Option[List[String]].Some(info.module_path),
-            _ then Option[List[String]].None(),
-        }
-    }
-
-    protected module_symbol_display(self, module_symbol Symbol) String = {
-        return when self.module_path_from_module_symbol(module_symbol) in {
-            .Some(module_path) then if module_path.is_empty() then "<module>" else module_path.join_to_string("."),
-            .None() then self.context().type_display_name(module_symbol.symbol_type),
-        }
-    }
-
-    protected lookup_module_member_symbol(self, module_symbol Symbol, member_name String) Option[Symbol] = {
-        return when self.module_path_from_module_symbol(module_symbol) in {
-            .Some(module_path) then when self.context().lookup_def_id(module_path, member_name, Option[String].None()) in {
-                .Some(def_id) then self.symbol_for_def_id(def_id),
-                .None() then Option[Symbol].None(),
-            },
-            .None() then self.lookup_module_member_by_type(module_symbol.symbol_type, member_name),
-        }
-    }
-
-    protected lookup_module_member_by_type(self, module_type Type, member_name String) Option[Symbol] = {
-        return when module_type in {
-            .ModuleType(info) then when self.context().lookup_def_id(info.module_path, member_name, Option[String].None()) in {
-                .Some(def_id) then self.symbol_for_def_id(def_id),
-                .None() then Option[Symbol].None(),
-            },
-            _ then Option[Symbol].None(),
         }
     }
 
@@ -575,13 +372,6 @@ given TypeChecker {
     private trait_type_args(self, trait_type TypeNode) List[Type] = {
         return when trait_type in {
             .Generic(_, trait_args) then {
-                let mut out = List[Type].new()
-                for arg in trait_args then {
-                    out.push(self.resolve_type(arg.val))
-                }
-                yield out
-            },
-            .ModuleQualifiedGeneric(_, _, trait_args) then {
                 let mut out = List[Type].new()
                 for arg in trait_args then {
                     out.push(self.resolve_type(arg.val))
@@ -831,12 +621,6 @@ given TypeChecker {
         }
         when trait_type in {
             .Generic(_, trait_args) then {
-                if trait_args.count() > 0(UInt) then {
-                    let item_type = self.resolve_type(trait_args[0(UInt)].val)
-                    self.record_explicit_iterator_conformance(target_type, item_type)
-                }
-            },
-            .ModuleQualifiedGeneric(_, _, trait_args) then {
                 if trait_args.count() > 0(UInt) then {
                     let item_type = self.resolve_type(trait_args[0(UInt)].val)
                     self.record_explicit_iterator_conformance(target_type, item_type)

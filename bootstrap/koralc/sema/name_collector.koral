@@ -8,15 +8,16 @@ public type NameCollector(
     mut diagnostics DiagnosticCollector,
     mut module_path List[String],
     mut source_file String,
+    mut package_id String,
 )
 
 given NameCollector {
     public new() NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), List[String].new(), "")
+        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), List[String].new(), "", "")
     }
 
     public new_with_context(module_path List[String], source_file String) NameCollector = {
-        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), module_path, source_file)
+        return NameCollector(CompilerContext.new(), Scope.new_root(), DiagnosticCollector.new(), module_path, source_file, "")
     }
 
     // Register all top-level names from a program.
@@ -31,13 +32,16 @@ given NameCollector {
     public collect_loaded_nodes_with_path(self mut ref, pairs List[Pair[LoadedNode, List[String]]]) Void = {
         let saved_module_path = self.module_path
         let saved_source_file = self.source_file
+        let saved_package_id = self.package_id
         for pair in pairs then {
             self.module_path = pair.second
             self.source_file = pair.first.source_file
+            self.package_id = pair.first.package_id
             self.collect_decl(pair.first.decl)
         }
         self.module_path = saved_module_path
         self.source_file = saved_source_file
+        self.package_id = saved_package_id
     }
 
     private make_var_symbol(self mut ref, name String, mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
@@ -45,13 +49,13 @@ given NameCollector {
             then SymbolKind.Variable(VariableKind.MutableValue())
             else SymbolKind.Variable(VariableKind.Value())
         let mut context = self.context
-        let def_id = context.allocate_full(name, DefKind.Variable(), self.module_path, self.source_file, access, span)
+        let def_id = context.allocate_full_in_package(name, DefKind.Variable(), self.module_path, self.source_file, self.package_id, access, span)
         return Symbol(def_id, Type.Unknown(), kind)
     }
 
     private make_fn_symbol(self mut ref, name String, access AccessModifier, span SourceSpan) Symbol = {
         let mut context = self.context
-        let def_id = context.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+        let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span)
         return Symbol(def_id, Type.Unknown(), SymbolKind.Function())
     }
 
@@ -83,28 +87,7 @@ given NameCollector {
         if local_conflict then {
             return true
         }
-        if self.module_path.count() > 0(UInt) and self.module_path[0(UInt)] <> "Std" then {
-            if self.global_scope.lookup_type(name) is .Some(existing_type) then {
-                return self.type_name_conflicts_with_std_prelude(existing_type)
-            }
-        }
         return false
-    }
-
-    private type_name_conflicts_with_std_prelude(self, existing_type Type) Bool = {
-        return when existing_type in {
-            .StructureType(def_id) then self.def_id_is_in_std_module(def_id),
-            .EnumType(def_id) then self.def_id_is_in_std_module(def_id),
-            .OpaqueType(def_id) then self.def_id_is_in_std_module(def_id),
-            _ then false,
-        }
-    }
-
-    private def_id_is_in_std_module(self, def_id DefId) Bool = {
-        return when self.context.get_module_path(def_id) in {
-            .Some(module_path) then module_path.count() > 0(UInt) and module_path[0(UInt)] == "Std",
-            .None() then false,
-        }
     }
 
     private collect_decl(self mut ref, decl Decl) Void = {
@@ -118,7 +101,7 @@ given NameCollector {
                     then DefKind.TypeDef(TypeDefKind.Structure())
                     else DefKind.GenericTemplate(GenericTemplateKind.Structure())
                 let mut context = self.context
-                let def_id = context.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span)
                 let t = Type.StructureType(def_id)
                 self.global_scope.define_type(name, t)
             },
@@ -131,7 +114,7 @@ given NameCollector {
                     then DefKind.TypeDef(TypeDefKind.Enum())
                     else DefKind.GenericTemplate(GenericTemplateKind.Enum())
                 let mut context = self.context
-                let def_id = context.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span)
                 let t = Type.EnumType(def_id)
                 self.global_scope.define_type(name, t)
             },
@@ -141,7 +124,7 @@ given NameCollector {
                     return
                 }
                 let mut context = self.context
-                let def_id = context.allocate_full(name, DefKind.TypeDef(TypeDefKind.Structure()), self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Structure()), self.module_path, self.source_file, self.package_id, access, span)
                 self.global_scope.define_type(name, Type.StructureType(def_id))
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
@@ -150,7 +133,7 @@ given NameCollector {
                     return
                 }
                 let mut context = self.context
-                let def_id = context.allocate_full(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, self.package_id, access, span)
                 self.global_scope.define_type(name, Type.OpaqueType(def_id))
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
@@ -163,7 +146,7 @@ given NameCollector {
                     .None() then DefKind.TypeDef(TypeDefKind.Opaque()),
                 }
                 let mut context = self.context
-                let def_id = context.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span)
                 let t = when fields in {
                     .Some(_) then Type.StructureType(def_id),
                     .None() then Type.OpaqueType(def_id),
@@ -176,7 +159,7 @@ given NameCollector {
                     return
                 }
                 let mut context = self.context
-                let def_id = context.allocate_full(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Trait()), self.module_path, self.source_file, self.package_id, access, span)
                 let mut trait_type_args = List[ref Type].new()
                 for type_param in type_params then {
                     trait_type_args.push(box(Type.GenericParameter(type_param.name)))
@@ -192,7 +175,7 @@ given NameCollector {
                     then DefKind.Function()
                     else DefKind.GenericTemplate(GenericTemplateKind.Function())
                 let mut context = self.context
-                let def_id = context.allocate_full(name, kind, self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, kind, self.module_path, self.source_file, self.package_id, access, span)
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function())
                 self.global_scope.define(self.context, sym)
             },
@@ -202,7 +185,7 @@ given NameCollector {
                     return
                 }
                 let mut context = self.context
-                let def_id = context.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span)
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function())
                 self.global_scope.define(self.context, sym)
             },
@@ -212,15 +195,9 @@ given NameCollector {
                     return
                 }
                 let mut context = self.context
-                let def_id = context.allocate_full(name, DefKind.Function(), self.module_path, self.source_file, access, span)
+                let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span)
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function())
-                let should_shadow_std = when self.global_scope.lookup(name) in {
-                    .Some(existing) then not self.def_id_is_in_std_module(existing.def_id),
-                    .None() then true,
-                }
-                if should_shadow_std then {
-                    self.global_scope.define(self.context, sym)
-                }
+                self.global_scope.define(self.context, sym)
             },
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 if self.has_conflicting_top_level_name(name, access) then {
@@ -241,7 +218,6 @@ given NameCollector {
             // Declarations that don't introduce names into the value/type namespace
             .ModuleUsingDecl(_, _, _) then {},
             .FileUsingDecl(_, _) then {},
-            .ForeignUsingDecl(_, _, _) then {},
             .GivenDecl(_, _, _, _) then {},
             .GivenTraitDecl(_, _, _, _, _) then {},
             .GivenNotTraitDecl(_, _, _, _) then {},

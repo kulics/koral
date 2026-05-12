@@ -8,7 +8,7 @@
 ///
 /// ## 设计参考
 /// - Rust 编译器 (rustc): DefId 系统
-/// - 原 TypeCheckerPasses.swift 中的 collectTypeDefinition 和 registerModuleNames 方法
+/// - 原 TypeCheckerPasses.swift 中的 collectTypeDefinition 方法
 ///
 /// ## 依赖关系
 /// - 输入：ModuleResolverOutput（包含 AST 节点和模块信息）
@@ -44,6 +44,9 @@ public class NameCollector: CompilerPass {
     
     /// 当前处理的模块路径
     private var currentModulePath: [String] = []
+
+    /// 当前处理的 package identity
+    private var currentPackageID: String = ""
     
     /// 标准库类型集合
     private var stdLibTypes: Set<String> = []
@@ -64,7 +67,6 @@ public class NameCollector: CompilerPass {
     private var collectedFunctions: [String: CollectedFunctionInfo] = [:]
     
     /// 收集到的模块信息
-    private var collectedModules: [String: CollectedModuleInfo] = [:]
 
     /// 关联的 TypeChecker（用于 Pass 1 状态注入）
     private var checker: TypeChecker?
@@ -98,7 +100,6 @@ public class NameCollector: CompilerPass {
         collectedTypes = [:]
         collectedGenericTemplates = [:]
         collectedFunctions = [:]
-        collectedModules = [:]
 
         if let checker {
             checker.defIdMap = defIdMap
@@ -112,6 +113,7 @@ public class NameCollector: CompilerPass {
             let sourceInfo = index < nodeSourceInfoList.count ? nodeSourceInfoList[index] : nil
             currentSourceFile = sourceInfo?.sourceFile ?? ""
             currentModulePath = sourceInfo?.modulePath ?? []
+            currentPackageID = sourceInfo?.packageID ?? ""
             
             try collectDefinition(node, isStdLib: isStdLib)
 
@@ -120,16 +122,10 @@ public class NameCollector: CompilerPass {
                 checker.currentFileName = currentSourceFile
                 checker.currentSourceFile = currentSourceFile
                 checker.currentModulePath = currentModulePath
+                checker.currentPackageID = currentPackageID
                 checker.currentSpan = node.span
                 try checker.collectTypeDefinition(node, isStdLib: isStdLib)
             }
-        }
-        
-        // 第二步：注册模块名称（合并原 Pass 1.5 的功能）
-        try registerModuleNames(from: nodeSourceInfoList)
-
-        if let checker {
-            try checker.registerModuleNames(from: astNodes)
         }
         
         return NameCollectorOutput(
@@ -149,9 +145,6 @@ public class NameCollector: CompilerPass {
         switch node {
         case .usingDeclaration:
             // Using 声明在 ModuleResolver 中处理，这里跳过
-            return
-        case .foreignUsingDeclaration:
-            // Foreign using is handled in CodeGen, skip here
             return
             
         case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
@@ -318,6 +311,7 @@ public class NameCollector: CompilerPass {
             kind: .type(.trait),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -377,6 +371,7 @@ public class NameCollector: CompilerPass {
             kind: defKind,
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -450,6 +445,7 @@ public class NameCollector: CompilerPass {
             kind: defKind,
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -509,6 +505,7 @@ public class NameCollector: CompilerPass {
             kind: defKind,
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -541,6 +538,7 @@ public class NameCollector: CompilerPass {
             kind: .variable,
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
     }
@@ -602,6 +600,7 @@ public class NameCollector: CompilerPass {
             kind: defKind,
             sourceFile: currentSourceFile,
             access: .protected,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -654,6 +653,7 @@ public class NameCollector: CompilerPass {
             kind: .type(kind),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -699,6 +699,7 @@ public class NameCollector: CompilerPass {
             kind: .type(.structure),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -748,6 +749,7 @@ public class NameCollector: CompilerPass {
             kind: defKind,
             sourceFile: currentSourceFile,
             access: .protected,
+            packageID: currentPackageID,
             span: span
         )
 
@@ -761,50 +763,6 @@ public class NameCollector: CompilerPass {
             sourceFile: currentSourceFile,
             modulePath: currentModulePath
         )
-    }
-    
-    // MARK: - 模块名称注册（合并原 Pass 1.5）
-    
-    /// 注册模块名称
-    ///
-    /// 这个方法合并了原 Pass 1.5 的功能，在 Pass 1 中一起完成。
-    /// 注册模块名称使得模块限定类型（如 `backend.Evaluator`）可以在 Pass 2 中解析。
-    private func registerModuleNames(from nodeSourceInfoList: [GlobalNodeSourceInfo]) throws {
-        // 收集所有唯一的模块路径
-        var allModulePaths: Set<String> = []
-        
-        for sourceInfo in nodeSourceInfoList {
-            let modulePath = sourceInfo.modulePath
-            
-            // 跳过根模块（空路径）- 我们只关心子模块
-            if modulePath.isEmpty { continue }
-            
-            let moduleKey = modulePath.joined(separator: ".")
-            allModulePaths.insert(moduleKey)
-        }
-        
-        // 为每个模块分配 DefId 并注册
-        for moduleKey in allModulePaths {
-            let parts = moduleKey.split(separator: ".").map(String.init)
-            
-            // 分配模块 DefId
-            let defId = defIdMap.allocate(
-                modulePath: Array(parts.dropLast()),
-                name: parts.last ?? "",
-                kind: .module,
-                sourceFile: "",
-                access: .protected,
-                span: .unknown
-            )
-            
-            // 添加到名称表
-            
-            // 收集模块信息
-            collectedModules[moduleKey] = CollectedModuleInfo(
-                defId: defId,
-                modulePath: parts
-            )
-        }
     }
     
     // MARK: - 辅助方法
@@ -847,11 +805,6 @@ public class NameCollector: CompilerPass {
     /// 获取收集到的函数信息
     public var functions: [String: CollectedFunctionInfo] {
         return collectedFunctions
-    }
-    
-    /// 获取收集到的模块信息
-    public var modules: [String: CollectedModuleInfo] {
-        return collectedModules
     }
     
     /// 获取标准库类型集合
@@ -914,11 +867,5 @@ public struct CollectedFunctionInfo {
     public let access: AccessModifier
     public let isPrivate: Bool
     public let sourceFile: String
-    public let modulePath: [String]
-}
-
-/// 收集到的模块信息
-public struct CollectedModuleInfo {
-    public let defId: DefId
     public let modulePath: [String]
 }

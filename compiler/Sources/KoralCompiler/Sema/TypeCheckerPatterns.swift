@@ -19,20 +19,12 @@ extension TypeChecker {
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return isSameSourceFile(defSourceFile, currentSourceFile)
     case .protected:
-      // Protected: accessible from the same module or submodule
+      // Protected: accessible from the same logical module only.
       let defModulePath = context.getModulePath(defId) ?? []
-      // Same module
-      if defModulePath == currentModulePath {
-        return true
-      }
-      // Current module is a submodule of the definition's module
-      if currentModulePath.count > defModulePath.count {
-        let prefix = Array(currentModulePath.prefix(defModulePath.count))
-        if prefix == defModulePath {
-          return true
-        }
-      }
-      return false
+      return defModulePath == currentModulePath
+    case .protectedPublic:
+      guard !currentPackageID.isEmpty else { return false }
+      return context.getPackageID(defId) == currentPackageID
     }
   }
 

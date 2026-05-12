@@ -19,7 +19,7 @@ Specification note:
 - Trait-based polymorphism with trait objects for runtime dispatch.
 - First-class functions, lambdas, and closures.
 - Multi-paradigm programming (combining functional and imperative).
-- Module system with access control (`public` / `protected` / `private`).
+- Module system with access control (`public` / `protected public` / `protected` / `private`).
 - Foreign function interface (FFI) for seamless C interop.
 - C backend for broad platform compatibility.
 
@@ -29,33 +29,37 @@ Specification note:
 
 ### Compilation and Execution
 
-Assuming you have a file named `hello.koral`.
+You can compile either a single source file directly or a manifest-declared module graph.
 
-1.  **Compile (default `build`)**: Run the compiler command (assuming the compiler is named `koralc`) to build the input file.
+1.  **Build a single file**:
     ```bash
-    koralc hello.koral
+    koralc build hello.koral
     ```
-2.  **Build a manifest-declared module**: Use package mode when your project has explicit modules in `koral.json`.
+2.  **Build a manifest-declared target module**.
     ```bash
     koralc build --package-config koral.json --target-module app::main
     ```
-3.  **Compile and run**: Use the `run` command to compile and execute in one step.
+3.  **Type-check only**:
+    ```bash
+    koralc check --package-config koral.json --target-module app::main
+    ```
+4.  **Compile and run**: Use the `run` command to compile and execute in one step.
     ```bash
     koralc run --package-config koral.json --target-module app::main
     ```
-4.  **Emit C only**: Use `emit-c` to generate C source.
+5.  **Emit C only**: Use `emit-c` to generate C source.
     ```bash
     koralc emit-c --package-config koral.json --target-module app::main -o out
     ```
 
 Common options:
 
-- `-o, --output <dir>`: output directory (default: input file directory)
+- `-o, --output <dir>`: output directory
 - `--package-config <path>`: build from a package manifest
 - `--target-module <name>`: choose the manifest target module
 - `--deps-root <path>`: dependency root for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
-- `--no-std`: compile without loading `std/std.koral`
+- `--no-std`: compile without loading modules declared by `std/koral.json`
 - `-m` / `-m=<N>`: print escape-analysis diagnostics
 
 ## Basic Syntax
@@ -1778,6 +1782,7 @@ A **module** in Koral is an explicit build unit declared in `koral.json` (or `st
 - **Target module**: The module selected by `--target-module`
 - **Peer module**: Another manifest-declared module in the same package
 - **External module**: A module coming from std or another package dependency
+- Top-level manifest `entry`: The default target module name, for example `app::main`
 
 Entry filename constraints:
 
@@ -1809,7 +1814,7 @@ File merge rules:
 
 #### Module Symbol Import
 
-Import public symbols from another module with explicit braces:
+Import visible symbols from another module with explicit braces:
 
 ```koral
 using std::io { Reader }
@@ -1820,45 +1825,41 @@ using std::io { .. }
 
 Notes:
 
-1. `using module { symbol-list }` imports only public symbols from that module.
+1. `using module { symbol-list }` imports symbols visible to the importing file: `public` from any package, and `protected public` when the importer is in the same package.
 2. `as` applies per imported symbol, not to the module itself.
-3. `using module { .. }` imports all public symbols, and `..` must appear alone.
+3. `using module { .. }` imports all symbols visible to the importing file, and `..` must appear alone.
 4. Imported names are file-local bindings and are not re-exported automatically.
-5. Module legality is checked against manifest `deps`; the compiler does not infer modules from directory structure.
-
-Removed source forms:
-
-- `using "file" as Name`
-- `using Super...`
-- bare module imports such as `using Std.Io`
-- member imports such as `using Std.Io.Reader`
-- batch imports such as `using Std.Io.*`
-- module alias imports such as `using Std.Io as Io`
-- `public using ...` / `protected using ...` / `private using ...`
-- `foreign using ...`
+5. Module legality is checked against manifest `requires`; the compiler does not infer modules from directory structure.
+6. Non-`std` packages get `std` automatically; do not list `std` manually in application/test package manifests.
+7. A module import never binds the module name as a namespace object. Import `Reader` with `using std::io { Reader }`, then write `Reader`, not `std.io.Reader` or `io.Reader`.
 
 ### Access Modifiers
 
-Koral provides three access levels to control symbol visibility:
+Koral provides four access levels to control symbol visibility:
 
 | Modifier | Visibility |
 |----------|------------|
 | `public` | Accessible from anywhere |
-| `protected` | Accessible within the current module compilation unit |
+| `protected public` | Accessible from any module in the same package |
+| `protected` | Accessible within the current logical module |
 | `private` | Accessible only within the same file |
+
+`protected public` is a single composite access modifier. Only the exact order `protected public` is valid; `public protected` is invalid.
+
+Package scope follows the manifest graph: the root package, `std`, and each dependency package are separate package boundaries.
 
 #### Default Access Levels
 
 | Declaration | Default |
 |-------------|---------|
 | Global functions, variables, types | `protected` |
-| Struct fields | `protected` |
+| Struct fields | `public` |
 | Enum constructor fields | `public` |
 | Member functions (in `given` blocks) | `protected` |
 | Trait methods | `public` |
 
 Direct struct construction `Type(...)` is only allowed when all referenced fields are visible at the call site.
-If a type has inaccessible `private`/`protected` fields, use an exposed public factory method.
+If a type has inaccessible `private`/`protected`/`protected public` fields, use an exposed public factory method.
 
 ### Project Structure Example
 
@@ -1882,17 +1883,17 @@ my_project/
   "modules": {
     "app::main": {
       "entry": "main.koral",
-      "deps": ["std", "app::models", "app::services"],
+      "requires": ["app::models", "app::services"],
       "links": []
     },
     "app::models": {
       "entry": "models/models.koral",
-      "deps": ["std"],
+      "requires": [],
       "links": []
     },
     "app::services": {
       "entry": "services/services.koral",
-      "deps": ["std", "app::models"],
+      "requires": ["app::models"],
       "links": []
     }
   }
@@ -1927,7 +1928,7 @@ Native libraries are declared in package or module `links` inside `koral.json` /
   "modules": {
     "app::main": {
       "entry": "main.koral",
-      "deps": ["std"],
+      "requires": [],
       "links": ["m"]
     }
   }

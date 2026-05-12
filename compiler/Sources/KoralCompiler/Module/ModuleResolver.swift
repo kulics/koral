@@ -12,16 +12,11 @@ private func isASCIIUppercaseLetter(_ char: Character) -> Bool {
 /// 模块系统错误类型
 public enum ModuleError: Error, CustomStringConvertible {
     case fileNotFound(String, searchPath: String)
-    case submoduleNotFound(String, parentPath: String, span: SourceSpan)
-    case missingEntryFile(submodName: String, expectedPath: String, span: SourceSpan)
-    case superOutOfBounds(span: SourceSpan)
-    case externalModuleNotFound(String, searchPaths: [String])
     case circularDependency(path: [String])
     case invalidModulePath(String)
     case duplicateUsing(String, span: SourceSpan)
     case parseError(file: String, underlying: Error)
     case invalidEntryFileName(filename: String, reason: String)
-    case ambiguousModuleEntry(moduleName: String, fileEntry: String, directoryEntry: String)
 
     /// Preferred file for diagnostics location when available.
     public var locationFile: String? {
@@ -36,12 +31,6 @@ public enum ModuleError: Error, CustomStringConvertible {
     /// Source span for diagnostics rendering when available.
     public var span: SourceSpan {
         switch self {
-        case .submoduleNotFound(_, _, let span):
-            return span
-        case .missingEntryFile(_, _, let span):
-            return span
-        case .superOutOfBounds(let span):
-            return span
         case .duplicateUsing(_, let span):
             return span
         case .parseError(_, let underlying as ParserError):
@@ -58,14 +47,6 @@ public enum ModuleError: Error, CustomStringConvertible {
         switch self {
         case .fileNotFound(let file, let searchPath):
             return "File '\(file).koral' not found in '\(searchPath)'"
-        case .submoduleNotFound(let name, let parentPath, _):
-            return "Submodule '\(name)' not found (expected directory '\(parentPath)/\(name)/')"
-        case .missingEntryFile(let submodName, let expectedPath, _):
-            return "Submodule '\(submodName)' is missing entry file '\(expectedPath)'"
-        case .superOutOfBounds:
-            return "'super' goes beyond the root module of the compilation unit"
-        case .externalModuleNotFound(let name, let paths):
-            return "External module '\(name)' not found. Searched in: \(paths.joined(separator: ", "))"
         case .circularDependency(let path):
             return "Circular dependency detected: \(path.joined(separator: " -> "))"
         case .invalidModulePath(let path):
@@ -85,22 +66,12 @@ public enum ModuleError: Error, CustomStringConvertible {
                 contain only lowercase letters, digits, and underscores.
                 Examples: main, my_app, tool1
                 """
-        case .ambiguousModuleEntry(let moduleName, let fileEntry, let directoryEntry):
-            return "Ambiguous module '\(moduleName)': both file module '\(fileEntry)' and directory module '\(directoryEntry)' exist"
         }
     }
     
     public var description: String {
         switch self {
         case .fileNotFound:
-            return messageWithoutLocation
-        case .submoduleNotFound(_, _, let span):
-            return "\(span): error: \(messageWithoutLocation)"
-        case .missingEntryFile(_, _, let span):
-            return "\(span): error: \(messageWithoutLocation)"
-        case .superOutOfBounds(let span):
-            return "\(span): error: \(messageWithoutLocation)"
-        case .externalModuleNotFound:
             return messageWithoutLocation
         case .circularDependency:
             return messageWithoutLocation
@@ -114,8 +85,6 @@ public enum ModuleError: Error, CustomStringConvertible {
             }
             return "\(file): \(messageWithoutLocation)"
         case .invalidEntryFileName:
-            return messageWithoutLocation
-        case .ambiguousModuleEntry:
             return messageWithoutLocation
         }
     }

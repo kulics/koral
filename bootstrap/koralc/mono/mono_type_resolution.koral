@@ -575,16 +575,6 @@ public let resolve_type_node(mono ref Monomorphizer, node TypeNode, substitution
                 .None() then Type.Unknown(),
             }
         },
-
-        // TypeNode.ModuleQualified: ignore module path, resolve type name.
-        .ModuleQualified(_, name) then {
-            yield resolve_type_node(mono, TypeNode.Identifier(name), substitution)
-        },
-
-        // TypeNode.ModuleQualifiedGeneric: ignore module path, resolve as generic.
-        .ModuleQualifiedGeneric(_, base, args) then {
-            yield resolve_type_node(mono, TypeNode.Generic(base, args), substitution)
-        },
     }
 }
 
@@ -2899,7 +2889,6 @@ private let bind_generic_function_call_callee(
                         // Fallback to expected call return type when template return is this type parameter.
                         let from_expected_return = when template.return_type in {
                             .Identifier(ret_name) then ret_name == tp.name,
-                            .ModuleQualified(_, ret_name) then ret_name == tp.name,
                             _ then false,
                         }
                         let constrained_by_params = template_type_parameter_constrained_by_parameters(template, tp.name)
@@ -3058,24 +3047,6 @@ private let collect_generic_bindings_from_type_node(
                 _ then {},
             }
         },
-        .ModuleQualified(_, name) then {
-            if is_type_parameter_name(name, type_params) then {
-                when bindings.get(name) in {
-                    .Some(existing) then {
-                        if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
-                            bindings.insert(name, actual)
-                        }
-                    },
-                    .None() then {
-                        bindings.insert(name, actual)
-                    },
-                }
-            }
-        },
-        .ModuleQualifiedGeneric(_, base, args) then {
-            // Treat qualified generics the same structurally for binding.
-            collect_generic_bindings_from_type_node(mono, TypeNode.Generic(base, args), actual, type_params, bindings)
-        },
         .InferredSelf() then {},
     }
 }
@@ -3104,14 +3075,6 @@ private let type_node_mentions_type_parameter(node TypeNode, type_param_name Str
                 if type_node_mentions_type_parameter(p.val, type_param_name) then { return true }
             }
             yield type_node_mentions_type_parameter(ret_node.val, type_param_name)
-        },
-        .ModuleQualified(_, name) then name == type_param_name,
-        .ModuleQualifiedGeneric(_, base, args) then {
-            if base == type_param_name then { return true }
-            for arg in args then {
-                if type_node_mentions_type_parameter(arg.val, type_param_name) then { return true }
-            }
-            yield false
         },
         .InferredSelf() then false,
     }

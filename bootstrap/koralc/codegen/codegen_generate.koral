@@ -3,7 +3,6 @@
 // 实现 CodeGen 的 generate() 主入口方法及所有 emit_* 辅助方法：
 // - generate: 生成完整的 C 源代码（按正确顺序调用各 emit_* 方法）
 // - emit_includes: 生成 #include 指令
-// - emit_foreign_using: 生成 // Link: -l{library} 注释
 // - emit_foreign_types: 生成 foreign 类型声明
 // - emit_type_declarations: 收集、拓扑排序、生成类型定义
 // - emit_foreign_functions: 生成 extern 函数声明
@@ -37,7 +36,6 @@ type ForeignFunctionPrototype(
 )
 
 type ForeignDeclarations(
-    libraries List[String],
     empty_types List[String],
     functions List[ForeignFunctionPrototype],
 )
@@ -284,7 +282,6 @@ given CodeGen {
     public generate_into_buffer(self mut ref) Void = {
         self.buffer = box(String.new())
         self.emit_includes()
-        self.emit_foreign_using(self.program_scan.foreign_declarations)
         self.emit_foreign_types(self.program_scan.foreign_declarations)
         self.emit_type_declarations()
         self.emit_foreign_functions(self.program_scan.foreign_declarations)
@@ -303,8 +300,6 @@ given CodeGen {
     }
 
     private scan_program_codegen_inputs(self mut ref) ProgramCodegenScan = {
-        let mut seen_libraries = Set[String].new()
-        let mut libraries = List[String].new()
         let mut empty_types = List[String].new()
         let mut foreign_functions = List[ForeignFunctionPrototype].new()
         let stdlib_functions = ["exit", "abort"]
@@ -319,12 +314,6 @@ given CodeGen {
             let node = program_nodes[node_index]
             node_index += 1
             when node in {
-                .ForeignUsingDecl(_, library, _) then {
-                    if not seen_libraries.contains(library) then {
-                        seen_libraries.insert(library)
-                        libraries.push(library)
-                    }
-                },
                 .ForeignTypeDecl(_, name, fields, _, _) then {
                     let should_emit_typedef = when fields in {
                         .Some(f) then f.is_empty(),
@@ -527,7 +516,7 @@ given CodeGen {
         }
 
         return ProgramCodegenScan(
-            ForeignDeclarations(libraries, empty_types, foreign_functions),
+            ForeignDeclarations(empty_types, foreign_functions),
             functions,
             foreign_globals,
             globals,
@@ -560,20 +549,6 @@ given CodeGen {
         self.buffer.push_string("    ((struct __koral_Control*)r.control)->dtor = NULL;\n")
         self.buffer.push_string("    return r;\n")
         self.buffer.push_string("}\n")
-        self.buffer.push_string("\n")
-    }
-
-    // ── emit_foreign_using ────────────────────────────────────────────────────
-
-    /// 生成 // Link: -l{library} 注释
-    ///
-    /// Requirements: 12.2
-    emit_foreign_using(self ref, foreign_declarations ForeignDeclarations) Void = {
-        if foreign_declarations.libraries.is_empty() then { return }
-
-        for lib in foreign_declarations.libraries then {
-            self.buffer.push_string("// Link: -l\(lib)\n")
-        }
         self.buffer.push_string("\n")
     }
 

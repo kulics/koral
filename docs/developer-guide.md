@@ -108,14 +108,11 @@ Windows notes:
 ### Compile Koral Programs
 
 ```bash
-# Build an executable (default command is build)
-swift run koralc path/to/file.koral
-
 # Build a manifest target module
 swift run koralc build --package-config path/to/koral.json --target-module app::main
 
 # Type-check only
-swift run koralc check path/to/file.koral
+swift run koralc check --package-config path/to/koral.json --target-module app::main
 
 # Build and run
 swift run koralc run --package-config path/to/koral.json --target-module app::main
@@ -124,17 +121,18 @@ swift run koralc run --package-config path/to/koral.json --target-module app::ma
 swift run koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
 
 # Disable stdlib preload
-swift run koralc path/to/file.koral --no-std
+swift run koralc build --package-config path/to/koral.json --target-module app::main --no-std
 
 # Print escape analysis diagnostics (Go-style)
-swift run koralc path/to/file.koral -m
-swift run koralc path/to/file.koral -m=2
+swift run koralc build --package-config path/to/koral.json --target-module app::main -m
+swift run koralc build --package-config path/to/koral.json --target-module app::main -m=2
 ```
 
 CLI shape in current implementation:
 
 - `koralc [build|check|run|emit-c] --package-config <koral.json> [--target-module <module>] [options]`
 - If no command is given, the first argument must be an option such as `--package-config`.
+- Top-level manifest `entry` is the default target module name, not a source file path.
 
 Output behavior:
 
@@ -176,7 +174,8 @@ Notes:
 - Cross-module imports must use explicit module syntax such as `using std::io { Reader }` or `using std::io { .. }`.
 - `..` must be the only item inside a module import list.
 - Imported symbols are file-local bindings and are not re-exported automatically.
-- Module names come from `koral.json` / `std/koral.json`; removed source forms include `using "file" as Name`, `using Super...`, bare-path imports such as `using Std.Io`, alias imports such as `using Std.Io as Io`, batch imports such as `using Std.Io.*`, and `foreign using`.
+- Module imports bind symbols only; they must not create a source-level module namespace or support `module.Symbol` access.
+- Module names come from `koral.json` / `std/koral.json`; 
 
 ## Language Rules That Commonly Drift
 
@@ -577,10 +576,10 @@ case .myNewError(let detail):
 
 ### Add a New Import Kind
 
-1. Add a path kind in `UsingDeclaration.pathKind`
-2. Add corresponding `resolveXxx()` logic in `ModuleResolver`
-3. Record import edges in `recordImportToGraph()`
-4. Implement visibility rules in `AccessChecker`
+1. Extend `UsingDeclarationKind` only if the language actually gains a new source form.
+2. Update `ParserDeclarations.swift` and `bootstrap/koralc/parser/core_precedence.koral`.
+3. Update `recordImportToGraph()` and the bootstrap counterpart if the new form changes import visibility.
+4. Keep module selection manifest-driven; do not reintroduce directory-inferred module trees.
 
 ### Module Resolution Flow
 
@@ -590,10 +589,8 @@ resolveModule(entryFile:)
         ├── Lexer + Parser → AST
         ├── Extract using declarations
         │   └── resolveUsing(using:module:unit:currentFile:)
-        │       ├── resolveSubmoduleMerge() → merge submodule into current module
-        │       ├── resolveSubmodule()   → create child module and recurse
-        │       ├── resolveParent()      → navigate through Super chain
-        │       └── resolveExternal()    → lookup external module
+        │       ├── resolveFileMerge()    → merge another source file into the same module
+        │       └── recordImportToGraph() → record explicit module imports
         └── Collect non-using top-level nodes
 ```
 
@@ -715,16 +712,16 @@ tests/compiler-cases/my_module_test/
 {
   "name": "MyModuleTest",
   "version": "0.1.0",
-  "entry": "my_module_test.koral",
+  "entry": "my_module_test",
   "modules": {
     "my_module_test": {
       "entry": "my_module_test.koral",
-      "deps": ["std", "my_module_test::child"],
+      "requires": ["my_module_test::child"],
       "links": []
     },
     "my_module_test::child": {
       "entry": "child/child.koral",
-      "deps": ["std"],
+      "requires": [],
       "links": []
     }
   }
@@ -764,13 +761,13 @@ print(diagnosticError.renderForCLI())
 Use `-m` / `-m=<N>`:
 
 ```bash
-swift run koralc hello.koral -m
+swift run koralc build --package-config path/to/koral.json --target-module app::main -m
 ```
 
 ### Inspect Generated C
 
 ```bash
-swift run koralc emit-c myfile.koral -o output/
+swift run koralc emit-c --package-config path/to/koral.json --target-module app::main -o output/
 ```
 
 ## FAQ

@@ -81,6 +81,18 @@ public class AccessChecker {
                     span: span
                 )
             }
+
+        case .protectedPublic:
+            // The standalone AccessChecker does not carry package identity.
+            // Callers that need package-scoped checks should use DefId metadata.
+            if from.path != definedIn.path {
+                throw AccessError.protectedAccess(
+                    symbol: symbolName,
+                    definedIn: definedIn.path,
+                    accessedFrom: from.path,
+                    span: span
+                )
+            }
             
         case .private:
             // private 符号只能从同一文件访问
@@ -130,7 +142,8 @@ public class AccessChecker {
         let order: [AccessModifier: Int] = [
             .private: 0,
             .protected: 1,
-            .public: 2
+            .protectedPublic: 2,
+            .public: 3
         ]
         
         let actualLevel = order[actual] ?? 0
@@ -181,8 +194,6 @@ public class AccessChecker {
     public static func defaultAccess(for node: GlobalNode) -> AccessModifier {
         switch node {
         case .usingDeclaration:
-            return .private
-        case .foreignUsingDeclaration:
             return .private
             
            case .globalFunctionDeclaration, .globalVariableDeclaration,

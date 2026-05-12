@@ -306,10 +306,6 @@ extension TypeChecker {
       return args.contains { containsSelfType($0) }
     case .functionType(let paramTypes, let returnType):
       return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
-    case .moduleQualified:
-      return false
-    case .moduleQualifiedGeneric(_, _, let args):
-      return args.contains { containsSelfType($0) }
     }
   }
 

@@ -7,30 +7,22 @@ using std::os { .. }
 
 public type ModuleError {
     FileNotFound(file String, search_path String),
-    SubmoduleNotFound(name String, parent_path String),
-    MissingEntryFile(submod_name String, expected_path String),
-    SuperOutOfBounds(),
     CircularDependency(path List[String]),
     InvalidModulePath(path String),
     DuplicateUsing(name String),
     ParseError(file String, message String),
     InvalidEntryFileName(filename String, reason String),
-    AmbiguousModuleEntry(module_name String, file_entry String, dir_entry String),
 }
 
 given ModuleError {
     public message(self ref) String = {
         return when self in {
             .FileNotFound(file, search_path) then "File '\(file).koral' not found in '\(search_path)'",
-            .SubmoduleNotFound(name, parent_path) then "Submodule '\(name)' not found (expected directory '\(parent_path)/\(name)/')",
-            .MissingEntryFile(submod_name, expected_path) then "Submodule '\(submod_name)' is missing entry file '\(expected_path)'",
-            .SuperOutOfBounds() then "'super' goes beyond the root module of the compilation unit",
             .CircularDependency(path) then "Circular dependency detected: \(join_path(path, " -> "))",
             .InvalidModulePath(path) then "Invalid module path: '\(path)'",
             .DuplicateUsing(name) then "Duplicate using declaration for '\(name)'",
             .ParseError(file, message) then "\(file): \(message)",
             .InvalidEntryFileName(filename, reason) then "Invalid entry file name '\(filename)': \(reason)",
-            .AmbiguousModuleEntry(module_name, file_entry, dir_entry) then "Ambiguous module '\(module_name)': both file module '\(file_entry)' and directory module '\(dir_entry)' exist",
         }
     }
 }
@@ -114,71 +106,6 @@ given ModuleResolver {
         }
 
         return best_target
-    }
-
-    // Locate child module entry: dir/<name>/<name>.koral or dir/<name>.koral
-    // Returns Ok(path) or Error(message) if ambiguous or not found
-    private locate_child_module_entry(self, parent_dir String, child_name String) Result[String] = {
-        // Only valid PascalCase module identifiers participate in submodule lookup.
-        // This avoids mistaking member names for module names.
-        if validate_module_identifier(child_name) is .Some(_) then {
-            return Result[String].Error(box("Invalid module identifier: \(child_name)"))
-        }
-
-        // Convert PascalCase identifier to snake_case file name
-        let child_file_name = module_identifier_to_file_name(child_name)
-
-        let dir_entry = parent_dir + "/" + child_file_name + "/" + child_file_name + ".koral"
-        let file_entry = parent_dir + "/" + child_file_name + ".koral"
-
-        let has_dir = path_exist(dir_entry.into_path())
-        let has_file = path_exist(file_entry.into_path())
-
-        // 歧义：两者都存在，报错
-        if has_dir and has_file then {
-            return Result[String].Error(box(
-                ModuleError.AmbiguousModuleEntry(child_name, file_entry, dir_entry).message()
-            ))
-        }
-
-        if has_dir then { return Result[String].Ok(dir_entry) }
-        if has_file then { return Result[String].Ok(file_entry) }
-        return Result[String].Error(box("Module '\(child_name)' not found in '\(parent_dir)'"))
-    }
-
-    // Resolve the entry file for a module starting from base_module with relative segments.
-    private locate_module_entry(self, base_module ModuleInfo, relative_segments List[String]) Option[String] = {
-        if relative_segments.is_empty() then { return Option[String].None() }
-
-        // All segments must be valid PascalCase module identifiers
-        for seg in relative_segments then {
-            if validate_module_identifier(seg) is .Some(_) then {
-                return Option[String].None()
-            }
-        }
-
-        if relative_segments.count() == 1 then {
-            return when self.locate_child_module_entry(base_module.directory(), relative_segments[0]) in {
-                .Ok(p) then Option[String].Some(p),
-                .Error(_) then Option[String].None(),
-            }
-        }
-
-        // Build intermediate path
-        let mut dir = base_module.directory()
-        let mut i UInt = 0
-        let last_idx = relative_segments.count() - 1
-        for seg in relative_segments then {
-            if i < last_idx then {
-                dir = dir + "/" + module_identifier_to_file_name(seg)
-            }
-            i += 1
-        }
-        let last = relative_segments[last_idx]
-        return when self.locate_child_module_entry(dir, last) in {
-            .Ok(p) then Option[String].Some(p),
-            .Error(_) then Option[String].None(),
-        }
     }
 
     // Main entry: resolve a module from its entry file.
@@ -271,69 +198,6 @@ given ModuleResolver {
         return result
     }
 
-    private inject_std_prelude_imports(
-        self,
-        std_unit ref CompilationUnit,
-        user_unit ref CompilationUnit,
-        graph mut ref ImportGraph,
-    ) Void = {
-        self.inject_std_prelude_imports_from_root(std_unit.root_module().path_string(), user_unit, graph)
-    }
-
-    private inject_std_prelude_imports_from_root(
-        self,
-        std_root_key String,
-        user_unit CompilationUnit,
-        graph mut ref ImportGraph,
-    ) Void = {
-        let mut std_root_path = List[String].new()
-        std_root_path.push(std_root_key)
-        if user_unit.has_module(std_root_key) then {
-            when user_unit.get_module(std_root_key) in {
-                .Some(module) then {
-                    std_root_path = module.path()
-                },
-                .None() then {},
-            }
-        }
-
-        let mut seen = Set[String].new()
-        let mut module_paths = List[List[String]].new()
-        for pair in user_unit.collect_all_nodes_with_path() then {
-            let key = join_path(pair.second, ".")
-            if key <> std_root_key and not seen.contains(key) then {
-                seen.insert(key)
-                module_paths.push(pair.second)
-            }
-        }
-        if user_unit.has_module(std_root_key) then {
-            for pair in user_unit.collect_nodes_with_path_for_module(std_root_key) then {
-                let key = join_path(pair.second, ".")
-                if key <> std_root_key and not seen.contains(key) then {
-                    seen.insert(key)
-                    module_paths.push(pair.second)
-                }
-            }
-        }
-
-        for mod_path in module_paths then {
-            let mut already = false
-            for edge in graph.edges then {
-                if string_list_eq(edge.source, mod_path) and
-                   string_list_eq(edge.target, std_root_path) and
-                   (when edge.kind in { .BatchImport() then true, _ then false }) and
-                   (when edge.source_file in { .None() then true, _ then false }) then {
-                    already = true
-                    break
-                }
-            }
-            if not already then {
-                graph.add_module_import(mod_path, std_root_path, ImportKind.BatchImport(), Option[String].None())
-            }
-        }
-        let _ = self
-    }
-
     private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
         let mut seen = Set[String].new()
         let mut module_paths = List[List[String]].new()
@@ -369,10 +233,16 @@ given ModuleResolver {
     ) ResolvedModuleGraph = {
         let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
         for pair in self.collect_effective_std_nodes_with_path(std_unit, user_unit) then {
-            all_pairs.push(pair)
+            all_pairs.push(Pair[LoadedNode, List[String]](
+                LoadedNode(pair.first.decl, pair.first.source_file, "std:std"),
+                pair.second
+            ))
         }
         for pair in user_unit.collect_all_nodes_with_path() then {
-            all_pairs.push(pair)
+            all_pairs.push(Pair[LoadedNode, List[String]](
+                LoadedNode(pair.first.decl, pair.first.source_file, "root:user"),
+                pair.second
+            ))
         }
 
         let mut loaded_nodes = List[LoadedNode].new()
@@ -386,13 +256,8 @@ given ModuleResolver {
         when std_unit in {
             .Some(su) then {
                 merged_graph.merge(su.import_graph())
-                self.inject_std_prelude_imports(su, user_unit, merged_graph.ref)
             },
-            .None() then {
-                if user_unit.has_module("Std") then {
-                    self.inject_std_prelude_imports_from_root("Std", user_unit, merged_graph.ref)
-                }
-            },
+            .None() then {},
         }
         merged_graph.merge(user_unit.import_graph())
 
@@ -605,21 +470,6 @@ private let validate_module_identifier(name String) Option[String] = {
         }
     }
     return .None()
-}
-
-// Remove leading "Self" or "self" segment from path
-private let filter_self(segments List[String]) List[String] = {
-    let mut out = List[String].new()
-    let mut skip_first = true
-    for seg in segments then {
-        if skip_first and (seg == "Self" or seg == "self") then {
-            skip_first = false
-            continue
-        }
-        skip_first = false
-        out.push(seg)
-    }
-    return out
 }
 
 private let module_debug(message String) Void = {

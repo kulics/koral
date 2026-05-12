@@ -11,7 +11,7 @@ public type PackageModuleConfig(
     full_name String,
     path_segments List[String],
     entry_path String,
-    deps List[String],
+    requires List[String],
     links List[String],
 )
 
@@ -42,7 +42,7 @@ public type ResolvedModuleSpec(
     full_name String,
     path_segments List[String],
     entry_file String,
-    deps List[String],
+    requires List[String],
     links List[String],
     visible_module_aliases List[ResolvedModuleAliasRule],
     package_name String,
@@ -231,15 +231,15 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
                     return Result[PackageManifest].Error(box("Invalid manifest field 'modules.\(module_name).entry': expected string"))
                 }
                 let entry_abs = absolute_manifest_path.into_path().dir_name().join(entry_rel).normalize().to_string()
-                let deps = when module_json.get_field("deps") in {
-                    .Some(value_ref) then load_manifest_string_array(value_ref, "modules.\(module_name).deps") or return,
+                let requires = when module_json.get_field("requires") in {
+                    .Some(value_ref) then load_manifest_string_array(value_ref, "modules.\(module_name).requires") or return,
                     .None then List[String].new(),
                 }
                 let module_links = when module_json.get_field("links") in {
                     .Some(value_ref) then load_manifest_string_array(value_ref, "modules.\(module_name).links") or return,
                     .None then List[String].new(),
                 }
-                modules.insert(module_name, PackageModuleConfig(module_name, path_segments, entry_abs, deps, module_links))
+                modules.insert(module_name, PackageModuleConfig(module_name, path_segments, entry_abs, requires, module_links))
             }
         },
         .None then {},
@@ -287,7 +287,7 @@ private let add_manifest_modules(
             module.full_name,
             module.path_segments,
             module.entry_path,
-            module.deps,
+            module.requires,
             all_links,
             List[ResolvedModuleAliasRule].new(),
             manifest.name,
@@ -361,27 +361,27 @@ private let build_dependency_alias_rules(
     return Result[List[ResolvedModuleAliasRule]].Ok(rules)
 }
 
-private let rewrite_module_dependency_names(
-    deps List[String],
+private let rewrite_module_requirement_names(
+    requires List[String],
     alias_rules List[ResolvedModuleAliasRule],
 ) List[String] = {
     if alias_rules.is_empty() then {
-        return deps
+        return requires
     }
 
     let mut out = List[String].new()
-    for dep in deps then {
-        let mut rewritten = dep
+    for requirement in requires then {
+        let mut rewritten = requirement
         let mut best_alias_len Int = -1
         for rule in alias_rules then {
             let mut candidate = Option[String].None()
-            if dep == rule.alias_full_name then {
+            if requirement == rule.alias_full_name then {
                 candidate = Option[String].Some(rule.target_full_name)
             } else {
                 let alias_prefix = rule.alias_full_name + "::"
-                if dep.starts_with(alias_prefix) then {
+                if requirement.starts_with(alias_prefix) then {
                     candidate = Option[String].Some(
-                        rule.target_full_name + "::" + dep.substring(.From(alias_prefix.count()))
+                        rule.target_full_name + "::" + requirement.substring(.From(alias_prefix.count()))
                     )
                 }
             }
@@ -426,11 +426,11 @@ private let validate_resolved_module_graph(
 
     visiting.insert(name)
     stack.push(name)
-    for dep in spec.deps then {
-        if modules_by_name.get(dep) is .None() then {
-            return Result[Void].Error(box("Module '\(name)' depends on unknown module '\(dep)'"))
+    for requirement in spec.requires then {
+        if modules_by_name.get(requirement) is .None() then {
+            return Result[Void].Error(box("Module '\(name)' depends on unknown module '\(requirement)'"))
         }
-        let _ = validate_resolved_module_graph(modules_by_name, dep, visiting, visited, stack) or return
+        let _ = validate_resolved_module_graph(modules_by_name, requirement, visiting, visited, stack) or return
     }
     let _ = stack.pop()
     visiting.remove(name)
@@ -448,8 +448,8 @@ private let collect_reachable_modules(
     }
     reachable.insert(name)
     let spec = modules_by_name.get(name) or else { return }
-    for dep in spec.deps then {
-        collect_reachable_modules(modules_by_name, dep, reachable)
+    for requirement in spec.requires then {
+        collect_reachable_modules(modules_by_name, requirement, reachable)
     }
 }
 
@@ -513,7 +513,7 @@ public let load_resolved_package_graph(
                         spec.full_name,
                         spec.path_segments,
                         spec.entry_file,
-                        rewrite_module_dependency_names(spec.deps, alias_rules),
+                        rewrite_module_requirement_names(spec.requires, alias_rules),
                         spec.links,
                         alias_rules,
                         spec.package_name,

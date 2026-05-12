@@ -213,8 +213,6 @@ given TypeChecker {
                 let self_referential_target = when target in {
                     .Identifier(target_name) then target_name == name,
                     .Generic(base, _) then base == name,
-                    .ModuleQualified(_, target_name) then target_name == name,
-                    .ModuleQualifiedGeneric(_, base, _) then base == name,
                     _ then false,
                 }
                 let mut resolved_target = self.resolve_type(target)
@@ -261,9 +259,6 @@ given TypeChecker {
                 let mut path_segments = List[String].new()
                 path_segments.push(file_name)
                 yield TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
-            },
-            .ForeignUsingDecl(access, library, span) then {
-                yield TypedDecl.ForeignUsingDecl(access, library, span)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let type_binding_snapshot = self.snapshot_type_bindings()
@@ -445,7 +440,6 @@ given TypeChecker {
         return when node in {
             .Identifier(name) then name,
             .Generic(base, _) then base,
-            .ModuleQualified(_, name) then name,
             _ then "?",
         }
     }
@@ -507,16 +501,7 @@ given TypeChecker {
                 .Identifier(name) then {
                     self.validate_trait_parent_arity(name, 0(UInt))
                 },
-                .ModuleQualified(_, name) then {
-                    self.validate_trait_parent_arity(name, 0(UInt))
-                },
                 .Generic(base, args) then {
-                    self.validate_trait_parent_arity(base, args.count())
-                    for arg in args then {
-                        let _ = self.resolve_type(arg.val)
-                    }
-                },
-                .ModuleQualifiedGeneric(_, base, args) then {
                     self.validate_trait_parent_arity(base, args.count())
                     for arg in args then {
                         let _ = self.resolve_type(arg.val)

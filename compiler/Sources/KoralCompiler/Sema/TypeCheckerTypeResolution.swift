@@ -6,32 +6,6 @@ import Foundation
 
 extension TypeChecker {
 
-  func resolveModuleInfo(for moduleName: String) throws -> ModuleSymbolInfo {
-    if let moduleDefId = currentScope.lookup(moduleName, sourceFile: currentSourceFile),
-       let moduleType = defIdMap.getSymbolType(moduleDefId),
-       case .module(let moduleInfo) = moduleType {
-      if !isModuleSymbolImported(moduleInfo.modulePath, symbolName: moduleName) {
-        throw SemanticError(.generic("Module '\(moduleName)' is not imported"), span: currentSpan)
-      }
-      return moduleInfo
-    }
-
-    if let importGraph,
-       let aliasedModulePath = importGraph.resolveAliasedModule(
-        alias: moduleName,
-        inModule: currentModulePath,
-        inSourceFile: currentSourceFile
-       ) {
-      let moduleKey = aliasedModulePath.joined(separator: ".")
-      if let info = moduleSymbols[moduleKey] {
-        return info
-      }
-      return ModuleSymbolInfo(modulePath: aliasedModulePath, publicSymbols: [:], publicTypes: [:])
-    }
-
-    throw SemanticError.undefinedVariable(moduleName)
-  }
-
   private func modulePath(of type: Type) -> [String]? {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
@@ -214,110 +188,6 @@ extension TypeChecker {
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
       
-    case .moduleQualified(let moduleName, let typeName):
-      // 模块限定类型：module.TypeName
-      let moduleInfo = try resolveModuleInfo(for: moduleName)
-      
-      // 首先尝试从模块的公开类型中查找（Pass 2.5 之后可用）
-      if let type = moduleInfo.publicTypes[typeName] {
-        return type
-      }
-      
-      // 如果模块的公开类型中没有，尝试从全局 scope 中查找
-      // 这是为了支持 Pass 2 中的类型解析（此时模块符号还没有完全构建）
-      if let type = currentScope.lookupType(typeName) {
-        try ensureTypeBelongsToModule(
-          typeName,
-          moduleName: moduleName,
-          expectedModulePath: moduleInfo.modulePath,
-          resolvedType: type
-        )
-        return type
-      }
-      
-      throw SemanticError(
-        .generic("Type '\(typeName)' is not a public type of module '\(moduleName)'"),
-        span: currentSpan
-      )
-      
-    case .moduleQualifiedGeneric(let moduleName, let baseName, let args):
-      // 模块限定泛型类型：module.[T]List
-      let moduleInfo = try resolveModuleInfo(for: moduleName)
-      
-      // 查找泛型模板（泛型模板是全局注册的）
-      if let template = currentScope.lookupGenericStructTemplate(baseName) {
-        try ensureTemplateBelongsToModule(
-          baseName,
-          moduleName: moduleName,
-          expectedModulePath: moduleInfo.modulePath,
-          templateDefId: template.defId
-        )
-
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        
-        // Validate type argument count
-        guard template.typeParameters.count == resolvedArgs.count else {
-          throw SemanticError.typeMismatch(
-            expected: "\(template.typeParameters.count) generic arguments",
-            got: "\(resolvedArgs.count)"
-          )
-        }
-        
-        // Validate generic constraints
-        if !deferGenericConstraintValidation {
-          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
-        }
-        
-        // Record instantiation request for deferred monomorphization
-        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-          recordInstantiation(InstantiationRequest(
-            kind: .structType(template: template, args: resolvedArgs),
-            sourceLine: currentLine,
-            sourceFileName: currentFileName
-          ))
-        }
-        
-        return .genericStruct(template: baseName, args: resolvedArgs)
-      } else if let template = currentScope.lookupGenericEnumTemplate(baseName) {
-        try ensureTemplateBelongsToModule(
-          baseName,
-          moduleName: moduleName,
-          expectedModulePath: moduleInfo.modulePath,
-          templateDefId: template.defId
-        )
-
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        
-        // Validate type argument count
-        guard template.typeParameters.count == resolvedArgs.count else {
-          throw SemanticError.typeMismatch(
-            expected: "\(template.typeParameters.count) generic types",
-            got: "\(resolvedArgs.count)"
-          )
-        }
-        
-        // Validate generic constraints
-        if !deferGenericConstraintValidation {
-          try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
-        }
-        
-        // Record instantiation request for deferred monomorphization
-        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-          recordInstantiation(InstantiationRequest(
-            kind: .enumType(template: template, args: resolvedArgs),
-            sourceLine: currentLine,
-            sourceFileName: currentFileName
-          ))
-        }
-        
-        return .genericEnum(template: baseName, args: resolvedArgs)
-      } else {
-        throw SemanticError(
-          .generic("Type '\(baseName)' is not a public type of module '\(moduleName)'"),
-          span: currentSpan
-        )
-      }
-      
     case .weakReference(let inner, let mutable):
       // Check if inner is a trait name → trait object weakref
       if case .identifier(let name) = inner, traits[name] != nil {
@@ -409,29 +279,6 @@ extension TypeChecker {
       let resolvedReturnType = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
-      
-    case .moduleQualified(let moduleName, let typeName):
-      _ = moduleName
-      // If substitution has an override for the simple name, use it
-      if let substitutedType = substitution[typeName] {
-        return substitutedType
-      }
-      return try resolveTypeNode(node)
-      
-    case .moduleQualifiedGeneric(let moduleName, let baseName, let args):
-      _ = moduleName
-      let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-      
-      // Try to resolve against templates (module visibility is checked in resolveTypeNode)
-      if currentScope.lookupGenericStructTemplate(baseName) != nil {
-        return .genericStruct(template: baseName, args: resolvedArgs)
-      }
-      if currentScope.lookupGenericEnumTemplate(baseName) != nil {
-        return .genericEnum(template: baseName, args: resolvedArgs)
-      }
-      
-      // Defer to regular resolution to surface canonical diagnostics
-      return try resolveTypeNode(node)
       
     case .inferredSelf:
       if let substitutedType = substitution["Self"] {
