@@ -10,7 +10,7 @@
 - Formatter: `toolchain/fmt/`
 - Stdlib and runtime: `std/` (`std/std.koral`, `std/koral_runtime.c`, `std/koral_runtime.h`)
 - Pipeline owner: `Driver` (`compiler/Sources/KoralCompiler/Driver/Driver.swift`)
-  1) Preload stdlib entry `std/std.koral` (unless `--no-std`)
+  1) Load `std/koral.json` (unless `--no-std`) and resolve the reachable std modules; the std root module still uses `std/std.koral` as its entry source
   2) Module resolution (`ModuleResolver`)
   3) Semantic passes (`TypeChecker`) + monomorphization (`Monomorphizer`)
   4) C generation (`CodeGen.generate()`) + clang link
@@ -34,14 +34,16 @@
 - Stdlib: `std/` (`std/std.koral` is the default entry)
 
 ## Module System Notes (Implementation Constraints)
+- The compiler is manifest-driven. Do not reintroduce direct source-file compilation paths; use `--package-config` with manifest-declared modules.
+- Top-level manifest `entry` means the default target module name, for example `app` or `app::main`, not a source file path.
 - Module entry file names must be valid module names: start with a lowercase letter, followed only by lowercase letters, digits, or `_`; otherwise `invalidEntryFileName` is reported.
-- External module lookup order: stdlib path first, then `externalPaths`; if unresolved, throws `externalModuleNotFound`.
 - File-based using (`using "file"`) resolves relative to the current file's directory, not the module root.
 - `using "file"` merges the file into the current module; it does not create a namespace or submodule.
 - Cross-module imports must use explicit module syntax: `using std::io { Reader }`, `using std::io { Reader as IoReader }`, or `using std::io { .. }`.
 - `..` must be the only item inside a module import list.
 - Imported symbols are file-local bindings and are never re-exported automatically.
-- Module identity comes from `koral.json` / `std/koral.json`; do not reintroduce removed source forms such as `using "file" as Name`, `using Super...`, `using Std.Io`, `using Std.Io as Io`, `using Std.Io.*`, `public using ...`, or `foreign using`.
+- Module imports bind symbols only. Do not reintroduce module-name namespace values or `module.Symbol` expression/type access.
+- Module identity comes from `koral.json` / `std/koral.json`; 
 
 ## Language Notes That Commonly Drift
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
@@ -51,7 +53,7 @@
 ## CLI Behavior (Swift Driver)
 - Shape:
   - `koralc [build|check|run|emit-c] --package-config <koral.json> [--target-module <module>] [options]`
-- If command is omitted, the first arg must be an option such as `--package-config`.
+- If command is omitted, the first arg may be an option such as `--package-config` or a direct source file such as `hello.koral`.
 - Options:
   - `-o`, `--output <dir>`
   - `--package-config <path>`
@@ -70,11 +72,11 @@
 ## CLI Behavior (Bootstrap Driver)
 - Entry executable is produced from `bootstrap/koralc/main.koral`.
 - Commands supported by `bootstrap/koralc/driver/run.koral`:
-  - `bootstrap-koralc --emit-typed-ast --package-config <koral.json> [options]`
-  - `bootstrap-koralc --resolve-module --package-config <koral.json> [options]`
-  - `bootstrap-koralc --emit-c --package-config <koral.json> [-o <dir>] [options]`
-  - `bootstrap-koralc check --package-config <koral.json> [options]`
-  - `bootstrap-koralc build --package-config <koral.json> [-o <dir>] [options]`
+  - `bootstrap-koralc --emit-typed-ast [--package-config <koral.json> | <file.koral>] [options]`
+  - `bootstrap-koralc --resolve-module [--package-config <koral.json> | <file.koral>] [options]`
+  - `bootstrap-koralc --emit-c [--package-config <koral.json> | <file.koral>] [-o <dir>] [options]`
+  - `bootstrap-koralc check [--package-config <koral.json> | <file.koral>] [options]`
+  - `bootstrap-koralc build [--package-config <koral.json> | <file.koral>] [-o <dir>] [options]`
 - Bootstrap driver supports `--package-config`, `--target-module`, `--deps-root`, and `--std-config`, but still does not mirror Swift driver's `run` command or `-m` escape-analysis flag.
 - Set `KORAL_DEBUG_PHASE=1` to print phase markers during bootstrap debugging.
 
@@ -86,7 +88,7 @@
 - Windows: drivers auto-add `-lbcrypt` and `-lws2_32` when needed.
 
 ## Stdlib Resolution
-Lookup order for stdlib root / `std/std.koral`:
+Lookup order for stdlib root / `std/koral.json` (+ `std/std.koral` as the std root module entry source):
 1. `KORAL_HOME`
 2. `./std/`
 3. `../std/`

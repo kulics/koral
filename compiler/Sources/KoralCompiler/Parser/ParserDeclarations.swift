@@ -495,6 +495,10 @@ extension Parser {
       return .private
     } else if currentToken === .protectedKeyword {
       try match(.protectedKeyword)
+      if currentToken === .publicKeyword {
+        try match(.publicKeyword)
+        return .protectedPublic
+      }
       return .protected
     } else if currentToken === .publicKeyword {
       try match(.publicKeyword)

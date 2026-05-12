@@ -56,46 +56,24 @@ private type CommandExecution {
     InfrastructureError(message String),
 }
 
-private let generated_case_manifest_path(output_dir Path) Path = {
-    return output_dir.join("koral.json")
-}
-
-private let ensure_generated_case_manifest(info CaseInfo, output_dir Path) Result[Path] = {
-    let manifest_path = generated_case_manifest_path(output_dir)
-    let entry_path = info.absolute_path.to_string().replace_all("\\", with: "/")
-    let content = "{\n"
-        + "  \"name\": \"compiler_runner_case\",\n"
-        + "  \"version\": \"0.0.0\",\n"
-        + "  \"entry\": \"case\",\n"
-        + "  \"modules\": {\n"
-        + "    \"case\": {\n"
-        + "      \"entry\": \"" + entry_path + "\"\n"
-        + "    }\n"
-        + "  }\n"
-        + "}\n"
-    write_text_file(manifest_path, content: content) or return
-    return Result[Path].Ok(manifest_path)
-}
-
-private let effective_case_manifest(config RunnerConfig, info CaseInfo, output_dir Path) Result[Path] = {
-    return when find_case_manifest(config, info) in {
-        .Some(manifest_path) then Result[Path].Ok(manifest_path),
-        .None then ensure_generated_case_manifest(info, output_dir),
-    }
-}
-
 private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
     let mut args = List[String].new()
-    let manifest_path = effective_case_manifest(config, info, output_dir) or return
     args.push("build")
-    args.push("--package-config")
-    args.push(manifest_path.to_string())
-    when find_case_deps_root(manifest_path) in {
-        .Some(deps_root) then {
-            args.push("--deps-root")
-            args.push(deps_root.to_string())
+    when find_case_manifest(config, info) in {
+        .Some(manifest_path) then {
+            args.push("--package-config")
+            args.push(manifest_path.to_string())
+            when find_case_deps_root(manifest_path) in {
+                .Some(deps_root) then {
+                    args.push("--deps-root")
+                    args.push(deps_root.to_string())
+                },
+                .None() then {},
+            }
         },
-        .None() then {},
+        .None() then {
+            args.push(info.absolute_path.to_string())
+        },
     }
     args.push("-o")
     args.push(output_dir.to_string())
@@ -104,17 +82,24 @@ private let build_command_args_for_case(config RunnerConfig, info CaseInfo, outp
 
 private let check_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
     let mut args = List[String].new()
-    let manifest_path = effective_case_manifest(config, info, output_dir) or return
     args.push("check")
-    args.push("--package-config")
-    args.push(manifest_path.to_string())
-    when find_case_deps_root(manifest_path) in {
-        .Some(deps_root) then {
-            args.push("--deps-root")
-            args.push(deps_root.to_string())
+    when find_case_manifest(config, info) in {
+        .Some(manifest_path) then {
+            args.push("--package-config")
+            args.push(manifest_path.to_string())
+            when find_case_deps_root(manifest_path) in {
+                .Some(deps_root) then {
+                    args.push("--deps-root")
+                    args.push(deps_root.to_string())
+                },
+                .None() then {},
+            }
         },
-        .None() then {},
+        .None() then {
+            args.push(info.absolute_path.to_string())
+        },
     }
+    let _ = output_dir
     return Result[List[String]].Ok(args)
 }
 
@@ -475,7 +460,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 info,
                 "failed",
                 "infrastructure_error",
-                "failed to prepare case manifest: \(err.message())",
+                "failed to prepare compiler arguments: \(err.message())",
                 -1,
                 duration_ms,
             )
@@ -547,7 +532,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 info,
                 "failed",
                 "infrastructure_error",
-                "failed to prepare retry case manifest: \(it.message())",
+                "failed to prepare retry compiler arguments: \(it.message())",
                 build_exit_code,
                 duration_ms,
             )
@@ -620,18 +605,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             }
 
             return pass_result(info, duration_ms, build_exit_code)
-        }
-
-        let exe_path = executable_path_for_case(info, active_output_dir)
-        if not path_exist(exe_path) then {
-            return failure_result(
-                info,
-                "failed",
-                "infrastructure_error",
-                "built executable not found: \(exe_path.to_string())",
-                build_exit_code,
-                duration_ms,
-            )
         }
 
         let launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
@@ -768,18 +741,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
 
     if expectations.expect_output.is_empty() and expectations.expect_exact_output.is_empty() and expectations.expected_exit is .None() then {
         return pass_result(info, duration_ms, build_exit_code)
-    }
-
-    let exe_path = executable_path_for_case(info, active_output_dir)
-    if not path_exist(exe_path) then {
-        return failure_result(
-            info,
-            "failed",
-            "infrastructure_error",
-            "built executable not found: \(exe_path.to_string())",
-            build_exit_code,
-            duration_ms,
-        )
     }
 
     let launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {

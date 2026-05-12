@@ -14,18 +14,18 @@ public enum SymbolKind {
 }
 
 /// 符号的导入方式
-/// 用于决定符号是否可以直接访问（不需要模块前缀）
+/// 用于决定符号是否可以直接访问
 public enum ImportKind {
   /// 当前模块定义的符号（包括文件合并）
   case local
-  /// 成员导入：using module.path.Symbol
+  /// 显式成员导入：using module::path { Symbol } / using module::path { Symbol as Alias }
   case memberImport
-  /// 批量导入：using module.path.*
+  /// 导入模块全部 public 符号：using module::path { .. }
   case batchImport
-  /// 模块导入：using module.path（符号不直接可用，需要通过模块前缀访问）
+  /// 内部导入边，表示当前文件可见该模块但符号不直接可用
   case moduleImport
   
-  /// 是否可以直接访问（不需要模块前缀）
+  /// 是否可以直接访问
   public var isDirectlyAccessible: Bool {
     switch self {
     case .local, .memberImport, .batchImport:
@@ -131,7 +131,6 @@ public struct TypedTraitConformance {
 }
 
 public indirect enum TypedGlobalNode {
-  case foreignUsing(libraryName: String)
   case foreignFunction(identifier: Symbol, parameters: [Symbol])
   case foreignType(identifier: Symbol)
   case foreignStruct(identifier: Symbol, fields: [(name: String, type: Type)])

@@ -11,6 +11,7 @@ protected type TypeCheckerStorage(
     mut diagnostics DiagnosticCollector,
     mut file_path String,
     mut module_path List[String],
+    mut package_id String,
     mut in_function Bool,
     mut current_function_return_type Option[Type],
     mut inferred_function_return_type Option[Type],
@@ -68,6 +69,7 @@ protected type LoadedDeclInput(
     decl Decl,
     source_file String,
     module_path List[String],
+    package_id String,
 )
 
 protected type GenericTraitConformanceStatus {
@@ -85,6 +87,7 @@ given TypeChecker {
             DiagnosticCollector.new(),
             file_path,
             List[String].new(),
+            "",
             false,
             Option[Type].None(),
             Option[Type].None(),
@@ -627,7 +630,7 @@ given TypeChecker {
 
         let mut pass_inputs = List[LoadedDeclInput].new()
         for pair in nodes then {
-            pass_inputs.push(LoadedDeclInput(pair.first.decl, pair.first.source_file, pair.second))
+            pass_inputs.push(LoadedDeclInput(pair.first.decl, pair.first.source_file, pair.second, pair.first.package_id))
         }
 
         // Pass 2: collect signatures (with per-node file_path context)
@@ -636,6 +639,7 @@ given TypeChecker {
             let input = pass_inputs[sig_index]
             self.storage.file_path = input.source_file
             self.storage.module_path = input.module_path
+            self.storage.package_id = input.package_id
             self.collect_decl_signature(input.decl)
             sig_index += 1
         }
@@ -646,6 +650,7 @@ given TypeChecker {
             let input = pass_inputs[body_index]
             self.storage.file_path = input.source_file
             self.storage.module_path = input.module_path
+            self.storage.package_id = input.package_id
             when input.decl in {
                 .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
                     self.check_given_not_trait_decl(target_type, type_params, trait_name, span)

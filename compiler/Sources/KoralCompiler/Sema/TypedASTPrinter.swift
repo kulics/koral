@@ -7,9 +7,6 @@ public func printTypedAST(_ node: TypedProgram) {
 
   func printTypedGlobalNode(_ node: TypedGlobalNode) {
     switch node {
-    case .foreignUsing(let libraryName):
-      print("\(indent)ForeignUsing: \(libraryName)")
-
     case .foreignFunction(let identifier, let parameters):
       print("\(indent)ForeignFunction:")
       print("\(indent)  Identifier: \(symbolLabel(identifier)): \(identifier.type)")

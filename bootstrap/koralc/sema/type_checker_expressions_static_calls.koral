@@ -217,227 +217,20 @@ given TypeChecker {
     }
 
     private check_static_method_call_ref(self, type_name String, type_args List[ref TypeNode], method_name String, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
-        let qualified_type_path = self.qualified_name_path(type_name)
-        let has_qualified_name = qualified_type_path.count() > 1(UInt)
-        let qualified_type_symbol_opt = self.resolve_visible_symbol_qualified_name(type_name)
-        let effective_type_name = when qualified_type_symbol_opt in {
-            .Some(sym) then self.context().symbol_name_or(sym, type_name),
-            .None() then type_name,
-        }
-
-        let has_qualified_receiver = qualified_type_symbol_opt is .Some(_)
-        if has_qualified_name and not has_qualified_receiver then {
-            let module_label = if not qualified_type_path.is_empty() then {
-                let tail_name = qualified_type_path[qualified_type_path.count() - 1(UInt)]
-                yield when self.try_resolve_named_type_without_diag(tail_name) in {
-                    .Some(tail_type) then when self.canonicalize_alias_type(tail_type) in {
-                        .StructureType(def_id) then when self.context().get_module_path(def_id) in {
-                            .Some(owner_module_path) then "module(\(owner_module_path.join_to_string(".")))",
-                            .None() then {
-                                let root_name = qualified_type_path[0(UInt)]
-                                yield when self.resolve_visible_module_path(root_name) in {
-                                    .Some(root_module_path) then {
-                                        let normalized_module_path = if not root_module_path.is_empty() and root_module_path[root_module_path.count() - 1(UInt)] == root_name then {
-                                            yield root_module_path
-                                        } else if root_module_path.count() > 1(UInt) then {
-                                            let mut trimmed = List[String].new()
-                                            let mut idx UInt = 0
-                                            while idx + 1 < root_module_path.count() then {
-                                                trimmed.push(root_module_path[idx])
-                                                idx += 1
-                                            }
-                                            yield trimmed
-                                        } else {
-                                            let mut fallback = List[String].new()
-                                            fallback.push(root_name)
-                                            yield fallback
-                                        }
-                                        yield "module(\(normalized_module_path.join_to_string(".")))"
-                                    },
-                                    .None() then {
-                                        let mut module_path = List[String].new()
-                                        let mut idx UInt = 0
-                                        while idx + 1 < qualified_type_path.count() then {
-                                            module_path.push(qualified_type_path[idx])
-                                            idx += 1
-                                        }
-                                        yield when self.resolve_visible_symbol_path(module_path) in {
-                                            .Some(module_symbol) then "module(\(self.module_symbol_display(module_symbol)))",
-                                            .None() then "module(\(module_path.join_to_string(".")))",
-                                        }
-                                    },
-                                }
-                            },
-                        },
-                        .EnumType(def_id) then when self.context().get_module_path(def_id) in {
-                            .Some(owner_module_path) then "module(\(owner_module_path.join_to_string(".")))",
-                            .None() then {
-                                let root_name = qualified_type_path[0(UInt)]
-                                yield when self.resolve_visible_module_path(root_name) in {
-                                    .Some(root_module_path) then {
-                                        let normalized_module_path = if not root_module_path.is_empty() and root_module_path[root_module_path.count() - 1(UInt)] == root_name then {
-                                            yield root_module_path
-                                        } else if root_module_path.count() > 1(UInt) then {
-                                            let mut trimmed = List[String].new()
-                                            let mut idx UInt = 0
-                                            while idx + 1 < root_module_path.count() then {
-                                                trimmed.push(root_module_path[idx])
-                                                idx += 1
-                                            }
-                                            yield trimmed
-                                        } else {
-                                            let mut fallback = List[String].new()
-                                            fallback.push(root_name)
-                                            yield fallback
-                                        }
-                                        yield "module(\(normalized_module_path.join_to_string(".")))"
-                                    },
-                                    .None() then {
-                                        let mut module_path = List[String].new()
-                                        let mut idx UInt = 0
-                                        while idx + 1 < qualified_type_path.count() then {
-                                            module_path.push(qualified_type_path[idx])
-                                            idx += 1
-                                        }
-                                        yield when self.resolve_visible_symbol_path(module_path) in {
-                                            .Some(module_symbol) then "module(\(self.module_symbol_display(module_symbol)))",
-                                            .None() then "module(\(module_path.join_to_string(".")))",
-                                        }
-                                    },
-                                }
-                            },
-                        },
-                        .OpaqueType(def_id) then when self.context().get_module_path(def_id) in {
-                            .Some(owner_module_path) then "module(\(owner_module_path.join_to_string(".")))",
-                            .None() then {
-                                let root_name = qualified_type_path[0(UInt)]
-                                yield when self.resolve_visible_module_path(root_name) in {
-                                    .Some(root_module_path) then {
-                                        let normalized_module_path = if not root_module_path.is_empty() and root_module_path[root_module_path.count() - 1(UInt)] == root_name then {
-                                            yield root_module_path
-                                        } else if root_module_path.count() > 1(UInt) then {
-                                            let mut trimmed = List[String].new()
-                                            let mut idx UInt = 0
-                                            while idx + 1 < root_module_path.count() then {
-                                                trimmed.push(root_module_path[idx])
-                                                idx += 1
-                                            }
-                                            yield trimmed
-                                        } else {
-                                            let mut fallback = List[String].new()
-                                            fallback.push(root_name)
-                                            yield fallback
-                                        }
-                                        yield "module(\(normalized_module_path.join_to_string(".")))"
-                                    },
-                                    .None() then {
-                                        let mut module_path = List[String].new()
-                                        let mut idx UInt = 0
-                                        while idx + 1 < qualified_type_path.count() then {
-                                            module_path.push(qualified_type_path[idx])
-                                            idx += 1
-                                        }
-                                        yield when self.resolve_visible_symbol_path(module_path) in {
-                                            .Some(module_symbol) then "module(\(self.module_symbol_display(module_symbol)))",
-                                            .None() then "module(\(module_path.join_to_string(".")))",
-                                        }
-                                    },
-                                }
-                            },
-                        },
-                        _ then {
-                            let root_name = qualified_type_path[0(UInt)]
-                            yield when self.resolve_visible_module_path(root_name) in {
-                                .Some(root_module_path) then {
-                                    let normalized_module_path = if not root_module_path.is_empty() and root_module_path[root_module_path.count() - 1(UInt)] == root_name then {
-                                        yield root_module_path
-                                    } else if root_module_path.count() > 1(UInt) then {
-                                        let mut trimmed = List[String].new()
-                                        let mut idx UInt = 0
-                                        while idx + 1 < root_module_path.count() then {
-                                            trimmed.push(root_module_path[idx])
-                                            idx += 1
-                                        }
-                                        yield trimmed
-                                    } else {
-                                        let mut fallback = List[String].new()
-                                        fallback.push(root_name)
-                                        yield fallback
-                                    }
-                                    yield "module(\(normalized_module_path.join_to_string(".")))"
-                                },
-                                .None() then {
-                                    let mut module_path = List[String].new()
-                                    let mut idx UInt = 0
-                                    while idx + 1 < qualified_type_path.count() then {
-                                        module_path.push(qualified_type_path[idx])
-                                        idx += 1
-                                    }
-                                    yield when self.resolve_visible_symbol_path(module_path) in {
-                                        .Some(module_symbol) then "module(\(self.module_symbol_display(module_symbol)))",
-                                        .None() then "module(\(module_path.join_to_string(".")))",
-                                    }
-                                },
-                            }
-                        },
-                    },
-                    .None() then {
-                        let root_name = qualified_type_path[0(UInt)]
-                        yield when self.resolve_visible_module_path(root_name) in {
-                            .Some(root_module_path) then {
-                                let normalized_module_path = if not root_module_path.is_empty() and root_module_path[root_module_path.count() - 1(UInt)] == root_name then {
-                                    yield root_module_path
-                                } else if root_module_path.count() > 1(UInt) then {
-                                    let mut trimmed = List[String].new()
-                                    let mut idx UInt = 0
-                                    while idx + 1 < root_module_path.count() then {
-                                        trimmed.push(root_module_path[idx])
-                                        idx += 1
-                                    }
-                                    yield trimmed
-                                } else {
-                                    let mut fallback = List[String].new()
-                                    fallback.push(root_name)
-                                    yield fallback
-                                }
-                                yield "module(\(normalized_module_path.join_to_string(".")))"
-                            },
-                            .None() then {
-                                let mut module_path = List[String].new()
-                                let mut idx UInt = 0
-                                while idx + 1 < qualified_type_path.count() then {
-                                    module_path.push(qualified_type_path[idx])
-                                    idx += 1
-                                }
-                                yield when self.resolve_visible_symbol_path(module_path) in {
-                                    .Some(module_symbol) then "module(\(self.module_symbol_display(module_symbol)))",
-                                    .None() then "module(\(module_path.join_to_string(".")))",
-                                }
-                            },
-                        }
-                    },
-                }
-            } else {
-                yield "module(\(type_name))"
-            }
+        let effective_type_name = type_name
+        if type_name.contains(".") then {
             self.storage.diagnostics.push(
                 make_diagnostic(
                     DiagnosticStage.Semantic(),
                     self.storage.file_path,
-                    "Invalid operation member access between types \(module_label) and"
+                    "Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"
                 )
             )
             return self.empty_typed_block(Type.Unknown())
         }
 
-        let scoped_receiver_type_opt = when qualified_type_symbol_opt in {
-            .Some(qualified_symbol) then when qualified_symbol.kind in {
-                .TypeSymbol() then Option[Type].Some(qualified_symbol.symbol_type),
-                _ then Option[Type].None(),
-            },
-            .None() then self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope),
-        }
-        if not has_qualified_receiver and scoped_receiver_type_opt is .Some(receiver_type) then {
+        let scoped_receiver_type_opt = self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope)
+        if scoped_receiver_type_opt is .Some(receiver_type) then {
             self.check_type_visibility(receiver_type, effective_type_name, scope)
         }
 
@@ -446,77 +239,6 @@ given TypeChecker {
             resolved_type_args.push(self.resolve_type_in_scope(ta.val, scope))
         }
         if scoped_receiver_type_opt is .None() and resolved_type_args.is_empty() then {
-            let visible_module_member = if has_qualified_receiver
-                then when qualified_type_symbol_opt in {
-                    .Some(module_symbol) then when module_symbol.kind in {
-                        .Module() then self.lookup_module_member_symbol(module_symbol, method_name),
-                        _ then Option[Symbol].None(),
-                    },
-                    .None() then Option[Symbol].None(),
-                }
-                else when self.resolve_module_symbol(effective_type_name) in {
-                    .Some(module_symbol) then self.lookup_module_member_symbol(module_symbol, method_name),
-                    .None() then Option[Symbol].None(),
-                }
-            when visible_module_member in {
-                .Some(member_symbol) then {
-                    if member_symbol.kind is not .Function() then {
-                        let receiver_label = self.context().type_display_name(member_symbol.symbol_type)
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Invalid operation call between types \(receiver_label) and"
-                            )
-                        )
-                        return self.empty_typed_block(Type.Unknown())
-                    }
-                    let mut typed_args = List[ref TypedExpr].new()
-                    let return_type_opt = self.context().get_function_return_type(member_symbol.def_id)
-                    let mut arg_index UInt = 0
-                    for arg in args then {
-                        typed_args.push(box(self.check_static_call_arg_ref(arg, member_symbol.def_id, arg_index, scope)))
-                        arg_index += 1
-                    }
-                    let callee = make_typed_expr(TypedExprKind.Variable(box(member_symbol)), member_symbol.symbol_type)
-                    let return_type = when return_type_opt in {
-                        .Some(concrete_return_type) then concrete_return_type,
-                        .None() then member_symbol.symbol_type,
-                    }
-                    return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
-                },
-                .None() then {},
-            }
-            let lowered_visible_module_member = Option[Symbol].None()
-            when lowered_visible_module_member in {
-                .Some(member_symbol) then {
-                    if member_symbol.kind is not .Function() then {
-                        let receiver_label = self.context().type_display_name(member_symbol.symbol_type)
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Invalid operation call between types \(receiver_label) and"
-                            )
-                        )
-                        return self.empty_typed_block(Type.Unknown())
-                    }
-                    let mut typed_args = List[ref TypedExpr].new()
-                    let return_type_opt = self.context().get_function_return_type(member_symbol.def_id)
-                    let mut arg_index UInt = 0
-                    for arg in args then {
-                        typed_args.push(box(self.check_static_call_arg_ref(arg, member_symbol.def_id, arg_index, scope)))
-                        arg_index += 1
-                    }
-                    let callee = make_typed_expr(TypedExprKind.Variable(box(member_symbol)), member_symbol.symbol_type)
-                    let return_type = when return_type_opt in {
-                        .Some(concrete_return_type) then concrete_return_type,
-                        .None() then member_symbol.symbol_type,
-                    }
-                    return make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
-                },
-                .None() then {},
-            }
             self.storage.diagnostics.push(
                 make_diagnostic(
                     DiagnosticStage.Semantic(),
@@ -766,12 +488,7 @@ given TypeChecker {
                 let method_name = parts.second
                 let should_skip_base_precheck = when base in {
                     .Identifier(base_name, _) then {
-                        yield if scope.lookup(base_name) is .None() and self.lookup_current_file_symbol(base_name) is .None() and self.storage.global_scope.lookup(base_name) is .None()
-                            then when self.resolve_module_symbol(base_name) in {
-                                .Some(module_symbol) then self.lookup_module_member_symbol(module_symbol, method_name) is .Some(_),
-                                .None() then false,
-                            }
-                            else false
+                        yield false
                     },
                     _ then false,
                 }

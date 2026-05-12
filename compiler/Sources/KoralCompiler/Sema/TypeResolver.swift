@@ -113,19 +113,19 @@ public class TypeResolver: CompilerPass {
             defer { checker.deferGenericConstraintValidation = false }
             for (index, node) in astNodes.enumerated() {
                 if case .usingDeclaration = node { continue }
-                if case .foreignUsingDeclaration = node { continue }
                 let isStdLib = index < coreGlobalCount
                 checker.isCurrentDeclStdLib = isStdLib
                 let sourceInfo = index < nodeSourceInfoList.count ? nodeSourceInfoList[index] : nil
                 checker.currentFileName = sourceInfo?.sourceFile ?? ""
                 checker.currentSourceFile = sourceInfo?.sourceFile ?? ""
                 checker.currentModulePath = sourceInfo?.modulePath ?? []
+                checker.currentPackageID = sourceInfo?.packageID ?? ""
                 checker.currentSpan = node.span
                 try checker.collectGivenSignatures(node)
             }
         }
         
-        // 第二步：构建模块符号表（合并原 Pass 2.5 的功能）
+        // 第二步：构建模块公开符号表，供 using module { symbol } 绑定使用
         try buildModuleSymbols(from: astNodes, nodeSourceInfoList: nodeSourceInfoList, defIdMap: defIdMap)
 
         if let checker {
@@ -151,9 +151,6 @@ public class TypeResolver: CompilerPass {
         switch node {
         case .usingDeclaration:
             // Using 声明在 ModuleResolver 中处理，这里跳过
-            return
-        case .foreignUsingDeclaration:
-            // Foreign using doesn't affect type signatures
             return
             
         case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
@@ -538,12 +535,12 @@ public class TypeResolver: CompilerPass {
         )
     }
     
-    // MARK: - 模块符号构建（合并原 Pass 2.5）
+    // MARK: - 模块公开符号构建
     
-    /// 构建模块符号表
+    /// 构建模块公开符号表
     ///
-    /// 这个方法在 Pass 2 中完成模块符号构建。
-    /// 构建后可以通过 `child.xxx` 访问模块公开符号。
+    /// 这个方法在 Pass 2 中收集每个模块的公开符号面。
+    /// 该表只用于显式 `using module { symbol }` 导入，不创建源码级模块命名空间。
     private func buildModuleSymbols(
         from astNodes: [GlobalNode],
         nodeSourceInfoList: [GlobalNodeSourceInfo],
@@ -755,10 +752,6 @@ public class TypeResolver: CompilerPass {
             return name
         case .generic(let name, _):
             return name
-        case .moduleQualified(_, let name):
-            return name
-        case .moduleQualifiedGeneric(_, let base, _):
-            return base
         case .reference(let inner, _):
             return extractTypeName(from: inner)
         case .pointer(let inner, _):

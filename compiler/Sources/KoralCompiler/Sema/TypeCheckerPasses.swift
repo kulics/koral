@@ -70,7 +70,6 @@ extension TypeChecker {
       // 从 GlobalNode 中过滤出非 using 声明的节点
       let declarations = allNodes.filter { node in
         if case .usingDeclaration = node { return false }
-        if case .foreignUsingDeclaration = node { return false }
         return true
       }
       
@@ -83,7 +82,7 @@ extension TypeChecker {
 
       // === PASS 1: Collect all type definitions using NameCollector ===
       // NameCollector collects all types, traits, and function names,
-      // allocates DefIds for each definition, and registers module names.
+      // allocates DefIds for each definition.
       
       // Run NameCollector
       var nameCollectorOutput: NameCollectorOutput?
@@ -190,50 +189,6 @@ extension TypeChecker {
     }
   }
   
-  // MARK: - Pass 1.5: Register Module Names
-  
-  /// Registers module names in scope so that module-qualified types can be resolved.
-  /// This is called after Pass 1 and before Pass 2.
-  /// Only registers the module names, the public symbols will be populated in Pass 2.5.
-  func registerModuleNames(from declarations: [GlobalNode]) throws {
-    // Collect all unique module paths
-    var allModulePaths: Set<String> = []
-    
-    for (index, _) in declarations.enumerated() {
-      guard let sourceInfo = nodeSourceInfoMap[index] else { continue }
-      let modulePath = sourceInfo.modulePath
-      
-      // Skip root module (empty path) - we only care about submodules
-      if modulePath.isEmpty { continue }
-      
-      let moduleKey = modulePath.joined(separator: ".")
-      allModulePaths.insert(moduleKey)
-    }
-    
-    // Register module names in scope for direct child modules
-    for moduleKey in allModulePaths {
-      let parts = moduleKey.split(separator: ".").map(String.init)
-      
-      // Only register direct child modules (depth 2 from root)
-      // Example: ["expr_eval", "frontend"] has 2 parts, so "frontend" is a direct child
-      if parts.count == 2 {
-        let submoduleName = parts[1]
-        
-        // Create an empty ModuleSymbolInfo (will be populated in Pass 2.5)
-        let moduleInfo = ModuleSymbolInfo(
-          modulePath: parts,
-          publicSymbols: [:],
-          publicTypes: [:]
-        )
-        moduleSymbols[moduleKey] = moduleInfo
-        
-        let moduleType = Type.module(info: moduleInfo)
-        // Register the submodule name in scope
-        currentScope.define(submoduleName, moduleType, mutable: false)
-      }
-    }
-  }
-
   private func registerExplicitModuleImports() throws {
     guard let importGraph else {
       return
@@ -243,13 +198,16 @@ extension TypeChecker {
       guard let sourceFile = edge.sourceFile else { continue }
       let targetKey = edge.target.joined(separator: ".")
       guard let moduleInfo = moduleSymbols[targetKey] else { continue }
+      let sourcePackageID = packageID(forSourceFile: sourceFile)
 
       for (name, type) in moduleInfo.publicTypes {
+        guard canImportType(type, intoPackageID: sourcePackageID) else { continue }
         if currentScope.lookupType(name, sourceFile: sourceFile) == nil {
           try currentScope.definePrivateType(name, sourceFile: sourceFile, type: type)
         }
       }
       for (name, symbol) in moduleInfo.publicSymbols {
+        guard canImportSymbol(symbol, intoPackageID: sourcePackageID) else { continue }
         try registerImportedSymbol(
           name: name,
           symbol: symbol,
@@ -266,13 +224,16 @@ extension TypeChecker {
 
       let originalName = symbolImport.originalSymbol
       let localName = symbolImport.symbol
+      let sourcePackageID = packageID(forSourceFile: sourceFile)
 
       if let importedType = moduleInfo.publicTypes[originalName],
+         canImportType(importedType, intoPackageID: sourcePackageID),
          currentScope.lookupType(localName, sourceFile: sourceFile) == nil {
         try currentScope.definePrivateType(localName, sourceFile: sourceFile, type: importedType)
       }
 
       if let importedSymbol = moduleInfo.publicSymbols[originalName] {
+        guard canImportSymbol(importedSymbol, intoPackageID: sourcePackageID) else { continue }
         try registerImportedSymbol(
           name: localName,
           symbol: importedSymbol,
@@ -280,6 +241,43 @@ extension TypeChecker {
           sourceFile: sourceFile
         )
       }
+    }
+  }
+
+  private func packageID(forSourceFile sourceFile: String) -> String {
+    nodeSourceInfoMap.values.first { isSameSourceFile($0.sourceFile, sourceFile) }?.packageID ?? ""
+  }
+
+  private func canImportSymbol(_ symbol: Symbol, intoPackageID packageID: String) -> Bool {
+    let access = defIdMap.getAccess(symbol.defId) ?? .protected
+    switch access {
+    case .public:
+      return true
+    case .protectedPublic:
+      guard !packageID.isEmpty else { return false }
+      return defIdMap.getPackageID(symbol.defId) == packageID
+    case .private, .protected:
+      return false
+    }
+  }
+
+  private func canImportType(_ type: Type, intoPackageID packageID: String) -> Bool {
+    let defId: DefId
+    switch type {
+    case .structure(let id), .`enum`(let id), .opaque(let id):
+      defId = id
+    default:
+      return true
+    }
+    let access = defIdMap.getAccess(defId) ?? .protected
+    switch access {
+    case .public:
+      return true
+    case .protectedPublic:
+      guard !packageID.isEmpty else { return false }
+      return defIdMap.getPackageID(defId) == packageID
+    case .private, .protected:
+      return false
     }
   }
 
@@ -318,11 +316,12 @@ extension TypeChecker {
     }
   }
   
-  // MARK: - Pass 2.5: Build Module Symbols
+  // MARK: - Pass 2.5: Build Module Public Symbol Tables
   
-  /// Builds module symbols from collected definitions.
-  /// This enables module-qualified access by creating module symbols
-  /// that can be accessed via `child.xxx`.
+  /// Builds module public symbol tables from collected definitions.
+  /// These tables back explicit `using module { symbol }` imports only; they
+  /// must not create source-level module namespace values or `module.symbol`
+  /// access.
   func buildModuleSymbols(from declarations: [GlobalNode]) throws {
     // Step 1: Collect all unique module paths
     var allModulePaths: Set<String> = []
@@ -346,6 +345,7 @@ extension TypeChecker {
       let modulePath = sourceInfo.modulePath
       currentSourceFile = sourceInfo.sourceFile
       currentModulePath = sourceInfo.modulePath
+      currentPackageID = sourceInfo.packageID
       currentSpan = decl.span
       
       // Skip root module (empty path) - we only care about submodules
@@ -388,21 +388,6 @@ extension TypeChecker {
       )
     }
     
-    // Step 4: Register module symbols in scope for direct child modules
-    // For each submodule, register its name as a module symbol in the parent scope
-    // Example: for module path ["expr_eval", "frontend"], register "frontend" as a module symbol
-    for (moduleKey, moduleInfo) in moduleSymbols {
-      let parts = moduleKey.split(separator: ".").map(String.init)
-      
-      // Only register direct child modules (depth 2 from root)
-      // Example: ["expr_eval", "frontend"] has 2 parts, so "frontend" is a direct child
-      if parts.count == 2 {
-        let submoduleName = parts[1]
-        let moduleType = Type.module(info: moduleInfo)
-        // Register the submodule name in scope
-        currentScope.define(submoduleName, moduleType, mutable: false)
-      }
-    }
   }
   
   /// Extracts symbol information from a global declaration.
@@ -692,9 +677,6 @@ extension TypeChecker {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
       return
-    case .foreignUsingDeclaration:
-      // Foreign using is handled in CodeGen, skip here
-      return
 
     case .givenNotTraitDeclaration:
       return
@@ -747,6 +729,7 @@ extension TypeChecker {
           kind: .genericTemplate(.`enum`),
           sourceFile: currentSourceFile,
           access: access,
+          packageID: currentPackageID,
           span: currentSpan
         )
         let template = GenericEnumTemplate(
@@ -790,6 +773,7 @@ extension TypeChecker {
           kind: .genericTemplate(.structure),
           sourceFile: currentSourceFile,
           access: access,
+          packageID: currentPackageID,
           span: currentSpan
         )
         let template = GenericStructTemplate(
@@ -912,6 +896,7 @@ extension TypeChecker {
           kind: .genericTemplate(.structure),
           sourceFile: currentSourceFile,
           access: .protected,
+          packageID: currentPackageID,
           span: currentSpan
         )
         let template = GenericStructTemplate(
@@ -1719,6 +1704,7 @@ extension TypeChecker {
             kind: .genericTemplate(.function),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
           )
 
@@ -1782,6 +1768,7 @@ extension TypeChecker {
             kind: .genericTemplate(.function),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: span
           )
         let dummyBody = ExpressionNode.booleanLiteral(false)
@@ -1806,8 +1793,6 @@ extension TypeChecker {
     case .usingDeclaration:
       // Using declarations are handled separately, skip here
       return nil
-    case .foreignUsingDeclaration(let libraryName, _):
-      return .foreignUsing(libraryName: libraryName)
 
     case .givenNotTraitDeclaration(let typeParams, let typeNode, let traitName, let span):
       self.currentSpan = span
@@ -2031,6 +2016,7 @@ extension TypeChecker {
             kind: .genericTemplate(.function),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: currentSpan
           )
 
@@ -2190,6 +2176,7 @@ extension TypeChecker {
             kind: .genericTemplate(.function),
             sourceFile: currentSourceFile,
             access: access,
+            packageID: currentPackageID,
             span: currentSpan
           )
         let template = GenericFunctionTemplate(
@@ -3381,6 +3368,7 @@ extension TypeChecker {
         nodeSourceInfoList.append(GlobalNodeSourceInfo(
           sourceFile: isStdLib ? coreFileName : userFileName,
           modulePath: [],
+          packageID: isStdLib ? "std:std" : "",
           node: node
         ))
       }

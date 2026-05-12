@@ -197,10 +197,10 @@ let inc(mut x Int) Int = {
 }
 
 // 泛型函数（单约束）
-let contains[T Equatable](list List[T], item T) Bool = todo()
+let contains[T Eq](list List[T], item T) Bool = todo()
 
 // 泛型函数（多约束）
-let max[T Equatable and Comparable](a T, b T) T =
+let max[T Eq and Ord](a T, b T) T =
     if a.compare(b) >= 0 then a else b
 
 // 函数类型
@@ -315,7 +315,7 @@ let value = if ready() then {
 // early yield：在分支 body 内提前产出当前分支表达式的值
 let classify(score Int) String =
     if score >= 90 then {
-        if score == 100 then yield "perfect"
+        if score == 100 then { yield "perfect" }
         yield "A"
     } else {
         yield "other"
@@ -392,7 +392,7 @@ let control_flow() Void = {
         _ then {
             let mut i = 0
             while i < list.count() then {
-                if list[i] % 2 == 0 then yield list[i]
+                if list[i] % 2 == 0 then { yield list[i] }
                 i += 1
             }
             yield -1
@@ -545,9 +545,6 @@ type Byte    = UInt8
 type Meters  = Int
 type Coord   = Point
 
-// 不透明类型（opaque type，用于 FFI）
-type C_Opaque
-
 // 泛型结构体
 type Table[T Any](mut data T)
 
@@ -685,21 +682,21 @@ let pointer_ops() Void = {
 // ============================================================
 
 // 基本 trait
-trait Equatable {
+trait Eq {
     equals(self, other Self) Bool
 }
 
 // trait 继承（单继承）
-trait Comparable Equatable {
+trait Ord Eq {
     compare(self, other Self) Int
 }
 
 // trait 继承（多继承，and 连接）
-trait Printable {
+trait ToString {
     to_string(self ref) String
 }
 
-trait PrettyPrint Printable and Equatable {
+trait PrettyPrint ToString and Eq {
     pretty(self) String
 }
 
@@ -720,11 +717,11 @@ given Foo {
 }
 
 // 实现 trait
-given Foo as Equatable {
+given Foo as Eq {
     equals(self, other Foo) Bool = self.value == other.value
 }
 
-given Foo as Comparable {
+given Foo as Ord {
     compare(self, other Foo) Int = self.value - other.value
 }
 
@@ -738,7 +735,7 @@ given[T Any] Table[T] {
 }
 
 // 泛型 given 实现 trait
-given[T Equatable] Table[T] as Equatable {
+given[T Eq] Table[T] as Eq {
     equals(self, other Table[T]) Bool = self.data.equals(other.data)
 }
 
@@ -849,10 +846,10 @@ let trait_object_example() Void = {
 // ============================================================
 
 // 泛型函数（单约束）
-let find[T Equatable](list List[T], item T) Bool = todo()
+let find[T Eq](list List[T], item T) Bool = todo()
 
 // 泛型函数（多约束）
-let sort_and_dedup[T Equatable and Comparable](list List[T]) List[T] = todo()
+let sort_and_dedup[T Eq and Ord](list List[T]) List[T] = todo()
 
 // 泛型类型实例化
 let generics_usage() Void = {
@@ -995,41 +992,32 @@ let with_custom_handling(path String) Result[String] = {
 }
 
 // ============================================================
-// 模块限定类型 (Module-Qualified Types)
-// ============================================================
-
-// using "models" as Models
-let module_qualified_types() Void = {
-    // 模块前缀访问类型和构造函数
-    let user Models.User = Models.User(1, "Alice")
-    let id   Models.UserId = Models.UserId(42)
-
-    // 模块前缀访问泛型类型
-    let list Models.List[Int] = Models.List[Int].new()
-}
-
-// ============================================================
 // 访问修饰符 (Access Modifiers)
 // ============================================================
 
-// public：所有模块可见
-// protected：当前模块及子模块可见（默认）
+// public：所有 package / module 可见
+// protected public：同一 package 内可见
+// protected：仅当前逻辑 module 内可见（顶层默认）
 // private：仅当前文件可见
 
 public  let public_fn()    Void = {}
+protected public let package_fn() Void = {}
 private let private_fn()   Void = {}
         let protected_fn() Void = {}  // 默认 protected
 
 public type PublicType(
-    public  x Int,   // 所有模块可见
-    private y Int,   // 仅当前文件可见
-            z Int,   // 默认 protected
+    public           x Int,   // 所有 package / module 可见
+    protected public y Int,   // 同一 package 内各 module 可见
+    protected        z Int,   // 仅当前 module 可见
+    private          w Int,   // 仅当前文件可见
+                     k Int,   // 字段默认 public
 )
 
 given PublicType {
-    public  get_x(self) Int = self.x
-    private helper(self) Int = self.y
-            internal_op(self) Int = self.z
+    public           get_x(self) Int = self.x
+    protected public package_helper(self) Int = self.y
+    private          helper(self) Int = self.w
+                     internal_op(self) Int = self.z
 }
 
 
@@ -1044,7 +1032,7 @@ let collections() Void = {
 
     // Dict（键值对）
     let dict Dict[String, Bool] = ["a": true, "b": false]
-    println(dict["a"])       // key 访问
+    println(dict)
 }
 
 // ============================================================

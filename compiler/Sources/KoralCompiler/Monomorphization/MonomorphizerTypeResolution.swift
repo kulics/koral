@@ -165,44 +165,6 @@ extension Monomorphizer {
             let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
             return .function(parameters: parameters, returns: resolvedReturnType)
             
-        case .moduleQualified(_, let name):
-            // 模块限定类型：直接解析类型名
-            // 在 Monomorphizer 阶段，模块信息已经不重要，直接使用类型名
-            if let substituted = substitution[name] {
-                return substituted
-            }
-            if let builtinType = resolveBuiltinType(name) {
-                return builtinType
-            }
-            if let concreteType = input.genericTemplates.concreteStructTypes[name] {
-                return concreteType
-            }
-            if let concreteType = input.genericTemplates.concreteEnumTypes[name] {
-                return concreteType
-            }
-            // Check if it's a trait name → resolve to traitObject type
-            if input.genericTemplates.traits[name] != nil {
-                return .traitObject(traitName: name, typeArgs: [])
-            }
-            return .genericParameter(name: name)
-            
-        case .moduleQualifiedGeneric(_, let base, let args):
-            // 模块限定泛型类型
-            let resolvedArgs = try args.map { try resolveTypeNode($0, substitution: substitution) }
-            
-            if let template = input.genericTemplates.structTemplates[base] {
-                return try instantiateStruct(template: template, args: resolvedArgs)
-            }
-            
-            if let template = input.genericTemplates.enumTemplates[base] {
-                return try instantiateEnum(template: template, args: resolvedArgs)
-            }
-            
-            throw SemanticError(
-                .generic("Unknown generic type: \(base)"),
-                span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
-            )
-            
         case .weakReference(let inner, let mutable):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutableWeakReference(inner: innerType) : .weakReference(inner: innerType)
@@ -417,8 +379,6 @@ extension Monomorphizer {
     /// This ensures no parameterized types reach CodeGen.
     internal func resolveTypesInGlobalNode(_ node: TypedGlobalNode) throws -> TypedGlobalNode {
         switch node {
-        case .foreignUsing:
-            return node
         case .foreignType(let identifier):
             let newIdentifier = copySymbolWithNewDefId(
                 identifier,

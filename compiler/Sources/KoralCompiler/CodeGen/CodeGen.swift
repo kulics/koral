@@ -206,8 +206,6 @@ public class CodeGen {
       case .foreignGlobalVariable(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         foreignDefIds.insert(defIdKey(identifier.defId))
-      case .foreignUsing:
-        break
       case .globalStructDeclaration(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         if case .structure(let defId) = identifier.type {
@@ -590,35 +588,12 @@ public class CodeGen {
 
       """
 
-    emitForeignUsingDeclarations(from: ast.globalNodes)
-
     // 生成程序体
     generateProgram(ast)
     
     return buffer
   }
 
-  private func emitForeignUsingDeclarations(from nodes: [TypedGlobalNode]) {
-    var seen: Set<String> = []
-    var ordered: [String] = []
-
-    for node in nodes {
-      if case .foreignUsing(let libraryName) = node {
-        if !seen.contains(libraryName) {
-          seen.insert(libraryName)
-          ordered.append(libraryName)
-        }
-      }
-    }
-
-    guard !ordered.isEmpty else { return }
-
-    for header in ordered {
-      generateForeignUsingDeclaration(header)
-    }
-    buffer += "\n"
-  }
-  
   /// 获取逃逸分析诊断报告
   /// 
   /// 返回所有在代码生成过程中收集的逃逸分析诊断信息。
@@ -1045,10 +1020,6 @@ public class CodeGen {
       buffer += "return 0;\n"
     }
     buffer += "}\n"
-  }
-
-  private func generateForeignUsingDeclaration(_ libraryName: String) {
-    buffer += "// Link: -l\(libraryName)\n"
   }
 
   private func generateForeignTypeDeclaration(_ identifier: Symbol) {

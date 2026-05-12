@@ -102,6 +102,10 @@ public struct DefId: Hashable, Equatable {
     public func access(in map: DefIdMap) -> AccessModifier? {
         return map.getAccess(self)
     }
+
+    public func packageID(in map: DefIdMap) -> String? {
+        return map.getPackageID(self)
+    }
     
     /// 通过 DefIdMap 查询诊断信息
     public func span(in map: DefIdMap) -> SourceSpan? {
@@ -288,6 +292,7 @@ public class DefIdMap {
         public let kind: DefKind
         public let sourceFile: String
         public let access: AccessModifier
+        public let packageID: String
         public let span: SourceSpan
         
         public init(
@@ -296,6 +301,7 @@ public class DefIdMap {
             kind: DefKind,
             sourceFile: String,
             access: AccessModifier,
+            packageID: String = "",
             span: SourceSpan
         ) {
             self.modulePath = modulePath
@@ -303,6 +309,7 @@ public class DefIdMap {
             self.kind = kind
             self.sourceFile = sourceFile
             self.access = access
+            self.packageID = packageID
             self.span = span
         }
     }
@@ -439,6 +446,7 @@ public class DefIdMap {
         kind: DefKind,
         sourceFile: String,
         access: AccessModifier = .protected,
+        packageID: String = "",
         span: SourceSpan = .unknown
     ) -> DefId {
         let isLocalSymbol = modulePath.isEmpty && sourceFile.isEmpty && kind == .variable
@@ -462,6 +470,7 @@ public class DefIdMap {
             kind: kind,
             sourceFile: sourceFile,
             access: access,
+            packageID: packageID,
             span: span
         )
         
@@ -687,6 +696,10 @@ public class DefIdMap {
     
     public func getAccess(_ defId: DefId) -> AccessModifier? {
         return idToMetadata[defId.id]?.access
+    }
+
+    public func getPackageID(_ defId: DefId) -> String? {
+        return idToMetadata[defId.id]?.packageID
     }
     
     public func getSpan(_ defId: DefId) -> SourceSpan? {

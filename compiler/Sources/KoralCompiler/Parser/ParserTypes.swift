@@ -94,26 +94,6 @@ extension Parser {
     }
     try match(.identifier(name))
 
-    if currentToken === .dot {
-      try match(.dot)
-
-      guard case .identifier(let typeName) = currentToken else {
-        throw ParserError.expectedTypeIdentifier(
-          span: currentSpan, got: currentToken.description)
-      }
-      if !isValidTypeName(typeName) {
-        throw ParserError.invalidTypeName(span: currentSpan, name: typeName)
-      }
-      try match(.identifier(typeName))
-
-      if currentToken === .leftBracket {
-        let args = try parseTypeListInBrackets()
-        return .moduleQualifiedGeneric(module: name, base: typeName, args: args)
-      }
-
-      return .moduleQualified(module: name, name: typeName)
-    }
-
     if name == "Func", currentToken === .leftBracket {
       let args = try parseTypeListInBrackets()
       guard !args.isEmpty else {

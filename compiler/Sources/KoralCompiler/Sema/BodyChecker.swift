@@ -97,6 +97,7 @@ public class BodyChecker: CompilerPass {
             checker.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? checker.coreFileName : checker.userFileName)
             checker.currentSourceFile = sourceInfo?.sourceFile ?? checker.currentFileName
             checker.currentModulePath = sourceInfo?.modulePath ?? []
+            checker.currentPackageID = sourceInfo?.packageID ?? ""
             checker.currentSpan = decl.span
             
             do {
@@ -135,4 +136,3 @@ public class BodyChecker: CompilerPass {
         return instantiationRequests
     }
 }
-

@@ -5,6 +5,7 @@ using std::time { .. }
 private type InvocationOptions(
     command String,
     package_config_path Option[String],
+    entry_file_path Option[String],
     target_module_name Option[String],
     deps_root Option[String],
     std_config_path Option[String],
@@ -47,6 +48,7 @@ public let run_driver() Int = {
     }
 
     let mut package_config_path = Option[String].None()
+    let mut entry_file_path = Option[String].None()
     let mut target_module_name = Option[String].None()
     let mut deps_root = Option[String].None()
     let mut std_config_path = Option[String].None()
@@ -97,8 +99,12 @@ public let run_driver() Int = {
             eprintln("unknown argument: \(arg)")
             return 1
         } else {
-            eprintln("unexpected positional argument: \(arg)")
-            return 1
+            if package_config_path is .None() and entry_file_path is .None() then {
+                entry_file_path = Option[String].Some(arg)
+            } else {
+                eprintln("unexpected positional argument: \(arg)")
+                return 1
+            }
         }
         i += 1
     }
@@ -106,6 +112,7 @@ public let run_driver() Int = {
     let options = InvocationOptions(
         command,
         package_config_path,
+        entry_file_path,
         target_module_name,
         deps_root,
         std_config_path,
@@ -113,8 +120,13 @@ public let run_driver() Int = {
         out_dir,
     )
 
-    if options.package_config_path is .None() then {
-        eprintln("missing --package-config")
+    if options.package_config_path is .None() and options.entry_file_path is .None() then {
+        eprintln("missing input file or --package-config")
+        print_usage()
+        return 1
+    }
+    if options.package_config_path is .Some(_) and options.entry_file_path is .Some(_) then {
+        eprintln("cannot combine direct file input with --package-config")
         print_usage()
         return 1
     }
@@ -134,7 +146,7 @@ public let run_driver() Int = {
 
 private let print_usage() Void = {
     eprintln("bootstrap-koralc")
-    eprintln("usage: bootstrap-koralc [build|check|--emit-c|--emit-typed-ast|--resolve-module] --package-config <koral.json> [--target-module <module>] [options]")
+    eprintln("usage: bootstrap-koralc [build|check|--emit-c|--emit-typed-ast|--resolve-module] [--package-config <koral.json> | <file.koral>] [--target-module <module>] [options]")
     eprintln("options:")
     eprintln("  -o <dir>                    output directory")
     eprintln("  --no-std                    disable std loading")
@@ -285,6 +297,15 @@ private let sanitize_module_artifact_name(module_name String) String = {
     return module_name.replace_all("::", with: "__")
 }
 
+private let contains_string(values List[String], target String) Bool = {
+    for value in values then {
+        if value == target then {
+            return true
+        }
+    }
+    return false
+}
+
 private let collect_unique_module_paths_from_pairs(pairs List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
     let mut seen = Set[String].new()
     let mut out = List[List[String]].new()
@@ -311,31 +332,6 @@ private let collect_unique_source_paths_from_pairs(pairs List[Pair[LoadedNode, L
     return out
 }
 
-private let inject_std_prelude_imports(std_root_path List[String], loaded_module_paths List[List[String]], graph mut ref ImportGraph) Void = {
-    let std_key = std_root_path.join_to_string(".")
-    let mut seen = Set[String].new()
-    for module_path in loaded_module_paths then {
-        let key = module_path.join_to_string(".")
-        if key == std_key or seen.contains(key) then {
-            continue
-        }
-        seen.insert(key)
-        let mut already = false
-        for edge in graph.edges then {
-            if string_list_eq(edge.source, module_path) and
-               string_list_eq(edge.target, std_root_path) and
-               (when edge.kind in { .BatchImport() then true, _ then false }) and
-               (when edge.source_file in { .None() then true, _ then false }) then {
-                already = true
-                break
-            }
-        }
-        if not already then {
-            graph.add_module_import(module_path, std_root_path, ImportKind.BatchImport(), Option[String].None())
-        }
-    }
-}
-
 private let make_prepared_compilation(
     std_pairs List[Pair[LoadedNode, List[String]]],
     user_pairs List[Pair[LoadedNode, List[String]]],
@@ -347,8 +343,18 @@ private let make_prepared_compilation(
     root_module_path String,
 ) PreparedCompilation = {
     let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
-    for pair in std_pairs then { all_pairs.push(pair) }
-    for pair in user_pairs then { all_pairs.push(pair) }
+    for pair in std_pairs then {
+        all_pairs.push(Pair[LoadedNode, List[String]](
+            LoadedNode(pair.first.decl, pair.first.source_file, "std:std"),
+            pair.second
+        ))
+    }
+    for pair in user_pairs then {
+        all_pairs.push(Pair[LoadedNode, List[String]](
+            LoadedNode(pair.first.decl, pair.first.source_file, "root:user"),
+            pair.second
+        ))
+    }
 
     let mut loaded_nodes = List[LoadedNode].new()
     let mut node_source_paths = List[String].new()
@@ -420,16 +426,6 @@ private let load_manifest_modules_into_prepared(
         }
     }
 
-    when std_root_module_name in {
-        .Some(std_root_name) then {
-            let std_root_segments = parse_manifest_module_name(std_root_name) or else List[String].new()
-            if not std_root_segments.is_empty() then {
-                inject_std_prelude_imports(std_root_segments, loaded_module_paths, merged_graph.ref)
-            }
-        },
-        .None() then {},
-    }
-
     return Result[PreparedCompilation].Ok(make_prepared_compilation(
         std_pairs,
         user_pairs,
@@ -468,9 +464,26 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
     let mut user_pairs = List[Pair[LoadedNode, List[String]]].new()
     let mut merged_graph = ImportGraph.new()
     let mut linked_libraries = List[String].new()
-    let mut loaded_module_paths = List[List[String]].new()
 
-    for module_name in package_graph.reachable_module_names then {
+    let mut module_names_to_load = List[String].new()
+    let mut all_module_names = List[String].new()
+    let mut name_iter = package_graph.modules_by_name.iterator()
+    while name_iter.next() is .Some(entry) then {
+        all_module_names.push(entry.first)
+    }
+    all_module_names.sort()
+    for module_name in all_module_names then {
+        let spec = package_graph.modules_by_name.get(module_name) or else { continue }
+        let include = when spec.package_kind in {
+            .Std() then true,
+            _ then contains_string(package_graph.reachable_module_names, module_name),
+        }
+        if include then {
+            module_names_to_load.push(module_name)
+        }
+    }
+
+    for module_name in module_names_to_load then {
         let spec = package_graph.modules_by_name.get(module_name) or else {
             return Result[PreparedCompilation].Error(box("Target module '\(module_name)' not found in resolved module graph"))
         }
@@ -488,18 +501,7 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
             for pair in pairs then { user_pairs.push(pair) }
         }
         merged_graph.merge(unit.import_graph())
-        loaded_module_paths.push(spec.path_segments)
         for link in spec.links then { linked_libraries.push(link) }
-    }
-
-    when package_graph.std_root_module_name in {
-        .Some(std_root_name) then {
-            let std_root_segments = parse_manifest_module_name(std_root_name) or else List[String].new()
-            if not std_root_segments.is_empty() then {
-                inject_std_prelude_imports(std_root_segments, loaded_module_paths, merged_graph.ref)
-            }
-        },
-        .None() then {},
     }
 
     let target_spec = package_graph.modules_by_name.get(package_graph.target_module_name) or else {
@@ -518,8 +520,64 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
     ))
 }
 
+private let prepare_single_file_compilation(options InvocationOptions) Result[PreparedCompilation] = {
+    let entry_file_path = options.entry_file_path or else {
+        return Result[PreparedCompilation].Error(box("missing input file or --package-config"))
+    }
+
+    let mut resolver = ModuleResolver.new()
+    let user_unit = resolver.resolve_module(entry_file_path) or return
+    let mut std_pairs = List[Pair[LoadedNode, List[String]]].new()
+    let mut user_pairs = user_unit.collect_all_nodes_with_path()
+    let mut merged_graph = user_unit.import_graph()
+    let mut linked_libraries = List[String].new()
+
+    let resolved_std_manifest_path = if options.no_std then Option[String].None()
+        else when options.std_config_path in {
+            .Some(path) then Option[String].Some(path),
+            .None() then find_std_manifest_path(),
+        }
+
+    when resolved_std_manifest_path in {
+        .Some(std_manifest_path) then {
+            let std_manifest = load_package_manifest(std_manifest_path) or return
+            let std_prepared = load_manifest_modules_into_prepared(
+                resolver.ref,
+                std_manifest,
+                ResolvedPackageKind.Std(),
+                Option[String].None(),
+                Option[String].None(),
+                std_manifest_path.into_path().dir_name(),
+            ) or return
+            std_pairs = std_prepared.graph.loaded_nodes_with_path
+            merged_graph.merge(std_prepared.graph.import_graph)
+            for link in std_prepared.linked_libraries then {
+                linked_libraries.push(link)
+            }
+        },
+        .None() then {},
+    }
+
+    let artifact_base_name = entry_file_path.into_path().with_ext_name("").base_name()
+    let display_name = entry_file_path
+    let default_output_dir = entry_file_path.into_path().dir_name()
+    return Result[PreparedCompilation].Ok(make_prepared_compilation(
+        std_pairs,
+        user_pairs,
+        merged_graph,
+        display_name,
+        artifact_base_name,
+        linked_libraries,
+        default_output_dir,
+        user_unit.root_module().path_string(),
+    ))
+}
+
 private let prepare_compilation(options InvocationOptions) Result[PreparedCompilation] = {
-    return prepare_package_compilation(options)
+    return when options.package_config_path in {
+        .Some(_) then prepare_package_compilation(options),
+        .None() then prepare_single_file_compilation(options),
+    }
 }
 
 private let run_check(options InvocationOptions) Int = {

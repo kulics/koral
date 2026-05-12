@@ -6,6 +6,11 @@ public enum AccessModifier: String, Sendable {
   case `public`
   case `private`
   case `protected`
+  case protectedPublic = "protected public"
+}
+
+extension AccessModifier: CustomStringConvertible {
+  public var description: String { rawValue }
 }
 
 // MARK: - Module System Types
@@ -76,10 +81,6 @@ public indirect enum TypeNode: CustomStringConvertible {
   /// Function type: Func[ParamType1, ParamType2, ..., ReturnType]
   /// The last type in args is the return type, all others are parameter types
   case functionType(paramTypes: [TypeNode], returnType: TypeNode)
-  /// Module-qualified type: module.TypeName
-  case moduleQualified(module: String, name: String)
-  /// Module-qualified generic type: module.List[T]
-  case moduleQualifiedGeneric(module: String, base: String, args: [TypeNode])
   
   public var description: String {
     switch self {
@@ -100,11 +101,6 @@ public indirect enum TypeNode: CustomStringConvertible {
       let allTypes = paramTypes + [returnType]
       let typesStr = allTypes.map { $0.description }.joined(separator: ", ")
       return "Func[\(typesStr)]"
-    case .moduleQualified(let module, let name):
-      return "\(module).\(name)"
-    case .moduleQualifiedGeneric(let module, let base, let args):
-      let argsStr = args.map { $0.description }.joined(separator: ", ")
-      return "\(module).\(base)[\(argsStr)]"
     }
   }
 }
@@ -138,12 +134,6 @@ public struct EnumCaseDeclaration {
 public indirect enum GlobalNode {
   // Using declaration (must appear at the beginning of a file)
   case usingDeclaration(UsingDeclaration)
-
-  /// Foreign Using 声明（外部库链接）
-  case foreignUsingDeclaration(
-    libraryName: String,
-    span: SourceSpan
-  )
   
   case globalVariableDeclaration(
     name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier,
@@ -246,8 +236,6 @@ extension GlobalNode {
     switch self {
     case .usingDeclaration(let decl):
       return decl.span
-    case .foreignUsingDeclaration(_, let span):
-      return span
     case .globalVariableDeclaration(_, _, _, _, _, let span):
       return span
     case .globalFunctionDeclaration(_, _, _, _, _, _, let span):

@@ -33,6 +33,10 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.getAccess(defId)
     }
 
+    public func getPackageID(_ defId: DefId) -> String? {
+        defIdMap.getPackageID(defId)
+    }
+
     public func getSpan(_ defId: DefId) -> SourceSpan? {
         defIdMap.getSpan(defId)
     }
@@ -79,6 +83,7 @@ public final class CompilerContext: @unchecked Sendable {
         kind: DefKind,
         sourceFile: String,
         access: AccessModifier = .protected,
+        packageID: String = "",
         span: SourceSpan = .unknown
     ) -> DefId {
         defIdMap.allocate(
@@ -87,6 +92,7 @@ public final class CompilerContext: @unchecked Sendable {
             kind: kind,
             sourceFile: sourceFile,
             access: access,
+            packageID: packageID,
             span: span
         )
     }
@@ -99,6 +105,7 @@ public final class CompilerContext: @unchecked Sendable {
         kind: SymbolKind,
         access: AccessModifier = .protected,
         span: SourceSpan = .unknown,
+        packageID: String = "",
         isMutable: Bool = false
     ) -> Symbol {
         let defKind: DefKind
@@ -128,6 +135,7 @@ public final class CompilerContext: @unchecked Sendable {
             kind: defKind,
             sourceFile: sourceFile,
             access: access,
+            packageID: packageID,
             span: span
         )
 

@@ -25,12 +25,21 @@ given AccessChecker {
         return when access in {
             .Public() then Result[Void].Ok({}),
             .Protected() then {
-                // protected 只能从定义模块及其子模块访问
-                if self.is_submodule_of(from_module, defined_in_module) then {
+                // protected 只能从同一逻辑模块访问
+                if string_list_eq(from_module, defined_in_module) then {
                     return Result[Void].Ok({})
                 } else {
                     return Result[Void].Error(box(
                         "Cannot access protected symbol '\(symbol_name)'"
+                    ))
+                }
+            },
+            .ProtectedPublic() then {
+                if string_list_eq(from_module, defined_in_module) then {
+                    return Result[Void].Ok({})
+                } else {
+                    return Result[Void].Error(box(
+                        "Cannot access protected public symbol '\(symbol_name)'"
                     ))
                 }
             },
@@ -90,6 +99,11 @@ given AccessChecker {
                                 "Public symbol '\(symbol_name)' cannot use protected type in its signature"
                             ))
                         },
+                        .ProtectedPublic() then {
+                            return Result[Void].Error(box(
+                                "Public symbol '\(symbol_name)' cannot use protected public type in its signature"
+                            ))
+                        },
                         _ then {},
                     }
                 }
@@ -129,21 +143,4 @@ given AccessChecker {
         return Result[Void].Ok({})
     }
 
-    // 判断 child 是否是 parent 的子模块（或相同模块）
-    private is_submodule_of(self, child List[String], parent List[String]) Bool = {
-        // 相同模块
-        if string_list_eq(child, parent) then { return true }
-
-        // child 路径必须比 parent 长
-        if child.count() <= parent.count() then { return false }
-
-        // child 路径必须以 parent 路径开头
-        let mut i UInt = 0
-        for seg in parent then {
-            if child[i] <> seg then { return false }
-            i += 1
-        }
-
-        return true
-    }
 }

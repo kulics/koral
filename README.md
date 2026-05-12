@@ -266,15 +266,17 @@ when weak.to_ref() in {
 Module rules summary:
 
 - `using "path"` merges another file into the current module scope.
-- `using module::path { Symbol, Other as Alias }` imports explicit public symbols from another module.
-- `using module::path { .. }` imports all public symbols from that module, and `..` must be the only item.
+- `using module::path { Symbol, Other as Alias }` imports explicit symbols visible to the importing file: `public` from any package, plus `protected public` when importing from the same package.
+- `using module::path { .. }` imports all symbols visible to the importing file from that module, and `..` must be the only item.
+- Module imports bind symbols only; they do not bind a module name or namespace. Use `Symbol`, not `module.Symbol`.
 - Entry file basenames must match `[a-z][a-z0-9_]*`.
 
 - File merge (`using "file_name"` / `using "./helpers"` / `using "../shared/format"`) is resolved relative to the current file directory
 - Modules are declared in `koral.json`; `std` modules are declared in `std/koral.json`
+- Top-level manifest `entry` is the default target module name (for example `app::main`), not a source file path
+- Per-module dependency edges use `requires`; non-`std` packages do not need to list `std` manually
 - Imports are file-local bindings and never re-export automatically
-- Removed forms: `using "file" as Name`, `using Super...`, bare-path imports such as `using Std.Io`, alias imports such as `using Std.Io as Io`, batch imports such as `using Std.Io.*`, and `public/protected/private using ...`
-- Access control: `public`, `protected` (default), `private`
+- Access control: `public`, `protected public` (same-package), `protected` (same module, default for top-level declarations), `private`
 - Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
 - Module entry file basename must match `[a-z][a-z0-9_]*`
 - String in `using "file"` is the literal file name (no case conversion); file is resolved relative to the current file's directory
@@ -349,6 +351,9 @@ swift build -c debug
 ## Run the Compiler
 
 ```bash
+# Build a single source file directly
+swift run koralc build hello.koral
+
 # Build a manifest-declared target module
 swift run koralc build --package-config path/to/koral.json --target-module app::main
 
