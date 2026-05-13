@@ -868,3 +868,214 @@ public let type_to_string(t Type) String = {
         .Unknown() then "?",
     }
 }
+
+private let stable_hash_combine_string(seed UInt, text String) UInt = {
+    let mut hash = seed.combine_hash(text.count())
+    for byte in text.bytes() then {
+        hash = hash.combine_hash(byte(UInt))
+    }
+    return hash.combine_hash(255)
+}
+
+private let stable_hash_combine_string_list(seed UInt, values List[String]) UInt = {
+    let mut hash = seed.combine_hash(values.count())
+    for value in values then {
+        hash = stable_hash_combine_string(hash, value)
+    }
+    return hash
+}
+
+public let stable_type_hash(t Type) UInt = {
+    return when t in {
+        .IntType() then 1,
+        .Int8Type() then 2,
+        .Int16Type() then 3,
+        .Int32Type() then 4,
+        .Int64Type() then 5,
+        .UIntType() then 6,
+        .UInt8Type() then 7,
+        .UInt16Type() then 8,
+        .UInt32Type() then 9,
+        .UInt64Type() then 10,
+        .Float32Type() then 11,
+        .Float64Type() then 12,
+        .BoolType() then 13,
+        .VoidType() then 14,
+        .NeverType() then 15,
+        .FunctionType(params, return_type) then {
+            let mut hash = 16(UInt).combine_hash(params.count())
+            for entry in params then {
+                hash = hash.combine_hash(entry.val.hash())
+            }
+            hash = hash.combine_hash(stable_type_hash(return_type.val))
+            yield hash
+        },
+        .StructureType(def_id) then 17(UInt).combine_hash(def_id.id),
+        .EnumType(def_id) then 18(UInt).combine_hash(def_id.id),
+        .ReferenceType(inner) then 19(UInt).combine_hash(stable_type_hash(inner.val)),
+        .MutableReferenceType(inner) then 20(UInt).combine_hash(stable_type_hash(inner.val)),
+        .PointerType(inner) then 21(UInt).combine_hash(stable_type_hash(inner.val)),
+        .MutablePointerType(inner) then 22(UInt).combine_hash(stable_type_hash(inner.val)),
+        .WeakReferenceType(inner) then 23(UInt).combine_hash(stable_type_hash(inner.val)),
+        .MutableWeakReferenceType(inner) then 24(UInt).combine_hash(stable_type_hash(inner.val)),
+        .OpaqueType(def_id) then 25(UInt).combine_hash(def_id.id),
+        .GenericParameter(name) then stable_hash_combine_string(26, name),
+        .GenericStruct(template, args) then {
+            let mut hash = stable_hash_combine_string(27, template)
+            hash = hash.combine_hash(args.count())
+            for arg in args then {
+                hash = hash.combine_hash(stable_type_hash(arg.val))
+            }
+            yield hash
+        },
+        .GenericEnum(template, args) then {
+            let mut hash = stable_hash_combine_string(28, template)
+            hash = hash.combine_hash(args.count())
+            for arg in args then {
+                hash = hash.combine_hash(stable_type_hash(arg.val))
+            }
+            yield hash
+        },
+        .ModuleType(info) then stable_hash_combine_string_list(29, info.module_path),
+        .TraitObject(trait_name, type_args) then {
+            let mut hash = stable_hash_combine_string(30, trait_name)
+            hash = hash.combine_hash(type_args.count())
+            for arg in type_args then {
+                hash = hash.combine_hash(stable_type_hash(arg.val))
+            }
+            yield hash
+        },
+        .TypeVar(tv) then 31(UInt).combine_hash(tv.val.id),
+        .Unknown() then 32,
+    }
+}
+
+given FunctionParamPassKind as Eq {
+
+    public equals(self, other FunctionParamPassKind) Bool = when self in {
+        .ByValue() then other is .ByValue(),
+        .ByReference() then other is .ByReference(),
+        .ByMutableReference() then other is .ByMutableReference(),
+    }
+}
+
+given FunctionParamPassKind as Hash {
+
+    public hash(self) UInt = when self in {
+        .ByValue() then 1,
+        .ByReference() then 2,
+        .ByMutableReference() then 3,
+    }
+}
+
+given FunctionParamEntry as Eq {
+
+    public equals(self, other FunctionParamEntry) Bool =
+        self.param_type == other.param_type and self.pass_kind == other.pass_kind
+}
+
+given FunctionParamEntry as Hash {
+
+    public hash(self) UInt = stable_type_hash(self.param_type).combine_hash(self.pass_kind.hash())
+}
+
+given ModuleSymbolInfo as Eq {
+
+    public equals(self, other ModuleSymbolInfo) Bool = self.module_path == other.module_path
+}
+
+given ModuleSymbolInfo as Hash {
+
+    public hash(self) UInt = stable_hash_combine_string_list(1, self.module_path)
+}
+
+given Type as Eq {
+
+    public equals(self, other Type) Bool = when self in {
+        .IntType() then other is .IntType(),
+        .Int8Type() then other is .Int8Type(),
+        .Int16Type() then other is .Int16Type(),
+        .Int32Type() then other is .Int32Type(),
+        .Int64Type() then other is .Int64Type(),
+        .UIntType() then other is .UIntType(),
+        .UInt8Type() then other is .UInt8Type(),
+        .UInt16Type() then other is .UInt16Type(),
+        .UInt32Type() then other is .UInt32Type(),
+        .UInt64Type() then other is .UInt64Type(),
+        .Float32Type() then other is .Float32Type(),
+        .Float64Type() then other is .Float64Type(),
+        .BoolType() then other is .BoolType(),
+        .VoidType() then other is .VoidType(),
+        .NeverType() then other is .NeverType(),
+        .FunctionType(params, return_type) then when other in {
+            .FunctionType(other_params, other_return_type) then params == other_params and return_type.val == other_return_type.val,
+            _ then false,
+        },
+        .StructureType(def_id) then when other in {
+            .StructureType(other_def_id) then def_id.id == other_def_id.id,
+            _ then false,
+        },
+        .EnumType(def_id) then when other in {
+            .EnumType(other_def_id) then def_id.id == other_def_id.id,
+            _ then false,
+        },
+        .ReferenceType(inner) then when other in {
+            .ReferenceType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .MutableReferenceType(inner) then when other in {
+            .MutableReferenceType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .PointerType(inner) then when other in {
+            .PointerType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .MutablePointerType(inner) then when other in {
+            .MutablePointerType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .WeakReferenceType(inner) then when other in {
+            .WeakReferenceType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .MutableWeakReferenceType(inner) then when other in {
+            .MutableWeakReferenceType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .OpaqueType(def_id) then when other in {
+            .OpaqueType(other_def_id) then def_id.id == other_def_id.id,
+            _ then false,
+        },
+        .GenericParameter(name) then when other in {
+            .GenericParameter(other_name) then name == other_name,
+            _ then false,
+        },
+        .GenericStruct(template, args) then when other in {
+            .GenericStruct(other_template, other_args) then template == other_template and args == other_args,
+            _ then false,
+        },
+        .GenericEnum(template, args) then when other in {
+            .GenericEnum(other_template, other_args) then template == other_template and args == other_args,
+            _ then false,
+        },
+        .ModuleType(info) then when other in {
+            .ModuleType(other_info) then info == other_info,
+            _ then false,
+        },
+        .TraitObject(trait_name, type_args) then when other in {
+            .TraitObject(other_trait_name, other_type_args) then trait_name == other_trait_name and type_args == other_type_args,
+            _ then false,
+        },
+        .TypeVar(tv) then when other in {
+            .TypeVar(other_tv) then tv.val.id == other_tv.val.id,
+            _ then false,
+        },
+        .Unknown() then other is .Unknown(),
+    }
+}
+
+given Type as Hash {
+
+    public hash(self) UInt = stable_type_hash(self)
+}

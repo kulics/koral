@@ -55,36 +55,36 @@ public enum InstantiationKind: Hashable {
             hasher.combine(0)
             hasher.combine(template.defId.id)
             for arg in args {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         case .enumType(let template, let args):
             hasher.combine(1)
             hasher.combine(template.defId.id)
             for arg in args {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         case .function(let template, let args):
             hasher.combine(2)
             hasher.combine(template.defId.id)
             for arg in args {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         case .extensionMethod(let templateName, _, let template, let typeArgs, let methodTypeArgs):
             hasher.combine(3)
             hasher.combine(templateName)
             hasher.combine(template.method.name)
             for arg in typeArgs {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
             for arg in methodTypeArgs {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         case .traitMethod(let baseType, let methodName, let methodTypeArgs):
             hasher.combine(4)
-            hasher.combine(baseType.stableKey)
+            hasher.combine(baseType)
             hasher.combine(methodName)
             for arg in methodTypeArgs {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         }
     }
@@ -111,13 +111,13 @@ public enum InstantiationKind: Hashable {
 /// Uses template names and type arguments for efficient comparison and hashing.
 public enum InstantiationKey: Hashable {
     /// Key for struct type instantiation
-    case structType(templateName: String, args: [Type])
+    case structType(templateDefId: DefId, args: [Type])
     
     /// Key for enum type instantiation
-    case enumType(templateName: String, args: [Type])
+    case enumType(templateDefId: DefId, args: [Type])
     
     /// Key for function instantiation
-    case function(templateName: String, args: [Type])
+    case function(templateDefId: DefId, args: [Type])
     
     /// Key for extension method instantiation
     case extensionMethod(templateName: String, methodName: String, typeArgs: [Type], methodTypeArgs: [Type])
@@ -129,52 +129,52 @@ public enum InstantiationKey: Hashable {
     
     public func hash(into hasher: inout Hasher) {
         switch self {
-        case .structType(let templateName, let args):
+        case .structType(let templateDefId, let args):
             hasher.combine(0)
-            hasher.combine(templateName)
+            hasher.combine(templateDefId)
             for arg in args {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
-        case .enumType(let templateName, let args):
+        case .enumType(let templateDefId, let args):
             hasher.combine(1)
-            hasher.combine(templateName)
+            hasher.combine(templateDefId)
             for arg in args {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
-        case .function(let templateName, let args):
+        case .function(let templateDefId, let args):
             hasher.combine(2)
-            hasher.combine(templateName)
+            hasher.combine(templateDefId)
             for arg in args {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         case .extensionMethod(let templateName, let methodName, let typeArgs, let methodTypeArgs):
             hasher.combine(3)
             hasher.combine(templateName)
             hasher.combine(methodName)
             for arg in typeArgs {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
             for arg in methodTypeArgs {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         case .traitMethod(let baseType, let methodName, let methodTypeArgs):
             hasher.combine(4)
-            hasher.combine(baseType.stableKey)
+            hasher.combine(baseType)
             hasher.combine(methodName)
             for arg in methodTypeArgs {
-                hasher.combine(arg.stableKey)
+                hasher.combine(arg)
             }
         }
     }
     
     public static func == (lhs: InstantiationKey, rhs: InstantiationKey) -> Bool {
         switch (lhs, rhs) {
-        case (.structType(let lName, let lArgs), .structType(let rName, let rArgs)):
-            return lName == rName && lArgs == rArgs
-        case (.enumType(let lName, let lArgs), .enumType(let rName, let rArgs)):
-            return lName == rName && lArgs == rArgs
-        case (.function(let lName, let lArgs), .function(let rName, let rArgs)):
-            return lName == rName && lArgs == rArgs
+        case (.structType(let lDefId, let lArgs), .structType(let rDefId, let rArgs)):
+            return lDefId == rDefId && lArgs == rArgs
+        case (.enumType(let lDefId, let lArgs), .enumType(let rDefId, let rArgs)):
+            return lDefId == rDefId && lArgs == rArgs
+        case (.function(let lDefId, let lArgs), .function(let rDefId, let rArgs)):
+            return lDefId == rDefId && lArgs == rArgs
         case (.extensionMethod(let lTName, let lMName, let lArgs, let lMethodArgs), .extensionMethod(let rTName, let rMName, let rArgs, let rMethodArgs)):
             return lTName == rTName && lMName == rMName && lArgs == rArgs && lMethodArgs == rMethodArgs
         case (.traitMethod(let lBase, let lName, let lMethodArgs), .traitMethod(let rBase, let rName, let rMethodArgs)):
@@ -213,11 +213,11 @@ public struct InstantiationRequest: Hashable {
     public var deduplicationKey: InstantiationKey {
         switch kind {
         case .structType(let template, let args):
-            return .structType(templateName: "def#\(template.defId.id)", args: args)
+            return .structType(templateDefId: template.defId, args: args)
         case .enumType(let template, let args):
-            return .enumType(templateName: "def#\(template.defId.id)", args: args)
+            return .enumType(templateDefId: template.defId, args: args)
         case .function(let template, let args):
-            return .function(templateName: "def#\(template.defId.id)", args: args)
+            return .function(templateDefId: template.defId, args: args)
         case .extensionMethod(let templateName, _, let template, let typeArgs, let methodTypeArgs):
             return .extensionMethod(
                 templateName: templateName,

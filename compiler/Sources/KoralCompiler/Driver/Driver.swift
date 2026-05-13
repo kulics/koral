@@ -34,6 +34,31 @@ public class Driver {
     FileHandle.standardError.write(Data(payload.utf8))
   }
 
+  private func envFlag(_ name: String) -> Bool {
+    guard let value = ProcessInfo.processInfo.environment[name] else {
+      return false
+    }
+    return value == "1" || value == "true" || value == "TRUE"
+  }
+
+  private func debugPhase(_ message: String) {
+    if envFlag("KORAL_DEBUG_PHASE") {
+      writeStderr("[phase] \(message)")
+    }
+  }
+
+  private func phaseTimingEnabled() -> Bool {
+    envFlag("KORAL_PROFILE_PHASES")
+  }
+
+  private func profilePhase(_ message: String, start: DispatchTime) {
+    guard phaseTimingEnabled() else {
+      return
+    }
+    let durationMs = (DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+    writeStderr("[phase-ms] \(message) duration_ms=\(durationMs)")
+  }
+
   public func run(args: [String]) {
     guard args.count > 1 else {
       printUsage()
@@ -625,7 +650,11 @@ public class Driver {
   ) throws {
     let fileManager = FileManager.default
     let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
+    let phasePrefix = mode.rawValue
+    let totalStart = DispatchTime.now()
 
+    debugPhase("\(phasePrefix): type check")
+    let typeCheckStart = DispatchTime.now()
     let typeChecker = TypeChecker(
       ast: combinedAST,
       nodeSourceInfoList: nodeSourceInfoList,
@@ -645,11 +674,15 @@ public class Driver {
         sourceManager: sourceManager
       )
     }
+    profilePhase("\(phasePrefix): type check", start: typeCheckStart)
 
     if mode == .check {
+      debugPhase("check: done")
       return
     }
 
+    debugPhase("\(phasePrefix): monomorphize")
+    let monoStart = DispatchTime.now()
     let monomorphizer = Monomorphizer(input: typeCheckerOutput)
     let monomorphizedProgram: MonomorphizedProgram
     do {
@@ -662,13 +695,21 @@ public class Driver {
         sourceManager: sourceManager
       )
     }
+    profilePhase("\(phasePrefix): monomorphize", start: monoStart)
 
+    if envFlag("KORAL_DUMP_MONO_AST") {
+      printTypedAST(.program(globalNodes: monomorphizedProgram.globalNodes))
+    }
+
+    debugPhase("\(phasePrefix): codegen")
+    let codegenStart = DispatchTime.now()
     let codeGen = CodeGen(
       ast: monomorphizedProgram,
       context: monomorphizer.context,
       escapeAnalysisReportEnabled: escapeAnalysisReport
     )
     let cSource = codeGen.generate()
+    profilePhase("\(phasePrefix): codegen", start: codegenStart)
 
     if escapeAnalysisReport {
       let diagnostics = codeGen.getEscapeAnalysisDiagnostics()
@@ -700,6 +741,8 @@ public class Driver {
     }
 
     if mode == .emitC {
+      debugPhase("emit-c: done")
+      profilePhase("emit-c: total", start: totalStart)
       return
     }
 
@@ -744,9 +787,13 @@ public class Driver {
     }
     #endif
 
+    debugPhase("\(phasePrefix): clang")
+    let clangStart = DispatchTime.now()
     let clangPath = findExecutable("clang") ?? "/usr/bin/clang"
     let clangResult = try runSubprocess(executable: clangPath, args: clangArgs)
+    profilePhase("\(phasePrefix): clang", start: clangStart)
     if clangResult != 0 {
+      profilePhase("\(phasePrefix): total", start: totalStart)
       throw NSError(
         domain: "Driver",
         code: 1,
@@ -755,12 +802,15 @@ public class Driver {
     }
 
     if mode == .build {
+      debugPhase("build: done")
+      profilePhase("build: total", start: totalStart)
       writeStdout("Build successful: \(exeURL.path)")
       return
     }
 
     if mode == .run {
       let runResult = try runSubprocess(executable: exeURL.path, args: [])
+      profilePhase("run: total", start: totalStart)
       if runResult != 0 {
         exit(runResult)
       }

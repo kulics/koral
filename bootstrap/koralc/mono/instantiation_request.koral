@@ -36,26 +36,27 @@ public type InstantiationRequest(
 // Deduplication key derived from an InstantiationRequest.
 // Two requests with the same key represent the same instantiation.
 public type InstantiationKey {
-    StructType(template_def_id DefId, args List[String]),
-    EnumType(template_def_id DefId, args List[String]),
-    Function(template_def_id DefId, args List[String]),
-    ExtensionMethod(template_name String, method_name String, type_args List[String], method_type_args List[String]),
-    TraitMethod(base_type_key String, method_name String, method_type_args List[String]),
+    StructType(template_def_id DefId, args List[ref Type]),
+    EnumType(template_def_id DefId, args List[ref Type]),
+    Function(template_def_id DefId, args List[ref Type]),
+    ExtensionMethod(template_name String, method_name String, type_args List[ref Type], method_type_args List[ref Type]),
+    TraitMethod(base_type Type, method_name String, method_type_args List[ref Type]),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Build canonical key components for a list of type arguments.
-private let args_to_key_parts(args List[ref Type]) List[String] = {
-    let mut out = List[String].new()
-    for a in args then {
-        out.push(stable_type_key(a.val))
+private let type_parts_to_string(parts List[ref Type]) String = {
+    if parts.is_empty() then {
+        return "-"
+    }
+    let mut out = String.new()
+    let mut first = true
+    for part in parts then {
+        if not first then { out.push_byte(',') }
+        out.push_string(stable_type_key(part.val))
+        first = false
     }
     return out
-}
-
-private let key_parts_to_string(parts List[String]) String = {
-    return if parts.is_empty() then "-" else parts.join_to_string(",")
 }
 
 // ── InstantiationKey methods ──────────────────────────────────────────────────
@@ -65,15 +66,15 @@ given InstantiationKey {
     public to_string(self ref) String = {
         return when self in {
             .StructType(template_def_id, args) then
-                "struct:\(template_def_id.id):\(key_parts_to_string(args))",
+                "struct:\(template_def_id.id):\(type_parts_to_string(args))",
             .EnumType(template_def_id, args) then
-                "enum:\(template_def_id.id):\(key_parts_to_string(args))",
+                "enum:\(template_def_id.id):\(type_parts_to_string(args))",
             .Function(template_def_id, args) then
-                "func:\(template_def_id.id):\(key_parts_to_string(args))",
+                "func:\(template_def_id.id):\(type_parts_to_string(args))",
             .ExtensionMethod(template_name, method_name, type_args, method_type_args) then
-                "ext:\(template_name):\(method_name):\(key_parts_to_string(type_args)):\(key_parts_to_string(method_type_args))",
-            .TraitMethod(base_type_key, method_name, method_type_args) then
-                "trait:\(base_type_key):\(method_name):\(key_parts_to_string(method_type_args))",
+                "ext:\(template_name):\(method_name):\(type_parts_to_string(type_args)):\(type_parts_to_string(method_type_args))",
+            .TraitMethod(base_type, method_name, method_type_args) then
+                "trait:\(stable_type_key(base_type)):\(method_name):\(type_parts_to_string(method_type_args))",
         }
     }
 
@@ -89,42 +90,116 @@ given InstantiationKey {
     }
 }
 
+given InstantiationKey as Eq {
+
+    public equals(self, other InstantiationKey) Bool = when self in {
+        .StructType(template_def_id, args) then when other in {
+            .StructType(other_template_def_id, other_args) then template_def_id.id == other_template_def_id.id and args == other_args,
+            _ then false,
+        },
+        .EnumType(template_def_id, args) then when other in {
+            .EnumType(other_template_def_id, other_args) then template_def_id.id == other_template_def_id.id and args == other_args,
+            _ then false,
+        },
+        .Function(template_def_id, args) then when other in {
+            .Function(other_template_def_id, other_args) then template_def_id.id == other_template_def_id.id and args == other_args,
+            _ then false,
+        },
+        .ExtensionMethod(template_name, method_name, type_args, method_type_args) then when other in {
+            .ExtensionMethod(other_template_name, other_method_name, other_type_args, other_method_type_args) then
+                template_name == other_template_name
+                and method_name == other_method_name
+                and type_args == other_type_args
+                and method_type_args == other_method_type_args,
+            _ then false,
+        },
+        .TraitMethod(base_type, method_name, method_type_args) then when other in {
+            .TraitMethod(other_base_type, other_method_name, other_method_type_args) then
+                base_type == other_base_type
+                and method_name == other_method_name
+                and method_type_args == other_method_type_args,
+            _ then false,
+        },
+    }
+}
+
+given InstantiationKey as Hash {
+
+    public hash(self) UInt = when self in {
+        .StructType(template_def_id, args) then {
+            let mut hash = 1(UInt).combine_hash(template_def_id.id)
+            for arg in args then {
+                hash = hash.combine_hash(arg.val.hash())
+            }
+            yield hash
+        },
+        .EnumType(template_def_id, args) then {
+            let mut hash = 2(UInt).combine_hash(template_def_id.id)
+            for arg in args then {
+                hash = hash.combine_hash(arg.val.hash())
+            }
+            yield hash
+        },
+        .Function(template_def_id, args) then {
+            let mut hash = 3(UInt).combine_hash(template_def_id.id)
+            for arg in args then {
+                hash = hash.combine_hash(arg.val.hash())
+            }
+            yield hash
+        },
+        .ExtensionMethod(template_name, method_name, type_args, method_type_args) then {
+            let mut hash = 4(UInt).combine_hash(template_name.hash()).combine_hash(method_name.hash())
+            for arg in type_args then {
+                hash = hash.combine_hash(arg.val.hash())
+            }
+            for arg in method_type_args then {
+                hash = hash.combine_hash(arg.val.hash())
+            }
+            yield hash
+        },
+        .TraitMethod(base_type, method_name, method_type_args) then {
+            let mut hash = 5(UInt).combine_hash(base_type.hash()).combine_hash(method_name.hash())
+            for arg in method_type_args then {
+                hash = hash.combine_hash(arg.val.hash())
+            }
+            yield hash
+        },
+    }
+}
+
 // ── InstantiationRequest methods ──────────────────────────────────────────────
 
 given InstantiationRequest {
     // Derive the InstantiationKey for this request.
+    // Generic argument lists are COW and Type is immutable, so reusing the
+    // original lists avoids redundant boxing while keeping keys stable.
     public to_key(self) InstantiationKey = {
         return when self.kind in {
             .StructType(template, args) then {
-                yield InstantiationKey.StructType(template.def_id, args_to_key_parts(args))
+                yield InstantiationKey.StructType(template.def_id, args)
             },
             .EnumType(template, args) then {
-                yield InstantiationKey.EnumType(template.def_id, args_to_key_parts(args))
+                yield InstantiationKey.EnumType(template.def_id, args)
             },
             .Function(template, args) then {
-                yield InstantiationKey.Function(template.def_id, args_to_key_parts(args))
+                yield InstantiationKey.Function(template.def_id, args)
             },
             .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
                 let _ = base_type
                 yield InstantiationKey.ExtensionMethod(
                     template_name,
                     template.method.name,
-                    args_to_key_parts(type_args),
-                    args_to_key_parts(method_type_args),
+                    type_args,
+                    method_type_args,
                 )
             },
             .TraitMethod(base_type, method_name, method_type_args) then
-                InstantiationKey.TraitMethod(stable_type_key(base_type), method_name, args_to_key_parts(method_type_args)),
+                InstantiationKey.TraitMethod(base_type, method_name, method_type_args),
         }
     }
 
-    // Return the canonical deduplication key string for this request.
-    public deduplication_key(self) String = {
-        return self.to_key().to_string()
+    // Return the canonical structured deduplication key for this request.
+    public deduplication_key(self) InstantiationKey = {
+        return self.to_key()
     }
-}
-
-// Lexicographic string comparison. Returns negative/0/positive.
-private let compare_strings(a String, b String) Int = {
-    return a.compare(b)
 }

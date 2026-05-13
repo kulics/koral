@@ -274,6 +274,49 @@ private let resolve_def_id_backed_type(
             }
         },
     }
+    if reconstructed == fallback then {
+        when fallback in {
+            .StructureType(local_def_id) then when mono.storage.context.get_struct_fields(local_def_id) in {
+                .Some(fields) then {
+                    let mut resolved_fields = List[StructField].with_capacity(fields.count())
+                    let mut changed = false
+                    for field in fields then {
+                        let resolved_field_type = resolve_parameterized_type(mono, field.field_type)
+                        if resolved_field_type <> field.field_type then {
+                            changed = true
+                        }
+                        resolved_fields.push(StructField(field.name, resolved_field_type, field.mutable, field.access, field.named))
+                    }
+                    if changed then {
+                        mono.storage.context.set_struct_fields(local_def_id, resolved_fields)
+                    }
+                },
+                .None() then {},
+            },
+            .EnumType(local_def_id) then when mono.storage.context.get_enum_cases(local_def_id) in {
+                .Some(cases) then {
+                    let mut resolved_cases = List[EnumCaseInfo].with_capacity(cases.count())
+                    let mut changed = false
+                    for enum_case in cases then {
+                        let mut resolved_params = List[EnumCaseParam].with_capacity(enum_case.params.count())
+                        for param in enum_case.params then {
+                            let resolved_param_type = resolve_parameterized_type(mono, param.param_type)
+                            if resolved_param_type <> param.param_type then {
+                                changed = true
+                            }
+                            resolved_params.push(EnumCaseParam(param.name, resolved_param_type, param.named))
+                        }
+                        resolved_cases.push(EnumCaseInfo(enum_case.name, resolved_params))
+                    }
+                    if changed then {
+                        mono.storage.context.set_enum_cases(local_def_id, resolved_cases)
+                    }
+                },
+                .None() then {},
+            },
+            _ then {},
+        }
+    }
     return reconstructed
 }
 
@@ -300,15 +343,65 @@ public let resolve_parameterized_type(mono ref Monomorphizer, t Type) Type = {
         .Unknown() then { return t },
         _ then {},
     }
-    let cache_key = stable_type_key(t)
-    when mono.storage.resolved_parameterized_types.get(cache_key) in {
+
+    when t in {
+        .ReferenceType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner.val)
+            return if resolved_inner == inner.val then t else Type.ReferenceType(box(resolved_inner))
+        },
+        .MutableReferenceType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner.val)
+            return if resolved_inner == inner.val then t else Type.MutableReferenceType(box(resolved_inner))
+        },
+        .PointerType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner.val)
+            return if resolved_inner == inner.val then t else Type.PointerType(box(resolved_inner))
+        },
+        .MutablePointerType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner.val)
+            return if resolved_inner == inner.val then t else Type.MutablePointerType(box(resolved_inner))
+        },
+        .WeakReferenceType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner.val)
+            return if resolved_inner == inner.val then t else Type.WeakReferenceType(box(resolved_inner))
+        },
+        .MutableWeakReferenceType(inner) then {
+            let resolved_inner = resolve_parameterized_type(mono, inner.val)
+            return if resolved_inner == inner.val then t else Type.MutableWeakReferenceType(box(resolved_inner))
+        },
+        .FunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params)
+            let mut new_param_types = List[ref Type].with_capacity(param_types.count())
+            let mut changed = false
+            for pt in param_types then {
+                let resolved = resolve_parameterized_type(mono, pt.val)
+                if resolved <> pt.val then {
+                    changed = true
+                }
+                new_param_types.push(box(resolved))
+            }
+            let resolved_return = resolve_parameterized_type(mono, return_type.val)
+            if not changed and resolved_return == return_type.val then {
+                return t
+            }
+            return make_function_type(new_param_types, resolved_return)
+        },
+        .OpaqueType(def_id) then {
+            if mono.storage.context.lookup_type(def_id) is .None() then {
+                return t
+            }
+        },
+        _ then {},
+    }
+
+    when mono.storage.resolved_parameterized_types.get(t) in {
         .Some(cached) then { return cached },
         .None() then {},
     }
-    if mono.storage.resolving_parameterized_type_keys.contains(cache_key) then {
+    if mono.storage.resolving_parameterized_type_keys.contains(t) then {
         return t
     }
-    mono.storage.resolving_parameterized_type_keys.insert(cache_key)
+    mono.storage.resolving_parameterized_type_keys.insert(t)
 
     let resolved = when t in {
         // GenericStruct: look up struct template and instantiate.
@@ -405,48 +498,6 @@ public let resolve_parameterized_type(mono ref Monomorphizer, t Type) Type = {
             }
         },
 
-        // ReferenceType: recursively resolve inner type.
-        .ReferenceType(inner) then {
-            let resolved_inner = resolve_parameterized_type(mono, inner.val)
-            yield Type.ReferenceType(box(resolved_inner))
-        },
-        .MutableReferenceType(inner) then {
-            let resolved_inner = resolve_parameterized_type(mono, inner.val)
-            yield Type.MutableReferenceType(box(resolved_inner))
-        },
-
-        // PointerType: recursively resolve inner type.
-        .PointerType(inner) then {
-            let resolved_inner = resolve_parameterized_type(mono, inner.val)
-            yield Type.PointerType(box(resolved_inner))
-        },
-        .MutablePointerType(inner) then {
-            let resolved_inner = resolve_parameterized_type(mono, inner.val)
-            yield Type.MutablePointerType(box(resolved_inner))
-        },
-
-        // WeakReferenceType: recursively resolve inner type.
-        .WeakReferenceType(inner) then {
-            let resolved_inner = resolve_parameterized_type(mono, inner.val)
-            yield Type.WeakReferenceType(box(resolved_inner))
-        },
-        .MutableWeakReferenceType(inner) then {
-            let resolved_inner = resolve_parameterized_type(mono, inner.val)
-            yield Type.MutableWeakReferenceType(box(resolved_inner))
-        },
-
-        // FunctionType: recursively resolve param types and return type.
-        .FunctionType(fn_params, return_type) then {
-            let param_types = param_entry_types(fn_params)
-            let mut new_param_types = List[ref Type].new()
-            for pt in param_types then {
-                let resolved = resolve_parameterized_type(mono, pt.val)
-                new_param_types.push(box(resolved))
-            }
-            let resolved_return = resolve_parameterized_type(mono, return_type.val)
-            yield make_function_type(new_param_types, resolved_return)
-        },
-
         .StructureType(def_id) then resolve_def_id_backed_type(mono, def_id, t, true),
 
         .EnumType(def_id) then resolve_def_id_backed_type(mono, def_id, t, false),
@@ -465,8 +516,8 @@ public let resolve_parameterized_type(mono ref Monomorphizer, t Type) Type = {
         _ then t,
     }
 
-    mono.storage.resolving_parameterized_type_keys.remove(cache_key)
-    mono.storage.resolved_parameterized_types.insert(cache_key, resolved)
+    mono.storage.resolving_parameterized_type_keys.remove(t)
+    mono.storage.resolved_parameterized_types.insert(t, resolved)
     return resolved
 }
 

@@ -368,8 +368,8 @@ protected type MonomorphizerStorage(
     mut instantiated_types Dict[String, Type],
     mut instantiated_functions Dict[String, InstantiatedFunction],
     mut instantiated_function_symbols Dict[String, Symbol],
-    mut resolved_parameterized_types Dict[String, Type],
-    mut resolving_parameterized_type_keys Set[String],
+    mut resolved_parameterized_types Dict[Type, Type],
+    mut resolving_parameterized_type_keys Set[Type],
     mut generated_layouts Set[String],
 
     // ── Output ───────────────────────────────────────────────────────────────
@@ -386,10 +386,10 @@ protected type MonomorphizerStorage(
 
     // ── Work queue ───────────────────────────────────────────────────────────
     mut pending_requests Queue[InstantiationRequest],
-    mut processed_request_keys Set[String],
-    mut pending_request_keys Set[String],
-    mut resolved_trait_placeholder_keys Set[String],
-    mut in_progress_trait_placeholder_keys Set[String],
+    mut processed_request_keys Set[InstantiationKey],
+    mut pending_request_keys Set[InstantiationKey],
+    mut resolved_trait_placeholder_keys Set[InstantiationKey],
+    mut in_progress_trait_placeholder_keys Set[InstantiationKey],
 
     // ── Recursion detection ──────────────────────────────────────────────────
     mut instantiating_types Set[String],
@@ -522,7 +522,7 @@ given Monomorphizer {
         // Copy and deduplicate instantiation requests up front to avoid
         // pathological queue growth from repeated identical requests.
         let mut requests = Queue[InstantiationRequest].with_capacity(input.instantiation_requests.count())
-        let mut queued_keys = Set[String].new()
+        let mut queued_keys = Set[InstantiationKey].new()
         for req in input.instantiation_requests then {
             let key = req.deduplication_key()
             if not queued_keys.contains(key) then {
@@ -538,8 +538,8 @@ given Monomorphizer {
             Dict[String, Type].new(),
             Dict[String, InstantiatedFunction].new(),
             Dict[String, Symbol].new(),
-            Dict[String, Type].new(),
-            Set[String].new(),
+            Dict[Type, Type].new(),
+            Set[Type].new(),
             Set[String].new(),
             // output
             initial_nodes,
@@ -553,10 +553,10 @@ given Monomorphizer {
             List[VtableRequest].new(),
             // work queue
             requests,
-            Set[String].new(),
+            Set[InstantiationKey].new(),
             queued_keys,
-            Set[String].new(),
-            Set[String].new(),
+            Set[InstantiationKey].new(),
+            Set[InstantiationKey].new(),
             // recursion detection
             Set[String].new(),
             Set[String].new(),

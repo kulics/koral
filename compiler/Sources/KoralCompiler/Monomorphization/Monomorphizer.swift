@@ -66,8 +66,8 @@ public class Monomorphizer {
     
     // MARK: - Caches
     
-    /// Cache for instantiated types: "TemplateName<Arg1,Arg2>" -> Type
-    internal var instantiatedTypes: [String: Type] = [:]
+    /// Cache for instantiated nominal types keyed by template DefId + concrete args.
+    internal var instantiatedTypes: [InstantiationKey: Type] = [:]
     
     /// Cache for instantiated functions: "TemplateName<Arg1,Arg2>" -> (SpecializedSymbolName, Type)
     internal var instantiatedFunctions: [String: (String, Type)] = [:]
@@ -97,7 +97,7 @@ public class Monomorphizer {
     /// Inherent given method names indexed by receiver type stableKey.
     /// Used to detect name conflicts with `given Type as Trait` methods and
     /// disambiguate specialized emitted symbols only when necessary.
-    internal var inherentGivenMethodNamesByTypeKey: [String: Set<String>] = [:]
+    internal var inherentGivenMethodNamesByTypeKey: [UInt64: Set<String>] = [:]
 
     
     /// Current source line for error reporting
@@ -299,6 +299,39 @@ public class Monomorphizer {
         }
         return candidates.first
     }
+
+    internal func typeInstantiationCacheKey(for type: Type) -> InstantiationKey? {
+        switch type {
+        case .genericStruct(let templateName, let args):
+            guard let template = input.genericTemplates.structTemplates[templateName] else {
+                return nil
+            }
+            return .structType(templateDefId: template.defId, args: args)
+        case .genericEnum(let templateName, let args):
+            guard let template = input.genericTemplates.enumTemplates[templateName] else {
+                return nil
+            }
+            return .enumType(templateDefId: template.defId, args: args)
+        case .structure(let defId):
+            guard context.isGenericInstantiation(defId) == true,
+                  let templateName = context.getTemplateName(defId),
+                  let args = context.getTypeArguments(defId),
+                  let template = input.genericTemplates.structTemplates[templateName] else {
+                return nil
+            }
+            return .structType(templateDefId: template.defId, args: args)
+        case .`enum`(let defId):
+            guard context.isGenericInstantiation(defId) == true,
+                  let templateName = context.getTemplateName(defId),
+                  let args = context.getTypeArguments(defId),
+                  let template = input.genericTemplates.enumTemplates[templateName] else {
+                return nil
+            }
+            return .enumType(templateDefId: template.defId, args: args)
+        default:
+            return nil
+        }
+    }
     
     // MARK: - Initialization
     
@@ -351,7 +384,7 @@ public class Monomorphizer {
 
                 guard trait == nil else { continue }
 
-                let typeKey = type.stableKey
+                let typeKey = type.stableHashKey
                 var names = inherentGivenMethodNamesByTypeKey[typeKey] ?? Set<String>()
                 for method in methods {
                     let methodName = receiverMethodDispatch[method.identifier.defId]?.methodName
@@ -373,11 +406,12 @@ public class Monomorphizer {
 
     private struct PendingRequestSortKey: Comparable {
         let kindOrder: PendingRequestKindOrder
+        let templateId: UInt64
         let templateName: String
         let methodName: String
-        let baseTypeKey: String
-        let typeArgKeys: [String]
-        let methodTypeArgKeys: [String]
+        let baseTypeHash: UInt64
+        let typeArgHashes: [UInt64]
+        let methodTypeArgHashes: [UInt64]
         let sourceFileName: String
         let sourceLine: Int
 
@@ -385,20 +419,23 @@ public class Monomorphizer {
             if lhs.kindOrder.rawValue != rhs.kindOrder.rawValue {
                 return lhs.kindOrder.rawValue < rhs.kindOrder.rawValue
             }
+            if lhs.templateId != rhs.templateId {
+                return lhs.templateId < rhs.templateId
+            }
             if lhs.templateName != rhs.templateName {
                 return lhs.templateName < rhs.templateName
             }
             if lhs.methodName != rhs.methodName {
                 return lhs.methodName < rhs.methodName
             }
-            if lhs.baseTypeKey != rhs.baseTypeKey {
-                return lhs.baseTypeKey < rhs.baseTypeKey
+            if lhs.baseTypeHash != rhs.baseTypeHash {
+                return lhs.baseTypeHash < rhs.baseTypeHash
             }
-            if lhs.typeArgKeys != rhs.typeArgKeys {
-                return lhs.typeArgKeys.lexicographicallyPrecedes(rhs.typeArgKeys)
+            if lhs.typeArgHashes != rhs.typeArgHashes {
+                return lhs.typeArgHashes.lexicographicallyPrecedes(rhs.typeArgHashes)
             }
-            if lhs.methodTypeArgKeys != rhs.methodTypeArgKeys {
-                return lhs.methodTypeArgKeys.lexicographicallyPrecedes(rhs.methodTypeArgKeys)
+            if lhs.methodTypeArgHashes != rhs.methodTypeArgHashes {
+                return lhs.methodTypeArgHashes.lexicographicallyPrecedes(rhs.methodTypeArgHashes)
             }
             if lhs.sourceFileName != rhs.sourceFileName {
                 return lhs.sourceFileName < rhs.sourceFileName
@@ -410,58 +447,63 @@ public class Monomorphizer {
     private func pendingRequestSortKey(_ request: InstantiationRequest) -> PendingRequestSortKey {
         let key = request.deduplicationKey
         switch key {
-        case .structType(let templateName, let args):
+        case .structType(let templateDefId, let args):
             return PendingRequestSortKey(
                 kindOrder: .structType,
-                templateName: templateName,
+                templateId: templateDefId.id,
+                templateName: "",
                 methodName: "",
-                baseTypeKey: "",
-                typeArgKeys: args.map(\.stableKey),
-                methodTypeArgKeys: [],
+                baseTypeHash: 0,
+                typeArgHashes: args.map(\.stableHashKey),
+                methodTypeArgHashes: [],
                 sourceFileName: request.sourceFileName,
                 sourceLine: request.sourceLine
             )
-        case .enumType(let templateName, let args):
+        case .enumType(let templateDefId, let args):
             return PendingRequestSortKey(
                 kindOrder: .enumType,
-                templateName: templateName,
+                templateId: templateDefId.id,
+                templateName: "",
                 methodName: "",
-                baseTypeKey: "",
-                typeArgKeys: args.map(\.stableKey),
-                methodTypeArgKeys: [],
+                baseTypeHash: 0,
+                typeArgHashes: args.map(\.stableHashKey),
+                methodTypeArgHashes: [],
                 sourceFileName: request.sourceFileName,
                 sourceLine: request.sourceLine
             )
-        case .function(let templateName, let args):
+        case .function(let templateDefId, let args):
             return PendingRequestSortKey(
                 kindOrder: .function,
-                templateName: templateName,
+                templateId: templateDefId.id,
+                templateName: "",
                 methodName: "",
-                baseTypeKey: "",
-                typeArgKeys: args.map(\.stableKey),
-                methodTypeArgKeys: [],
+                baseTypeHash: 0,
+                typeArgHashes: args.map(\.stableHashKey),
+                methodTypeArgHashes: [],
                 sourceFileName: request.sourceFileName,
                 sourceLine: request.sourceLine
             )
         case .extensionMethod(let templateName, let methodName, let typeArgs, let methodTypeArgs):
             return PendingRequestSortKey(
                 kindOrder: .extensionMethod,
+                templateId: 0,
                 templateName: templateName,
                 methodName: methodName,
-                baseTypeKey: "",
-                typeArgKeys: typeArgs.map(\.stableKey),
-                methodTypeArgKeys: methodTypeArgs.map(\.stableKey),
+                baseTypeHash: 0,
+                typeArgHashes: typeArgs.map(\.stableHashKey),
+                methodTypeArgHashes: methodTypeArgs.map(\.stableHashKey),
                 sourceFileName: request.sourceFileName,
                 sourceLine: request.sourceLine
             )
         case .traitMethod(let baseType, let methodName, let methodTypeArgs):
             return PendingRequestSortKey(
                 kindOrder: .traitMethod,
+                templateId: 0,
                 templateName: "",
                 methodName: methodName,
-                baseTypeKey: baseType.stableKey,
-                typeArgKeys: [],
-                methodTypeArgKeys: methodTypeArgs.map(\.stableKey),
+                baseTypeHash: baseType.stableHashKey,
+                typeArgHashes: [],
+                methodTypeArgHashes: methodTypeArgs.map(\.stableHashKey),
                 sourceFileName: request.sourceFileName,
                 sourceLine: request.sourceLine
             )
@@ -509,7 +551,9 @@ public class Monomorphizer {
                     // Also cache the type if it's a generic instantiation
                           if case .structure(let defId) = identifier.type,
                               context.isGenericInstantiation(defId) == true {
-                        instantiatedTypes[identifierName] = identifier.type
+                        if let cacheKey = typeInstantiationCacheKey(for: identifier.type) {
+                            instantiatedTypes[cacheKey] = identifier.type
+                        }
                     }
                     resultNodes.append(node)
                 case .globalEnumDeclaration(let identifier, _):
@@ -518,7 +562,9 @@ public class Monomorphizer {
                     generatedLayouts.insert(identifierName)
                           if case .`enum`(let defId) = identifier.type,
                               context.isGenericInstantiation(defId) == true {
-                        instantiatedTypes[identifierName] = identifier.type
+                        if let cacheKey = typeInstantiationCacheKey(for: identifier.type) {
+                            instantiatedTypes[cacheKey] = identifier.type
+                        }
                     }
                     resultNodes.append(node)
                 case .globalFunction(let identifier, _, _):
