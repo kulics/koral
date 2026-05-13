@@ -19,10 +19,10 @@ public struct VtableRequest: Hashable {
     public let traitTypeArgs: [Type]
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(concreteType.stableKey)
+        hasher.combine(concreteType)
         hasher.combine(traitName)
         for arg in traitTypeArgs {
-            hasher.combine(arg.stableKey)
+            hasher.combine(arg)
         }
     }
 
@@ -57,7 +57,7 @@ extension Monomorphizer {
         let templateName = context.getName(template.defId) ?? "<unknown>"
         
         // Check cache
-        let key = "\(templateName)<\(args.map { $0.description }.joined(separator: ","))>"
+        let key: InstantiationKey = .structType(templateDefId: template.defId, args: args)
         if let cached = instantiatedTypes[key] {
             return cached
         }
@@ -163,7 +163,7 @@ extension Monomorphizer {
         let templateName = context.getName(template.defId) ?? "<unknown>"
 
         // Check cache
-        let key = "\(templateName)<\(args.map { $0.description }.joined(separator: ","))>"
+        let key: InstantiationKey = .enumType(templateDefId: template.defId, args: args)
         if let existing = instantiatedTypes[key] {
             return existing
         }

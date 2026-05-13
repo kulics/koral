@@ -24,7 +24,7 @@ protected type TypeCheckerStorage(
     mut generic_param_constraints Dict[String, List[String]],
     mut generic_templates GenericTemplateRegistry,
     mut instantiation_requests List[InstantiationRequest],
-    mut instantiation_request_keys Set[String],
+    mut instantiation_request_keys Set[InstantiationKey],
     mut import_graph Option[ImportGraph],
     mut known_root_modules Set[String],
     mut explicit_trait_conformances Set[String],
@@ -100,7 +100,7 @@ given TypeChecker {
             Dict[String, List[String]].new(),
             GenericTemplateRegistry.new(),
             List[InstantiationRequest].new(),
-            Set[String].new(),
+            Set[InstantiationKey].new(),
             Option[ImportGraph].None(),
             Set[String].new(),
             Set[String].new(),
@@ -340,14 +340,14 @@ given TypeChecker {
     private same_expr_type(self, left Type, right Type) Bool = {
         let normalized_left = self.canonicalize_alias_type(self.concretize_default_literal_type(left))
         let normalized_right = self.canonicalize_alias_type(self.concretize_default_literal_type(right))
-        return stable_type_key(normalized_left) == stable_type_key(normalized_right)
+        return normalized_left == normalized_right
     }
 
     private canonicalize_alias_type(self, t Type) Type = {
         return when t in {
             .StructureType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
-                    if stable_type_key(mapped) == stable_type_key(t) then {
+                    if mapped == t then {
                         return t
                     }
                     return self.canonicalize_alias_type(mapped)
@@ -356,7 +356,7 @@ given TypeChecker {
             },
             .EnumType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
-                    if stable_type_key(mapped) == stable_type_key(t) then {
+                    if mapped == t then {
                         return t
                     }
                     return self.canonicalize_alias_type(mapped)
@@ -365,7 +365,7 @@ given TypeChecker {
             },
             .OpaqueType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
-                    if stable_type_key(mapped) == stable_type_key(t) then {
+                    if mapped == t then {
                         return t
                     }
                     return self.canonicalize_alias_type(mapped)

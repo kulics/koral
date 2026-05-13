@@ -508,7 +508,7 @@ extension Monomorphizer {
             // Convert to regular call by instantiating the function
             if let template = input.genericTemplates.functionTemplates[functionName] {
                 // Ensure the function is instantiated
-                let key = InstantiationKey.function(templateName: functionName, args: substitutedTypeArgs)
+                let key = InstantiationKey.function(templateDefId: template.defId, args: substitutedTypeArgs)
                 if !processedRequestKeys.contains(key) {
                     pendingRequests.append(InstantiationRequest(
                         kind: .function(template: template, args: substitutedTypeArgs),

@@ -197,34 +197,26 @@ extension Monomorphizer {
     internal func resolveParameterizedType(_ type: Type, visited: Set<UInt64> = []) -> Type {
         switch type {
         case .genericStruct(let template, let args):
-            // Check if we already have this type cached FIRST (before resolving args)
-            // This handles recursive types like List<Expr ref> where Expr contains List<Expr ref>
-            let initialCacheKey = "\(template)<\(args.map { $0.description }.joined(separator: ","))>"
-            if let cached = instantiatedTypes[initialCacheKey] {
+            if let cacheKey = typeInstantiationCacheKey(for: type),
+               let cached = instantiatedTypes[cacheKey] {
                 return cached
             }
-            
-            // First, recursively resolve the type arguments
+
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
-            
-            // If any arg still contains generic parameters, we can't resolve yet
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return .genericStruct(template: template, args: resolvedArgs)
+                return resolvedArgs == args ? type : .genericStruct(template: template, args: resolvedArgs)
             }
-            
-            // Check cache again with resolved args (in case description changed)
-            let cacheKey = "\(template)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
-            if let cached = instantiatedTypes[cacheKey] {
+
+            let resolvedType = Type.genericStruct(template: template, args: resolvedArgs)
+            if let cacheKey = typeInstantiationCacheKey(for: resolvedType),
+               let cached = instantiatedTypes[cacheKey] {
                 return cached
             }
-            
-            // Look up the struct template and instantiate directly
+
             if let structTemplate = input.genericTemplates.structTemplates[template] {
-                // Directly instantiate the struct type
                 do {
                     return try instantiateStruct(template: structTemplate, args: resolvedArgs)
                 } catch {
-                    // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
@@ -232,37 +224,30 @@ extension Monomorphizer {
                     return .structure(defId: defId)
                 }
             }
-            
-            return .genericStruct(template: template, args: resolvedArgs)
+
+            return resolvedArgs == args ? type : resolvedType
             
         case .genericEnum(let template, let args):
-            // Check if we already have this type cached FIRST (before resolving args)
-            let initialCacheKey = "\(template)<\(args.map { $0.description }.joined(separator: ","))>"
-            if let cached = instantiatedTypes[initialCacheKey] {
+            if let cacheKey = typeInstantiationCacheKey(for: type),
+               let cached = instantiatedTypes[cacheKey] {
                 return cached
             }
-            
-            // First, recursively resolve the type arguments
+
             let resolvedArgs = args.map { resolveParameterizedType($0, visited: visited) }
-            
-            // If any arg still contains generic parameters, we can't resolve yet
             if resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
-                return .genericEnum(template: template, args: resolvedArgs)
+                return resolvedArgs == args ? type : .genericEnum(template: template, args: resolvedArgs)
             }
-            
-            // Check cache again with resolved args (in case description changed)
-            let cacheKey = "\(template)<\(resolvedArgs.map { $0.description }.joined(separator: ","))>"
-            if let cached = instantiatedTypes[cacheKey] {
+
+            let resolvedType = Type.genericEnum(template: template, args: resolvedArgs)
+            if let cacheKey = typeInstantiationCacheKey(for: resolvedType),
+               let cached = instantiatedTypes[cacheKey] {
                 return cached
             }
-            
-            // Look up the enum template and instantiate directly
+
             if let enumTemplate = input.genericTemplates.enumTemplates[template] {
-                // Directly instantiate the enum type
                 do {
                     return try instantiateEnum(template: enumTemplate, args: resolvedArgs)
                 } catch {
-                    // If instantiation fails, return a placeholder
                     let argLayoutKeys = resolvedArgs.map { context.getLayoutKey($0) }.joined(separator: "_")
                     let layoutName = "\(template)_\(argLayoutKeys)"
                     let defId = getOrAllocateTypeDefId(name: layoutName, kind: .`enum`)
@@ -270,39 +255,46 @@ extension Monomorphizer {
                     return .`enum`(defId: defId)
                 }
             }
-            
-            return .genericEnum(template: template, args: resolvedArgs)
+
+            return resolvedArgs == args ? type : resolvedType
             
         case .reference(let inner):
-            return .reference(inner: resolveParameterizedType(inner, visited: visited))
+            let resolvedInner = resolveParameterizedType(inner, visited: visited)
+            return resolvedInner == inner ? type : .reference(inner: resolvedInner)
         case .mutableReference(let inner):
-            return .mutableReference(inner: resolveParameterizedType(inner, visited: visited))
+            let resolvedInner = resolveParameterizedType(inner, visited: visited)
+            return resolvedInner == inner ? type : .mutableReference(inner: resolvedInner)
 
         case .weakReference(let inner):
-            return .weakReference(inner: resolveParameterizedType(inner, visited: visited))
+            let resolvedInner = resolveParameterizedType(inner, visited: visited)
+            return resolvedInner == inner ? type : .weakReference(inner: resolvedInner)
         case .mutableWeakReference(let inner):
-            return .mutableWeakReference(inner: resolveParameterizedType(inner, visited: visited))
+            let resolvedInner = resolveParameterizedType(inner, visited: visited)
+            return resolvedInner == inner ? type : .mutableWeakReference(inner: resolvedInner)
 
         case .pointer(let element):
-            return .pointer(element: resolveParameterizedType(element, visited: visited))
+            let resolvedElement = resolveParameterizedType(element, visited: visited)
+            return resolvedElement == element ? type : .pointer(element: resolvedElement)
         case .mutablePointer(let element):
-            return .mutablePointer(element: resolveParameterizedType(element, visited: visited))
+            let resolvedElement = resolveParameterizedType(element, visited: visited)
+            return resolvedElement == element ? type : .mutablePointer(element: resolvedElement)
 
         case .function(let params, let returns):
+            var paramsChanged = false
             let newParams = params.map { param in
-                Parameter(
-                    type: resolveParameterizedType(param.type, visited: visited),
-                    kind: param.kind
-                )
+                let resolvedType = resolveParameterizedType(param.type, visited: visited)
+                if resolvedType != param.type {
+                    paramsChanged = true
+                }
+                return Parameter(type: resolvedType, kind: param.kind)
             }
             let newReturns = resolveParameterizedType(returns, visited: visited)
-            return .function(
-                parameters: newParams,
-                returns: newReturns
-            )
+            if !paramsChanged && newReturns == returns {
+                return type
+            }
+            return .function(parameters: newParams, returns: newReturns)
             
         case .structure(let defId):
-            // Skip if already resolved (optimization to avoid exponential traversal)
             if resolvedStructEnumDefIds.contains(defId.id) {
                 return type
             }
@@ -335,7 +327,6 @@ extension Monomorphizer {
             return .structure(defId: defId)
             
         case .`enum`(let defId):
-            // Skip if already resolved (optimization to avoid exponential traversal)
             if resolvedStructEnumDefIds.contains(defId.id) {
                 return type
             }
@@ -976,7 +967,7 @@ extension Monomorphizer {
             // Look up the function template and instantiate
             if let template = input.genericTemplates.functionTemplates[functionName] {
                 // Ensure the function is instantiated
-                let key = InstantiationKey.function(templateName: functionName, args: resolvedTypeArgs)
+                let key = InstantiationKey.function(templateDefId: template.defId, args: resolvedTypeArgs)
                 if !processedRequestKeys.contains(key) {
                     pendingRequests.append(InstantiationRequest(
                         kind: .function(template: template, args: resolvedTypeArgs),

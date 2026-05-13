@@ -1,5 +1,30 @@
 import Foundation
 
+private struct StableTypeHasher {
+  private(set) var state: UInt64 = 0xcbf29ce484222325
+
+  mutating func combine(_ value: UInt64) {
+    state ^= value &+ 0x9e3779b97f4a7c15
+    state &*= 0x100000001b3
+  }
+
+  mutating func combine(_ value: Int) {
+    combine(UInt64(bitPattern: Int64(value)))
+  }
+
+  mutating func combine(_ value: Bool) {
+    combine(value ? 1 : 0)
+  }
+
+  mutating func combine(_ value: String) {
+    combine(UInt64(value.utf8.count))
+    for byte in value.utf8 {
+      combine(UInt64(byte))
+    }
+    combine(0xff)
+  }
+}
+
 // MARK: - Type Declaration Entities
 
 /// Struct 类型的声明实体
@@ -344,6 +369,110 @@ public indirect enum Type: CustomStringConvertible {
     return context.containsGenericParameter(self)
   }
 
+  public var stableHashKey: UInt64 {
+    var hasher = StableTypeHasher()
+    switch self {
+    case .int:
+      hasher.combine(1)
+    case .int8:
+      hasher.combine(2)
+    case .int16:
+      hasher.combine(3)
+    case .int32:
+      hasher.combine(4)
+    case .int64:
+      hasher.combine(5)
+    case .uint:
+      hasher.combine(6)
+    case .uint8:
+      hasher.combine(7)
+    case .uint16:
+      hasher.combine(8)
+    case .uint32:
+      hasher.combine(9)
+    case .uint64:
+      hasher.combine(10)
+    case .float32:
+      hasher.combine(11)
+    case .float64:
+      hasher.combine(12)
+    case .bool:
+      hasher.combine(13)
+    case .void:
+      hasher.combine(14)
+    case .never:
+      hasher.combine(15)
+    case .function(let params, let returns):
+      hasher.combine(16)
+      hasher.combine(params.count)
+      for param in params {
+        hasher.combine(param.stableHashKey)
+      }
+      hasher.combine(returns.stableHashKey)
+    case .structure(let defId):
+      hasher.combine(17)
+      hasher.combine(defId.id)
+    case .reference(let inner):
+      hasher.combine(18)
+      hasher.combine(inner.stableHashKey)
+    case .mutableReference(let inner):
+      hasher.combine(19)
+      hasher.combine(inner.stableHashKey)
+    case .pointer(let element):
+      hasher.combine(20)
+      hasher.combine(element.stableHashKey)
+    case .mutablePointer(let element):
+      hasher.combine(21)
+      hasher.combine(element.stableHashKey)
+    case .weakReference(let inner):
+      hasher.combine(22)
+      hasher.combine(inner.stableHashKey)
+    case .mutableWeakReference(let inner):
+      hasher.combine(23)
+      hasher.combine(inner.stableHashKey)
+    case .genericParameter(let name):
+      hasher.combine(24)
+      hasher.combine(name)
+    case .`enum`(let defId):
+      hasher.combine(25)
+      hasher.combine(defId.id)
+    case .genericStruct(let template, let args):
+      hasher.combine(26)
+      hasher.combine(template)
+      hasher.combine(args.count)
+      for arg in args {
+        hasher.combine(arg.stableHashKey)
+      }
+    case .genericEnum(let template, let args):
+      hasher.combine(27)
+      hasher.combine(template)
+      hasher.combine(args.count)
+      for arg in args {
+        hasher.combine(arg.stableHashKey)
+      }
+    case .opaque(let defId):
+      hasher.combine(28)
+      hasher.combine(defId.id)
+    case .module(let info):
+      hasher.combine(29)
+      hasher.combine(info.modulePath.count)
+      for part in info.modulePath {
+        hasher.combine(part)
+      }
+    case .typeVariable(let tv):
+      hasher.combine(30)
+      hasher.combine(tv.id)
+    case .traitObject(let traitName, let typeArgs):
+      hasher.combine(31)
+      hasher.combine(traitName)
+      hasher.combine(typeArgs.count)
+      for arg in typeArgs {
+        hasher.combine(arg.stableHashKey)
+      }
+    }
+    return hasher.state
+  }
+
   /// Stable key for hashing/deduplication without global context.
   public var stableKey: String {
     switch self {
@@ -452,7 +581,7 @@ public indirect enum Type: CustomStringConvertible {
   }
 }
 
-public struct Parameter: Equatable {
+public struct Parameter: Equatable, Hashable {
   public let type: Type
   public let kind: PassKind
   
@@ -460,12 +589,31 @@ public struct Parameter: Equatable {
     self.type = type
     self.kind = kind
   }
+
+  fileprivate var stableHashKey: UInt64 {
+    var hasher = StableTypeHasher()
+    hasher.combine(1)
+    hasher.combine(type.stableHashKey)
+    hasher.combine(kind.stableHashKey)
+    return hasher.state
+  }
 }
 
-public enum PassKind: Equatable {
+public enum PassKind: Equatable, Hashable {
   case byVal
   case byRef
   case byMutRef
+
+  fileprivate var stableHashKey: UInt64 {
+    switch self {
+    case .byVal:
+      return 1
+    case .byRef:
+      return 2
+    case .byMutRef:
+      return 3
+    }
+  }
 }
 
 public func fromSymbolKindToPassKind(_ kind: SymbolKind) -> PassKind {
@@ -486,7 +634,11 @@ public func fromSymbolKindToPassKind(_ kind: SymbolKind) -> PassKind {
   }
 }
 
-extension Type: Equatable {
+extension Type: Equatable, Hashable {
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(stableHashKey)
+  }
+
   public static func == (lhs: Type, rhs: Type) -> Bool {
     switch (lhs, rhs) {
     case (.int, .int),
