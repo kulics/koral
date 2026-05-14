@@ -22,7 +22,12 @@ public let parse_cli_args(argv List[String]) Result[CliArgs] = {
     let mut i UInt = 2
     while i < argv.count() then {
         let arg = argv[i]
-        if arg.starts_with("--") then {
+        if arg == "--" then {
+            while i < argv.count() then {
+                positional_args.push(argv[i])
+                i += 1
+            }
+        } else if arg.starts_with("--") then {
             if i + 1 < argv.count() then {
                 flags.insert(arg, argv[i + 1])
                 i += 2
@@ -40,8 +45,7 @@ public let parse_cli_args(argv List[String]) Result[CliArgs] = {
 
 /// Dispatch to the appropriate subcommand handler
 public let dispatch(cli_args CliArgs) Int = {
-    let command = cli_args.command
-    return when command in {
+    return when cli_args.command in {
         "init"    then cmd_init(cli_args.args),
         "build"   then cmd_build(cli_args.args, cli_args.flags),
         "check"   then cmd_check(cli_args.args, cli_args.flags),
@@ -52,7 +56,7 @@ public let dispatch(cli_args CliArgs) Int = {
         "version" then { println("koral 0.1.0"); yield 0 },
         "help"    then { print_help(); yield 0 },
         _         then {
-            error_msg("unknown command: \(command)")
+            error_msg("unknown command: \(cli_args.command)")
             print_help()
             yield 1
         },
@@ -61,19 +65,22 @@ public let dispatch(cli_args CliArgs) Int = {
 
 /// Print help information
 public let print_help() Void = {
-    eprintln("Usage: koral <command> [args...] [flags...]")
-    eprintln("")
-    eprintln("Commands:")
-    eprintln("  init       Create a new Koral project")
-    eprintln("  build      Build the project")
-    eprintln("  check      Type-check the project")
-    eprintln("  run        Build and run the project")
-    eprintln("  get        Download dependencies")
-    eprintln("  format     Format source files")
-    eprintln("  clean      Remove build artifacts")
-    eprintln("  version    Show version information")
-    eprintln("  help       Show this help message")
-    eprintln("")
-    eprintln("Build flags:")
-    eprintln("  --module <name>   build/check/run the selected module from koral.json")
+    let help = """
+        Usage: koral <command> [args...] [flags...]
+
+        Commands:
+          init       Create a new Koral project
+          build      Build the project
+          check      Type-check the project
+          run        Build and run the project
+          get        Download dependencies
+          format     Format source files
+          clean      Remove build artifacts
+          version    Show version information
+          help       Show this help message
+
+        Build flags:
+          --module <name>   build/check/run the selected module from koral.json
+        """
+    eprintln(help)
 }

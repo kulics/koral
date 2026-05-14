@@ -2,6 +2,7 @@
 // Koral Build System - Project Configuration
 // ============================================================================
 
+using "utils"
 using std::json { .. }
 using std::os { .. }
 
@@ -37,8 +38,7 @@ private let is_valid_module_segment(segment String) Bool = {
         return false
     }
 
-    let mut i UInt = 1
-    while i < segment.count() then {
+    for i in 1..<segment.count() then {
         let ch = segment[i]
         let is_lower = ch >= 'a' and ch <= 'z'
         let is_digit = ch >= '0' and ch <= '9'
@@ -46,7 +46,6 @@ private let is_valid_module_segment(segment String) Bool = {
         if not is_lower and not is_digit and not is_underscore then {
             return false
         }
-        i += 1
     }
 
     return true
@@ -67,10 +66,8 @@ private let is_valid_module_full_name(name String) Bool = {
 
 private let json_string_array(values List[String]) ref JsonValue = {
     let mut arr = List[ref JsonValue].new()
-    let mut i UInt = 0
-    while i < values.count() then {
-        arr.push(box(JsonValue.String(values[i])))
-        i += 1
+    for value in values then {
+        arr.push(box(JsonValue.String(value)))
     }
     return box(JsonValue.Array(arr))
 }
@@ -81,19 +78,17 @@ private let load_string_array_field(
     context String,
 ) Result[List[String]] = {
     let arr = value.val.as_array() or else {
-        return Result[List[String]].Error(box("error: '\(field_name)' in \(context) must be an array"))
+        return .Error(box("error: '\(field_name)' in \(context) must be an array"))
     }
 
     let mut out = List[String].new()
-    let mut i UInt = 0
-    while i < arr.count() then {
+    for i in 0..<arr.count() then {
         let item = arr[i].val.as_string() or else {
-            return Result[List[String]].Error(box("error: '\(field_name)[\(i)]' in \(context) must be a string"))
+            return .Error(box("error: '\(field_name)[\(i)]' in \(context) must be a string"))
         }
         out.push(item)
-        i += 1
     }
-    return Result[List[String]].Ok(out)
+    return .Ok(out)
 }
 
 private let load_string_dict_field(
@@ -102,37 +97,70 @@ private let load_string_dict_field(
     context String,
 ) Result[Dict[String, String]] = {
     let obj = value.val.as_object() or else {
-        return Result[Dict[String, String]].Error(box("error: '\(field_name)' in \(context) must be an object"))
+        return .Error(box("error: '\(field_name)' in \(context) must be an object"))
     }
 
     let mut out = Dict[String, String].new()
     let mut iter = obj.iterator()
     while iter.next() is .Some(entry) then {
         let str_value = entry.second.val.as_string() or else {
-            return Result[Dict[String, String]].Error(box("error: '\(field_name).\(entry.first)' in \(context) must be a string"))
+            return .Error(box("error: '\(field_name).\(entry.first)' in \(context) must be a string"))
         }
         out.insert(entry.first, str_value)
     }
-    return Result[Dict[String, String]].Ok(out)
+    return .Ok(out)
+}
+
+private let load_optional_string_array_field(
+    json ref JsonValue,
+    field_name String,
+    context String,
+) Result[List[String]] = when json.get_field(field_name) in {
+    .Some(value_ref) then load_string_array_field(value_ref, field_name, context),
+    .None then .Ok(List[String].new()),
+}
+
+private let load_optional_string_dict_field(
+    json ref JsonValue,
+    field_name String,
+    context String,
+) Result[Dict[String, String]] = when json.get_field(field_name) in {
+    .Some(value_ref) then load_string_dict_field(value_ref, field_name, context),
+    .None then .Ok(Dict[String, String].new()),
 }
 
 public let default_target_module(config ProjectConfig) Result[String] = {
     if not config.entry.is_empty() then {
-        if config.modules.contains(config.entry) then {
-            return Result[String].Ok(config.entry)
+        if config.modules.contains_key(config.entry) then {
+            return .Ok(config.entry)
         }
-        return Result[String].Error(box("error: default target module '\(config.entry)' is not declared in koral.json"))
+        return .Error(box("error: default target module '\(config.entry)' is not declared in koral.json"))
     }
 
-    if config.modules.count() == 1 then {
-        let mut iter = config.modules.iterator()
-        if iter.next() is .Some(entry) then {
-            return Result[String].Ok(entry.first)
-        }
+    if config.modules.count() <> 1 then {
+        return .Error(box("error: missing default target module; set top-level 'entry' to a module name or pass --module"))
     }
 
-    return Result[String].Error(box("error: missing default target module; set top-level 'entry' to a module name or pass --module"))
+    let mut iter = config.modules.iterator()
+    let entry = iter.next() or else {
+        return .Error(box("error: missing default target module; set top-level 'entry' to a module name or pass --module"))
+    }
+    return .Ok(entry.first)
 }
+
+public let target_module_for_build(config ProjectConfig, flags Dict[String, String]) Result[String] = {
+    let module_name = flags.get("--module") or else {
+        return default_target_module(config)
+    }
+
+    if config.modules.contains_key(module_name) then {
+        return .Ok(module_name)
+    }
+
+    return .Error(box("error: module '\(module_name)' not found in koral.json"))
+}
+
+public let artifact_stem(module_name String) String = module_name.replace_all("::", with: "__")
 
 public let load_config(project_dir String) Result[ProjectConfig] = {
     let config_path = project_dir + "/koral.json"
@@ -177,10 +205,7 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
         return .Error(box("error: 'entry' must be a module full name such as 'app' or 'app::main'"))
     }
 
-    let links = when json.get_field("links") in {
-        .Some(value_ref) then load_string_array_field(value_ref, "links", "koral.json") or return,
-        .None then List[String].new(),
-    }
+    let links = load_optional_string_array_field(json, "links", "koral.json") or return
 
     let modules_ref = json.get_field("modules") or else {
         return .Error(box("error: missing required field 'modules' in koral.json"))
@@ -197,7 +222,7 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             return .Error(box("error: invalid module name '\(module_name)'; use lower_snake segments joined by '::'"))
         }
 
-        let module_obj = module_entry.second.val.as_object() or else {
+        if module_entry.second.val.as_object() is .None then {
             return .Error(box("error: module '\(module_name)' must be an object"))
         }
         let module_json = module_entry.second.val
@@ -212,63 +237,50 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             return .Error(box("error: module '\(module_name)' entry must end with .koral"))
         }
 
-        let deps = when module_json.get_field("deps") in {
-            .Some(value_ref) then load_string_array_field(value_ref, "deps", "module '\(module_name)'") or return,
-            .None then List[String].new(),
-        }
-        let links = when module_json.get_field("links") in {
-            .Some(value_ref) then load_string_array_field(value_ref, "links", "module '\(module_name)'") or return,
-            .None then List[String].new(),
-        }
+        let deps = load_optional_string_array_field(module_json, "deps", "module '\(module_name)'") or return
+        let links = load_optional_string_array_field(module_json, "links", "module '\(module_name)'") or return
 
         modules.insert(module_name, ModuleConfig(module_entry_path, deps, links))
-        let _ = module_obj
     }
 
     let mut dependencies = Dict[String, DepConfig].new()
-    when json.get_field("dependencies") in {
-        .Some(deps_ref) then {
-            let deps_obj = deps_ref.val.as_object() or else {
-                return .Error(box("error: 'dependencies' must be an object in koral.json"))
+    if json.get_field("dependencies") is .Some(deps_ref) then {
+        let deps_obj = deps_ref.val.as_object() or else {
+            return .Error(box("error: 'dependencies' must be an object in koral.json"))
+        }
+        let mut iter = deps_obj.iterator()
+        while iter.next() is .Some(dep_entry) then {
+            let dep_key = dep_entry.first
+            let dep_json = dep_entry.second.val
+
+            let dep_name_ref = dep_json.get_field("name") or else {
+                return .Error(box("error: dependency '\(dep_key)' missing 'name' field"))
             }
-            let mut iter = deps_obj.iterator()
-            while iter.next() is .Some(dep_entry) then {
-                let dep_key = dep_entry.first
-                let dep_json = dep_entry.second.val
-
-                let dep_name_ref = dep_json.get_field("name") or else {
-                    return .Error(box("error: dependency '\(dep_key)' missing 'name' field"))
-                }
-                let dep_name = dep_name_ref.val.as_string() or else {
-                    return .Error(box("error: dependency '\(dep_key)' 'name' must be a string"))
-                }
-                if not is_valid_module_name(dep_name) then {
-                    return .Error(box("error: invalid dependency package name '\(dep_name)'"))
-                }
-
-                let dep_git_ref = dep_json.get_field("git") or else {
-                    return .Error(box("error: dependency '\(dep_key)' missing 'git' field"))
-                }
-                let dep_git = dep_git_ref.val.as_string() or else {
-                    return .Error(box("error: dependency '\(dep_key)' 'git' must be a string"))
-                }
-
-                let dep_version_ref = dep_json.get_field("version") or else {
-                    return .Error(box("error: dependency '\(dep_key)' missing 'version' field"))
-                }
-                let dep_version = dep_version_ref.val.as_string() or else {
-                    return .Error(box("error: dependency '\(dep_key)' 'version' must be a string"))
-                }
-
-                let module_aliases = when dep_json.get_field("module_aliases") in {
-                    .Some(value_ref) then load_string_dict_field(value_ref, "module_aliases", "dependency '\(dep_key)'") or return,
-                    .None then Dict[String, String].new(),
-                }
-
-                dependencies.insert(dep_key, DepConfig(dep_name, dep_git, dep_version, module_aliases))
+            let dep_name = dep_name_ref.val.as_string() or else {
+                return .Error(box("error: dependency '\(dep_key)' 'name' must be a string"))
             }
-        },
-        .None then {},
+            if not is_valid_module_name(dep_name) then {
+                return .Error(box("error: invalid dependency package name '\(dep_name)'"))
+            }
+
+            let dep_git_ref = dep_json.get_field("git") or else {
+                return .Error(box("error: dependency '\(dep_key)' missing 'git' field"))
+            }
+            let dep_git = dep_git_ref.val.as_string() or else {
+                return .Error(box("error: dependency '\(dep_key)' 'git' must be a string"))
+            }
+
+            let dep_version_ref = dep_json.get_field("version") or else {
+                return .Error(box("error: dependency '\(dep_key)' missing 'version' field"))
+            }
+            let dep_version = dep_version_ref.val.as_string() or else {
+                return .Error(box("error: dependency '\(dep_key)' 'version' must be a string"))
+            }
+
+            let module_aliases = load_optional_string_dict_field(dep_json, "module_aliases", "dependency '\(dep_key)'") or return
+
+            dependencies.insert(dep_key, DepConfig(dep_name, dep_git, dep_version, module_aliases))
+        }
     }
 
     if entry.is_empty() and modules.count() <> 1 then {

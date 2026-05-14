@@ -24,9 +24,7 @@ let main() Void = {
 
     let mut check_mode = false
     let mut files = List[String].new()
-    let mut i UInt = 1
-
-    while i < arguments.count() then {
+    for i in 1..<arguments.count() then {
         let arg = arguments[i]
         if arg == "--check" then {
             check_mode = true
@@ -36,20 +34,17 @@ let main() Void = {
         } else {
             files.push(arg)
         }
-        i += 1
     }
 
-    if files.count() == 0 then {
+    if files.is_empty() then {
         eprintln("Error: no input files specified")
         print_usage()
         exit(1)
     }
 
     let mut had_error = false
-    let mut j UInt = 0
 
-    while j < files.count() then {
-        let path = files[j]
+    for path in files then {
         if check_mode then {
             when check_file(path) in {
                 .Ok(is_formatted) then {
@@ -72,7 +67,6 @@ let main() Void = {
                 },
             }
         }
-        j += 1
     }
 
     if had_error then { exit(1) }
@@ -88,9 +82,7 @@ let format_file(path String) Result[Void] = {
     let normalized = normalize_newlines(source)
     let formatted = safe_format_source(normalized) or return
 
-    if formatted == source then {
-        return Result[Void].Ok({})
-    }
+    if formatted == source then { return .Ok({}) }
     return write_text_file(file_path, content: formatted)
 }
 
@@ -98,7 +90,7 @@ let check_file(path String) Result[Bool] = {
     let source = read_text_file(path.into_path()) or return
     let normalized = normalize_newlines(source)
     let formatted = safe_format_source(normalized) or return
-    return Result[Bool].Ok(formatted == normalized)
+    return .Ok(formatted == normalized)
 }
 
 let safe_format_source(source String) Result[String] = {
@@ -106,15 +98,11 @@ let safe_format_source(source String) Result[String] = {
     let before_sig = comment_signature(source) or return
     let after_sig = comment_signature(first_pass) or return
 
-    if before_sig <> after_sig then {
-        return .Error(box("Formatter internal error: comment signature changed after formatting"))
-    }
+    if before_sig <> after_sig then { return .Error(box("Formatter internal error: comment signature changed after formatting")) }
 
     let second_pass = format_source(first_pass) or return
-    if first_pass == second_pass then {
-        return Result[String].Ok(first_pass)
-    }
-    return Result[String].Error(box("Formatter internal error: formatting is not idempotent"))
+    if first_pass == second_pass then { return .Ok(first_pass) }
+    return .Error(box("Formatter internal error: formatting is not idempotent"))
 }
 
 let normalize_newlines(source String) String = {
@@ -149,9 +137,8 @@ let comment_signature(source String) Result[String] = {
     let mut tokenizer = Tokenizer.new(source)
     let tokens = tokenizer.tokenize() or return
     let mut out = String.new()
-    let mut i UInt = 0
-    while i < tokens.count() then {
-        when tokens[i] in {
+    for token in tokens then {
+        when token in {
             .LineComment(text) then {
                 out.push_string(text)
                 out.push_string("\n@@\n")
@@ -162,7 +149,6 @@ let comment_signature(source String) Result[String] = {
             },
             _ then {},
         }
-        i += 1
     }
     return .Ok(out)
 }
@@ -171,10 +157,11 @@ let comment_signature(source String) Result[String] = {
 // Usage
 // ============================================================================
 
-let print_usage() Void = {
-    eprintln("Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]")
-    eprintln("")
-    eprintln("Options:")
-    eprintln("  --check    Check if files are formatted (exit 1 if not)")
-    eprintln("  --help     Show this help message")
-}
+let print_usage() Void =
+    eprintln("""
+        Usage: koral-fmt [--check] <file1.koral> [file2.koral ...]
+
+        Options:
+          --check    Check if files are formatted (exit 1 if not)
+          --help     Show this help message
+        """)

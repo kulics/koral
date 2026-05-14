@@ -2,8 +2,8 @@
 // Run example: koralc run test/cat_test.koral -o .
 // Assumes cat binary is built to ./bin/sample-cat/cat(.exe) from src/cat.koral.
 
-using Std.Os.*
-using Std.Proc.*
+using std::os { .. }
+using std::proc { .. }
 
 type TestResult {
     Pass(),
@@ -26,7 +26,7 @@ let fail(msg String) TestResult = TestResult.Fail(msg)
 
 let create_temp_text_file(name String, content String) Result[String] = {
     let path = name.into_path()
-    let _ = write_text_file(path, content: content) or return
+    write_text_file(path, content: content) or return
     return Result[String].Ok(name)
 }
 
@@ -35,10 +35,8 @@ let cleanup_temp_file(path String) Void = {
 }
 
 let cleanup_temp_files(paths List[String]) Void = {
-    let mut i UInt = 0
-    while i < paths.count() then {
-        cleanup_temp_file(paths[i])
-        i += 1
+    for path in paths then {
+        cleanup_temp_file(path)
     }
 }
 
@@ -82,9 +80,7 @@ let test_single_file() TestResult = {
     }
     finally cleanup_temp_file(path)
 
-    let mut args = List[String].new()
-    args.push(path)
-    let out = run_cat(args) or else { return fail("single file command failed") }
+    let out = run_cat([path]) or else { return fail("single file command failed") }
 
     if out.exit_code == 0 then {
         return assert_eq(normalize_newlines(out.stdout), "Hello\nWorld\n", "single file output mismatch")
@@ -103,10 +99,7 @@ let test_multiple_files() TestResult = {
     }
     finally cleanup_temp_file(b)
 
-    let mut args = List[String].new()
-    args.push(a)
-    args.push(b)
-    let out = run_cat(args) or else { return fail("multiple file command failed") }
+    let out = run_cat([a, b]) or else { return fail("multiple file command failed") }
     return assert_eq(normalize_newlines(out.stdout), "A\nB\n", "multiple file concat mismatch")
 }
 
@@ -116,10 +109,7 @@ let test_number_all_lines() TestResult = {
     }
     finally cleanup_temp_file(path)
 
-    let mut args = List[String].new()
-    args.push("-n")
-    args.push(path)
-    let out = run_cat(args) or else { return fail("-n command failed") }
+    let out = run_cat(["-n", path]) or else { return fail("-n command failed") }
 
     let expected = "     1\tLine 1\n     2\tLine 2\n     3\t\n     4\tLine 4\n"
     return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch")
@@ -131,10 +121,7 @@ let test_number_nonblank() TestResult = {
     }
     finally cleanup_temp_file(path)
 
-    let mut args = List[String].new()
-    args.push("-b")
-    args.push(path)
-    let out = run_cat(args) or else { return fail("-b command failed") }
+    let out = run_cat(["-b", path]) or else { return fail("-b command failed") }
 
     let expected = "     1\tLine 1\n\n     2\tLine 3\n"
     return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch")
@@ -146,10 +133,7 @@ let test_squeeze_blank() TestResult = {
     }
     finally cleanup_temp_file(path)
 
-    let mut args = List[String].new()
-    args.push("-s")
-    args.push(path)
-    let out = run_cat(args) or else { return fail("-s command failed") }
+    let out = run_cat(["-s", path]) or else { return fail("-s command failed") }
 
     return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch")
 }
@@ -160,27 +144,10 @@ let test_show_ends_tabs_all() TestResult = {
     }
     finally cleanup_temp_file(path)
 
-    let mut args_e = List[String].new()
-    args_e.push("-E")
-    args_e.push(path)
-    let e1 = run_cat(args_e) or else { return fail("-E command failed") }
-
-    let mut args_t = List[String].new()
-    args_t.push("-T")
-    args_t.push(path)
-    let t1 = run_cat(args_t) or else { return fail("-T command failed") }
-
-    let mut args_a = List[String].new()
-    args_a.push("-A")
-    args_a.push(path)
-    let a1 = run_cat(args_a) or else { return fail("-A command failed") }
-
-    let mut args_vet = List[String].new()
-    args_vet.push("-v")
-    args_vet.push("-E")
-    args_vet.push("-T")
-    args_vet.push(path)
-    let vet1 = run_cat(args_vet) or else { return fail("-vET command failed") }
+    let e1 = run_cat(["-E", path]) or else { return fail("-E command failed") }
+    let t1 = run_cat(["-T", path]) or else { return fail("-T command failed") }
+    let a1 = run_cat(["-A", path]) or else { return fail("-A command failed") }
+    let vet1 = run_cat(["-v", "-E", "-T", path]) or else { return fail("-vET command failed") }
 
     let e_out = normalize_newlines(e1.stdout)
     let t_out = normalize_newlines(t1.stdout)
@@ -193,44 +160,32 @@ let test_show_ends_tabs_all() TestResult = {
 }
 
 let test_invalid_option() TestResult = {
-    let mut args = List[String].new()
-    args.push("--badopt")
-    let out = run_cat(args) or else { return fail("invalid option command failed") }
+    let out = run_cat(["--badopt"]) or else { return fail("invalid option command failed") }
     let ok = out.exit_code <> 0 and out.stderr.contains("invalid option")
     return assert_true(ok, "invalid option not reported")
 }
 
 let test_missing_file() TestResult = {
-    let mut args = List[String].new()
-    args.push("no_such_file_12345.txt")
-    let out = run_cat(args) or else { return fail("missing file command failed") }
+    let out = run_cat(["no_such_file_12345.txt"]) or else { return fail("missing file command failed") }
     let ok = out.exit_code <> 0 and out.stderr.contains("no_such_file_12345.txt")
     return assert_true(ok, "missing file not reported")
 }
 
 let test_help_and_version() TestResult = {
-    let mut args_help = List[String].new()
-    args_help.push("--help")
-    let help = run_cat(args_help) or else { return fail("help command failed") }
-
-    let mut args_ver = List[String].new()
-    args_ver.push("--version")
-    let ver = run_cat(args_ver) or else { return fail("version command failed") }
+    let help = run_cat(["--help"]) or else { return fail("help command failed") }
+    let ver = run_cat(["--version"]) or else { return fail("version command failed") }
 
     let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains("koral-cat")
     return assert_true(ok, "help/version output mismatch")
 }
 
 let property_multifile_roundtrip() TestResult = {
-    let mut i UInt = 0
-
-    while i < 20 then {
+    for i in 0..<20 then {
         let mut paths = List[String].new()
         finally cleanup_temp_files(paths)
         let mut expected = String.new()
 
-        let mut j UInt = 0
-        while j < 3 then {
+        for j in 0..<3 then {
             let mut content = String.new()
             content.push_string("F")
             content.push_string(i.to_string())
@@ -251,8 +206,6 @@ let property_multifile_roundtrip() TestResult = {
 
             expected.push_string(content)
             paths.push(path)
-
-            j += 1
         }
 
         let out = run_cat(paths) or else {
@@ -262,8 +215,6 @@ let property_multifile_roundtrip() TestResult = {
         if out.exit_code <> 0 or normalize_newlines(out.stdout) <> normalize_newlines(expected) then {
             return fail("property multifile roundtrip failed")
         }
-
-        i += 1
     }
 
     return pass()
@@ -305,9 +256,8 @@ public let main() Int = {
 
     let mut passed UInt = 0
     let mut failed UInt = 0
-    let mut i UInt = 0
-    while i < tests.count() then {
-        when tests[i].result in {
+    for test in tests then {
+        when test.result in {
             .Pass() then {
                 passed += 1
             },
@@ -315,7 +265,6 @@ public let main() Int = {
                 failed += 1
             },
         }
-        i += 1
     }
 
     println("----------------------------------------")

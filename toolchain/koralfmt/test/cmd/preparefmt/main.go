@@ -28,12 +28,12 @@ func main() {
 		}
 	}
 
-	koralc := filepath.Join(root, "bin", exeName("koralc"))
-	if _, err := os.Stat(koralc); err != nil {
-		fatal(fmt.Errorf("koralc binary not found at %s", koralc))
+	koralc, err := findKoralc(root)
+	if err != nil {
+		fatal(err)
 	}
 
-	code, out := runCmd(root, koralc, "build", "fmt/koralfmt.koral", "-o", "bin")
+	code, out := runCmd(root, koralc, "build", "toolchain/koralfmt/koralfmt.koral", "-o", "bin")
 	if code != 0 {
 		fatal(fmt.Errorf("build koralfmt failed (exit=%d)\n%s", code, out))
 	}
@@ -53,7 +53,7 @@ func findRepoRoot() (string, error) {
 
 	cur := wd
 	for {
-		marker := filepath.Join(cur, "fmt", "koralfmt.koral")
+		marker := filepath.Join(cur, "toolchain", "koralfmt", "koralfmt.koral")
 		if _, err := os.Stat(marker); err == nil {
 			return cur, nil
 		}
@@ -63,6 +63,23 @@ func findRepoRoot() (string, error) {
 		}
 		cur = next
 	}
+}
+
+func findKoralc(root string) (string, error) {
+	candidates := []string{
+		filepath.Join(root, "compiler", ".build", "x86_64-unknown-windows-msvc", "debug", exeName("koralc")),
+		filepath.Join(root, "compiler", ".build", "debug", exeName("koralc")),
+		filepath.Join(root, "bin", "bootstrap-new", exeName("koralc")),
+		filepath.Join(root, "bin", "bootstrap-clone", exeName("koralc")),
+		filepath.Join(root, "bin", "bootstrap", exeName("koralc")),
+		filepath.Join(root, "bin", exeName("koralc")),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("koralc binary not found in compiler/.build or bin/")
 }
 
 func runCmd(cwd string, exe string, args ...string) (int, string) {

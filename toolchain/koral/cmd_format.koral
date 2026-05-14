@@ -7,37 +7,16 @@ using std::proc { .. }
 
 /// Find koralfmt executable by searching PATH and KORAL_HOME
 let find_koralfmt() Option[String] = {
-    if env("KORAL_HOME") is .Some(home) then {
-        let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
-        let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
-        let dirs = [home, home + "/bin"]
-        for dir in dirs then {
-            for ext in exts then {
-                let candidate = dir + "/koralfmt" + ext
-                if path_exist(candidate.into_path()) then {
-                    return Option[String].Some(candidate)
-                }
-            }
-        }
+    let preferred_dirs List[String] = when env("KORAL_HOME") in {
+        .Some(home) then [
+            home + "/bin/toolchain-koralfmt",
+            home + "/bin/koralfmt",
+            home + "/bin",
+            home,
+        ],
+        .None then List[String].new(),
     }
-
-    let path_env = if env("PATH") is .Some(path) then path
-        else if env("Path") is .Some(path) then path
-        else { return Option[String].None() }
-
-    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
-    let sep = if is_windows then ";" else ":"
-    let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
-    for dir in path_env.split(sep) then {
-        for ext in exts then {
-            let candidate = dir + "/koralfmt" + ext
-            if path_exist(candidate.into_path()) then {
-                return Option[String].Some(candidate)
-            }
-        }
-    }
-
-    return Option[String].None()
+    return find_executable("koralfmt", preferred_dirs)
 }
 
 /// Collect all .koral files in the project directory
@@ -79,9 +58,7 @@ public let cmd_format(args List[String], flags Dict[String, String]) Int = {
     let mut had_error = false
     let mut formatted UInt = 0
 
-    let mut i UInt = 0
-    while i < files.count() then {
-        let file = files[i]
+    for file in files then {
         let status = Command.new(koralfmt)
             .arg(file)
             .set_stdout(IoRedirect.Inherit())
@@ -89,7 +66,6 @@ public let cmd_format(args List[String], flags Dict[String, String]) Int = {
             .run() or else {
             eprintln("error: failed to run koralfmt on \(file): \(it.message())")
             had_error = true
-            i += 1
             continue
         }
         if status.is_success() then {
@@ -97,7 +73,6 @@ public let cmd_format(args List[String], flags Dict[String, String]) Int = {
         } else {
             had_error = true
         }
-        i += 1
     }
 
     status_msg("Formatted", "\(formatted) file(s)")
