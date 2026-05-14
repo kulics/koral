@@ -68,12 +68,12 @@ given TcpListener {
         // Set SO_REUSEADDR: level=1 (SOL_SOCKET), optname=2 (SO_REUSEADDR)
         // Value is a 4-byte integer with value 1
         let opt_buf = alloc_memory[UInt8](4)
+        finally dealloc_memory(opt_buf)
         init_memory(opt_buf + 0, 1(UInt8))
         init_memory(opt_buf + 1, 0(UInt8))
         init_memory(opt_buf + 2, 0(UInt8))
         init_memory(opt_buf + 3, 0(UInt8))
         let setsock_result = __koral_socket_setsockopt(fd, __koral_const_SOL_SOCKET(), __koral_const_SO_REUSEADDR(), opt_buf, 4(UInt32))
-        dealloc_memory(opt_buf)
         if setsock_result <> 0 then {
             __koral_socket_close(fd)
               return Result[TcpListener].Error(box(last_error_message()))
@@ -104,28 +104,23 @@ given TcpListener {
     public accept(self ref) Result[Pair[TcpSocket, SocketAddr]] = {
         // Allocate a 128-byte buffer for the peer address
         let addr_buf = alloc_memory[UInt8](128)
-        let mut i UInt = 0
-        while i < 128 then {
+        finally dealloc_memory(addr_buf)
+        for i in 0(UInt)..<128(UInt) then {
             init_memory(addr_buf + i, 0(UInt8))
-            i += 1
         }
         let mut addr_len UInt32 = 128(UInt32)
 
         let new_fd = __koral_socket_accept(self.storage.fd, addr_buf, addr_len.ptr)
         if new_fd < 0 then {
-            dealloc_memory(addr_buf)
-                return Result[Pair[TcpSocket, SocketAddr]].Error(box(last_error_message()))
+            return Result[Pair[TcpSocket, SocketAddr]].Error(box(last_error_message()))
         }
 
         // Parse the sockaddr bytes into a SocketAddr
         let actual_len = addr_len(UInt)
         let mut addr_list = List[UInt8].with_capacity(actual_len)
-        let mut j UInt = 0
-        while j < actual_len then {
+        for j in 0..<actual_len then {
             addr_list.push(addr_buf[j])
-            j += 1
         }
-        dealloc_memory(addr_buf)
 
         let sa_result = SocketAddr.from_sockaddr_bytes(addr_list)
         when sa_result in {
@@ -143,28 +138,23 @@ given TcpListener {
     /// Get the local address this listener is bound to.
     public local_addr(self ref) Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128)
-        let mut i UInt = 0
-        while i < 128 then {
+        finally dealloc_memory(addr_buf)
+        for i in 0(UInt)..<128(UInt) then {
             init_memory(addr_buf + i, 0(UInt8))
-            i += 1
         }
         let mut addr_len UInt32 = 128(UInt32)
 
         let result = __koral_socket_getsockname(self.storage.fd, addr_buf, addr_len.ptr)
         if result <> 0 then {
-            dealloc_memory(addr_buf)
               return Result[SocketAddr].Error(box(last_error_message()))
         }
 
         // Parse the sockaddr bytes into a SocketAddr
         let actual_len = addr_len(UInt)
         let mut addr_list = List[UInt8].with_capacity(actual_len)
-        let mut j UInt = 0
-        while j < actual_len then {
+        for j in 0..<actual_len then {
             addr_list.push(addr_buf[j])
-            j += 1
         }
-        dealloc_memory(addr_buf)
 
         return SocketAddr.from_sockaddr_bytes(addr_list)
     }

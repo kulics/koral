@@ -11,11 +11,9 @@ given[T Deref] DequeStorage[T] as Drop {
         if ref_is_borrow(self) then {
             return
         }
-        let mut i UInt = 0
-        while i < self.len then {
+        for i in 0..<self.len then {
             let index = (self.head + i) % self.cap
             deinit_memory(self.source + index)
-            i += 1
         }
         dealloc_memory(self.source)
     }
@@ -55,11 +53,9 @@ given[T Deref] Deque[T] {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_source = alloc_memory[T](old.cap)
-            let mut i UInt = 0
-            while i < old.len then {
+            for i in 0..<old.len then {
                 let old_index = (old.head + i) % old.cap
                 init_memory(new_source + i, old.source[old_index])
-                i += 1
             }
             let new_storage = box(DequeStorage[T](new_source, old.len, old.cap, 0))
             self.storage = new_storage
@@ -74,22 +70,19 @@ given[T Deref] Deque[T] {
             }
             let old = self.storage
             let new_source = alloc_memory[T](new_cap)
-            let mut i UInt = 0
             if ref_count(old) == 1 then {
-                while i < old.len then {
+                for i in 0..<old.len then {
                     let old_index = (old.head + i) % old.cap
                     init_memory(new_source + i, take_memory(old.source + old_index))
-                    i += 1
                 }
                 dealloc_memory(old.source)
                 self.storage.source = new_source
                 self.storage.cap = new_cap
                 self.storage.head = 0
             } else {
-                while i < old.len then {
+                for i in 0..<old.len then {
                     let old_index = (old.head + i) % old.cap
                     init_memory(new_source + i, old.source[old_index])
-                    i += 1
                 }
                 let new_storage = box(DequeStorage[T](new_source, old.len, new_cap, 0))
                 self.storage = new_storage
@@ -160,11 +153,9 @@ given[T Deref] Deque[T] {
 
     public clear(self mut ref) Void = {
         self.ensure_unique()
-        let mut i UInt = 0
-        while i < self.storage.len then {
+        for i in 0..<self.storage.len then {
             let index = self.physical_index(i)
             deinit_memory(self.storage.source + index)
-            i += 1
         }
         self.storage.len = 0
         self.storage.head = 0
@@ -203,8 +194,7 @@ given[T Deref] Deque[T] {
             if predicate(v) then {
                 let wp = self.physical_index(write)
                 if write <> read then {
-                    deinit_memory(self.storage.source + wp)
-                    init_memory(self.storage.source + wp, v)
+                    init_memory(self.storage.source + wp, take_memory(self.storage.source + rp))
                 }
                 write += 1
             } else {
@@ -219,13 +209,11 @@ given[T Deref] Deque[T] {
 given[T Eq and Deref] Deque[T] {
 
     public contains(self ref, value T) Bool = {
-        let mut i UInt = 0
-        while i < self.storage.len then {
+        for i in 0..<self.storage.len then {
             let physical = self.physical_index(i)
             if self.storage.source[physical] == value then {
                 return true
             }
-            i += 1
         }
         return false
     }

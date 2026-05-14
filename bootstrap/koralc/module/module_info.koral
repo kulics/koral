@@ -40,8 +40,8 @@ public type ImportGraph(
 given ImportGraph {
     public new() ImportGraph = {
         return ImportGraph(
-            List[ImportEdge].new(),
-            List[SymbolImportEdge].new(),
+            [],
+            [],
         )
     }
 
@@ -145,8 +145,8 @@ given ModuleInfo {
             path,
             entry_file,
             is_external,
-            List[String].new(),
-            List[LoadedNode].new(),
+            [],
+            [],
         ))
         return ModuleInfo(s)
     }
@@ -202,14 +202,10 @@ public type CompilationUnit(protected mut storage mut ref CompilationUnitStorage
 
 given CompilationUnit {
     public new(root_module ModuleInfo) CompilationUnit = {
-        let mut paths = List[String].new()
-        let mut modules = List[ModuleInfo].new()
-        paths.push(root_module.path_string())
-        modules.push(root_module)
         let s = box(CompilationUnitStorage(
             root_module,
-            paths,
-            modules,
+            [root_module.path_string()],
+            [root_module],
             ImportGraph.new()
         ))
         return CompilationUnit(s)
@@ -268,7 +264,7 @@ given CompilationUnit {
 
     // Collect all global nodes in dependency order.
     public collect_all_nodes(self) List[LoadedNode] = {
-        let mut result = List[LoadedNode].new()
+        let mut result List[LoadedNode] = []
         self.collect_nodes_from(self.storage.root_module, result)
         return result
     }
@@ -276,13 +272,13 @@ given CompilationUnit {
     // Collect all global nodes with their module path, in dependency order.
     // Returns a list of (LoadedNode, module_path) pairs.
     public collect_all_nodes_with_path(self) List[Pair[LoadedNode, List[String]]] = {
-        let mut result = List[Pair[LoadedNode, List[String]]].new()
+        let mut result List[Pair[LoadedNode, List[String]]] = []
         self.collect_nodes_with_path_from(self.storage.root_module, result)
         return result
     }
 
     public collect_nodes_with_path_for_module(self, path_string String) List[Pair[LoadedNode, List[String]]] = {
-        let mut result = List[Pair[LoadedNode, List[String]]].new()
+        let mut result List[Pair[LoadedNode, List[String]]] = []
         when self.get_module(path_string) in {
             .Some(module) then self.collect_nodes_with_path_from(module, result),
             .None() then {},
@@ -307,25 +303,20 @@ given CompilationUnit {
 
 public let string_list_eq(a List[String], b List[String]) Bool = {
     if a.count() <> b.count() then { return false }
-    let mut i UInt = 0
-    for s in a then {
-        if s <> b[i] then { return false }
-        i += 1
+    for i in 0..<a.count() then {
+        if a[i] <> b[i] then { return false }
     }
     return true
 }
 
-public let source_file_matches(stored Option[String], current Option[String]) Bool = {
+public let source_file_matches(stored Option[String], current Option[String]) Bool =
     when stored in {
-        .None() then { return true },
-        .Some(s) then {
-            when current in {
-                .Some(c) then { return normalize_source_file_for_match(s) == normalize_source_file_for_match(c) },
-                .None() then { return false },
-            }
+        .None() then true,
+        .Some(s) then when current in {
+            .Some(c) then normalize_source_file_for_match(s) == normalize_source_file_for_match(c),
+            .None() then false,
         },
     }
-}
 
 private let normalize_source_file_for_match(path String) String = {
     let mut out = String.new()

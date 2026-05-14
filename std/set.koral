@@ -25,10 +25,8 @@ given[T Hash] SetStorage[T] as Drop {
         if ref_is_borrow(self) then {
             return
         }
-        let mut i UInt = 0
-        while i < self.capacity then {
+        for i in 0..<self.capacity then {
             deinit_memory(self.buckets + i)
-            i += 1
         }
         dealloc_memory(self.buckets)
     }
@@ -46,10 +44,8 @@ given[T Hash] Set[T] {
     public new() Self = {
         let capacity UInt = 16
         let buckets = alloc_memory[SetBucket[T]](capacity)
-        let mut i UInt = 0
-        while i < capacity then {
+        for i in 0..<capacity then {
             init_memory(buckets + i, SetBucket[T].Empty())
-            i += 1
         }
         let storage = box(SetStorage[T](buckets, 0, capacity))
         return Set[T](storage)
@@ -59,10 +55,8 @@ given[T Hash] Set[T] {
         // Hash tables need extra space for efficiency (load factor ~0.5)
         let cap = if capacity < 4 then 4 else capacity * 2
         let buckets = alloc_memory[SetBucket[T]](cap)
-        let mut i UInt = 0
-        while i < cap then {
+        for i in 0..<cap then {
             init_memory(buckets + i, SetBucket[T].Empty())
-            i += 1
         }
         let storage = box(SetStorage[T](buckets, 0, cap))
         return Set[T](storage)
@@ -74,11 +68,9 @@ given[T Hash] Set[T] {
         if ref_count(self.storage) > 1 then {
             let old = self.storage
             let new_buckets = alloc_memory[SetBucket[T]](old.capacity)
-            let mut i UInt = 0
-            while i < old.capacity then {
+            for i in 0..<old.capacity then {
                 let bucket = old.buckets[i]
                 init_memory(new_buckets + i, bucket)
-                i += 1
             }
             let new_storage = box(SetStorage[T](new_buckets, old.count, old.capacity))
             self.storage = new_storage
@@ -129,16 +121,13 @@ given[T Hash] Set[T] {
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2
         let new_buckets = alloc_memory[SetBucket[T]](new_cap)
-        let mut i UInt = 0
-        while i < new_cap then {
+        for i in 0..<new_cap then {
             init_memory(new_buckets + i, SetBucket[T].Empty())
-            i += 1
         }
         self.storage.buckets = new_buckets
         self.storage.capacity = new_cap
         self.storage.count = 0
-        i = 0
-        while i < old_cap then {
+        for i in 0..<old_cap then {
             let bucket = take_memory(old_buckets + i)
             when bucket in {
                 .Occupied(v) then {
@@ -146,7 +135,6 @@ given[T Hash] Set[T] {
                 },
                 _ then {},
             }
-            i += 1
         }
         dealloc_memory(old_buckets)
     }
@@ -181,9 +169,8 @@ given[T Hash] Set[T] {
     }
 
     public insert_set(self mut ref, other Set[T]) Void = {
-        let mut iter = other.iterator()
-        while iter.next() is .Some(v) then {
-            self.insert(v);
+        for v in other then {
+            self.insert(v)
         }
     }
 
@@ -229,8 +216,7 @@ given[T Hash] Set[T] {
     public is_empty(self ref) Bool = self.storage.count == 0
 
     public is_subset_of(self ref, other Set[T]) Bool = {
-        let mut iter = SetIterator[T](self.storage, 0)
-        while iter.next() is .Some(v) then {
+        for v in self then {
             if not other.contains(v) then {
                 return false
             }
@@ -242,10 +228,8 @@ given[T Hash] Set[T] {
 
     public clear(self mut ref) Void = {
         self.ensure_unique()
-        let mut i UInt = 0
-        while i < self.storage.capacity then {
+        for i in 0..<self.storage.capacity then {
             self.storage.buckets[i] = SetBucket[T].Empty()
-            i += 1
         }
         self.storage.count = 0
     }
@@ -253,8 +237,7 @@ given[T Hash] Set[T] {
     // Retains only elements satisfying the predicate. O(n).
     public retain(self mut ref, predicate Func[T, Bool]) Void = {
         self.ensure_unique()
-        let mut i UInt = 0
-        while i < self.storage.capacity then {
+        for i in 0..<self.storage.capacity then {
             let bucket = self.storage.buckets[i]
             when bucket in {
                 .Occupied(v) then {
@@ -265,30 +248,26 @@ given[T Hash] Set[T] {
                 },
                 _ then {},
             }
-            i += 1
         }
     }
 
     // Using while is pattern matching for iterator loops
     public union(self ref, other Set[T]) Set[T] = {
         let mut result = Set[T].new()
-        let mut iter = SetIterator[T](self.storage, 0)
-        while iter.next() is .Some(v) then {
-            result.insert(v);
+        for v in self then {
+            result.insert(v)
         }
-        let mut iter2 = SetIterator[T](other.storage, 0)
-        while iter2.next() is .Some(v) then {
-            result.insert(v);
+        for v in other then {
+            result.insert(v)
         }
         return result
     }
 
     public intersection(self ref, other Set[T]) Set[T] = {
         let mut result = Set[T].new()
-        let mut iter = SetIterator[T](self.storage, 0)
-        while iter.next() is .Some(v) then {
+        for v in self then {
             if other.contains(v) then {
-                result.insert(v);
+                result.insert(v)
             }
         }
         return result
@@ -296,10 +275,9 @@ given[T Hash] Set[T] {
 
     public difference(self ref, other Set[T]) Set[T] = {
         let mut result = Set[T].new()
-        let mut iter = SetIterator[T](self.storage, 0)
-        while iter.next() is .Some(v) then {
+        for v in self then {
             if not other.contains(v) then {
-                result.insert(v);
+                result.insert(v)
             }
         }
         return result
@@ -307,16 +285,14 @@ given[T Hash] Set[T] {
 
     public symmetric_difference(self ref, other Set[T]) Set[T] = {
         let mut result = Set[T].new()
-        let mut iter = SetIterator[T](self.storage, 0)
-        while iter.next() is .Some(v) then {
+        for v in self then {
             if not other.contains(v) then {
-                result.insert(v);
+                result.insert(v)
             }
         }
-        let mut iter2 = SetIterator[T](other.storage, 0)
-        while iter2.next() is .Some(v) then {
+        for v in other then {
             if not self.contains(v) then {
-                result.insert(v);
+                result.insert(v)
             }
         }
 
