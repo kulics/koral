@@ -59,7 +59,6 @@ public class CodeGen {
   
   /// 全局逃逸分析结果
   private var globalEscapeResult: GlobalEscapeResult?
-  private var currentCodegenContext = "<unknown>"
 
   // Lightweight type declaration wrapper used for dependency ordering before emission
   private enum TypeDeclaration {
@@ -170,14 +169,6 @@ public class CodeGen {
 
     let base = sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
     return "\(base)_\(symbol.defId.id)"
-  }
-
-  @discardableResult
-  func withCodegenContext<T>(_ context: String, _ body: () throws -> T) rethrows -> T {
-    let previous = currentCodegenContext
-    currentCodegenContext = context
-    defer { currentCodegenContext = previous }
-    return try body()
   }
 
   private func buildCIdentifierMap() {
@@ -891,20 +882,11 @@ public class CodeGen {
       for decl in sortTypeDeclarations(typeDeclarations) {
         switch decl {
         case .structure(let identifier, let parameters, _):
-          let name = context.getQualifiedName(identifier.defId) ?? context.getName(identifier.defId) ?? identifier.type.description
-          withCodegenContext("type declaration \(name)") {
-            generateTypeDeclaration(identifier, parameters)
-          }
+          generateTypeDeclaration(identifier, parameters)
         case .`enum`(let identifier, let cases, _):
-          let name = context.getQualifiedName(identifier.defId) ?? context.getName(identifier.defId) ?? identifier.type.description
-          withCodegenContext("enum declaration \(name)") {
-            generateEnumDeclaration(identifier, cases)
-          }
+          generateEnumDeclaration(identifier, cases)
         case .foreignStructure(let identifier, let fields, _):
-          let name = context.getQualifiedName(identifier.defId) ?? context.getName(identifier.defId) ?? identifier.type.description
-          withCodegenContext("foreign struct declaration \(name)") {
-            generateForeignStructDeclaration(identifier, fields)
-          }
+          generateForeignStructDeclaration(identifier, fields)
         }
       }
 
@@ -919,19 +901,13 @@ public class CodeGen {
       for node in nodes {
         if case .globalFunction(let identifier, let params, _) = node {
           if context.containsGenericParameter(identifier.type) { continue }
-          let name = context.getQualifiedName(identifier.defId) ?? context.getName(identifier.defId) ?? identifier.type.description
-          withCodegenContext("function declaration \(name)") {
-            generateFunctionDeclaration(identifier, params)
-          }
+          generateFunctionDeclaration(identifier, params)
         }
         if case .givenDeclaration(let type, _, let methods) = node {
           if context.containsGenericParameter(type) { continue }
           for method in methods {
             if context.containsGenericParameter(method.identifier.type) { continue }
-            let name = context.getQualifiedName(method.identifier.defId) ?? context.getName(method.identifier.defId) ?? method.identifier.type.description
-            withCodegenContext("function declaration \(name)") {
-              generateFunctionDeclaration(method.identifier, method.parameters)
-            }
+            generateFunctionDeclaration(method.identifier, method.parameters)
           }
         }
       }
@@ -951,21 +927,18 @@ public class CodeGen {
       }
       for node in nodes {
         if case .globalVariable(let identifier, let value, _) = node {
-          let name = context.getQualifiedName(identifier.defId) ?? context.getName(identifier.defId) ?? identifier.type.description
-          withCodegenContext("global variable \(name)") {
-            let cType = cTypeName(identifier.type)
-            let cName = cIdentifier(for: identifier)
-            switch value {
-            case .integerLiteral(_, _), .floatLiteral(_, _),
-              .stringLiteral(_, _), .booleanLiteral(_, _):
-              buffer += "\(cType) \(cName) = "
-              buffer += generateExpressionSSA(value)
-              buffer += ";\n"
-            default:
-              // 复杂表达式延迟到 main 函数中初始化
-              buffer += "\(cType) \(cName);\n"
-              globalInitializations.append((cName, value))
-            }
+          let cType = cTypeName(identifier.type)
+          let cName = cIdentifier(for: identifier)
+          switch value {
+          case .integerLiteral(_, _), .floatLiteral(_, _),
+            .stringLiteral(_, _), .booleanLiteral(_, _):
+            buffer += "\(cType) \(cName) = "
+            buffer += generateExpressionSSA(value)
+            buffer += ";\n"
+          default:
+            // 复杂表达式延迟到 main 函数中初始化
+            buffer += "\(cType) \(cName);\n"
+            globalInitializations.append((cName, value))
           }
         }
       }
@@ -982,19 +955,13 @@ public class CodeGen {
       for node in nodes {
         if case .globalFunction(let identifier, let params, let body) = node {
           if context.containsGenericParameter(identifier.type) { continue }
-          let name = context.getQualifiedName(identifier.defId) ?? context.getName(identifier.defId) ?? identifier.type.description
-          withCodegenContext("function body \(name)") {
-            generateGlobalFunction(identifier, params, body)
-          }
+          generateGlobalFunction(identifier, params, body)
         }
         if case .givenDeclaration(let type, _, let methods) = node {
           if context.containsGenericParameter(type) { continue }
           for method in methods {
             if context.containsGenericParameter(method.identifier.type) { continue }
-            let name = context.getQualifiedName(method.identifier.defId) ?? context.getName(method.identifier.defId) ?? method.identifier.type.description
-            withCodegenContext("function body \(name)") {
-              generateGlobalFunction(method.identifier, method.parameters, method.body)
-            }
+            generateGlobalFunction(method.identifier, method.parameters, method.body)
           }
         }
       }
@@ -2582,7 +2549,7 @@ public class CodeGen {
          .typeVariable,
          .module,
          .traitObject:
-      fatalError("Unresolved type \(type) during codegen context: \(currentCodegenContext)")
+      fatalError("Unresolved type \(type) during codegen")
     default:
       break
     }

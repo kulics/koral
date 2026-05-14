@@ -15,6 +15,29 @@ extension TypeChecker {
     return false
   }
 
+  private func isKnownModuleIdentifier(_ name: String) -> Bool {
+    for moduleInfo in moduleSymbols.values {
+      guard let lastSegment = moduleInfo.modulePath.last else { continue }
+      if moduleFileNameToIdentifier(lastSegment) == name {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func isModulePrefixedMemberPath(baseExpr: ExpressionNode, path: [String]) -> Bool {
+    guard case .identifier(let baseName) = baseExpr,
+          !path.isEmpty,
+          isASCIITypeStyleIdentifier(baseName),
+          isASCIITypeStyleIdentifier(path[0]),
+          currentScope.lookup(baseName, sourceFile: currentSourceFile) == nil,
+          currentScope.lookupType(baseName, sourceFile: currentSourceFile) == nil else {
+      return false
+    }
+
+    return isKnownModuleIdentifier(baseName)
+  }
+
   private func enforceGenericFunctionCallConstraints(
     typeParameters: [TypeParameterDecl],
     args: [Type]
@@ -1556,7 +1579,7 @@ extension TypeChecker {
         // 检查符号是否可以从当前模块直接访问（传递符号名用于成员导入检查）
         if !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
           let modulePath = symbolModulePath.joined(separator: "::")
-          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePath)'. Import it explicitly with `using \(modulePath) { \(name) }`."), span: currentSpan)
+          throw SemanticError(.generic("'\(name)' is defined in module '\(modulePath)'. Import it explicitly with using \(modulePath) { \(name) }."), span: currentSpan)
         }
       }
       
@@ -2878,7 +2901,7 @@ extension TypeChecker {
 
     // Static qualified call: T.(Trait)method(...)
     if case .identifier(let baseName) = baseExpr,
-       let baseType = currentScope.lookupType(baseName),
+       let baseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile),
        let methodSym = extensionMethods[baseName]?[methodName] {
       guard case .function(let params, let returnType) = methodSym.type else {
         throw SemanticError(.generic("Expected function type for static qualified method"), span: currentSpan)
@@ -3079,7 +3102,7 @@ extension TypeChecker {
     if case .memberPath(let baseExpr, let path) = callee,
        case .identifier(let baseName) = baseExpr,
        path.count == 1,
-       let baseType = currentScope.lookupType(baseName),
+       let baseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile),
        case .genericParameter(let paramName) = baseType
     {
       let methodName = path[0]
@@ -4616,7 +4639,7 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     if case .identifier(let typeName) = baseExpr,
        currentScope.lookup(typeName, sourceFile: currentSourceFile) == nil,
-       let baseType = currentScope.lookupType(typeName) {
+       let baseType = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
       if case .genericParameter = baseType {
         // Keep existing generic-parameter method path below.
       } else {
@@ -4773,6 +4796,13 @@ extension TypeChecker {
   
   /// Infers the type of a member path expression (e.g., obj.field or Type.method)
   func inferMemberPathExpression(baseExpr: ExpressionNode, path: [String]) throws -> TypedExpressionNode {
+    if isModulePrefixedMemberPath(baseExpr: baseExpr, path: path) {
+      throw SemanticError(
+        .generic("Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"),
+        span: currentSpan
+      )
+    }
+
     // 1. Check if baseExpr is a Type (Generic Instantiation) for static method access or Enum Constructor
     if case .genericInstantiation(let baseName, let args) = baseExpr {
       if let result = try inferGenericInstantiationMemberPath(baseName: baseName, args: args, path: path) {
@@ -4781,14 +4811,14 @@ extension TypeChecker {
     }
 
     // 2. Check if baseExpr is a Type (Identifier) for static method access
-    if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
+    if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
       if let result = try inferTypeMemberPath(type: type, typeName: name, path: path) {
         return result
       }
     }
 
     // 3. Enum Constructor Access via member path (e.g., EnumType.CaseName)
-    if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name) {
+    if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
       if path.count == 1 {
         let memberName = path[0]
         if case .`enum`(let defId) = type {
@@ -5389,6 +5419,13 @@ extension TypeChecker {
     methodName: String,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
+    if typeName.contains(".") {
+      throw SemanticError(
+        .generic("Module-prefixed access is not supported; import the required symbol explicitly with using module { Symbol }"),
+        span: currentSpan
+      )
+    }
+
     let resolvedTypeArgs = try typeArgs.map { try resolveTypeNode($0) }
     
     // Check if it's a generic struct
@@ -5416,7 +5453,7 @@ extension TypeChecker {
     }
     
     // Check if it's a non-generic type (e.g., String.empty())
-    if let type = currentScope.lookupType(typeName) {
+    if let type = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
       // 检查类型的模块可见性
       try checkTypeVisibility(type: type, typeName: typeName)
       
