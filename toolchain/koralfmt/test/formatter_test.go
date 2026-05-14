@@ -27,7 +27,7 @@ func runFmtCase(t *testing.T, name string) {
 	root := findRepoRoot(t)
 	requireKoralfmtBuilt(t, root)
 
-	casesDir := filepath.Join(root, "fmt", "test", "cases")
+	casesDir := filepath.Join(root, "toolchain", "koralfmt", "test", "cases")
 	src := filepath.Join(casesDir, name+".koral")
 	expected := filepath.Join(casesDir, name+".expected")
 	expectedErr := filepath.Join(casesDir, name+".error")
@@ -103,7 +103,7 @@ func findRepoRoot(t *testing.T) string {
 	}
 	cur := wd
 	for {
-		marker := filepath.Join(cur, "fmt", "koralfmt.koral")
+		marker := filepath.Join(cur, "toolchain", "koralfmt", "koralfmt.koral")
 		if _, ok := statOK(marker); ok {
 			return cur
 		}
@@ -119,7 +119,7 @@ func requireKoralfmtBuilt(t *testing.T, root string) {
 	t.Helper()
 	fmtExe := filepath.Join(root, "bin", exeName("koralfmt"))
 	if _, ok := statOK(fmtExe); !ok {
-		t.Fatalf("koralfmt binary not found at %s; run `go run ./cmd/preparefmt` from fmt/test first", fmtExe)
+		t.Fatalf("koralfmt binary not found at %s; run `go run ./cmd/preparefmt` from toolchain/koralfmt/test first", fmtExe)
 	}
 }
 

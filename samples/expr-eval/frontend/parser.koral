@@ -1,88 +1,69 @@
 // 表达式求值器 - 语法分析器
 
-// 导入 types 模块
-using Super.Types
-
 public type Parser(
-    tokens List[Types.Token],
+    tokens List[Token],
     mut pos UInt,
 )
 
 given Parser {
-    public new(tokens List[Types.Token]) Parser = Parser(tokens, 0)
+    public new(tokens List[Token]) Parser = Parser(tokens, 0)
 
-    private peek(self) Types.Token = {
+    private peek(self ref) Token = {
         if self.pos >= self.tokens.count() then {
-            return Types.Token.EOF()
+            return Token.EOF()
         }
         return self.tokens[self.pos]
     }
 
-    private peek_next(self) Types.Token = {
+    private peek_next(self ref) Token = {
         if self.pos + 1 >= self.tokens.count() then {
-            return Types.Token.EOF()
+            return Token.EOF()
         }
         return self.tokens[self.pos + 1]
     }
 
-    private advance(self mut ref) Types.Token = {
+    private advance(self mut ref) Token = {
         let token = self.peek()
         self.pos += 1
         return token
     }
 
-    private check_plus(self) Bool = when self.peek() in { .Plus then true, _ then false }
-    private check_minus(self) Bool = when self.peek() in { .Minus then true, _ then false }
-    private check_star(self) Bool = when self.peek() in { .Star then true, _ then false }
-    private check_slash(self) Bool = when self.peek() in { .Slash then true, _ then false }
-    private check_percent(self) Bool = when self.peek() in { .Percent then true, _ then false }
-    private check_power(self) Bool = when self.peek() in { .Power then true, _ then false }
-    private check_left_paren(self) Bool = when self.peek() in { .LeftParen then true, _ then false }
-    private check_right_paren(self) Bool = when self.peek() in { .RightParen then true, _ then false }
-    private check_comma(self) Bool = when self.peek() in { .Comma then true, _ then false }
-    private check_eof(self) Bool = when self.peek() in { .EOF then true, _ then false }
+    private check_plus(self ref) Bool = self.peek() is .Plus
+    private check_minus(self ref) Bool = self.peek() is .Minus
+    private check_star(self ref) Bool = self.peek() is .Star
+    private check_slash(self ref) Bool = self.peek() is .Slash
+    private check_percent(self ref) Bool = self.peek() is .Percent
+    private check_power(self ref) Bool = self.peek() is .Power
+    private check_left_paren(self ref) Bool = self.peek() is .LeftParen
+    private check_right_paren(self ref) Bool = self.peek() is .RightParen
+    private check_comma(self ref) Bool = self.peek() is .Comma
+    private check_eof(self ref) Bool = self.peek() is .EOF
 
-    private expect_right_paren(self mut ref) Result[Void] = {
+    private expect_right_paren(self mut ref) Result[Void] =
         if self.check_right_paren() then {
             self.advance()
-            return Result.Ok({})
-        }
+            yield .Ok({})
+        } else .Error(box("Parse error: expected ')', found \(self.peek().to_string())"))
 
-        let mut msg = String.new()
-        msg.push_string("Parse error: expected ')', found ")
-        msg.push_string(self.peek().to_string())
-        return Result.Error(box(msg))
-    }
-
-    public parse(self mut ref) Result[mut ref Expr] = {
+    public parse(self mut ref) Result[ref Expr] = {
         let expr = self.parse_expression() or return
-        if not self.check_eof() then {
-            let mut msg = String.new()
-            msg.push_string("Parse error: unexpected token ")
-            msg.push_string(self.peek().to_string())
-            return Result.Error(box(msg))
-        }
-        return Result.Ok(expr)
+        return if self.check_eof() then .Ok(expr)
+               else .Error(box("Parse error: unexpected token \(self.peek().to_string())"))
     }
 
-    private parse_expression(self mut ref) Result[mut ref Expr] = self.parse_assignment()
+    private parse_expression(self mut ref) Result[ref Expr] = self.parse_assignment()
 
-    private parse_assignment(self mut ref) Result[mut ref Expr] = {
-        when self.peek() in {
-            .Identifier(name) then {
-                if self.peek_next() is .Equals then {
-                    self.advance()
-                    self.advance()
-                    let value = self.parse_assignment() or return
-                    return Result.Ok(box(Expr.Assignment(name, value)))
-                }
-            },
-            _ then {},
+    private parse_assignment(self mut ref) Result[ref Expr] = {
+        if self.peek() is .Identifier(name) and self.peek_next() is .Equals then {
+            self.advance()
+            self.advance()
+            let value = self.parse_assignment() or return
+            return .Ok(box(Expr.Assignment(name, value)))
         }
         return self.parse_additive()
     }
 
-    private parse_additive(self mut ref) Result[mut ref Expr] = {
+    private parse_additive(self mut ref) Result[ref Expr] = {
         let mut left = self.parse_multiplicative() or return
         while self.check_plus() or self.check_minus() then {
             let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
@@ -90,10 +71,10 @@ given Parser {
             let right = self.parse_multiplicative() or return
             left = box(Expr.BinaryOp(op, left, right))
         }
-        return Result.Ok(left)
+        return .Ok(left)
     }
 
-    private parse_multiplicative(self mut ref) Result[mut ref Expr] = {
+    private parse_multiplicative(self mut ref) Result[ref Expr] = {
         let mut left = self.parse_power() or return
         while self.check_star() or self.check_slash() or self.check_percent() then {
             let op = if self.check_star() then BinaryOperator.Mul()
@@ -103,53 +84,45 @@ given Parser {
             let right = self.parse_power() or return
             left = box(Expr.BinaryOp(op, left, right))
         }
-        return Result.Ok(left)
+        return .Ok(left)
     }
     
 
-    private parse_power(self mut ref) Result[mut ref Expr] = {
+    private parse_power(self mut ref) Result[ref Expr] = {
         let left = self.parse_unary() or return
         if self.check_power() then {
             self.advance()
             let right = self.parse_power() or return
-            return Result.Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right)))
+            return .Ok(box(Expr.BinaryOp(BinaryOperator.Pow(), left, right)))
         }
-        return Result.Ok(left)
+        return .Ok(left)
     }
 
-    private parse_unary(self mut ref) Result[mut ref Expr] = {
+    private parse_unary(self mut ref) Result[ref Expr] = {
         if self.check_minus() then {
             self.advance()
             let operand = self.parse_unary() or return
-            return Result.Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand)))
+            return .Ok(box(Expr.UnaryOp(UnaryOperator.Neg(), operand)))
         }
         return self.parse_call()
     }
 
-    private parse_call(self mut ref) Result[mut ref Expr] = {
+    private parse_call(self mut ref) Result[ref Expr] = {
         let primary = self.parse_primary() or return
-        when primary.val in {
-            .Variable(name) then {
-                if self.check_left_paren() then {
-                    self.advance()
-                    let args = self.parse_arguments() or return
-                    let _ = self.expect_right_paren() or return
-                    return Result.Ok(box(Expr.FunctionCall(name, args)))
-                }
-
-                return Result.Ok(primary)
-            },
-            _ then {
-                return Result.Ok(primary)
-            },
+        if primary.val is .Variable(name) and self.check_left_paren() then {
+            self.advance()
+            let args = self.parse_arguments() or return
+            let _ = self.expect_right_paren() or return
+            return .Ok(box(Expr.FunctionCall(name, args)))
         }
+        return .Ok(primary)
     }
 
-    private parse_arguments(self mut ref) Result[List[mut ref Expr]] = {
-        let mut args = List[mut ref Expr].new()
+    private parse_arguments(self mut ref) Result[List[ref Expr]] = {
+        let mut args = List[ref Expr].new()
         
         if self.check_right_paren() then {
-            return Result.Ok(args)
+            return .Ok(args)
         }
 
         let first = self.parse_expression() or return
@@ -159,35 +132,29 @@ given Parser {
             let arg = self.parse_expression() or return
             args.push(arg)
         }
-        return Result.Ok(args)
+        return .Ok(args)
     }
 
-    private parse_primary(self mut ref) Result[mut ref Expr] = {
+    private parse_primary(self mut ref) Result[ref Expr] =
         when self.peek() in {
             .IntLiteral(v) then {
                 self.advance()
-                return Result.Ok(box(Expr.Number(Types.Value.IntVal(v))))
+                yield .Ok(box(Expr.Number(Value.IntVal(v))))
             },
             .FloatLiteral(v) then {
                 self.advance()
-                return Result.Ok(box(Expr.Number(Types.Value.FloatVal(v))))
+                yield .Ok(box(Expr.Number(Value.FloatVal(v))))
             },
             .Identifier(name) then {
                 self.advance()
-                return Result.Ok(box(Expr.Variable(name)))
+                yield .Ok(box(Expr.Variable(name)))
             },
             .LeftParen then {
                 self.advance()
                 let expr = self.parse_expression() or return
                 let _ = self.expect_right_paren() or return
-                return Result.Ok(expr)
+                yield .Ok(expr)
             },
-            _ then {
-                let mut msg = String.new()
-                msg.push_string("Parse error: unexpected token ")
-                msg.push_string(self.peek().to_string())
-                return Result.Error(box(msg))
-            },
+            _ then .Error(box("Parse error: unexpected token \(self.peek().to_string())")),
         }
-    }
 }

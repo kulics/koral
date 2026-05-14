@@ -803,7 +803,7 @@ given Lexer {
             return .Error(box("Unterminated multiline string literal"))
         }
         if not first_char.is_newline() then {
-            return .Error(box("multiline string literal must begin with a newline immediately after \"\"\""))
+            return .Error(box("multi-line string literal content must begin on a new line"))
         }
         if first_char == '\r' then {
             when self.peek() in {
@@ -817,38 +817,67 @@ given Lexer {
         }
 
         let mut raw_lines = List[String].new()
-        let mut current_line = String.new()
         let mut closing_indent = String.new()
-        let mut found_closing = false
 
-        while self.peek() is .Some(_) then {
-            let cur = self.advance().unwrap()
-            if cur.is_newline() then {
-                if cur == '\r' then {
-                    when self.peek() in {
-                        .Some(next) then {
-                            if next == '\n' then {
-                                self.advance()
-                            }
-                        },
-                        .None() then {},
+        while true then {
+            let mut current_line = String.new()
+
+            while self.peek() is .Some(ch) then {
+                if ch == ' ' or ch == '\t' then {
+                    current_line.push_rune(self.advance().unwrap())
+                    continue
+                }
+                break
+            }
+
+            let saved_index = self.index
+            let saved_line = self.line
+            let saved_column = self.column
+
+            if self.peek() is .Some(first) and first == '"' then {
+                self.advance()
+                if self.peek() is .Some(second) and second == '"' then {
+                    self.advance()
+                    if self.peek() is .Some(third) and third == '"' then {
+                        self.advance()
+                        closing_indent = current_line
+                        break
                     }
                 }
-                let trimmed = current_line.trim_ascii()
-                if trimmed == "\"\"\"" then {
-                    closing_indent = self.leading_indent(current_line)
-                    found_closing = true
+            }
+
+            self.index = saved_index
+            self.line = saved_line
+            self.column = saved_column
+
+            while self.peek() is .Some(_) then {
+                let cur = self.advance().unwrap()
+                if cur.is_newline() then {
+                    if cur == '\r' then {
+                        when self.peek() in {
+                            .Some(next) then {
+                                if next == '\n' then {
+                                    self.advance()
+                                }
+                            },
+                            .None() then {},
+                        }
+                    }
+                    if current_line.contains("\"\"\"") then {
+                        return .Error(box("multi-line string literal closing delimiter must begin on a new line"))
+                    }
+                    raw_lines.push(current_line)
                     break
                 }
-                raw_lines.push(current_line)
-                current_line = String.new()
-            } else {
                 current_line.push_rune(cur)
             }
-        }
 
-        if not found_closing then {
-            return .Error(box("Unterminated multiline string literal"))
+            if self.peek() is .None() then {
+                if current_line.contains("\"\"\"") then {
+                    return .Error(box("multi-line string literal closing delimiter must begin on a new line"))
+                }
+                return .Error(box("Unterminated multiline string literal"))
+            }
         }
 
         let closing_indent_count = closing_indent.count()

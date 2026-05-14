@@ -5,57 +5,21 @@
 using std::os { .. }
 using std::proc { .. }
 
-private let target_module_for_build(config ProjectConfig, flags Dict[String, String]) Result[String] = {
-    return when flags.get("--module") in {
-        .Some(module_name) then {
-            if config.modules.contains(module_name) then {
-                yield Result[String].Ok(module_name)
-            }
-            yield Result[String].Error(box("error: module '\(module_name)' not found in koral.json"))
-        },
-        .None() then default_target_module(config),
-    }
-}
-
-private let artifact_stem(module_name String) String = {
-    return module_name.replace_all("::", with: "__")
-}
-
 /// Find koralc executable by searching PATH and KORAL_HOME
 public let find_koralc() Option[String] = {
-    // Check KORAL_HOME first (root and bin/ subdirectory)
-    if env("KORAL_HOME") is .Some(home) then {
-        let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
-        let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
-        let dirs = [home, home + "/bin"]
-        for dir in dirs then {
-            for ext in exts then {
-                let candidate = dir + "/koralc" + ext
-                if path_exist(candidate.into_path()) then {
-                    return Option[String].Some(candidate)
-                }
-            }
-        }
+    let preferred_dirs List[String] = when env("KORAL_HOME") in {
+        .Some(home) then [
+            home + "/compiler/.build/x86_64-unknown-windows-msvc/debug",
+            home + "/compiler/.build/debug",
+            home + "/bin/bootstrap-new",
+            home + "/bin/bootstrap-clone",
+            home + "/bin/bootstrap",
+            home + "/bin",
+            home,
+        ],
+        .None then List[String].new(),
     }
-
-    // Search PATH
-    let path_env = if env("PATH") is .Some(path) then path
-        else if env("Path") is .Some(path) then path
-        else { return Option[String].None() }
-
-    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
-    let sep = if is_windows then ";" else ":"
-    let exts = if is_windows then [".exe", ".cmd", ".bat", ""] else [""]
-    for dir in path_env.split(sep) then {
-        for ext in exts then {
-            let candidate = dir + "/koralc" + ext
-            if path_exist(candidate.into_path()) then {
-                return Option[String].Some(candidate)
-            }
-        }
-    }
-
-    return Option[String].None()
+    return find_executable("koralc", preferred_dirs)
 }
 
 /// Build the project
@@ -70,7 +34,6 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
         return 1
     }
 
-    // Find koralc
     let koralc = find_koralc() or else {
         error_msg("koralc not found. Ensure koralc is in your PATH or set KORAL_HOME")
         return 1
@@ -79,13 +42,11 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
     let stem = artifact_stem(target_module)
     status_msg("Compiling", "\(config.name) v\(config.version) [\(target_module)]")
 
-    // Ensure .build/ directory exists
     create_dir_all(".build".into_path()) or else {
         error_msg("failed to create .build directory: \(it.message())")
         return 1
     }
 
-    // Call koralc build --package-config ./koral.json --target-module <module> -o .build/
     let status = Command.new(koralc)
         .arg("build")
         .arg("--package-config")
@@ -103,13 +64,11 @@ public let cmd_build(args List[String], flags Dict[String, String]) Int = {
         return 1
     }
 
-    if status.is_success() then {
-        let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
-        let exe_ext = if is_windows then ".exe" else ""
-        status_msg("Finished", ".build/\(stem)\(exe_ext)")
-        return 0
+    if not status.is_success() then {
+        return status.code() or else 1
     }
 
-    // Return koralc's exit code
-    return status.code() or else 1
+    let exe_ext = executable_suffix()
+    status_msg("Finished", ".build/\(stem)\(exe_ext)")
+    return 0
 }

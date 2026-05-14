@@ -305,7 +305,7 @@ given CstParser {
     // Token helpers
     // ========================================================================
 
-    private peek(self) Token = {
+    private peek(self ref) Token = {
         let mut i = self.pos
         while i < self.tokens.count() then {
             when self.tokens[i] in {
@@ -316,7 +316,7 @@ given CstParser {
         return Token.EOF()
     }
 
-    private peek_raw(self) Token = {
+    private peek_raw(self ref) Token = {
         if self.pos >= self.tokens.count() then { return .EOF() }
         return self.tokens[self.pos]
     }
@@ -337,14 +337,14 @@ given CstParser {
         }
     }
 
-    private expected_error(self, expected String) String = {
+    private expected_error(self ref, expected String) String = {
         let got = self.peek()
         return "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())"
     }
 
-    private is_eof(self) Bool = when self.peek() in { .EOF() then true, _ then false }
+    private is_eof(self ref) Bool = self.peek() is .EOF()
 
-    private check(self, expected Token) Bool =
+    private check(self ref, expected Token) Bool =
         Token.tag(self.peek()) == Token.tag(expected)
 
     private expect(self mut ref, expected Token, expected_name String) Result[Token] = {
@@ -358,7 +358,7 @@ given CstParser {
             _ then .Error(box(self.expected_error(what))),
         }
 
-    private is_type_start(self, t Token) Bool = when t in {
+    private is_type_start(self ref, t Token) Bool = when t in {
         .KwMut() or .KwRef() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
         .Ident(name) then {
             let runes = name.to_runes()
@@ -379,7 +379,7 @@ given CstParser {
         return .None()
     }
 
-    private count_newlines(self) UInt = {
+    private count_newlines(self ref) UInt = {
         let mut count UInt = 0
         let mut i = self.pos
         while i < self.tokens.count() then {
@@ -391,7 +391,7 @@ given CstParser {
         return count
     }
 
-    private peek_at_skip_nl(self, offset UInt) Token = {
+    private peek_at_skip_nl(self ref, offset UInt) Token = {
         let mut count UInt = 0
         let mut i = self.pos
         while i < self.tokens.count() then {
@@ -407,9 +407,8 @@ given CstParser {
         return Token.EOF()
     }
 
-    private is_access_mod(self) Bool = when self.peek() in {
-        .KwPublic() or .KwPrivate() or .KwProtected() then true, _ then false,
-    }
+    private is_access_mod(self ref) Bool =
+        self.peek() is .KwPublic() or self.peek() is .KwPrivate() or self.peek() is .KwProtected()
 
     private eat_vis(self mut ref) Option[Token] = {
         if self.is_access_mod() then { return .Some(self.eat()) }
@@ -432,14 +431,14 @@ given CstParser {
         _ then false,
     }
 
-    private last_item_is_code(self, items List[ref CstItem]) Bool = {
+    private last_item_is_code(self ref, items List[ref CstItem]) Bool = {
         if items.count() == 0 then { return false }
         let prev = items[items.count() - 1].val
         return CstParser.is_code_item(prev)
     }
 
     // Check if we crossed a newline boundary (for statement termination)
-    private at_newline_boundary(self) Bool = {
+    private at_newline_boundary(self ref) Bool = {
         if self.pos == 0 then { return false }
         // Check if there's a newline between current pos-1 and the next non-newline
         let mut i = self.pos
@@ -456,7 +455,7 @@ given CstParser {
     }
 
     // Check if there's a newline before the current peek position
-    private newline_before_current(self) Bool = {
+    private newline_before_current(self ref) Bool = {
         return self.count_newlines() > 0
     }
 

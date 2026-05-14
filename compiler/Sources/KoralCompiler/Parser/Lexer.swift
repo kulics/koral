@@ -1,3 +1,5 @@
+import Foundation
+
 /// Interpolated string token parts
 public enum InterpolatedStringPart: CustomStringConvertible {
   case stringPart(String)
@@ -890,41 +892,58 @@ public class Lexer {
 
   // Read a multiline string literal delimited by """...""" (Swift-style indentation rules).
   // The opening """ must be followed immediately by a newline.
-  // The closing """ must be on its own line; its leading whitespace defines the indentation
+  // The closing """ must begin on a new line; its leading whitespace defines the indentation
   // prefix that is stripped from every content line.
   // Supports the same escape sequences and \(...) interpolation as regular strings.
   private func readMultilineStringToken() throws -> Token {
     // Consume the mandatory newline after the opening """
     guard let firstChar = getNextChar(), firstChar.isNewline else {
       throw LexerError.invalidString(span: tokenSpan,
-        "multiline string literal must begin with a newline immediately after \"\"\"")
+        "multi-line string literal content must begin on a new line")
     }
 
-    // Collect raw lines until we find a line whose non-whitespace content is exactly """
-    // Each element is the raw text of the line (without the trailing newline).
+    // Collect raw lines until we find """ at the start of a new line (after indentation).
+    // Each element is the raw text of a content line (without the trailing newline).
     var rawLines: [String] = []
-    var currentLine = ""
     var closingIndent: String = ""
-    var foundClosing = false
 
-    lineLoop: while let char = getNextChar() {
-      if char.isNewline {
-        // Check if currentLine is the closing delimiter line
-        let trimmed = currentLine.trimmingCharacters(in: .init(charactersIn: " \t"))
-        if trimmed == "\"\"\"" {
-          // Extract the leading whitespace as the closing indent
-          closingIndent = String(currentLine.prefix(while: { $0 == " " || $0 == "\t" }))
-          foundClosing = true
-          break lineLoop
+    lineLoop: while true {
+      var currentLine = ""
+
+      while let char = getNextChar() {
+        if char == " " || char == "\t" {
+          currentLine.append(char)
+          continue
         }
-        rawLines.append(currentLine)
-        currentLine = ""
-      } else {
+        unreadChar(char)
+        break
+      }
+
+      let delimiterState = saveState()
+      if let first = getNextChar(), first == "\"",
+         let second = getNextChar(), second == "\"",
+         let third = getNextChar(), third == "\"" {
+        closingIndent = currentLine
+        break lineLoop
+      }
+      restoreState(delimiterState)
+
+      while let char = getNextChar() {
+        if char.isNewline {
+          if currentLine.contains("\"\"\"") {
+            throw LexerError.invalidString(span: tokenSpan,
+              "multi-line string literal closing delimiter must begin on a new line")
+          }
+          rawLines.append(currentLine)
+          continue lineLoop
+        }
         currentLine.append(char)
       }
-    }
 
-    if !foundClosing {
+      if currentLine.contains("\"\"\"") {
+        throw LexerError.invalidString(span: tokenSpan,
+          "multi-line string literal closing delimiter must begin on a new line")
+      }
       throw LexerError.invalidString(span: tokenSpan, "unterminated multiline string literal")
     }
 

@@ -1,182 +1,119 @@
 // 表达式求值器 - 内置函数
-using Std.Math.*
+using std::math { .. }
+
+private let expect_arity(name String, args List[Value], expected UInt) Result[Void] = {
+    if args.count() == expected then {
+        return .Ok({})
+    }
+    let suffix = if expected == 1 then "" else "s"
+    return .Error(box("\(name)() takes exactly \(expected) argument\(suffix)"))
+}
+
+private let with_one_arg(name String, args List[Value], action Func[Value, Result[Value]]) Result[Value] = {
+    expect_arity(name, args, 1) or return
+    return action(args[0])
+}
+
+private let with_two_args(name String, args List[Value], action Func[Value, Value, Result[Value]]) Result[Value] = {
+    expect_arity(name, args, 2) or return
+    return action(args[0], args[1])
+}
 
 // 内置函数：abs - 绝对值
-public let builtin_abs(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("abs() takes exactly 1 argument"))
-    }
-    return when args[0] in {
-        .IntVal(x) then Result.Ok(Types.Value.IntVal(x.abs())),
-        .FloatVal(x) then Result.Ok(Types.Value.FloatVal(x.abs())),
-    }
-}
+public let builtin_abs(args List[Value]) Result[Value] =
+    with_one_arg("abs", args, (value) -> .Ok(value.unary_numeric((x) -> .IntVal(x.abs()), (x) -> .FloatVal(x.abs()))))
 
 // 内置函数：sqrt - 平方根
-public let builtin_sqrt(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("sqrt() takes exactly 1 argument"))
-    }
-    let x = args[0].to_float()
-    if x < 0.0 then {
-        return Result.Error(box("sqrt() argument must be non-negative"))
-    }
-    return Result.Ok(Types.Value.FloatVal(sqrt(x)))
-}
+public let builtin_sqrt(args List[Value]) Result[Value] =
+    with_one_arg("sqrt", args, (value) -> {
+        let x = value.to_float()
+        if x < 0.0 then {
+            return .Error(box("sqrt() argument must be non-negative"))
+        }
+        return .Ok(.FloatVal(sqrt(x)))
+    })
 
 // 内置函数：min - 最小值
-public let builtin_min(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 2 then {
-        return Result.Error(box("min() takes exactly 2 arguments"))
-    }
-    let a = args[0]
-    let b = args[1]
-    if a.is_int() and b.is_int() then {
-        return when a in {
-            .IntVal(av) then when b in {
-                .IntVal(bv) then Result.Ok(Types.Value.IntVal(min(av, bv))),
-                _ then Result.Error(box("unreachable")),
-            },
-            _ then Result.Error(box("unreachable")),
-        }
-    }
-    let af = a.to_float()
-    let bf = b.to_float()
-    return Result.Ok(Types.Value.FloatVal(min(af, bf)))
-}
+public let builtin_min(args List[Value]) Result[Value] =
+    with_two_args("min", args, (a, b) -> .Ok(a.numeric_binary(b, (x, y) -> .IntVal(min(x, y)), (x, y) -> .FloatVal(min(x, y)))))
 
 // 内置函数：max - 最大值
-public let builtin_max(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 2 then {
-        return Result.Error(box("max() takes exactly 2 arguments"))
-    }
-    let a = args[0]
-    let b = args[1]
-    if a.is_int() and b.is_int() then {
-        return when a in {
-            .IntVal(av) then when b in {
-                .IntVal(bv) then Result.Ok(Types.Value.IntVal(max(av, bv))),
-                _ then Result.Error(box("unreachable")),
-            },
-            _ then Result.Error(box("unreachable")),
-        }
-    }
-    let af = a.to_float()
-    let bf = b.to_float()
-    return Result.Ok(Types.Value.FloatVal(max(af, bf)))
-}
+public let builtin_max(args List[Value]) Result[Value] =
+    with_two_args("max", args, (a, b) -> .Ok(a.numeric_binary(b, (x, y) -> .IntVal(max(x, y)), (x, y) -> .FloatVal(max(x, y)))))
 
 // 内置函数：floor - 向下取整
-public let builtin_floor(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("floor() takes exactly 1 argument"))
-    }
-    return Result.Ok(Types.Value.IntVal(args[0].to_float().floor()(Int)))
-}
+public let builtin_floor(args List[Value]) Result[Value] =
+    with_one_arg("floor", args, (value) -> .Ok(.IntVal(value.to_float().floor()(Int))))
 
 // 内置函数：ceil - 向上取整
-public let builtin_ceil(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("ceil() takes exactly 1 argument"))
-    }
-    return Result.Ok(Types.Value.IntVal(args[0].to_float().ceil()(Int)))
-}
+public let builtin_ceil(args List[Value]) Result[Value] =
+    with_one_arg("ceil", args, (value) -> .Ok(.IntVal(value.to_float().ceil()(Int))))
 
 // 内置函数：round - 四舍五入
-public let builtin_round(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("round() takes exactly 1 argument"))
-    }
-    return Result.Ok(Types.Value.IntVal(args[0].to_float().round()(Int)))
-}
+public let builtin_round(args List[Value]) Result[Value] =
+    with_one_arg("round", args, (value) -> .Ok(.IntVal(value.to_float().round()(Int))))
 
 // 内置函数：sin
-public let builtin_sin(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("sin() takes exactly 1 argument"));
-    }
-    return Result.Ok(Types.Value.FloatVal(sin(args[0].to_float())))
-}
+public let builtin_sin(args List[Value]) Result[Value] =
+    with_one_arg("sin", args, (value) -> .Ok(.FloatVal(sin(value.to_float()))))
 
 // 内置函数：cos
-public let builtin_cos(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("cos() takes exactly 1 argument"));
-    }
-    return Result.Ok(Types.Value.FloatVal(cos(args[0].to_float())))
-}
+public let builtin_cos(args List[Value]) Result[Value] =
+    with_one_arg("cos", args, (value) -> .Ok(.FloatVal(cos(value.to_float()))))
 
 // 内置函数：tan
-public let builtin_tan(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("tan() takes exactly 1 argument"));
-    }
-    return Result.Ok(Types.Value.FloatVal(tan(args[0].to_float())))
-}
+public let builtin_tan(args List[Value]) Result[Value] =
+    with_one_arg("tan", args, (value) -> .Ok(.FloatVal(tan(value.to_float()))))
 
 // 内置函数：ln
-public let builtin_ln(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("ln() takes exactly 1 argument"));
-    }
-    let x = args[0].to_float()
-    if x <= 0.0 then {
-        return Result.Error(box("ln() argument must be positive"))
-    }
-    return Result.Ok(Types.Value.FloatVal(ln(x)))
-}
+public let builtin_ln(args List[Value]) Result[Value] =
+    with_one_arg("ln", args, (value) -> {
+        let x = value.to_float()
+        if x <= 0.0 then {
+            return .Error(box("ln() argument must be positive"))
+        }
+        return .Ok(.FloatVal(ln(x)))
+    })
 
 // 内置函数：log2
-public let builtin_log2(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("log2() takes exactly 1 argument"));
-    }
-    let x = args[0].to_float()
-    if x <= 0.0 then {
-        return Result.Error(box("log2() argument must be positive"))
-    }
-    return Result.Ok(Types.Value.FloatVal(log2(x)))
-}
+public let builtin_log2(args List[Value]) Result[Value] =
+    with_one_arg("log2", args, (value) -> {
+        let x = value.to_float()
+        if x <= 0.0 then {
+            return .Error(box("log2() argument must be positive"))
+        }
+        return .Ok(.FloatVal(log2(x)))
+    })
 
 // 内置函数：log10
-public let builtin_log10(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("log10() takes exactly 1 argument"));
-    }
-    let x = args[0].to_float()
-    if x <= 0.0 then {
-        return Result.Error(box("log10() argument must be positive"))
-    }
-    return Result.Ok(Types.Value.FloatVal(log10(x)))
-}
+public let builtin_log10(args List[Value]) Result[Value] =
+    with_one_arg("log10", args, (value) -> {
+        let x = value.to_float()
+        if x <= 0.0 then {
+            return .Error(box("log10() argument must be positive"))
+        }
+        return .Ok(.FloatVal(log10(x)))
+    })
 
 // 内置函数：exp
-public let builtin_exp(args List[Types.Value]) Result[Types.Value] = {
-    if args.count() <> 1 then {
-        return Result.Error(box("exp() takes exactly 1 argument"));
-    }
-    return Result.Ok(Types.Value.FloatVal(exp(args[0].to_float())))
-}
+public let builtin_exp(args List[Value]) Result[Value] =
+    with_one_arg("exp", args, (value) -> .Ok(.FloatVal(exp(value.to_float()))))
 
 // 调用内置函数的分发器
-public let call_builtin(name String, args List[Types.Value]) Result[Types.Value] = {
-    if name == "abs" then { return builtin_abs(args) }
-    else if name == "sqrt" then { return builtin_sqrt(args) }
-    else if name == "min" then { return builtin_min(args) }
-    else if name == "max" then { return builtin_max(args) }
-    else if name == "floor" then { return builtin_floor(args) }
-    else if name == "ceil" then { return builtin_ceil(args) }
-    else if name == "round" then { return builtin_round(args) }
-    else if name == "sin" then { return builtin_sin(args) }
-    else if name == "cos" then { return builtin_cos(args) }
-    else if name == "tan" then { return builtin_tan(args) }
-    else if name == "ln" then { return builtin_ln(args) }
-    else if name == "log2" then { return builtin_log2(args) }
-    else if name == "log10" then { return builtin_log10(args) }
-    else if name == "exp" then { return builtin_exp(args) }
-
-    let mut msg = String.new()
-    msg.push_string("Unknown function: ")
-    msg.push_string(name)
-    return Result.Error(box(msg))
+public let call_builtin(name String, args List[Value]) Result[Value] = when name in {
+    "abs" then builtin_abs(args),
+    "sqrt" then builtin_sqrt(args),
+    "min" then builtin_min(args),
+    "max" then builtin_max(args),
+    "floor" then builtin_floor(args),
+    "ceil" then builtin_ceil(args),
+    "round" then builtin_round(args),
+    "sin" then builtin_sin(args),
+    "cos" then builtin_cos(args),
+    "tan" then builtin_tan(args),
+    "ln" then builtin_ln(args),
+    "log2" then builtin_log2(args),
+    "log10" then builtin_log10(args),
+    "exp" then builtin_exp(args),
+    _ then .Error(box("Unknown function: \(name)")),
 }

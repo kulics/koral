@@ -64,7 +64,9 @@ Blocks are also expressions, so branch bodies can stay local instead of forcing 
 
 ```koral
 let label = if score >= 90 then {
-    if score == 100 then yield "perfect"
+    if score == 100 then {
+        yield "perfect"
+    }
     yield "A"
 } else {
     yield "other"

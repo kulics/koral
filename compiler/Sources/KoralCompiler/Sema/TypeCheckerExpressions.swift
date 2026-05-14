@@ -3084,6 +3084,14 @@ extension TypeChecker {
   
   /// Infers the type of a call expression
   func inferCallExpression(callee: ExpressionNode, arguments callArgs: [CallArg], expectedType: Type? = nil) throws -> TypedExpressionNode {
+    if let chain = flattenDeepFluentMemberCallChain(callee: callee, callArgs: callArgs),
+       let typedChain = try inferDeepFluentMemberCallChain(
+        baseExpr: chain.baseExpr,
+        segments: chain.segments,
+        expectedType: expectedType
+       ) {
+      return typedChain
+    }
     // Extract bare expressions for internal use; labels are used for named argument validation
     let arguments = callArgs.map { $0.expression }
     
@@ -5786,7 +5794,7 @@ extension TypeChecker {
     default:
       lookupTypeName = type.description
     }
-    
+
     if let methods = extensionMethods[lookupTypeName], let methodSym = methods[methodName] {
       if context.containsGenericParameter(methodSym.type) {
         return try inferStaticGenericMethodCallOnConcreteType(
@@ -6081,6 +6089,119 @@ extension TypeChecker {
     }
 
     return resolvedMethodTypeArgs
+  }
+
+  private func flattenDeepFluentMemberCallChain(
+    callee: ExpressionNode,
+    callArgs: [CallArg]
+  ) -> (baseExpr: ExpressionNode, segments: [(memberName: String, callArgs: [CallArg])])? {
+    var segments: [(memberName: String, callArgs: [CallArg])] = []
+    var currentCallee = callee
+    var currentArgs = callArgs
+
+    while case .memberPath(let baseExpr, let path) = currentCallee, path.count == 1 {
+      segments.append((memberName: path[0], callArgs: currentArgs))
+      guard case .call(let nestedCallee, let nestedArgs) = baseExpr else {
+        return segments.count >= 8 ? (baseExpr, segments.reversed()) : nil
+      }
+      currentCallee = nestedCallee
+      currentArgs = nestedArgs
+    }
+
+    return nil
+  }
+
+  private func inferDeepFluentMemberCallChain(
+    baseExpr: ExpressionNode,
+    segments: [(memberName: String, callArgs: [CallArg])],
+    expectedType: Type?
+  ) throws -> TypedExpressionNode? {
+    var current = try inferTypedExpression(baseExpr)
+
+    for (index, segment) in segments.enumerated() {
+      guard let typedCallee = try inferSingleMemberReference(base: current, memberName: segment.memberName) else {
+        return nil
+      }
+
+      let segmentExpectedType = index == segments.count - 1 ? expectedType : nil
+      current = try inferResolvedMethodReferenceCall(
+        typedCallee: typedCallee,
+        callArgs: segment.callArgs,
+        expectedType: segmentExpectedType
+      )
+    }
+
+    return current
+  }
+
+  private func inferSingleMemberReference(
+    base: TypedExpressionNode,
+    memberName: String
+  ) throws -> TypedExpressionNode? {
+    let (typeToLookup, isPointerAccess): (Type, Bool)
+    switch base.type {
+    case .reference(let inner), .mutableReference(let inner):
+      (typeToLookup, isPointerAccess) = (inner, false)
+    case .pointer(let inner), .mutablePointer(let inner):
+      (typeToLookup, isPointerAccess) = (inner, true)
+    default:
+      (typeToLookup, isPointerAccess) = (base.type, false)
+    }
+
+    if isPointerAccess,
+       let methodResult = try inferMethodOnType(
+        typeToLookup: base.type,
+        memberName: memberName,
+        typedBase: base,
+        typedPath: []
+       ) {
+      return methodResult
+    }
+
+    return try inferMethodOnType(
+      typeToLookup: typeToLookup,
+      memberName: memberName,
+      typedBase: base,
+      typedPath: []
+    )
+  }
+
+  private func inferResolvedMethodReferenceCall(
+    typedCallee: TypedExpressionNode,
+    callArgs: [CallArg],
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    guard case .methodReference(let base, let method, _, _, let methodType) = typedCallee else {
+      throw SemanticError.invalidOperation(
+        op: "call",
+        type1: typedCallee.type.description,
+        type2: ""
+      )
+    }
+
+    if let namedParams = functionNamedParams[method.defId], namedParams.count > 0 {
+      let callSiteParams: [(name: String, named: Bool)]
+      if namedParams.first?.name == "self" {
+        callSiteParams = Array(namedParams.dropFirst())
+      } else {
+        callSiteParams = namedParams
+      }
+      if !callSiteParams.isEmpty {
+        try validateNamedArguments(
+          callArgs: callArgs,
+          parameters: callSiteParams,
+          callDescription: context.getName(method.defId) ?? "method"
+        )
+      }
+    }
+
+    return try inferMethodCall(
+      base: base,
+      method: method,
+      methodType: methodType,
+      arguments: callArgs.map { $0.expression },
+      expectedReturnType: expectedType
+    )
   }
 }
 
@@ -7150,6 +7271,13 @@ extension TypeChecker {
       typedRight = try inferTypedExpression(r, expectedType: expectedElementType)
       if let eet = expectedElementType {
         typedRight = try coerceLiteral(typedRight!, to: eet)
+      }
+    }
+
+    if typedLeft != nil, typedRight != nil, typedLeft!.type != typedRight!.type {
+      typedRight = try coerceLiteral(typedRight!, to: typedLeft!.type)
+      if typedLeft!.type != typedRight!.type {
+        typedLeft = try coerceLiteral(typedLeft!, to: typedRight!.type)
       }
     }
     

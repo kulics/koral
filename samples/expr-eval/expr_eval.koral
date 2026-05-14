@@ -1,100 +1,94 @@
 // 表达式求值器 - 入口文件
 
-public using "types" as Types
-public using "frontend" as Frontend
-public using "backend" as Backend
+using std { .. }
+using "types/types"
+using "frontend/frontend"
+using "backend/backend"
 
 // REPL 类型
-public type REPL(mut evaluator Backend.Evaluator)
+public type REPL(mut evaluator Evaluator)
 
 given REPL {
-    public new() Self = REPL(Backend.Evaluator.new())
+    public new() Self = REPL(Evaluator.new())
+
+    private report_error(self ref, prefix String, err ref Error) Void = {
+        println("\(prefix): \(err.message())")
+    }
 
     // 显示欢迎信息
-    private show_welcome(self) Void = {
-        println("Expression Evaluator v1.0")
-        println("Type 'help' for available commands, 'quit' to exit.")
-        println("")
-    }
+    private show_welcome(self ref) Void =
+        println("""
+            Expression Evaluator v1.0
+            Type 'help' for available commands, 'quit' to exit.
+            
+            """)
 
     // 显示帮助信息
-    private show_help(self) Void = {
-        println("Commands:")
-        println("  help   - Show this help message")
-        println("  vars   - List all defined variables")
-        println("  clear  - Clear all variables")
-        println("  quit   - Exit the program")
-        println("  exit   - Exit the program")
-        println("")
-        println("Operators: + - * / % ^ (power)")
-        println("Functions: abs, sqrt, min, max, floor, ceil, round,")
-        println("          sin, cos, tan, ln, log2, log10, exp")
-        println("Variables: x = 10 (assignment), x (reference)")
-    }
+    private show_help(self ref) Void =
+        println("""
+            Commands:
+              help   - Show this help message
+              vars   - List all defined variables
+              clear  - Clear all variables
+              quit   - Exit the program
+              exit   - Exit the program
 
-    // 处理单行输入
-    private process_line(self mut ref, line String) Bool = {
-        // 检查命令
-        if line == "quit" or line == "exit" then {
-            println("Goodbye!")
-            return false
-        }
-        
-        if line == "help" then {
-            self.show_help()
-            return true
-        }
-        
-        if line == "vars" then {
-            self.evaluator.list_vars()
-            return true
-        }
-        
-        if line == "clear" then {
-            self.evaluator.clear_env()
-            println("Variables cleared.")
-            return true
-        }
-        
-        // 空行跳过
+            Operators: + - * / % ^ (power)
+            Functions: abs, sqrt, min, max, floor, ceil, round,
+                      sin, cos, tan, ln, log2, log10, exp
+            Variables: x = 10 (assignment), x (reference)
+            """)
+
+    private eval_input(self mut ref, line String) Bool = {
         if line.is_empty() then {
             return true
         }
-        
-        // 解析并求值表达式
-        let mut lexer = Frontend.Lexer.new(line)
-        when lexer.tokenize() in {
-            .Ok(tokens) then {
-                let mut parser = Frontend.Parser.new(tokens)
-                when parser.parse() in {
-                    .Ok(expr) then {
-                        when self.evaluator.eval(expr) in {
-                            .Ok(v) then println(v.to_string()),
-                            .Error(e) then {
-                                let mut s = String.new()
-                                s.push_string("Error: ")
-                                s.push_string(e.message())
-                                println(s)
-                            },
-                        }
-                    },
-                    .Error(e) then {
-                        let mut s = String.new()
-                        s.push_string("Parse error: ")
-                        s.push_string(e.message())
-                        println(s)
-                    },
-                }
-            },
-            .Error(e) then {
-                let mut s = String.new()
-                s.push_string("Lexer error: ")
-                s.push_string(e.message())
-                println(s)
-            },
+
+        let mut lexer = Lexer.new(line)
+        let tokens = lexer.tokenize() or else {
+            self.report_error("Lexer error", it)
+            return true
         }
-        
+
+        let mut parser = Parser.new(tokens)
+        let expr = parser.parse() or else {
+            self.report_error("Parse error", it)
+            return true
+        }
+
+        let value = self.evaluator.eval(expr) or else {
+            self.report_error("Error", it)
+            return true
+        }
+
+        println(value.to_string())
         return true
+    }
+
+    // 处理单行输入
+    private process_line(self mut ref, line String) Bool = when line in {
+        "quit" then {
+            println("Goodbye!")
+            yield false
+        },
+        "exit" then {
+            println("Goodbye!")
+            yield false
+        },
+        "help" then {
+            self.show_help()
+            yield true
+        },
+        "vars" then {
+            self.evaluator.list_vars()
+            yield true
+        },
+        "clear" then {
+            self.evaluator.clear_env()
+            println("Variables cleared.")
+            yield true
+        },
+        _ then self.eval_input(line),
     }
 
     // 运行 REPL 主循环
@@ -108,7 +102,7 @@ given REPL {
                 .Some(line) then {
                     running = self.process_line(line)
                 },
-                .None then {
+                .None() then {
                     // EOF
                     println("")
                     println("Goodbye!")
@@ -119,7 +113,8 @@ given REPL {
     }
 }
 
-public let main() Void = {
+public let main() Int = {
     let mut repl = REPL.new()
     repl.run()
+    return 0
 }

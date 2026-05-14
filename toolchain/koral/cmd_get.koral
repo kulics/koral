@@ -5,6 +5,27 @@
 using std::os { .. }
 using std::proc { .. }
 
+private let run_git_command(
+    dep_key String,
+    failure_label String,
+    mut cmd Command,
+) Bool = {
+    let status = cmd
+        .set_stdout(IoRedirect.Inherit())
+        .set_stderr(IoRedirect.Inherit())
+        .run() or else {
+        error_msg("git \(failure_label) failed for \(dep_key): \(it.message())")
+        return false
+    }
+
+    if not status.is_success() then {
+        error_msg("git \(failure_label) failed for \(dep_key)")
+        return false
+    }
+
+    return true
+}
+
 /// Check if git is available
 let find_git() Bool = {
     let status = Command.new("git")
@@ -21,55 +42,31 @@ let fetch_dependency(dep_key String, dep DepConfig, deps_dir String) Bool = {
     status_msg("Fetching", "\(dep_key) (\(dep.name)) from \(dep.git)")
 
     if path_exist(target.into_path()) then {
-        // Already exists — git pull
-        let status = Command.new("git")
+        return run_git_command(dep_key, "pull",
+            Command.new("git")
             .arg("-C").arg(target)
             .arg("pull")
-            .set_stdout(IoRedirect.Inherit())
-            .set_stderr(IoRedirect.Inherit())
-            .run() or else {
-            eprintln("error: git pull failed for \(dep_key): \(it.message())")
-            return false
-        }
-        if not status.is_success() then {
-            eprintln("error: git pull failed for \(dep_key)")
-            return false
-        }
-    } else {
-        // Clone
-        let status = Command.new("git")
+        )
+    }
+
+    if not run_git_command(dep_key, "clone",
+        Command.new("git")
             .arg("clone")
             .arg(dep.git)
             .arg(target)
-            .set_stdout(IoRedirect.Inherit())
-            .set_stderr(IoRedirect.Inherit())
-            .run() or else {
-            eprintln("error: git clone failed for \(dep_key): \(it.message())")
-            return false
-        }
-        if not status.is_success() then {
-            eprintln("error: git clone failed for \(dep_key)")
-            return false
-        }
+    ) then {
+        return false
+    }
 
-        // Checkout version if specified
-        if not dep.version.is_empty() then {
-            let checkout = Command.new("git")
+    if dep.version.is_empty() then {
+        return true
+    }
+
+    return run_git_command(dep_key, "checkout \(dep.version)",
+        Command.new("git")
                 .arg("-C").arg(target)
                 .arg("checkout").arg(dep.version)
-                .set_stdout(IoRedirect.Inherit())
-                .set_stderr(IoRedirect.Inherit())
-                .run() or else {
-                eprintln("error: git checkout failed for \(dep_key): \(it.message())")
-                return false
-            }
-            if not checkout.is_success() then {
-                eprintln("error: git checkout \(dep.version) failed for \(dep_key)")
-                return false
-            }
-        }
-    }
-    return true
+    )
 }
 
 /// Download project dependencies
@@ -95,21 +92,15 @@ public let cmd_get(args List[String], flags Dict[String, String]) Int = {
 
     if args.count() > 0 then {
         // Download only specified dependencies
-        let mut i UInt = 0
-        while i < args.count() then {
-            let name = args[i]
-            when config.dependencies.get(name) in {
-                .Some(dep) then {
-                    if not fetch_dependency(name, dep, deps_dir) then {
-                        had_error = true
-                    }
-                },
-                .None() then {
-                    error_msg("dependency '\(name)' not found in koral.json")
-                    had_error = true
-                },
+        for name in args then {
+            let dep = config.dependencies.get(name) or else {
+                error_msg("dependency '\(name)' not found in koral.json")
+                had_error = true
+                continue
             }
-            i += 1
+            if not fetch_dependency(name, dep, deps_dir) then {
+                had_error = true
+            }
         }
     } else {
         // Download all dependencies

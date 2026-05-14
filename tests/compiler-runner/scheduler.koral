@@ -24,8 +24,7 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
     let mut timed_out UInt = 0
     let mut infra_failed UInt = 0
 
-    let mut i UInt = 0
-    while i < total then {
+    for i in 0..<total then {
         print_case_started(config, i + 1, total, cases[i])
         let result = run_single_case(config, cases[i])
         print_case_result(config, i + 1, total, result)
@@ -40,7 +39,6 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
                 infra_failed += 1
             }
         }
-        i += 1
     }
 
     return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
@@ -60,25 +58,24 @@ private let run_case_with_group_lock(
     env_lock Mutex,
     sender SendChannel[CaseWorkerEvent],
 ) Void = {
-    if info.group_key == "sync" then {
-        sync_lock.lock()
-        run_case_and_emit_events(config, info, sender)
-        sync_lock.unlock()
-        return
+    when info.group_key in {
+        "sync" then {
+            sync_lock.lock()
+            run_case_and_emit_events(config, info, sender)
+            sync_lock.unlock()
+        },
+        "net" then {
+            net_lock.lock()
+            run_case_and_emit_events(config, info, sender)
+            net_lock.unlock()
+        },
+        "env" then {
+            env_lock.lock()
+            run_case_and_emit_events(config, info, sender)
+            env_lock.unlock()
+        },
+        _ then run_case_and_emit_events(config, info, sender),
     }
-    if info.group_key == "net" then {
-        net_lock.lock()
-        run_case_and_emit_events(config, info, sender)
-        net_lock.unlock()
-        return
-    }
-    if info.group_key == "env" then {
-        env_lock.lock()
-        run_case_and_emit_events(config, info, sender)
-        env_lock.unlock()
-        return
-    }
-    run_case_and_emit_events(config, info, sender)
 }
 
 private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
@@ -107,8 +104,7 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
     let mut timed_out UInt = 0
     let mut infra_failed UInt = 0
 
-    let mut w UInt = 0
-    while w < worker_count then {
+    for _ in 0..<worker_count then {
         let shared_sender = sender
         let shared_cases = shuffled_cases
         let shared_config = config
@@ -128,8 +124,6 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
                 run_case_with_group_lock(shared_config, case_info, shared_sync_lock, shared_net_lock, shared_env_lock, shared_sender)
             }
         })
-
-        w += 1
     }
 
     while received < total then {

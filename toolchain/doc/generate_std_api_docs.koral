@@ -19,6 +19,9 @@ type ExtractTypeResult(end UInt, declaration Decl)
 
 type ExtractTraitResult(block TraitBlock, valid Bool)
 
+let empty_parsed_api() ParsedApi =
+    ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new())
+
 let is_space(b UInt8) Bool = b == ' ' or b == '\t' or b == '\r' or b == '\n'
 
 let rstrip(text String) String = {
@@ -53,12 +56,11 @@ let strip_inline_comment(text String) String =
 
 let count_braces(text String) Int = {
     let mut delta Int = 0
-    let mut i UInt = 0
     let mut in_string = false
     let mut in_rune = false
     let mut escaped = false
 
-    while i < text.count() then {
+    for i in 0..<text.count() then {
         let ch = text[i]
 
         if in_string then {
@@ -69,7 +71,6 @@ let count_braces(text String) Int = {
             } else if ch == '"' then {
                 in_string = false
             }
-            i += 1
             continue
         }
 
@@ -81,7 +82,6 @@ let count_braces(text String) Int = {
             } else if ch == '\'' then {
                 in_rune = false
             }
-            i += 1
             continue
         }
 
@@ -91,13 +91,11 @@ let count_braces(text String) Int = {
 
         if ch == '"' then {
             in_string = true
-            i += 1
             continue
         }
 
         if ch == '\'' then {
             in_rune = true
-            i += 1
             continue
         }
 
@@ -106,7 +104,6 @@ let count_braces(text String) Int = {
         } else if ch == '}' then {
             delta -= 1
         }
-        i += 1
     }
 
     return delta
@@ -117,8 +114,7 @@ let has_unclosed_delimiters(lines List[String]) Bool = {
     let mut bracket Int = 0
 
     for line in lines then {
-        let mut i UInt = 0
-        while i < line.count() then {
+        for i in 0..<line.count() then {
             let ch = line[i]
             if ch == '(' then {
                 paren += 1
@@ -129,7 +125,6 @@ let has_unclosed_delimiters(lines List[String]) Bool = {
             } else if ch == ']' then {
                 bracket -= 1
             }
-            i += 1
         }
     }
 
@@ -150,9 +145,8 @@ let signature_seems_complete(line String) Bool = {
     let mut paren Int = 0
     let mut bracket Int = 0
     let mut angle Int = 0
-    let mut i UInt = 0
 
-    while i < raw.count() then {
+    for i in 0..<raw.count() then {
         let ch = raw[i]
         if ch == '(' then {
             paren += 1
@@ -167,7 +161,6 @@ let signature_seems_complete(line String) Bool = {
         } else if ch == '>' then {
             angle -= 1
         }
-        i += 1
     }
 
     return paren <= 0 and bracket <= 0 and angle <= 0
@@ -279,12 +272,10 @@ let list_lines_equal(a List[String], b List[String]) Bool = {
     if a.count() <> b.count() then {
         return false
     }
-    let mut i UInt = 0
-    while i < a.count() then {
+    for i in 0..<a.count() then {
         if a[i] <> b[i] then {
             return false
         }
-        i += 1
     }
     return true
 }
@@ -419,43 +410,36 @@ let split_top_level_commas(text String) List[String] = {
     let mut bracket Int = 0
     let mut brace Int = 0
 
-    let mut i UInt = 0
-    while i < text.count() then {
+    for i in 0..<text.count() then {
         let ch = text[i]
         if ch == '(' then {
             paren += 1
             current.push_byte(ch)
-            i += 1
             continue
         }
         if ch == ')' then {
             paren -= 1
             current.push_byte(ch)
-            i += 1
             continue
         }
         if ch == '[' then {
             bracket += 1
             current.push_byte(ch)
-            i += 1
             continue
         }
         if ch == ']' then {
             bracket -= 1
             current.push_byte(ch)
-            i += 1
             continue
         }
         if ch == '{' then {
             brace += 1
             current.push_byte(ch)
-            i += 1
             continue
         }
         if ch == '}' then {
             brace -= 1
             current.push_byte(ch)
-            i += 1
             continue
         }
 
@@ -465,12 +449,10 @@ let split_top_level_commas(text String) List[String] = {
                 parts.push(part)
             }
             current = String.new()
-            i += 1
             continue
         }
 
         current.push_byte(ch)
-        i += 1
     }
 
     let tail = trim(current)
@@ -602,7 +584,7 @@ let split_lines(text String) List[String] = {
 let parse_public_api(file_path Path) ParsedApi = {
     let text = read_text_file(file_path) or else {
         eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())")
-        return ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new())
+        return empty_parsed_api()
     }
 
     let lines = split_lines(text)
@@ -678,11 +660,9 @@ let to_pascal_case(s String) String = {
 
 let segments_to_pascal_key(segments List[String]) String = {
     let mut out = String.new()
-    let mut i UInt = 0
-    while i < segments.count() then {
+    for i in 0..<segments.count() then {
         if i > 0 then { out.push_byte('.') }
         out.push_string(to_pascal_case(segments[i]))
-        i += 1
     }
     return out
 }
@@ -708,8 +688,7 @@ let module_key_for_source(source Path, std_root Path) String = {
 let module_name_from_key(key String) String = key
 
 let append_declarations(lines mut ref List[String], declarations List[Decl]) Void = {
-    let mut idx UInt = 0
-    while idx < declarations.count() then {
+    for idx in 0..<declarations.count() then {
         let decl = declarations[idx]
         for line in decl.lines then {
             lines.push(line)
@@ -717,13 +696,11 @@ let append_declarations(lines mut ref List[String], declarations List[Decl]) Voi
         if idx + 1 < declarations.count() then {
             lines.push("")
         }
-        idx += 1
     }
 }
 
 let append_traits_or_givens(lines mut ref List[String], blocks List[TraitBlock]) Void = {
-    let mut idx UInt = 0
-    while idx < blocks.count() then {
+    for idx in 0..<blocks.count() then {
         let block = blocks[idx]
         for line in block.header.lines then {
             lines.push(line)
@@ -737,7 +714,6 @@ let append_traits_or_givens(lines mut ref List[String], blocks List[TraitBlock])
         if idx + 1 < blocks.count() then {
             lines.push("")
         }
-        idx += 1
     }
 }
 
@@ -789,7 +765,7 @@ let write_module_doc(module_key String, source_files List[String], docs_root Pat
     let mut ordered_sources = stem_first
     ordered_sources.push_list(rest)
 
-    let mut parsed_all = ParsedApi(List[Decl].new(), List[TraitBlock].new(), List[Decl].new(), List[TraitBlock].new())
+    let mut parsed_all = empty_parsed_api()
 
     for source_str in ordered_sources then {
         let parsed = parse_public_api(source_str.into_path())

@@ -5,6 +5,17 @@ public type Value {
     FloatVal(value Float64),
 }
 
+private let trim_float_repr(text String) String = {
+    let mut trimmed = text
+    while trimmed.ends_with("0") then {
+        trimmed = trimmed.trim_suffix("0")
+    }
+    if trimmed.ends_with(".") then {
+        trimmed = trimmed.trim_suffix(".")
+    }
+    return trimmed
+}
+
 given Value {
     public to_float(self) Float64 = when self in {
         .IntVal(v) then v(Float64),
@@ -16,8 +27,31 @@ given Value {
         .FloatVal(_) then false,
     }
 
+    public int_pair(self, other Value) Option[Pair[Int, Int]] = when self in {
+        .IntVal(a) then when other in {
+            .IntVal(b) then .Some((a, b)),
+            .FloatVal(_) then .None(),
+        },
+        .FloatVal(_) then .None(),
+    }
+
+    public numeric_binary(
+        self,
+        other Value,
+        on_int Func[Int, Int, Value],
+        on_float Func[Float64, Float64, Value],
+    ) Value = when self.int_pair(other) in {
+        .Some(pair) then on_int(pair.first, pair.second),
+        .None then on_float(self.to_float(), other.to_float()),
+    }
+
+    public unary_numeric(self, on_int Func[Int, Value], on_float Func[Float64, Value]) Value = when self in {
+        .IntVal(v) then on_int(v),
+        .FloatVal(v) then on_float(v),
+    }
+
     public to_string(self ref) String = when self in {
         .IntVal(v) then v.to_string(),
-        .FloatVal(v) then v.to_string(),
+        .FloatVal(v) then trim_float_repr(v.to_string()),
     }
 }

@@ -11,7 +11,7 @@
 ## 运行方式
 
 ```bash
-cd fmt/test
+cd toolchain/koralfmt/test
 go run ./cmd/preparefmt
 go test ./...
 ```
@@ -29,4 +29,3 @@ go test ./... -run TestFmtCaseValidGivenWhen
 ```bash
 go run ./cmd/preparefmt --force
 ```
-
