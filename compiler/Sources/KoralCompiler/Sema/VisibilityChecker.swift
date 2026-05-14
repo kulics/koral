@@ -25,7 +25,7 @@ public enum VisibilityError: Error, CustomStringConvertible {
         switch self {
         case .symbolNotImported(let symbol, let modulePath):
             let path = modulePath.joined(separator: "::")
-            return "'\(symbol)' is defined in module '\(path)'. Import it explicitly with `using \(path) { \(symbol) }`."
+            return "'\(symbol)' is defined in module '\(path)'. Import it explicitly with using \(path) { \(symbol) }."
         case .notAccessible(let symbol, let reason):
             return "Cannot access '\(symbol)': \(reason)"
         case .genericParameterNoPrefix(let name):
@@ -307,6 +307,6 @@ public class VisibilityChecker {
         currentModulePath: [String]
     ) -> String {
         let modulePath = symbolModulePath.joined(separator: "::")
-        return "'\(symbolName)' is defined in module '\(modulePath)'. Import it explicitly with `using \(modulePath) { \(symbolName) }`."
+        return "'\(symbolName)' is defined in module '\(modulePath)'. Import it explicitly with using \(modulePath) { \(symbolName) }."
     }
 }

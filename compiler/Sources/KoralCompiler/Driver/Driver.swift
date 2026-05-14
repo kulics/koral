@@ -697,10 +697,6 @@ public class Driver {
     }
     profilePhase("\(phasePrefix): monomorphize", start: monoStart)
 
-    if envFlag("KORAL_DUMP_MONO_AST") {
-      printTypedAST(.program(globalNodes: monomorphizedProgram.globalNodes))
-    }
-
     debugPhase("\(phasePrefix): codegen")
     let codegenStart = DispatchTime.now()
     let codeGen = CodeGen(
