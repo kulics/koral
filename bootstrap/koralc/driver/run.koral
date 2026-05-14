@@ -131,17 +131,18 @@ public let run_driver() Int = {
         return 1
     }
 
-    if command == "--emit-ast" then {
-        eprintln("--emit-ast is no longer supported by the manifest-driven bootstrap driver")
-        return 1
+    return when command in {
+        "--emit-ast" then {
+            eprintln("--emit-ast is no longer supported by the manifest-driven bootstrap driver")
+            yield 1
+        },
+        "--emit-typed-ast" then run_emit_typed_ast(options),
+        "--resolve-module" then run_resolve_module(options),
+        "--emit-c" then run_emit_c(options),
+        "check" then run_check(options),
+        "build" then run_build(options),
+        _ then 1,
     }
-    if command == "--emit-typed-ast" then { return run_emit_typed_ast(options) }
-    if command == "--resolve-module" then { return run_resolve_module(options) }
-    if command == "--emit-c" then { return run_emit_c(options) }
-    if command == "check" then { return run_check(options) }
-    if command == "build" then { return run_build(options) }
-
-    return 1
 }
 
 private let print_usage() Void = {
@@ -187,12 +188,11 @@ private let debug_phase(message String) Void = {
     }
 }
 
-private let phase_timing_enabled() Bool = {
-    return when env("KORAL_PROFILE_PHASES") in {
+private let phase_timing_enabled() Bool =
+    when env("KORAL_PROFILE_PHASES") in {
         .Some(value) then value == "1" or value == "true" or value == "TRUE",
         .None() then false,
     }
-}
 
 private let profile_phase(message String, start MonoTime) Void = {
     if phase_timing_enabled() then {
@@ -200,9 +200,8 @@ private let profile_phase(message String, start MonoTime) Void = {
     }
 }
 
-private let normalize_path_for_match(path String) String = {
-    return path.into_path().normalize().to_string().replace_all("\\", with: "/").to_ascii_lowercase()
-}
+private let normalize_path_for_match(path String) String =
+    path.into_path().normalize().to_string().replace_all("\\", with: "/").to_ascii_lowercase()
 
 private let path_matches_user_file(diag_path String, user_file_path String) Bool = {
     let diag_norm = normalize_path_for_match(diag_path)

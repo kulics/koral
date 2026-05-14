@@ -35,6 +35,9 @@ given Regex {
         let handle_out = alloc_memory[ptr UInt8](1)
         let error_buf = alloc_memory[UInt8](256)
         let error_len_out = alloc_memory[Int32](1)
+        finally dealloc_memory(handle_out)
+        finally dealloc_memory(error_buf)
+        finally dealloc_memory(error_len_out)
 
         let rc = __koral_regex_compile(
             pattern.storage.data, c_flags,
@@ -46,25 +49,19 @@ given Regex {
         if rc <> 0 then {
             let err_len = error_len_out.val
             let msg = String.from_utf8_ptr(error_buf, err_len(UInt))
-            dealloc_memory(handle_out)
-            dealloc_memory(error_buf)
-            dealloc_memory(error_len_out)
             return when msg in {
-                .Ok(msg) then Result[Regex].Error(box(msg)),
-                .Error(e) then Result[Regex].Error(e),
+                .Ok(msg) then .Error(box(msg)),
+                .Error(e) then .Error(e),
             }
         }
 
         let handle = handle_out.val
-        dealloc_memory(handle_out)
-        dealloc_memory(error_buf)
-        dealloc_memory(error_len_out)
 
         // 计算捕获组数量：扫描 pattern 中未转义的 '('
         let groups = Regex.count_groups(pattern)
 
         let storage = box(RegexStorage(handle, pattern, groups))
-        return Result[Regex].Ok(Regex(storage))
+        return .Ok(Regex(storage))
     }
 
     // 计算正则表达式中的捕获组数量
@@ -97,14 +94,14 @@ given Regex {
     public matches(self ref, text String) Bool = {
         let starts = alloc_memory[Int32](1)
         let ends = alloc_memory[Int32](1)
+        finally dealloc_memory(starts)
+        finally dealloc_memory(ends)
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, 0,
             1, starts, ends
         )
 
-        dealloc_memory(starts)
-        dealloc_memory(ends)
         return matched > 0
     }
 
@@ -116,6 +113,8 @@ given Regex {
     find_at(self ref, text String, offset UInt) Option[Match] = {
         let starts = alloc_memory[Int32](1)
         let ends = alloc_memory[Int32](1)
+        finally dealloc_memory(starts)
+        finally dealloc_memory(ends)
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, offset(Int32),
@@ -123,15 +122,11 @@ given Regex {
         )
 
         if matched == 0 then {
-            dealloc_memory(starts)
-            dealloc_memory(ends)
             return Option[Match].None()
         }
 
         let s = starts.val(UInt)
         let e = ends.val(UInt)
-        dealloc_memory(starts)
-        dealloc_memory(ends)
 
         return Option[Match].Some(Match(text, s, e))
     }
@@ -155,6 +150,8 @@ given Regex {
         let max_groups = (self.storage.groups + 1)(Int32)  // +1 for $0
         let starts = alloc_memory[Int32](max_groups(UInt))
         let ends = alloc_memory[Int32](max_groups(UInt))
+        finally dealloc_memory(starts)
+        finally dealloc_memory(ends)
 
         let matched = __koral_regex_match(
             self.storage.handle, text.storage.data, offset(Int32),
@@ -162,22 +159,15 @@ given Regex {
         )
 
         if matched == 0 then {
-            dealloc_memory(starts)
-            dealloc_memory(ends)
             return Option[Captures].None()
         }
 
-        let mut start_list = List[Int32].new()
-        let mut end_list = List[Int32].new()
-        let mut i Int32 = 0
-        while i < max_groups then {
-            start_list.push(starts[i(UInt)])
-            end_list.push(ends[i(UInt)])
-            i += 1
+        let mut start_list List[Int32] = []
+        let mut end_list List[Int32] = []
+        for i in 0..<max_groups(UInt) then {
+            start_list.push(starts[i])
+            end_list.push(ends[i])
         }
-
-        dealloc_memory(starts)
-        dealloc_memory(ends)
 
         return Option[Captures].Some(Captures(text, start_list, end_list))
     }

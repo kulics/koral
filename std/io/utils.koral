@@ -15,22 +15,18 @@ given Reader {
 
     // Read all bytes from self until EOF. Returns all bytes as a list.
     public read_all(self ref) Result[List[UInt8]] = {
-        let mut out = List[UInt8].new()
+        let mut out List[UInt8] = []
         let mut chunk = make_bytes(4096)
         while true then {
             when self.read(into: chunk.ref, ..) in {
                 .Ok(n) then {
-                    if n == 0 then {
-                        return Result[List[UInt8]].Ok(out)
-                    }
+                    if n == 0 then { return .Ok(out) }
                     out.push_sublist(chunk, 0..<n)
                 },
-                .Error(e) then {
-                    return Result[List[UInt8]].Error(e)
-                },
+                .Error(e) then { return .Error(e) },
             }
         }
-        return Result[List[UInt8]].Ok(out)
+        return .Ok(out)
     }
 
     // Copy all bytes from self to dst. Returns total bytes copied.
@@ -40,24 +36,16 @@ given Reader {
         while true then {
             when self.read(into: chunk.ref, ..) in {
                 .Ok(n) then {
-                    if n == 0 then {
-                        return Result[UInt].Ok(total)
+                    if n == 0 then { return .Ok(total) }
+                    let _ = dst.write_all(from: chunk, 0..<n) or else {
+                        return .Error(it)
                     }
-                    when dst.write_all(from: chunk, 0..<n) in {
-                        .Ok(_) then {
-                            total += n
-                        },
-                        .Error(e) then {
-                            return Result[UInt].Error(e)
-                        },
-                    }
+                    total += n
                 },
-                .Error(e) then {
-                    return Result[UInt].Error(e)
-                },
+                .Error(e) then { return .Error(e) },
             }
         }
-        return Result[UInt].Ok(total)
+        return .Ok(total)
     }
 }
 
@@ -72,22 +60,16 @@ given Writer {
         let span = from.slice_spec(range)
         let mut start = span.start()
         let end = span.end()
-        if end <= start then {
-            return Result[Void].Ok({})
-        }
+        if end <= start then { return .Ok({}) }
         while start < end then {
             when self.write(from: from, start..<end) in {
                 .Ok(n) then {
-                    if n == 0 then {
-                        return Result[Void].Error(box(IoError.WriteZero()))
-                    }
+                    if n == 0 then { return .Error(box(IoError.WriteZero())) }
                     start += n
                 },
-                .Error(e) then {
-                    return Result[Void].Error(e)
-                },
+                .Error(e) then { return .Error(e) },
             }
         }
-        return Result[Void].Ok({})
+        return .Ok({})
     }
 }

@@ -48,10 +48,9 @@ given JsonParser {
     // --- Byte-level access ---
 
     peek(self ref) Option[UInt8] = {
-        if self.pos < self.len then {
-            return Option[UInt8].Some(self.input[self.pos])
-        }
-        return Option[UInt8].None()
+        return if self.pos < self.len
+            then .Some(self.input[self.pos])
+            else .None()
     }
 
     advance(self mut ref) UInt8 = {
@@ -61,13 +60,11 @@ given JsonParser {
     }
 
     expect_char(self mut ref, expected UInt8) Result[JsonValue] = {
-        if self.pos >= self.len then {
-            return self.make_error("unexpected end of input")
-        }
+        if self.pos >= self.len then { return self.make_error("unexpected end of input") }
         let b = self.input[self.pos]
         if b == expected then {
             self.pos += 1
-            return Result[JsonValue].Ok(JsonValue.Null())
+            return .Ok(JsonValue.Null())
         }
         let mut msg = String.new()
         msg.push_string("expected '")
@@ -86,7 +83,7 @@ given JsonParser {
         }
         if self.input[self.pos] == 'n' and self.input[self.pos + 1] == 'u' and self.input[self.pos + 2] == 'l' and self.input[self.pos + 3] == 'l' then {
             self.pos += 4
-            return Result[JsonValue].Ok(JsonValue.Null())
+            return .Ok(JsonValue.Null())
         }
         return self.make_error("expected 'null'")
     }
@@ -97,7 +94,7 @@ given JsonParser {
         }
         if self.input[self.pos] == 't' and self.input[self.pos + 1] == 'r' and self.input[self.pos + 2] == 'u' and self.input[self.pos + 3] == 'e' then {
             self.pos += 4
-            return Result[JsonValue].Ok(JsonValue.Bool(true))
+            return .Ok(JsonValue.Bool(true))
         }
         return self.make_error("expected 'true'")
     }
@@ -108,7 +105,7 @@ given JsonParser {
         }
         if self.input[self.pos] == 'f' and self.input[self.pos + 1] == 'a' and self.input[self.pos + 2] == 'l' and self.input[self.pos + 3] == 's' and self.input[self.pos + 4] == 'e' then {
             self.pos += 5
-            return Result[JsonValue].Ok(JsonValue.Bool(false))
+            return .Ok(JsonValue.Bool(false))
         }
         return self.make_error("expected 'false'")
     }
@@ -122,10 +119,9 @@ given JsonParser {
 
     parse_hex4(self mut ref) Result[UInt] = {
         let mut value UInt = 0
-        let mut i UInt = 0
-        while i < 4 then {
+        for _ in 0..<4 then {
             if self.pos >= self.len then {
-                return Result[UInt].Error(box(JsonError("invalid unicode escape", self.pos)))
+                return .Error(box(JsonError("invalid unicode escape", self.pos)))
             }
             let b = self.input[self.pos]
             let digit = if b >= '0' and b <= '9' then {
@@ -135,13 +131,12 @@ given JsonParser {
             } else if b >= 'A' and b <= 'F' then {
                 yield (b - 'A')(UInt) + 10
             } else {
-                return Result[UInt].Error(box(JsonError("invalid unicode escape", self.pos)))
+                return .Error(box(JsonError("invalid unicode escape", self.pos)))
             }
             value = value * 16 + digit
             self.pos += 1
-            i += 1
         }
-        return Result[UInt].Ok(value)
+        return .Ok(value)
     }
 
     // --- UTF-8 encoding helper ---
@@ -188,7 +183,7 @@ given JsonParser {
             // Closing quote
             if b == '"' then {
                 self.pos += 1
-                return Result[String].Ok(result)
+                return .Ok(result)
             }
 
             // Escape sequence
@@ -220,7 +215,7 @@ given JsonParser {
                     let hex_result = self.parse_hex4()
                     let cp = when hex_result in {
                         .Ok(v) then v,
-                        .Error(e) then { return Result[String].Error(e) },
+                        .Error(e) then { return .Error(e) },
                     }
                     // Check for UTF-16 surrogate pair
                     if cp >= 55296 and cp <= 56319 then {
@@ -233,7 +228,7 @@ given JsonParser {
                         let low_result = self.parse_hex4()
                         let low = when low_result in {
                             .Ok(v) then v,
-                            .Error(e) then { return Result[String].Error(e) },
+                            .Error(e) then { return .Error(e) },
                         }
                         if low < 56320 or low > 57343 then {
                             // Not a valid low surrogate (0xDC00-0xDFFF)
@@ -273,11 +268,7 @@ given JsonParser {
     }
 
     parse_string(self mut ref) Result[JsonValue] = {
-        let str_result = self.parse_string_raw()
-        return when str_result in {
-            .Ok(s) then Result[JsonValue].Ok(JsonValue.String(s)),
-            .Error(e) then Result[JsonValue].Error(e),
-        }
+        return .Ok(JsonValue.String(self.parse_string_raw() or return))
     }
 
     // --- Array parsing ---
@@ -294,17 +285,15 @@ given JsonParser {
         // Empty array
         if self.pos < self.len and self.input[self.pos] == ']' then {
             self.pos += 1
-            return Result[JsonValue].Ok(JsonValue.Array(List[ref JsonValue].new()))
+            let empty List[ref JsonValue] = []
+            return .Ok(JsonValue.Array(empty))
         }
 
-        let mut elements = List[ref JsonValue].new()
+        let mut elements List[ref JsonValue] = []
 
         while true then {
             // Parse element
-            let value = when self.parse_value() in {
-                .Ok(v) then v,
-                .Error(e) then { return Result[JsonValue].Error(e) },
-            }
+            let value = self.parse_value() or return
             elements.push(box(value))
 
             self.skip_whitespace()
@@ -325,7 +314,7 @@ given JsonParser {
             }
         }
 
-        return Result[JsonValue].Ok(JsonValue.Array(elements))
+        return .Ok(JsonValue.Array(elements))
     }
 
     // --- Object parsing ---
@@ -342,17 +331,15 @@ given JsonParser {
         // Empty object
         if self.pos < self.len and self.input[self.pos] == '}' then {
             self.pos += 1
-            return Result[JsonValue].Ok(JsonValue.Object(Dict[String, ref JsonValue].new()))
+            let empty Dict[String, ref JsonValue] = []
+            return .Ok(JsonValue.Object(empty))
         }
 
-        let mut entries = Dict[String, ref JsonValue].new()
+        let mut entries Dict[String, ref JsonValue] = []
 
         while true then {
             // Parse key (must be a string)
-            let key = when self.parse_string_raw() in {
-                .Ok(k) then k,
-                .Error(e) then { return Result[JsonValue].Error(e) },
-            }
+            let key = self.parse_string_raw() or return
 
             self.skip_whitespace()
 
@@ -368,10 +355,7 @@ given JsonParser {
             self.skip_whitespace()
 
             // Parse value
-            let value = when self.parse_value() in {
-                .Ok(v) then v,
-                .Error(e) then { return Result[JsonValue].Error(e) },
-            }
+            let value = self.parse_value() or return
 
             // Insert key-value pair (duplicate keys: later value overwrites)
             entries.insert(key, box(value))
@@ -394,7 +378,7 @@ given JsonParser {
             }
         }
 
-        return Result[JsonValue].Ok(JsonValue.Object(entries))
+        return .Ok(JsonValue.Object(entries))
     }
 
     // --- Number parsing ---
@@ -480,7 +464,7 @@ given JsonParser {
             result = 0.0 - result
         }
 
-        return Result[JsonValue].Ok(JsonValue.Number(result))
+        return .Ok(JsonValue.Number(result))
     }
 
     // --- Top-level value dispatch ---
@@ -490,27 +474,20 @@ given JsonParser {
         when self.peek() in {
             .None then { return self.make_error("unexpected end of input") },
             .Some(b) then {
-                if b == 'n' then {
-                    return self.parse_null()
-                } else if b == 't' then {
-                    return self.parse_true()
-                } else if b == 'f' then {
-                    return self.parse_false()
-                } else if b == '"' then {
-                    return self.parse_string()
-                } else if b == '[' then {
-                    return self.parse_array()
-                } else if b == '{' then {
-                    return self.parse_object()
-                } else if b == '-' or (b >= '0' and b <= '9') then {
+                if b == 'n' then { return self.parse_null() }
+                if b == 't' then { return self.parse_true() }
+                if b == 'f' then { return self.parse_false() }
+                if b == '"' then { return self.parse_string() }
+                if b == '[' then { return self.parse_array() }
+                if b == '{' then { return self.parse_object() }
+                if b == '-' or (b >= '0' and b <= '9') then {
                     return self.parse_number()
-                } else {
-                    let mut msg = String.new()
-                    msg.push_string("unexpected character '")
-                    msg.push_byte(b)
-                    msg.push_byte('\'')
-                    return self.make_error(msg)
                 }
+                let mut msg = String.new()
+                msg.push_string("unexpected character '")
+                msg.push_byte(b)
+                msg.push_byte('\'')
+                return self.make_error(msg)
             },
         }
     }
@@ -523,14 +500,13 @@ given JsonValue as Parseable {
 
     public parse(s String) Result[Self] = {
         let mut parser = JsonParser.new(s)
-        let value = when parser.parse_value() in {
-            .Ok(v) then v,
-            .Error(e) then { return Result[Self].Error(e) },
+        let value = parser.parse_value() or else {
+            return .Error(it)
         }
         parser.skip_whitespace()
         if parser.pos < parser.len then {
-            return Result[Self].Error(box(JsonError("trailing characters after JSON value", parser.pos)))
+            return .Error(box(JsonError("trailing characters after JSON value", parser.pos)))
         }
-        return Result[Self].Ok(value)
+        return .Ok(value)
     }
 }
