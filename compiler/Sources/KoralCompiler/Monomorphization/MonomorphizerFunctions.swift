@@ -13,6 +13,66 @@ extension Monomorphizer {
         [name]
     }
 
+    internal func instantiateReferenceLikeExtensionMethod(
+        on selfType: Type,
+        name: String,
+        methodTypeArgs: [Type],
+        expectedMethodType: Type?
+    ) throws -> Symbol? {
+        func instantiateModifierMethod(
+            structureName: String,
+            innerType: Type
+        ) throws -> Symbol? {
+            guard let methods = input.genericTemplates.extensionMethods[structureName],
+                  let ext = selectExtensionTemplate(
+                    methods,
+                    name: name,
+                    extensionTypeArgCount: 1
+                  ) else {
+                return nil
+            }
+
+            let resolvedInner = resolveParameterizedType(innerType)
+            if context.containsGenericParameter(resolvedInner) {
+                return nil
+            }
+
+            let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                methodInfo: ext,
+                baseType: selfType,
+                extensionTypeArgs: [resolvedInner],
+                providedMethodTypeArgs: methodTypeArgs,
+                expectedMethodType: expectedMethodType
+            )
+            let instantiated = try instantiateExtensionMethodFromEntry(
+                baseType: selfType,
+                structureName: structureName,
+                genericArgs: [resolvedInner],
+                methodTypeArgs: resolvedMethodTypeArgs,
+                methodInfo: ext
+            )
+            guard methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) else {
+                return nil
+            }
+            return instantiated
+        }
+
+        switch selfType {
+        case .reference(let inner):
+            return try instantiateModifierMethod(structureName: "Ref", innerType: inner)
+        case .mutableReference(let inner):
+            return try instantiateModifierMethod(structureName: "MutRef", innerType: inner)
+                ?? instantiateModifierMethod(structureName: "Ref", innerType: inner)
+        case .weakReference(let inner):
+            return try instantiateModifierMethod(structureName: "WeakRef", innerType: inner)
+        case .mutableWeakReference(let inner):
+            return try instantiateModifierMethod(structureName: "MutWeakRef", innerType: inner)
+                ?? instantiateModifierMethod(structureName: "WeakRef", innerType: inner)
+        default:
+            return nil
+        }
+    }
+
     private func resolvedReceiverMethodName(_ methodSymbol: Symbol) -> String {
         if let dispatchInfo = receiverMethodDispatch[methodSymbol.defId] {
             return dispatchInfo.methodName
@@ -106,6 +166,34 @@ extension Monomorphizer {
             expectedMethodType: expectedMethodType
         )
     }
+
+    internal func lookupConcreteMethodSymbolWithRefLikeFallback(
+        on selfType: Type,
+        name: String,
+        methodTypeArgs: [Type] = [],
+        expectedMethodType: Type? = nil
+    ) throws -> Symbol? {
+        if let direct = try lookupConcreteMethodSymbol(
+            on: selfType,
+            name: name,
+            methodTypeArgs: methodTypeArgs,
+            expectedMethodType: expectedMethodType
+        ) {
+            return direct
+        }
+
+        switch resolveParameterizedType(selfType) {
+        case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+            return try instantiateReferenceLikeExtensionMethod(
+                on: selfType,
+                name: name,
+                methodTypeArgs: methodTypeArgs,
+                expectedMethodType: nil
+            )
+        default:
+            return nil
+        }
+    }
     
     // MARK: - Function Instantiation
     
@@ -182,7 +270,7 @@ extension Monomorphizer {
         // Create function type
         let functionType = Type.function(
             parameters: resolvedParams.map {
-                Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+                Parameter(type: $0.type, kind: passKindForParameterType($0.type))
             },
             returns: resolvedReturnType)
         
@@ -408,7 +496,7 @@ extension Monomorphizer {
         // Create function type
         let functionType = Type.function(
             parameters: params.map {
-                Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+                Parameter(type: $0.type, kind: passKindForParameterType($0.type))
             },
             returns: returnType
         )
@@ -568,7 +656,7 @@ extension Monomorphizer {
         
         let funcType = Type.function(
             parameters: params.map {
-                Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+                Parameter(type: $0.type, kind: passKindForParameterType($0.type))
             },
             returns: returnType
         )
@@ -588,39 +676,13 @@ extension Monomorphizer {
     ) throws -> Symbol? {
         switch selfType {
         case .reference(let inner):
-            // First check if there's a blanket given extension method on Ref itself
-            // (e.g., given[T Eq] T ref Eq { equals(...) }). If so, use it directly
-            // rather than auto-derefing to the inner type.
-            if let refExtensions = input.genericTemplates.extensionMethods["Ref"],
-               let ext = selectExtensionTemplate(
-                   refExtensions,
-                   name: name,
-                   extensionTypeArgCount: 1
-               ) {
-                let innerResolved = resolveParameterizedType(inner)
-                if !context.containsGenericParameter(innerResolved) {
-                    do {
-                        let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                            methodInfo: ext,
-                            baseType: selfType,
-                            extensionTypeArgs: [innerResolved],
-                            providedMethodTypeArgs: methodTypeArgs,
-                            expectedMethodType: expectedMethodType
-                        )
-                        let instantiated = try instantiateExtensionMethodFromEntry(
-                            baseType: selfType,
-                            structureName: "Ref",
-                            genericArgs: [innerResolved],
-                            methodTypeArgs: resolvedMethodTypeArgs,
-                            methodInfo: ext
-                        )
-                        if methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) {
-                            return instantiated
-                        }
-                    } catch {
-                        throw error
-                    }
-                }
+            if let instantiated = try instantiateReferenceLikeExtensionMethod(
+                on: selfType,
+                name: name,
+                methodTypeArgs: methodTypeArgs,
+                expectedMethodType: expectedMethodType
+            ) {
+                return instantiated
             }
             // Fall back to auto-deref: look up the method on the inner type
             return try lookupConcreteMethodSymbol(
@@ -631,67 +693,13 @@ extension Monomorphizer {
             )
 
         case .mutableReference(let inner):
-            if let mutRefExtensions = input.genericTemplates.extensionMethods["MutRef"],
-               let ext = selectExtensionTemplate(
-                   mutRefExtensions,
-                   name: name,
-                   extensionTypeArgCount: 1
-               ) {
-                let innerResolved = resolveParameterizedType(inner)
-                if !context.containsGenericParameter(innerResolved) {
-                    do {
-                        let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                            methodInfo: ext,
-                            baseType: selfType,
-                            extensionTypeArgs: [innerResolved],
-                            providedMethodTypeArgs: methodTypeArgs,
-                            expectedMethodType: expectedMethodType
-                        )
-                        let instantiated = try instantiateExtensionMethodFromEntry(
-                            baseType: selfType,
-                            structureName: "MutRef",
-                            genericArgs: [innerResolved],
-                            methodTypeArgs: resolvedMethodTypeArgs,
-                            methodInfo: ext
-                        )
-                        if methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) {
-                            return instantiated
-                        }
-                    } catch {
-                        throw error
-                    }
-                }
-            }
-            if let refExtensions = input.genericTemplates.extensionMethods["Ref"],
-               let ext = selectExtensionTemplate(
-                   refExtensions,
-                   name: name,
-                   extensionTypeArgCount: 1
-               ) {
-                let innerResolved = resolveParameterizedType(inner)
-                if !context.containsGenericParameter(innerResolved) {
-                    do {
-                        let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                            methodInfo: ext,
-                            baseType: selfType,
-                            extensionTypeArgs: [innerResolved],
-                            providedMethodTypeArgs: methodTypeArgs,
-                            expectedMethodType: expectedMethodType
-                        )
-                        let instantiated = try instantiateExtensionMethodFromEntry(
-                            baseType: selfType,
-                            structureName: "Ref",
-                            genericArgs: [innerResolved],
-                            methodTypeArgs: resolvedMethodTypeArgs,
-                            methodInfo: ext
-                        )
-                        if methodTypeMatchesExpected(instantiated.type, expected: expectedMethodType) {
-                            return instantiated
-                        }
-                    } catch {
-                        throw error
-                    }
-                }
+            if let instantiated = try instantiateReferenceLikeExtensionMethod(
+                on: selfType,
+                name: name,
+                methodTypeArgs: methodTypeArgs,
+                expectedMethodType: expectedMethodType
+            ) {
+                return instantiated
             }
             return try lookupConcreteMethodSymbol(
                 on: inner,
@@ -701,80 +709,24 @@ extension Monomorphizer {
             )
 
         case .weakReference(let inner):
-            if let weakRefExtensions = input.genericTemplates.extensionMethods["WeakRef"],
-               let ext = selectExtensionTemplate(
-                   weakRefExtensions,
-                   name: name,
-                   extensionTypeArgCount: 1
-               ) {
-                let innerResolved = resolveParameterizedType(inner)
-                if !context.containsGenericParameter(innerResolved) {
-                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                        methodInfo: ext,
-                        baseType: selfType,
-                        extensionTypeArgs: [innerResolved],
-                        providedMethodTypeArgs: methodTypeArgs,
-                        expectedMethodType: expectedMethodType
-                    )
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: "WeakRef",
-                        genericArgs: [innerResolved],
-                        methodTypeArgs: resolvedMethodTypeArgs,
-                        methodInfo: ext
-                    )
-                }
+            if let instantiated = try instantiateReferenceLikeExtensionMethod(
+                on: selfType,
+                name: name,
+                methodTypeArgs: methodTypeArgs,
+                expectedMethodType: expectedMethodType
+            ) {
+                return instantiated
             }
             return nil
 
         case .mutableWeakReference(let inner):
-            if let mutWeakRefExtensions = input.genericTemplates.extensionMethods["MutWeakRef"],
-               let ext = selectExtensionTemplate(
-                   mutWeakRefExtensions,
-                   name: name,
-                   extensionTypeArgCount: 1
-               ) {
-                let innerResolved = resolveParameterizedType(inner)
-                if !context.containsGenericParameter(innerResolved) {
-                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                        methodInfo: ext,
-                        baseType: selfType,
-                        extensionTypeArgs: [innerResolved],
-                        providedMethodTypeArgs: methodTypeArgs,
-                        expectedMethodType: expectedMethodType
-                    )
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: "MutWeakRef",
-                        genericArgs: [innerResolved],
-                        methodTypeArgs: resolvedMethodTypeArgs,
-                        methodInfo: ext
-                    )
-                }
-            }
-            if let weakRefExtensions = input.genericTemplates.extensionMethods["WeakRef"],
-               let ext = selectExtensionTemplate(
-                   weakRefExtensions,
-                   name: name,
-                   extensionTypeArgCount: 1
-               ) {
-                let innerResolved = resolveParameterizedType(inner)
-                if !context.containsGenericParameter(innerResolved) {
-                    let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
-                        methodInfo: ext,
-                        baseType: selfType,
-                        extensionTypeArgs: [innerResolved],
-                        providedMethodTypeArgs: methodTypeArgs,
-                        expectedMethodType: expectedMethodType
-                    )
-                    return try instantiateExtensionMethodFromEntry(
-                        baseType: selfType,
-                        structureName: "WeakRef",
-                        genericArgs: [innerResolved],
-                        methodTypeArgs: resolvedMethodTypeArgs,
-                        methodInfo: ext
-                    )
-                }
+            if let instantiated = try instantiateReferenceLikeExtensionMethod(
+                on: selfType,
+                name: name,
+                methodTypeArgs: methodTypeArgs,
+                expectedMethodType: expectedMethodType
+            ) {
+                return instantiated
             }
             return nil
 
@@ -1159,6 +1111,60 @@ extension Monomorphizer {
                 )
             }
             return nil
+
+        case .mutablePointer(let element):
+            if let extensions = input.genericTemplates.intrinsicExtensionMethods["MutPtr"],
+               let ext = extensions.first(where: { $0.method.name == name }) {
+                return try instantiateIntrinsicExtensionMethod(
+                    baseType: selfType,
+                    structureName: "MutPtr",
+                    genericArgs: [element],
+                    methodInfo: ext
+                )
+            }
+            if let extensions = input.genericTemplates.extensionMethods["MutPtr"],
+               let ext = selectExtensionTemplate(
+                    extensions,
+                    name: name,
+                    extensionTypeArgCount: 1
+               ) {
+                let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                    methodInfo: ext,
+                    baseType: selfType,
+                    extensionTypeArgs: [element],
+                    providedMethodTypeArgs: methodTypeArgs,
+                    expectedMethodType: expectedMethodType
+                )
+                return try instantiateExtensionMethodFromEntry(
+                    baseType: selfType,
+                    structureName: "MutPtr",
+                    genericArgs: [element],
+                    methodTypeArgs: resolvedMethodTypeArgs,
+                    methodInfo: ext
+                )
+            }
+            if let extensions = input.genericTemplates.extensionMethods["Ptr"],
+               let ext = selectExtensionTemplate(
+                    extensions,
+                    name: name,
+                    extensionTypeArgCount: 1
+               ) {
+                let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
+                    methodInfo: ext,
+                    baseType: selfType,
+                    extensionTypeArgs: [element],
+                    providedMethodTypeArgs: methodTypeArgs,
+                    expectedMethodType: expectedMethodType
+                )
+                return try instantiateExtensionMethodFromEntry(
+                    baseType: selfType,
+                    structureName: "Ptr",
+                    genericArgs: [element],
+                    methodTypeArgs: resolvedMethodTypeArgs,
+                    methodInfo: ext
+                )
+            }
+            return nil
             
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
@@ -1244,6 +1250,14 @@ extension Monomorphizer {
     private func extensionLookupTypeNames(for baseType: Type) -> [String] {
         let resolvedBaseType = resolveParameterizedType(baseType)
         switch resolvedBaseType {
+        case .reference:
+            return ["Ref"]
+        case .mutableReference:
+            return ["MutRef", "Ref"]
+        case .weakReference:
+            return ["WeakRef"]
+        case .mutableWeakReference:
+            return ["MutWeakRef", "WeakRef"]
         case .structure(let defId):
             let concreteName = context.getName(defId) ?? ""
             if let templateName = context.getTemplateName(defId), templateName != concreteName {
@@ -1262,6 +1276,8 @@ extension Monomorphizer {
             return [concreteName]
         case .pointer:
             return ["Ptr"]
+        case .mutablePointer:
+            return ["MutPtr", "Ptr"]
         default:
             return [resolvedBaseType.description]
         }
@@ -1270,6 +1286,14 @@ extension Monomorphizer {
     private func extensionStructureName(for baseType: Type) -> String {
         let resolvedBaseType = resolveParameterizedType(baseType)
         switch resolvedBaseType {
+        case .reference:
+            return "Ref"
+        case .mutableReference:
+            return "MutRef"
+        case .weakReference:
+            return "WeakRef"
+        case .mutableWeakReference:
+            return "MutWeakRef"
         case .structure(let defId):
             let name = context.getName(defId) ?? ""
             return context.getTemplateName(defId) ?? name
@@ -1282,6 +1306,8 @@ extension Monomorphizer {
             return context.getTemplateName(defId) ?? name
         case .pointer:
             return "Ptr"
+        case .mutablePointer:
+            return "MutPtr"
         default:
             return resolvedBaseType.description
         }
@@ -1308,6 +1334,9 @@ extension Monomorphizer {
         case .reference(let expectedInner):
             guard case .reference(let actualInner) = actual else { return false }
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
+        case .mutableReference(let expectedInner):
+            guard case .mutableReference(let actualInner) = actual else { return false }
+            return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
         case .weakReference(let expectedInner):
             switch actual {
             case .weakReference(let actualInner), .mutableWeakReference(let actualInner):
@@ -1320,6 +1349,9 @@ extension Monomorphizer {
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
         case .pointer(let expectedInner):
             guard case .pointer(let actualInner) = actual else { return false }
+            return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
+        case .mutablePointer(let expectedInner):
+            guard case .mutablePointer(let actualInner) = actual else { return false }
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
         case .function(let expectedParams, let expectedReturn):
             guard case .function(let actualParams, let actualReturn) = actual,
@@ -1540,13 +1572,13 @@ extension Monomorphizer {
         if let checkedParameters = methodInfo.checkedParameters,
            let checkedReturnType = methodInfo.checkedReturnType {
             patternParams = checkedParameters.map { param in
-                Parameter(type: substituteType(param.type, substitution: substitution), kind: fromSymbolKindToPassKind(param.kind))
+                Parameter(type: substituteType(param.type, substitution: substitution), kind: passKindForParameterType(substituteType(param.type, substitution: substitution)))
             }
             patternReturn = substituteType(checkedReturnType, substitution: substitution)
         } else {
             let params = try methodInfo.method.parameters.map { param -> Parameter in
                 let paramType = try resolveTypeNode(param.type, substitution: substitution)
-                return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+                return Parameter(type: paramType, kind: passKindForParameterType(paramType))
             }
             patternParams = params
             patternReturn = try resolveTypeNode(methodInfo.method.returnType, substitution: substitution)
@@ -1610,13 +1642,13 @@ extension Monomorphizer {
         if let checkedParameters = methodInfo.checkedParameters,
            let checkedReturnType = methodInfo.checkedReturnType {
             patternParams = checkedParameters.map { param in
-                Parameter(type: substituteType(param.type, substitution: substitution), kind: fromSymbolKindToPassKind(param.kind))
+                Parameter(type: substituteType(param.type, substitution: substitution), kind: passKindForParameterType(substituteType(param.type, substitution: substitution)))
             }
             patternReturn = substituteType(checkedReturnType, substitution: substitution)
         } else {
             patternParams = try methodInfo.method.parameters.map { param in
                 let paramType = try resolveTypeNode(param.type, substitution: substitution)
-                return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+                return Parameter(type: paramType, kind: passKindForParameterType(paramType))
             }
             patternReturn = try resolveTypeNode(methodInfo.method.returnType, substitution: substitution)
         }
@@ -1658,20 +1690,44 @@ extension Monomorphizer {
         methodTypeArgs: [Type],
         expectedMethodType: Type?
     ) throws -> Symbol? {
-        guard let methods = input.genericTemplates.extensionMethods[traitInfo.traitName],
-              let methodInfo = selectExtensionTemplate(
-                methods,
-                name: methodName,
-                methodTypeArgCount: methodTypeArgs.isEmpty ? nil : methodTypeArgs.count
-              ) else {
+        let resolvedBaseType = resolveParameterizedType(baseType)
+        let traitEntryExpectedType = expectedMethodType ?? entryLikeExpectedMethodType(baseType: resolvedBaseType, methodName: methodName)
+
+        if let instantiated = try instantiateReferenceLikeExtensionMethod(
+            on: resolvedBaseType,
+            name: methodName,
+            methodTypeArgs: methodTypeArgs,
+            expectedMethodType: traitEntryExpectedType
+        ) {
+            return instantiated
+        }
+
+        let methodInfo: GenericExtensionMethodTemplate? = {
+            for candidateName in extensionLookupTypeNames(for: resolvedBaseType) {
+                guard let methods = input.genericTemplates.extensionMethods[candidateName] else {
+                    continue
+                }
+                guard let selected = selectExtensionTemplate(
+                    methods,
+                    name: methodName,
+                    methodTypeArgCount: methodTypeArgs.isEmpty ? nil : methodTypeArgs.count
+                ) else {
+                    continue
+                }
+                if selected.conformanceTraitName == traitInfo.traitName {
+                    return selected
+                }
+            }
+            return nil
+        }()
+        guard let methodInfo else {
             return nil
         }
 
-        let resolvedBaseType = resolveParameterizedType(baseType)
         let inferredTypeArgs = try inferTraitExtensionTypeArgs(
             baseType: resolvedBaseType,
             methodInfo: methodInfo,
-            expectedMethodType: expectedMethodType ?? entryLikeExpectedMethodType(baseType: resolvedBaseType, methodName: methodName),
+            expectedMethodType: traitEntryExpectedType,
             methodTypeArgs: methodTypeArgs
         )
 

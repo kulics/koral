@@ -405,7 +405,7 @@ extension TypeChecker {
         }
         let params: [Parameter] = try sig.parameters.map { param in
           let t = try resolveTypeNode(param.type)
-          return Parameter(type: t, kind: param.mutable ? .byMutRef : .byVal)
+          return Parameter(type: t, kind: passKindForParameterType(t))
         }
         let ret = try resolveTypeNode(sig.returnType)
         return (params, ret)
@@ -535,14 +535,14 @@ extension TypeChecker {
       let returnType = SemaUtils.substituteType(checkedReturnType, substitution: substitution, context: context)
       let params = checkedParameters.map { param in
         let paramType = SemaUtils.substituteType(param.type, substitution: substitution, context: context)
-        return Parameter(type: paramType, kind: fromSymbolKindToPassKind(param.kind))
+        return Parameter(type: paramType, kind: passKindForParameterType(paramType))
       }
       functionType = Type.function(parameters: params, returns: returnType)
     } else {
       let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
       let params = try method.parameters.map { param -> Parameter in
         let paramType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
-        return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+        return Parameter(type: paramType, kind: passKindForParameterType(paramType))
       }
       functionType = Type.function(parameters: params, returns: returnType)
     }
@@ -608,7 +608,7 @@ extension TypeChecker {
     let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
     let params = try method.parameters.map { param -> Parameter in
       let paramType = try resolveTypeNodeWithSubstitution(param.type, substitution: substitution)
-      return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+      return Parameter(type: paramType, kind: passKindForParameterType(paramType))
     }
     let functionType = Type.function(parameters: params, returns: returnType)
     
@@ -776,7 +776,7 @@ extension TypeChecker {
       let returnType = try resolveTypeNode(method.returnType)
       let params = try method.parameters.map { param -> Parameter in
         let paramType = try resolveTypeNode(param.type)
-        return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+        return Parameter(type: paramType, kind: passKindForParameterType(paramType))
       }
       
       return Type.function(parameters: params, returns: returnType)
@@ -884,7 +884,7 @@ extension TypeChecker {
           let returnType = try resolveTypeNode(sig.returnType)
           let params = try sig.parameters.map { param -> Parameter in
             let paramType = try resolveTypeNode(param.type)
-            return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+            return Parameter(type: paramType, kind: passKindForParameterType(paramType))
           }
           
           return Type.function(parameters: params, returns: returnType)

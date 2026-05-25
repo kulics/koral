@@ -498,6 +498,17 @@ public class CodeGen {
     }
   }
 
+  func escapingOwnedLocalName(for expr: TypedExpressionNode) -> String? {
+    switch expr {
+    case .variable(let identifier):
+      return context.getName(identifier.defId)
+    case .castExpression(let inner, _):
+      return escapingOwnedLocalName(for: inner)
+    default:
+      return nil
+    }
+  }
+
   func shouldCopyValue(type: Type, source: String, isLvalue: Bool) -> Bool {
     guard isLvalue && needsDrop(type) else {
       return false
@@ -541,6 +552,29 @@ public class CodeGen {
     let innerCType = cTypeName(innerType)
     let refCType = cTypeName(type)
     let result = nextTempWithDecl(cType: refCType)
+    let cleanupSource = cleanupTrackingName(for: inner, fallback: innerResult)
+    let shouldTransferEscapingOwnedLocal: Bool = {
+      guard inner.valueCategory == .lvalue,
+            isCleanupRegisteredValue(cleanupSource),
+            let localName = escapingOwnedLocalName(for: inner),
+            escapeContext.inReturnContext || escapeContext.inFieldAssignmentContext,
+            let escapeReason = escapeContext.getEscapeReason(localName)
+      else {
+        return false
+      }
+      switch escapeReason {
+      case .escapeToReturn, .escapeToField:
+        break
+      case .escapeToParameter, .unknown, .noEscape:
+        return false
+      }
+      switch inner {
+      case .variable, .castExpression:
+        return true
+      default:
+        return false
+      }
+    }()
 
     addIndent()
     buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
@@ -548,7 +582,10 @@ public class CodeGen {
       type: innerType,
       source: innerResult,
       dest: "*(\(innerCType)*)\(result).ptr",
-      isLvalue: inner.valueCategory == .lvalue)
+      isLvalue: inner.valueCategory == .lvalue && !shouldTransferEscapingOwnedLocal)
+    if shouldTransferEscapingOwnedLocal {
+      unregisterVariable(cleanupSource)
+    }
 
     addIndent()
     buffer += "\(result).control = malloc(sizeof(struct __koral_Control));\n"
@@ -2172,11 +2209,11 @@ public class CodeGen {
       } else if case .structure(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
         addIndent()
-        buffer += "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)\(p), .control = NULL });\n"
+        buffer += "__koral_\(typeName)_drop((struct \(typeName)*)\(p));\n"
       } else if case .`enum`(let defId) = element {
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
         addIndent()
-        buffer += "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)\(p), .control = NULL });\n"
+        buffer += "__koral_\(typeName)_drop((struct \(typeName)*)\(p));\n"
       } else if case .function = element {
         addIndent()
         buffer += "__koral_closure_release(*(struct __koral_Closure*)\(p));\n"
@@ -2659,10 +2696,10 @@ public class CodeGen {
         return
       }
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&(\(value)));\n")
     case .`enum`(let defId):
       let fieldTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });\n")
+      appendToBuffer("\(indent)__koral_\(fieldTypeName)_drop(&(\(value)));\n")
     default:
       let dropCode = TypeHandlerRegistry.shared.generateDropCode(type, value: value)
       appendIndentedCode(dropCode, indent: indent)

@@ -4,6 +4,29 @@ import Foundation
 // This extension contains Pass 1/2/3 logic and module symbol building.
 
 extension TypeChecker {
+  private func validateCompilerDropSignature(
+    params: [Symbol],
+    returnType: Type,
+    selfType: Type
+  ) throws {
+    guard params.count == 1 else {
+      throw SemanticError.invalidOperation(
+        op: "drop must have exactly one parameter of type 'mut ptr Self'", type1: "", type2: "")
+    }
+    let expectedParamType = Type.mutablePointer(element: selfType)
+    guard params[0].type == expectedParamType else {
+      throw SemanticError.invalidOperation(
+        op: "drop parameter must have type '\(expectedParamType)'",
+        type1: params[0].type.description,
+        type2: expectedParamType.description
+      )
+    }
+    if returnType != .void {
+      throw SemanticError.invalidOperation(
+        op: "drop must return Void", type1: returnType.description, type2: "")
+    }
+  }
+
   private func declaredDefIdForCurrentGlobal(name: String, access: AccessModifier) -> DefId? {
     let lookupSourceFile = access == .private ? currentSourceFile : nil
     return defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: lookupSourceFile)
@@ -1160,15 +1183,7 @@ extension TypeChecker {
 
             // Validate drop signature
             if method.name == "drop" {
-              let firstParamName = params.first.flatMap { context.getName($0.defId) }
-              if params.count != 1 || firstParamName != "self" {
-                throw SemanticError.invalidOperation(
-                  op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
-              }
-              if returnType != .void {
-                throw SemanticError.invalidOperation(
-                  op: "drop must return Void", type1: returnType.description, type2: "")
-              }
+              try validateCompilerDropSignature(params: params, returnType: returnType, selfType: genericSelfType)
             }
 
             return (params, returnType)
@@ -1235,7 +1250,7 @@ extension TypeChecker {
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Parameter in
               let paramType = try resolveTypeNode(param.type)
-              let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+              let passKind = passKindForParameterType(paramType)
               return Parameter(type: paramType, kind: passKind)
             }
 
@@ -1503,7 +1518,7 @@ extension TypeChecker {
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Parameter in
               let paramType = try resolveTypeNode(param.type)
-              let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+              let passKind = passKindForParameterType(paramType)
               return Parameter(type: paramType, kind: passKind)
             }
             
@@ -1674,7 +1689,7 @@ extension TypeChecker {
           let paramType = try resolveTypeNode(param.type)
           try assertNotOpaqueType(paramType, span: span)
           // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
-          let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+          let passKind = passKindForParameterType(paramType)
           return Parameter(type: paramType, kind: passKind)
         }
         let functionType = Type.function(parameters: params, returns: returnType)
@@ -1735,7 +1750,7 @@ extension TypeChecker {
       let params = try parameters.map { param -> Parameter in
         let paramType = try resolveTypeNode(param.type)
         try assertNotOpaqueType(paramType, span: span)
-        let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+        let passKind = passKindForParameterType(paramType)
         return Parameter(type: paramType, kind: passKind)
       }
       let functionType = Type.function(parameters: params, returns: returnType)
@@ -1752,7 +1767,7 @@ extension TypeChecker {
         let returnType = try resolveTypeNode(returnTypeNode)
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
-          let passKind: PassKind = param.mutable ? .byMutRef : .byVal
+          let passKind = passKindForParameterType(paramType)
           return Parameter(type: paramType, kind: passKind)
         }
         let functionType = Type.function(parameters: params, returns: returnType)
@@ -2077,7 +2092,7 @@ extension TypeChecker {
 
       let functionType = Type.function(
         parameters: params.map {
-          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+          Parameter(type: $0.type, kind: passKindForParameterType($0.type))
         },
         returns: returnType
       )
@@ -2129,7 +2144,7 @@ extension TypeChecker {
 
       let functionType = Type.function(
         parameters: params.map {
-          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+          Parameter(type: $0.type, kind: passKindForParameterType($0.type))
         },
         returns: returnType
       )
@@ -2203,7 +2218,7 @@ extension TypeChecker {
             kind: .variable(param.mutable ? .MutableValue : .Value))
         }
         let funcType = Type.function(
-          parameters: params.map { Parameter(type: $0.type, kind: .byVal) }, returns: returnType)
+          parameters: params.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }, returns: returnType)
         // Dummy typed body
         let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
         return (funcType, typedBody, params)
@@ -2369,22 +2384,13 @@ extension TypeChecker {
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
 
-          // Validate drop signature
           if method.name == "drop" {
-            let firstParamName = params.first.flatMap { context.getName($0.defId) }
-            if params.count != 1 || firstParamName != "self" {
-              throw SemanticError.invalidOperation(
-                op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
-            }
-            if returnType != .void {
-              throw SemanticError.invalidOperation(
-                op: "drop must return Void", type1: returnType.description, type2: "")
-            }
+            try validateCompilerDropSignature(params: params, returnType: returnType, selfType: type)
           }
 
           let functionType = Type.function(
             parameters: params.map {
-              Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+              Parameter(type: $0.type, kind: passKindForParameterType($0.type))
             },
             returns: returnType
           )
@@ -2689,19 +2695,11 @@ extension TypeChecker {
           }
 
           if traitName == "Drop" && method.name == "drop" {
-            let firstParamName = resolvedParams.first.flatMap { context.getName($0.defId) }
-            if resolvedParams.count != 1 || firstParamName != "self" {
-              throw SemanticError.invalidOperation(
-                op: "drop must have exactly one parameter 'self'", type1: "", type2: "")
-            }
-            if resolvedReturn != .void {
-              throw SemanticError.invalidOperation(
-                op: "drop must return Void", type1: resolvedReturn.description, type2: "")
-            }
+            try validateCompilerDropSignature(params: resolvedParams, returnType: resolvedReturn, selfType: selfType)
           }
 
           let resolvedFunctionType = Type.function(
-            parameters: resolvedParams.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) },
+            parameters: resolvedParams.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
             returns: resolvedReturn
           )
           return (resolvedFunctionType, resolvedParams, resolvedReturn)
@@ -2774,7 +2772,7 @@ extension TypeChecker {
             )
           }
           let resolvedFunctionType = Type.function(
-            parameters: resolvedParams.map { Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind)) },
+            parameters: resolvedParams.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
             returns: resolvedReturn
           )
           return (resolvedFunctionType, resolvedParams, resolvedReturn)
@@ -3164,7 +3162,7 @@ extension TypeChecker {
 
           let functionType = Type.function(
             parameters: params.map {
-              Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+              Parameter(type: $0.type, kind: passKindForParameterType($0.type))
             },
             returns: returnType
           )

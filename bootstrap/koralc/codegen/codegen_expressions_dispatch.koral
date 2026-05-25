@@ -45,7 +45,12 @@ given CodeGen {
                     .TraitObject(_, _) then Option[Type].Some(mapped_type),
                     _ then Option[Type].None(),
                 },
-                .None() then Option[Type].None(),
+                .None() then {
+                    let trait_name = self.context.get_name(def_id) or else ""
+                    yield if self.program.semantic_traits().get(trait_name).is_some()
+                        then Option[Type].Some(Type.TraitObject(trait_name, List[ref Type].new()))
+                        else Option[Type].None()
+                },
             },
             .ReferenceType(inner_ref) then self.trait_dispatch_type_opt(inner_ref.val),
             .MutableReferenceType(inner_ref) then self.trait_dispatch_type_opt(inner_ref.val),
@@ -70,7 +75,16 @@ given CodeGen {
         }
     }
 
-    private semantic_receiver_method_name(self, method ref Symbol) Option[String] = {
+    private semantic_receiver_method_name(self, method ref Symbol, dispatch_callsite Option[DefId]) Option[String] = {
+        when dispatch_callsite in {
+            .Some(callsite_def_id) then when self.program.semantic_receiver_method_dispatch().get(callsite_def_id.id) in {
+                .Some(info) then {
+                    return Option[String].Some(info.method_name)
+                },
+                .None() then {},
+            },
+            .None() then {},
+        }
         if method.def_id.id == 0 then {
             return Option[String].None()
         }
@@ -627,7 +641,7 @@ given CodeGen {
         }
         let lookup_base_type = base_type
         let fallback_method_name = self.context.symbol_name(method)
-        let method_name = if method.def_id.id == 0 then fallback_method_name else self.semantic_receiver_method_name(method) or else fallback_method_name
+        let method_name = if method.def_id.id == 0 then fallback_method_name else self.semantic_receiver_method_name(method, dispatch_callsite) or else fallback_method_name
         let effective_result_type = self.requested_or_symbol_result_type(result_type, method.symbol_type)
         let direct_dispatch_base = when base.expr_kind in {
             .TraitObjectConversion(inner, _, _) then {
@@ -641,7 +655,9 @@ given CodeGen {
         let base_declared_type = self.concretize_codegen_type(base.expr_type)
         when base_declared_type in {
             .TraitObject(trait_name, trait_type_args) then {
-                return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
+                if self.is_raw_trait_method(trait_name, method_name) then {
+                    return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
+                }
             },
             _ then {},
         }
@@ -654,19 +670,27 @@ given CodeGen {
             _ then Option[Type].None(),
         }
         if cast_trait_type_opt is .Some(cast_trait_type) then {
-            return self.generate_trait_method_call_typed(base, cast_trait_type, method_name, args, effective_result_type)
+            let cast_trait_name = self.trait_name_from_type(cast_trait_type)
+            if self.is_raw_trait_method(cast_trait_name, method_name) then {
+                return self.generate_trait_method_call_typed(base, cast_trait_type, method_name, args, effective_result_type)
+            }
         }
 
         when self.trait_dispatch_type_opt(base_declared_type) in {
             .Some(trait_type) then {
-                return self.generate_trait_method_call_typed(base, trait_type, method_name, args, effective_result_type)
+                let trait_name = self.trait_name_from_type(trait_type)
+                if self.is_raw_trait_method(trait_name, method_name) then {
+                    return self.generate_trait_method_call_typed(base, trait_type, method_name, args, effective_result_type)
+                }
             },
             .None() then {},
         }
 
         when base_type in {
             .TraitObject(trait_name, trait_type_args) then {
-                return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
+                if self.is_raw_trait_method(trait_name, method_name) then {
+                    return self.generate_trait_method_call_typed(base, Type.TraitObject(trait_name, trait_type_args), method_name, args, effective_result_type)
+                }
             },
             _ then {},
         }

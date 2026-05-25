@@ -1,7 +1,7 @@
 #ifndef KORAL_RUNTIME_H
 #define KORAL_RUNTIME_H
 
-#define KORAL_RUNTIME_ABI_VERSION 5
+#define KORAL_RUNTIME_ABI_VERSION 6
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -16,7 +16,7 @@ struct __koral_Ref {
     void* control;
 };
 
-typedef void (*__koral_Dtor)(struct __koral_Ref);
+typedef void (*__koral_Dtor)(void*);
 
 struct __koral_WeakRef {
     void* control;

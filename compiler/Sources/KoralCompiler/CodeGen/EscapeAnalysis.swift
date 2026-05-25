@@ -1555,19 +1555,7 @@ public class GlobalEscapeAnalyzer {
         // Run the existing preAnalyze
         escCtx.preAnalyze(body: body, params: params)
 
-        // Store the per-function escaped variables, but filter out parameter-level
-        // escapes. Parameter escape info is only used for building summaries — the
-        // actual memory allocation decision for parameters belongs to the caller,
-        // not the callee.
-        let paramNames = Set(params.compactMap { context.getName($0.defId) })
-        var localEscaped: [String: EscapeResult] = [:]
-        for (name, reason) in escCtx.escapedVariables {
-            if paramNames.contains(name) {
-                continue  // Skip parameter variables
-            }
-            localEscaped[name] = reason
-        }
-        escapedVariablesPerFunction[defId] = localEscaped
+        escapedVariablesPerFunction[defId] = escCtx.escapedVariables
 
         // Build the parameter summary (always overwrite — needed for SCC iteration)
         var paramStates: [ParameterEscapeState] = []

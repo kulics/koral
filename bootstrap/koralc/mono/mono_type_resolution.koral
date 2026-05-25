@@ -592,6 +592,33 @@ public let resolve_type_node(mono ref Monomorphizer, node TypeNode, substitution
 
         // TypeNode.Reference: recursively resolve inner type and wrap.
         .Reference(inner, mutable) then {
+            let trait_ref_override = when inner.val in {
+                .Identifier(name) then if mono.storage.generic_templates.traits.get(name) is .Some(_) then {
+                    let trait_ref_inner = trait_object_type_from_registry(mono, name)
+                    yield Option[Type].Some(if mutable
+                        then Type.MutableReferenceType(box(trait_ref_inner))
+                        else Type.ReferenceType(box(trait_ref_inner)))
+                } else Option[Type].None(),
+                .Generic(base, args) then {
+                    yield if mono.storage.generic_templates.traits.get(base) is .Some(_) then {
+                        let mut resolved_args = List[ref Type].new()
+                        for arg in args then {
+                            let resolved = resolve_type_node(mono, arg.val, substitution)
+                            resolved_args.push(box(resolved))
+                        }
+                        let canonical_args = canonicalize_type_arguments(mono, resolved_args)
+                        let trait_ref_inner = Type.TraitObject(base, canonical_args)
+                        yield Option[Type].Some(if mutable
+                            then Type.MutableReferenceType(box(trait_ref_inner))
+                            else Type.ReferenceType(box(trait_ref_inner)))
+                    } else Option[Type].None()
+                },
+                _ then Option[Type].None(),
+            }
+            when trait_ref_override in {
+                .Some(resolved_trait_ref) then { yield resolved_trait_ref },
+                .None() then {},
+            }
             let resolved_inner = resolve_type_node(mono, inner.val, substitution)
             yield if mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
         },
@@ -1928,7 +1955,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                                         _ then base_expr,
                                     }
                                     return box(TypedExpr(
-                                        box(TypedExprKind.TraitMethodCall(trait_receiver, trait_object_type, box(method.val), new_args, method_index, dispatch_callsite)),
+                                        box(TypedExprKind.TraitMethodCall(trait_receiver, trait_object_type, logical_method_name, method_index, new_args)),
                                         resolve_parameterized_type(mono, expr.expr_type)
                                     ))
                                 }
@@ -2065,6 +2092,50 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                         .Some(lowered_expr) then { return lowered_expr },
                         .None() then {},
                     }
+                    let receiver_trait_name_opt = when effective_receiver_type in {
+                        .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                        .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                            _ then Option[String].None(),
+                        },
+                        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                            _ then Option[String].None(),
+                        },
+                        .WeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                            _ then Option[String].None(),
+                        },
+                        .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                            _ then Option[String].None(),
+                        },
+                        _ then Option[String].None(),
+                    }
+                    when receiver_trait_name_opt in {
+                        .Some(trait_name) then {
+                            let logical_method_name = when effective_dispatch_callsite in {
+                                .Some(def_id) then when mono.storage.receiver_method_dispatch.get(def_id.id) in {
+                                    .Some(info) then info.method_name,
+                                    .None() then get_semantic_method_name(mono, bound_method),
+                                },
+                                .None() then get_semantic_method_name(mono, bound_method),
+                            }
+                            if vtable_method_index(mono, trait_name, logical_method_name) < 0 then {
+                                let callee_expr = box(TypedExpr(
+                                    box(TypedExprKind.Variable(box(bound_method))),
+                                    bound_method.symbol_type,
+                                ))
+                                let mut direct_args = List[ref TypedExpr].new()
+                                direct_args.push(adapted_base)
+                                for arg in new_args then {
+                                    direct_args.push(arg)
+                                }
+                                return box(TypedExpr(box(TypedExprKind.Call(callee_expr, direct_args)), resolved_type))
+                            }
+                        },
+                        .None() then {},
+                    }
                     let rebound_callee = box(TypedExpr(
                         box(TypedExprKind.MethodReference(adapted_base, adapted_base.expr_type, box(bound_method), type_args, method_type_args, effective_dispatch_callsite)),
                         bound_method.symbol_type,
@@ -2158,52 +2229,6 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
             let mut bound_callee = bind_generic_function_call_callee(mono, new_callee, new_args, resolve_parameterized_type(mono, expr.expr_type))
             when bound_callee.expr_kind in {
                 .Variable(symbol) then {
-                    if symbol.def_id.id > 0 and not new_args.is_empty() then {
-                        when mono.storage.concrete_callables_by_def_id.get(symbol.def_id.id) in {
-                            .Some(concrete) then {
-                                when concrete.owner_type in {
-                                    .Some(owner_type) then when symbol.symbol_type in {
-                                        .FunctionType(fn_params, _) then {
-                                            if fn_params.count() == new_args.count() then {
-                                                let receiver_param_type = resolve_parameterized_type(mono, fn_params[0(UInt)].val.param_type)
-                                                let actual_receiver_expr = static_dispatch_receiver_expr(new_args[0(UInt)])
-                                                let actual_receiver_type = resolve_parameterized_type(mono, actual_receiver_expr.expr_type)
-                                                let normalized_owner_type = resolve_parameterized_type(mono, owner_type)
-                                                let owner_is_self_param = when receiver_param_type in {
-                                                    .ReferenceType(inner_ref) then layout_key(resolve_parameterized_type(mono, inner_ref.val)) == layout_key(normalized_owner_type),
-                                                    .MutableReferenceType(inner_ref) then layout_key(resolve_parameterized_type(mono, inner_ref.val)) == layout_key(normalized_owner_type),
-                                                    .WeakReferenceType(inner_ref) then layout_key(resolve_parameterized_type(mono, inner_ref.val)) == layout_key(normalized_owner_type),
-                                                    .MutableWeakReferenceType(inner_ref) then layout_key(resolve_parameterized_type(mono, inner_ref.val)) == layout_key(normalized_owner_type),
-                                                    _ then layout_key(receiver_param_type) == layout_key(normalized_owner_type),
-                                                }
-                                                if owner_is_self_param and layout_key(normalized_owner_type) == layout_key(actual_receiver_type) then {
-                                                    let receiver_matches = receiver_param_matches_actual_receiver(mono, receiver_param_type, actual_receiver_type)
-                                                    if receiver_matches then {
-                                                        let receiver_arg = adapt_receiver_expr_for_method(mono, actual_receiver_expr, symbol)
-                                                        let mut method_args = List[ref TypedExpr].new()
-                                                        let mut method_arg_index UInt = 1(UInt)
-                                                        while method_arg_index < new_args.count() then {
-                                                            method_args.push(new_args[method_arg_index])
-                                                            method_arg_index += 1(UInt)
-                                                        }
-                                                        let rebound_callee = box(TypedExpr(
-                                                            box(TypedExprKind.MethodReference(receiver_arg, receiver_arg.expr_type, symbol, List[Type].new(), List[Type].new(), Option[DefId].None())),
-                                                            symbol.symbol_type,
-                                                        ))
-                                                        let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, symbol)
-                                                        return box(TypedExpr(box(TypedExprKind.Call(rebound_callee, method_args)), resolved_type))
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        _ then {},
-                                    },
-                                    .None() then {},
-                                }
-                            },
-                            .None() then {},
-                        }
-                    }
                     if symbol.def_id.id == 0 and new_args.count() > 0(UInt) then {
                         let normalized_name = get_semantic_method_name(mono, symbol)
                         let receiver_type = resolve_parameterized_type(mono, new_args[0(UInt)].val.expr_type)
@@ -2231,6 +2256,38 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                             ).val
                             if rebound_method.def_id.id > 0 then {
                                 let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, rebound_method)
+                                let receiver_trait_name_opt = when binding_receiver_type in {
+                                    .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                    .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                        .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                        _ then Option[String].None(),
+                                    },
+                                    .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                        .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                        _ then Option[String].None(),
+                                    },
+                                    .WeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                        .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                        _ then Option[String].None(),
+                                    },
+                                    .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                        .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                        _ then Option[String].None(),
+                                    },
+                                    _ then Option[String].None(),
+                                }
+                                when receiver_trait_name_opt in {
+                                    .Some(trait_name) then {
+                                        if vtable_method_index(mono, trait_name, normalized_name) < 0 then {
+                                            let callee_expr = box(TypedExpr(
+                                                box(TypedExprKind.Variable(box(rebound_method))),
+                                                rebound_method.symbol_type,
+                                            ))
+                                            return box(TypedExpr(box(TypedExprKind.Call(callee_expr, new_args)), resolved_type))
+                                        }
+                                    },
+                                    .None() then {},
+                                }
                                 let dispatch_callsite = ensure_receiver_dispatch_callsite(
                                     mono,
                                     .None(),
@@ -3763,7 +3820,7 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
             let new_method = Symbol(resolved_method.def_id, resolved_method.symbol_type, resolved_method.kind)
             yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), List[Type].new(), dispatch_callsite))
         },
-        .TraitMethodCall(receiver, trait_type, method, args, _, dispatch_callsite) then {
+        .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then {
             let new_receiver = resolve_types_in_expression(mono, receiver)
             let mut new_trait_type = resolve_parameterized_type(mono, trait_type)
             when trait_type in {
@@ -3776,21 +3833,27 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
                 },
                 _ then {},
             }
-            let resolved_method = resolve_symbol_type(mono, method)
-            let new_method = Symbol(resolved_method.def_id, resolved_method.symbol_type, resolved_method.kind)
             let mut new_args = List[ref TypedExpr].new()
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
             let concrete_receiver_type = concrete_trait_receiver_type(mono, new_receiver)
+            let receiver_requires_dynamic_trait_dispatch = when concrete_receiver_type in {
+                .TraitObject(_, _) then true,
+                .ReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
+                .MutableReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
+                .WeakReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
+                .MutableWeakReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
+                _ then false,
+            }
             let can_use_static_dispatch = when concrete_receiver_type in {
-                .TraitObject(_, _) then false,
-                _ then not has_generic_parameter(concrete_receiver_type) and not expr_is_type_symbol(new_receiver),
+                _ then not receiver_requires_dynamic_trait_dispatch and not has_generic_parameter(concrete_receiver_type) and not expr_is_type_symbol(new_receiver),
             }
             let mut rebound_static_kind Option[ref TypedExprKind] = Option[ref TypedExprKind].None()
             if can_use_static_dispatch then {
                 let resolved_result_type = resolve_parameterized_type(mono, expr.expr_type)
-                let rebound_method = try_bind_generic_method_call(mono, concrete_receiver_type, new_method, new_args, resolved_result_type).val
+                let method_symbol = make_trait_method_symbol(mono, method_name, resolved_result_type)
+                let rebound_method = try_bind_generic_method_call(mono, concrete_receiver_type, method_symbol, new_args, resolved_result_type).val
                 let static_receiver_base = when new_receiver.expr_kind in {
                     .TraitObjectConversion(inner, _, concrete_type) then {
                         let resolved_inner = resolve_types_in_expression(mono, inner)
@@ -3802,10 +3865,10 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
                 let static_receiver = adapt_receiver_expr_for_method(mono, static_receiver_base, rebound_method)
                 let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(
                     mono,
-                    dispatch_callsite,
+                    Option[DefId].None(),
                     concrete_receiver_type,
                     rebound_method,
-                    Option[String].Some(mono.storage.context.symbol_name(method)),
+                    Option[String].Some(method_name),
                 )
                 rebound_static_kind = Option[ref TypedExprKind].Some(
                     when try_lower_wrapping_generic_method_call(
@@ -3843,10 +3906,11 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
                 .Some(kind) then kind,
                 .None() then {
                     let mut trait_method_index Int = -1
+                    let mut logical_method_name = method_name
                     when new_trait_type in {
                         .TraitObject(trait_name, _) then {
-                            let logical_method_name = mono.storage.context.symbol_name(method)
-                            trait_method_index = vtable_method_index(mono, trait_name, logical_method_name)
+                            logical_method_name = method_name
+                            trait_method_index = if method_index >= 0 then method_index else vtable_method_index(mono, trait_name, logical_method_name)
                             if trait_method_index >= 0 then {
                                 collect_qualified_method_vtable_requests(mono, trait_name, logical_method_name, new_receiver, new_args)
                             }
@@ -3854,11 +3918,12 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
                         _ then {},
                     }
                     let lowered_kind = if trait_method_index >= 0 then {
-                        yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, trait_method_index, dispatch_callsite))
+                        yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, logical_method_name, trait_method_index, new_args))
                     } else {
+                        let method_symbol = make_trait_method_symbol(mono, method_name, resolve_parameterized_type(mono, expr.expr_type))
                         let direct_callee = box(TypedExpr(
-                            box(TypedExprKind.MethodReference(new_receiver, new_receiver.expr_type, box(new_method), List[Type].new(), List[Type].new(), dispatch_callsite)),
-                            new_method.symbol_type,
+                            box(TypedExprKind.MethodReference(new_receiver, new_receiver.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None())),
+                            method_symbol.symbol_type,
                         ))
                         yield box(TypedExprKind.Call(direct_callee, new_args))
                     }
@@ -4052,6 +4117,15 @@ private let materialize_extension_template_ref(
         template.checked_parameters,
         template.checked_return_type,
     ))
+}
+
+private let make_trait_method_symbol(
+    mono ref Monomorphizer,
+    method_name String,
+    return_type Type,
+) Symbol = {
+    let def_id = mono.storage.context.allocate_unindexed(method_name, DefKind.Function())
+    return Symbol(def_id, return_type, SymbolKind.Function())
 }
 
 // Get the semantic method name for a symbol, using structured defId lookup
@@ -4963,6 +5037,38 @@ private let resolve_static_method_call_to_call(
                         _ then receiver_param_matches_actual_receiver(mono, receiver_param_type, actual_receiver_type),
                     }
                     if owner_matches and receiver_matches then {
+                        let receiver_trait_name_opt = when new_receiver_type in {
+                            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                            .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                _ then Option[String].None(),
+                            },
+                            .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                _ then Option[String].None(),
+                            },
+                            .WeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                _ then Option[String].None(),
+                            },
+                            .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                                .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+                                _ then Option[String].None(),
+                            },
+                            _ then Option[String].None(),
+                        }
+                        when receiver_trait_name_opt in {
+                            .Some(trait_name) then {
+                                if vtable_method_index(mono, trait_name, method_name) < 0 then {
+                                    let callee_expr = box(TypedExpr(
+                                        box(TypedExprKind.Variable(box(sym))),
+                                        sym.symbol_type,
+                                    ))
+                                    return TypedExprKind.Call(callee_expr, new_args)
+                                }
+                            },
+                            .None() then {},
+                        }
                         let receiver_arg = adapt_receiver_expr_for_method(mono, actual_receiver_expr, sym)
                         let mut method_args = List[ref TypedExpr].new()
                         let mut arg_index UInt = 1(UInt)

@@ -8,6 +8,28 @@ private func cIdentifierOrFallback(defId: DefId, fallback: String) -> String {
     return TypeHandlerRegistry.shared.currentContext?.getCIdentifier(defId) ?? fallback
 }
 
+private func usesTraitObjectRefStorage(_ type: Type, context: CompilerContext?) -> Bool {
+    switch type {
+    case .traitObject:
+        return true
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .weakReference(let inner),
+         .mutableWeakReference(let inner):
+        return usesTraitObjectRefStorage(inner, context: context)
+    case .opaque(let defId):
+        if let mapped = context?.defIdMap.lookupType(defId: defId) {
+            return usesTraitObjectRefStorage(mapped, context: context)
+        }
+        if case .type(.trait) = context?.getKind(defId) {
+            return true
+        }
+        return false
+    default:
+        return false
+    }
+}
+
 // MARK: - TypeHandler Protocol
 
 /// 类型处理器协议 - 确保所有类型都有完整的处理逻辑
@@ -297,7 +319,7 @@ public class StructHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cTypeIdentifierOrFallback(type, fallback: "T_\(defId.id)")
-        return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
+        return "__koral_\(qualifiedName)_drop(&(\(value)));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -433,7 +455,7 @@ public class EnumHandler: TypeHandler {
             return ""
         }
         let qualifiedName = cIdentifierOrFallback(defId: defId, fallback: "U_\(defId.id)")
-        return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
+        return "__koral_\(qualifiedName)_drop(&(\(value)));"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -675,7 +697,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             let qualifiedName = "\(template)_\(argsStr)"
-            return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
+            return "__koral_\(qualifiedName)_drop(&(\(value)));"
         case .genericEnum(let template, let args):
             let argsStr: String
             if let context = TypeHandlerRegistry.shared.currentContext {
@@ -684,7 +706,7 @@ public class GenericHandler: TypeHandler {
                 argsStr = args.map { $0.stableKey }.joined(separator: "_")
             }
             let qualifiedName = "\(template)_\(argsStr)"
-            return "__koral_\(qualifiedName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(value)), .control = NULL });"
+            return "__koral_\(qualifiedName)_drop(&(\(value)));"
         case .genericParameter:
             return "/* cannot drop generic parameter */"
         default:
@@ -893,10 +915,11 @@ public class ReferenceHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
-        if case .reference(let inner) = type, case .traitObject = inner {
+        let context = TypeHandlerRegistry.shared.currentContext
+        if case .reference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
-        if case .mutableReference(let inner) = type, case .traitObject = inner {
+        if case .mutableReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
         return "struct __koral_Ref"
@@ -1064,10 +1087,11 @@ public class WeakReferenceHandler: TypeHandler {
     }
     
     public func generateCTypeName(_ type: Type) -> String {
-        if case .weakReference(let inner) = type, case .traitObject = inner {
+        let context = TypeHandlerRegistry.shared.currentContext
+        if case .weakReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitWeakRef"
         }
-        if case .mutableWeakReference(let inner) = type, case .traitObject = inner {
+        if case .mutableWeakReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitWeakRef"
         }
         return "struct __koral_WeakRef"

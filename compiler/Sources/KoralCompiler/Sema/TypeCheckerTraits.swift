@@ -113,12 +113,7 @@ extension TypeChecker {
   ) throws -> Type {
     return try withNewScope {
       // Bind both `Self` and inferred self placeholder.
-      let normalizedSelfType: Type
-      if case .reference(let inner) = selfType {
-        normalizedSelfType = inner
-      } else {
-        normalizedSelfType = selfType
-      }
+      let normalizedSelfType = selfType
       try currentScope.defineType("Self", type: normalizedSelfType)
 
       // Bind trait-level type parameters to their actual type arguments
@@ -172,7 +167,7 @@ extension TypeChecker {
 
       let params: [Parameter] = try method.parameters.map { param in
         let t = try resolveTypeNode(param.type)
-        return Parameter(type: t, kind: .byVal)
+        return Parameter(type: t, kind: passKindForParameterType(t))
       }
       let ret = try resolveTypeNode(method.returnType)
       return Type.function(parameters: params, returns: ret)
@@ -444,7 +439,7 @@ extension TypeChecker {
 
       let params: [Parameter] = try method.parameters.map { param in
         let t = try resolveTypeNode(param.type)
-        return Parameter(type: t, kind: param.mutable ? .byMutRef : .byVal)
+        return Parameter(type: t, kind: passKindForParameterType(t))
       }
       let ret = try resolveTypeNode(method.returnType)
       return Type.function(parameters: params, returns: ret)

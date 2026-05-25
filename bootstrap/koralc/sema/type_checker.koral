@@ -237,10 +237,7 @@ given TypeChecker {
                 yield if is_known_span(base_span) then base_span else self.context().get_span(method.def_id) or else unknown_span()
             },
             .TraitObjectConversion(inner, _, _) then self.typed_expr_span(inner),
-            .TraitMethodCall(receiver, _, method, _, _, _) then {
-                let method_span = self.context().get_span(method.def_id) or else unknown_span()
-                yield if is_known_span(method_span) then method_span else self.typed_expr_span(receiver)
-            },
+            .TraitMethodCall(receiver, _, _, _, _) then self.typed_expr_span(receiver),
             .GenericInstantiation(base_type, _) then when base_type in {
                 .StructureType(def_id) then self.context().get_span(def_id) or else unknown_span(),
                 .EnumType(def_id) then self.context().get_span(def_id) or else unknown_span(),
@@ -634,13 +631,36 @@ given TypeChecker {
         }
 
         // Pass 2: collect signatures (with per-node file_path context)
+        // Match the Swift pipeline and the single-program path by registering
+        // all traits first. Otherwise cross-file references like
+        // `ref Error` inside generic enum templates can degrade to Unknown
+        // when the owning declaration is visited before the trait file.
         let mut sig_index UInt = 0
         while sig_index < pass_inputs.count() then {
             let input = pass_inputs[sig_index]
-            self.storage.file_path = input.source_file
-            self.storage.module_path = input.module_path
-            self.storage.package_id = input.package_id
-            self.collect_decl_signature(input.decl)
+            when input.decl in {
+                .TraitDecl(_, _, _, _, _, _) then {
+                    self.storage.file_path = input.source_file
+                    self.storage.module_path = input.module_path
+                    self.storage.package_id = input.package_id
+                    self.collect_decl_signature(input.decl)
+                },
+                _ then {},
+            }
+            sig_index += 1
+        }
+        sig_index = 0(UInt)
+        while sig_index < pass_inputs.count() then {
+            let input = pass_inputs[sig_index]
+            when input.decl in {
+                .TraitDecl(_, _, _, _, _, _) then {},
+                _ then {
+                    self.storage.file_path = input.source_file
+                    self.storage.module_path = input.module_path
+                    self.storage.package_id = input.package_id
+                    self.collect_decl_signature(input.decl)
+                },
+            }
             sig_index += 1
         }
         // Pass 3: check bodies
@@ -704,7 +724,16 @@ given TypeChecker {
 
     private collect_signatures(self mut ref, program Program) Void = {
         for decl in program.declarations then {
-            self.collect_decl_signature(decl)
+            when decl in {
+                .TraitDecl(_, _, _, _, _, _) then self.collect_decl_signature(decl),
+                _ then {},
+            }
+        }
+        for decl in program.declarations then {
+            when decl in {
+                .TraitDecl(_, _, _, _, _, _) then {},
+                _ then self.collect_decl_signature(decl),
+            }
         }
     }
 
@@ -1076,6 +1105,17 @@ given TypeChecker {
                 let typed_members = self.check_trait_members(members, type_params)
                 let info = TraitInfo(name, param_names, parent_constraints, typed_members, self.storage.module_path)
                 self.storage.trait_registry.register(info)
+                self.storage.generic_templates.traits.insert(
+                    name,
+                    TraitDeclInfo(
+                        name,
+                        self.to_template_type_params(type_params),
+                        parent_constraints,
+                        members,
+                        typed_members,
+                        self.storage.module_path
+                    )
+                )
             },
             _ then {},
         }

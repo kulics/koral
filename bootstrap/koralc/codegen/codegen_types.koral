@@ -72,7 +72,12 @@ given CodeGen {
                         .TraitObject(_, _) then mapped,
                         _ then Type.Unknown(),
                     },
-                    .None() then Type.Unknown(),
+                    .None() then {
+                        let trait_name = self.context.get_name(def_id) or else ""
+                        yield if self.program.semantic_traits().get(trait_name).is_some()
+                            then Type.TraitObject(trait_name, List[ref Type].new())
+                            else Type.Unknown()
+                    },
                 },
                 _ then Type.Unknown(),
             },
@@ -82,7 +87,12 @@ given CodeGen {
                     .TraitObject(_, _) then mapped,
                     _ then Type.Unknown(),
                 },
-                .None() then Type.Unknown(),
+                .None() then {
+                    let trait_name = self.context.get_name(def_id) or else ""
+                    yield if self.program.semantic_traits().get(trait_name).is_some()
+                        then Type.TraitObject(trait_name, List[ref Type].new())
+                        else Type.Unknown()
+                },
             },
             _ then Type.Unknown(),
         }
@@ -120,6 +130,10 @@ given CodeGen {
     }
 
     private concrete_struct_fields_from_def(self, def_id DefId) Option[List[TypedField]] = {
+        when self.concrete_struct_fields_from_program(def_id) in {
+            .Some(fields) then { return Option[List[TypedField]].Some(fields) },
+            .None() then {},
+        }
         return when self.context.get_struct_fields(def_id) in {
             .Some(fields) then {
                 let mut typed_fields = List[TypedField].new()
@@ -136,6 +150,10 @@ given CodeGen {
     }
 
     private concrete_enum_cases_from_def(self, def_id DefId) Option[List[TypedEnumCase]] = {
+        when self.concrete_enum_cases_from_program(def_id) in {
+            .Some(cases) then { return Option[List[TypedEnumCase]].Some(cases) },
+            .None() then {},
+        }
         return when self.context.get_enum_cases(def_id) in {
             .Some(cases) then {
                 let mut typed_cases = List[TypedEnumCase].new()
@@ -151,7 +169,7 @@ given CodeGen {
                 }
                 yield Option[List[TypedEnumCase]].Some(typed_cases)
             },
-            .None() then self.concrete_enum_cases_from_program(def_id),
+            .None() then Option[List[TypedEnumCase]].None(),
         }
     }
 
@@ -182,7 +200,7 @@ given CodeGen {
         self.with_indent(() -> {
             for field in fields then {
                 self.add_indent()
-                let field_c_type = self.c_type_name(field.field_type)
+                let field_c_type = self.storage_c_type_name(field.field_type)
                 let field_c_name = self.sanitize_codegen_identifier(field.name)
                 self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
             }
@@ -208,10 +226,8 @@ given CodeGen {
         self.buffer.push_string("}\n\n")
 
         // 生成 drop 函数
-        self.buffer.push_string("void __koral_\(name)_drop(struct __koral_Ref self_ref) {\n")
+        self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n")
         self.with_indent(() -> {
-            self.add_indent()
-            self.buffer.push_string("struct \(name)* self = (struct \(name)*)self_ref.ptr;\n")
             // 调用用户定义的 drop（如果存在）
             when self.user_defined_drops.get(name) in {
                 .Some(user_drop) then {
@@ -221,9 +237,9 @@ given CodeGen {
                     self.buffer.push_string("{\n")
                     self.with_indent(() -> {
                         self.add_indent()
-                        self.buffer.push_string("void \(user_drop_name)(struct __koral_Ref);\n")
+                        self.buffer.push_string("void \(user_drop_name)(struct \(name)*);\n")
                         self.add_indent()
-                        self.buffer.push_string("\(user_drop_name)(self_ref);\n")
+                        self.buffer.push_string("\(user_drop_name)(self);\n")
                     })
                     self.add_indent()
                     self.buffer.push_string("}\n")
@@ -275,7 +291,7 @@ given CodeGen {
                                     .VoidType() then {},
                                     _ then {
                                         self.add_indent()
-                                        let f_c_type = if is_void_like_type(f.field_type) then "char" else self.c_type_name(f.field_type)
+                                        let f_c_type = if is_void_like_type(f.field_type) then "char" else self.storage_c_type_name(f.field_type)
                                         let f_c_name = self.sanitize_codegen_identifier(f.name)
                                         self.buffer.push_string("\(f_c_type) \(f_c_name);\n")
                                     },
@@ -335,10 +351,8 @@ given CodeGen {
         self.buffer.push_string("}\n\n")
 
         // 生成 drop 函数
-        self.buffer.push_string("void __koral_\(name)_drop(struct __koral_Ref self_ref) {\n")
+        self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n")
         self.with_indent(() -> {
-            self.add_indent()
-            self.buffer.push_string("struct \(name)* self = (struct \(name)*)self_ref.ptr;\n")
             // 调用用户定义的 drop（如果存在）
             when self.user_defined_drops.get(name) in {
                 .Some(user_drop) then {
@@ -348,9 +362,9 @@ given CodeGen {
                     self.buffer.push_string("{\n")
                     self.with_indent(() -> {
                         self.add_indent()
-                        self.buffer.push_string("void \(user_drop_name)(struct __koral_Ref);\n")
+                        self.buffer.push_string("void \(user_drop_name)(struct \(name)*);\n")
                         self.add_indent()
-                        self.buffer.push_string("\(user_drop_name)(self_ref);\n")
+                        self.buffer.push_string("\(user_drop_name)(self);\n")
                     })
                     self.add_indent()
                     self.buffer.push_string("}\n")
@@ -400,7 +414,7 @@ given CodeGen {
         self.with_indent(() -> {
             for field in fields then {
                 self.add_indent()
-                let field_c_type = self.c_type_name(field.field_type)
+                let field_c_type = self.storage_c_type_name(field.field_type)
                 let field_c_name = self.sanitize_codegen_identifier(field.name)
                 self.buffer.push_string("\(field_c_type) \(field_c_name);\n")
             }

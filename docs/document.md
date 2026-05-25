@@ -486,7 +486,7 @@ let d = c.val            // Dereference read, gets 42
 // c.val = 100           // Error: ref does not support .val assignment
 ```
 
-`ref` and `mut ref` denote managed reference types. `x.ref` forms one from an lvalue, with the result mutability determined by the source. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. `box(expr)` returns `mut ref T` by intentionally producing an escaping managed reference.
+`ref` and `mut ref` denote managed reference types. `x.ref` forms one from an lvalue, with the result mutability determined by the source. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. `box(expr)` returns `mut ref T` by intentionally producing an escaping managed reference. Conceptually, `box` is `box(mut v T) -> v.ref`: the escaping reference takes over ownership of that local storage, so the local is not dropped a second time.
 
 Pointer types follow the same read-only / mutable distinction:
 
@@ -518,7 +518,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` and `mut ref` are Koral's managed reference types. `ref T` is read-only, `mut ref T` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `mut ref T`). Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self mut ref` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` and `mut ref` are Koral's managed reference types. `ref T` is read-only, `mut ref T` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `mut ref T`). When a local value is promoted into an escaping managed reference, destruction transfers to that reference owner instead of running a second value drop on the source local. Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self mut ref` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -1108,6 +1108,8 @@ Mutable parameters use the `mut` keyword:
 let increment(mut x Int) Int = { x += 1; return x }
 ```
 
+For ordinary parameters, `mut` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the `Func[...]` type, and is ignored when checking trait/given method compatibility.
+
 #### Named Parameters
 
 Named parameters follow these rules:
@@ -1586,8 +1588,11 @@ The most commonly used core traits are:
 - `ToString`: conversion to string.
 - `Iterator[T]`: iteration protocol (`next(self mut ref) Option[T]`).
 - `Error`: error message interface (`message(self ref) String`).
+- `Drop`: destructor hook (`drop(source mut ptr Self) Void`).
 
 Operators are lowered to trait methods internally (for example `+` to `Add`, and indexing to `Index`/`MutIndex`).
+
+`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source mut ptr Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
 
 ### Trait Objects
 

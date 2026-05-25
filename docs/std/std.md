@@ -11,7 +11,7 @@ public let make_bytes(count UInt) List[UInt8]
 
 public let make_uninitialized_bytes(count UInt) List[UInt8]
 
-public let box[T Any](v T) mut ref T
+public let box[T Any](mut v T) mut ref T
 
 public let max[T Ord](a T, b T) T
 
@@ -113,7 +113,7 @@ public trait Error {
 }
 
 public trait Drop {
-    drop(self mut ref) Void
+    drop(source mut ptr Self) Void
 }
 
 public trait Index[K Any, V Any] {

@@ -9,10 +9,31 @@ import Foundation
 // MARK: - Type Resolution Extension
 
 extension Monomorphizer {
+    private func methodLookupBaseType(for base: TypedExpressionNode) -> Type {
+        if case .variable = base {
+            return base.type
+        }
+        if case .referenceExpression(let inner, _) = base {
+            switch inner {
+            case .variable:
+                return base.type
+            default:
+                return inner.type
+            }
+        }
+        if case .reference(let inner) = base.type {
+            return inner
+        }
+        if case .mutableReference(let inner) = base.type {
+            return inner
+        }
+        return base.type
+    }
+
 
     internal func predeclareGivenMethodRemaps(in nodes: [TypedGlobalNode]) {}
 
-    private func methodHasCompatibleRefLikeReceiver(_ methodType: Type, baseType: Type) -> Bool {
+    internal func methodHasCompatibleRefLikeReceiver(_ methodType: Type, baseType: Type) -> Bool {
         guard case .function(let params, _) = methodType,
               let firstParam = params.first else {
             return false
@@ -30,7 +51,7 @@ extension Monomorphizer {
         }
     }
 
-    private func shouldPreserveResolvedMethodReference(_ method: Symbol, baseType: Type) -> Bool {
+    internal func shouldPreserveResolvedMethodReference(_ method: Symbol, baseType: Type) -> Bool {
         let resolvedMethodType = resolveParameterizedType(method.type)
         guard methodHasCompatibleRefLikeReceiver(resolvedMethodType, baseType: baseType) else {
             return false
@@ -515,27 +536,6 @@ extension Monomorphizer {
 // MARK: - Expression Type Resolution Extension
 
 extension Monomorphizer {
-    private func methodLookupBaseType(for base: TypedExpressionNode) -> Type {
-        if case .variable = base {
-            return base.type
-        }
-        if case .referenceExpression(let inner, _) = base {
-            switch inner {
-            case .variable:
-                return base.type
-            default:
-                return inner.type
-            }
-        }
-        if case .reference(let inner) = base.type {
-            return inner
-        }
-        if case .mutableReference(let inner) = base.type {
-            return inner
-        }
-        return base.type
-    }
-
     /// Resolves all genericStruct/genericEnum types in an expression.
     internal func resolveTypesInExpression(_ expr: TypedExpressionNode) -> TypedExpressionNode {
         switch expr {
@@ -783,12 +783,26 @@ extension Monomorphizer {
                         + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
                     returns: newType
                 )
-                if let concreteMethod = try? lookupConcreteMethodSymbol(
-                    on: lookupBaseType,
-                    name: methodName,
-                    methodTypeArgs: methodTypeArgs,
-                    expectedMethodType: expectedCallType
-                ) {
+                let concreteMethod =
+                    (try? lookupConcreteMethodSymbolWithRefLikeFallback(
+                        on: lookupBaseType,
+                        name: methodName,
+                        methodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedCallType
+                    )) ?? {
+                        _ = try? instantiateTraitPlaceholderMethod(
+                            baseType: lookupBaseType,
+                            name: methodName,
+                            methodTypeArgs: methodTypeArgs
+                        )
+                        return try? lookupConcreteMethodSymbolWithRefLikeFallback(
+                            on: lookupBaseType,
+                            name: methodName,
+                            methodTypeArgs: methodTypeArgs,
+                            expectedMethodType: expectedCallType
+                        )
+                    }()
+                if let concreteMethod {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                     newCallee = .methodReference(
                         base: alignMethodReferenceBase(base, to: resolvedMethodType),
@@ -1071,7 +1085,6 @@ extension Monomorphizer {
             let newBase = resolveTypesInExpression(base)
             let resolvedMethodTypeArgs = methodTypeArgs.map { resolveParameterizedType($0) }
             let resolvedType = resolveParameterizedType(type)
-            
             // Enqueue trait placeholder request for later resolution
             enqueueTraitPlaceholderRequest(
                 baseType: newBase.type,
@@ -1094,12 +1107,12 @@ extension Monomorphizer {
                 }
 
                 // Look up the concrete method on the resolved base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(
+                if let concreteMethod = (try? lookupConcreteMethodSymbolWithRefLikeFallback(
                     on: newBase.type,
                     name: methodName,
                     methodTypeArgs: resolvedMethodTypeArgs,
                     expectedMethodType: resolvedType
-                ) {
+                )) {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                     let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
                     return .methodReference(
@@ -1116,12 +1129,12 @@ extension Monomorphizer {
                         name: methodName,
                         methodTypeArgs: resolvedMethodTypeArgs
                     )
-                    if let concreteMethod = try? lookupConcreteMethodSymbol(
+                    if let concreteMethod = (try? lookupConcreteMethodSymbolWithRefLikeFallback(
                         on: newBase.type,
                         name: methodName,
                         methodTypeArgs: resolvedMethodTypeArgs,
                         expectedMethodType: resolvedType
-                    ) {
+                    )) {
                         let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                         let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
                         return .methodReference(

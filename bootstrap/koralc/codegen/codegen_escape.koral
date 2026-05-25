@@ -73,6 +73,24 @@ public type EscapeContext(
     mut compiler_context Option[CompilerContext],
 )
 
+public type EscapeScopeSnapshot(
+    variable_scopes Dict[String, UInt],
+    current_scope_level UInt,
+    reference_origins Dict[String, List[String]],
+    scope_stack List[mut ref List[String]],
+)
+
+public type EscapeFullSnapshot(
+    variable_scopes Dict[String, UInt],
+    current_scope_level UInt,
+    escaped_variables Dict[String, EscapeResult],
+    reference_origins Dict[String, List[String]],
+    scope_stack List[mut ref List[String]],
+    return_type Option[Type],
+    in_return_context Bool,
+    in_field_assignment_context Bool,
+)
+
 private let escape_symbol_name(ctx EscapeContext, symbol Symbol) String = {
     return when ctx.compiler_context in {
         .Some(context) then context.symbol_name(symbol),
@@ -81,6 +99,86 @@ private let escape_symbol_name(ctx EscapeContext, symbol Symbol) String = {
 }
 
 given EscapeContext {
+    private copy_variable_scopes(self) Dict[String, UInt] = {
+        let mut snapshot = Dict[String, UInt].new()
+        for entry in self.variable_scopes.iterator() then {
+            snapshot.insert(entry.first, entry.second)
+        }
+        return snapshot
+    }
+
+    private copy_escaped_variables(self) Dict[String, EscapeResult] = {
+        let mut snapshot = Dict[String, EscapeResult].new()
+        for entry in self.escaped_variables.iterator() then {
+            snapshot.insert(entry.first, entry.second)
+        }
+        return snapshot
+    }
+
+    private copy_reference_origins(self) Dict[String, List[String]] = {
+        let mut snapshot = Dict[String, List[String]].new()
+        for entry in self.reference_origins.iterator() then {
+            let mut origins = List[String].new()
+            for origin in entry.second.iterator() then {
+                origins.push(origin)
+            }
+            snapshot.insert(entry.first, origins)
+        }
+        return snapshot
+    }
+
+    private copy_scope_stack(self) List[mut ref List[String]] = {
+        let mut snapshot = List[mut ref List[String]].new()
+        for scope in self.scope_stack.iterator() then {
+            let mut copied_scope = List[String].new()
+            for name in scope.iterator() then {
+                copied_scope.push(name)
+            }
+            snapshot.push(box(copied_scope))
+        }
+        return snapshot
+    }
+
+    public snapshot_scope_state(self) EscapeScopeSnapshot = {
+        return EscapeScopeSnapshot(
+            self.copy_variable_scopes(),
+            self.current_scope_level,
+            self.copy_reference_origins(),
+            self.copy_scope_stack(),
+        )
+    }
+
+    public restore_scope_state(self mut ref, snapshot EscapeScopeSnapshot) Void = {
+        self.variable_scopes = snapshot.variable_scopes
+        self.current_scope_level = snapshot.current_scope_level
+        self.reference_origins = snapshot.reference_origins
+        self.scope_stack = snapshot.scope_stack
+    }
+
+    public snapshot_full_state(self) EscapeFullSnapshot = {
+        return EscapeFullSnapshot(
+            self.copy_variable_scopes(),
+            self.current_scope_level,
+            self.copy_escaped_variables(),
+            self.copy_reference_origins(),
+            self.copy_scope_stack(),
+            self.return_type,
+            self.in_return_context,
+            self.in_field_assignment_context,
+        )
+    }
+
+    public restore_full_state(self mut ref, snapshot EscapeFullSnapshot) Void = {
+        self.variable_scopes = snapshot.variable_scopes
+        self.current_scope_level = snapshot.current_scope_level
+        self.escaped_variables = snapshot.escaped_variables
+        self.reference_origins = snapshot.reference_origins
+        self.scope_stack = snapshot.scope_stack
+        self.return_type = snapshot.return_type
+        self.in_return_context = snapshot.in_return_context
+        self.in_field_assignment_context = snapshot.in_field_assignment_context
+    }
+
     /// 构造函数：创建一个空的逃逸分析上下文
     public new() EscapeContext = EscapeContext(
         Dict[String, UInt].new(),
@@ -117,7 +215,7 @@ given EscapeContext {
                 i += 1
             }
         }
-        if self.current_scope_level > 0 then {
+        if self.current_scope_level <> 0(UInt) then {
             self.current_scope_level -= 1
         }
     }
@@ -186,9 +284,18 @@ given EscapeContext {
         return self.escaped_variables.contains_key(name)
     }
 
+    public get_escape_reason(self, name String) Option[EscapeResult] = {
+        return self.escaped_variables.get(name)
+    }
+
     private needs_return_escape_check_for_expr(self, expr ref TypedExpr) Bool = {
-        if self.return_type is .Some(rt) and (rt is .ReferenceType(_) or rt is .MutableReferenceType(_)) then {
-            return true
+        when self.return_type in {
+            .Some(rt) then {
+                if result_type_may_escape_references(self, rt) then {
+                    return true
+                }
+            },
+            .None() then {},
         }
         return when expr.expr_type in {
             .StructureType(_) or .GenericStruct(_, _) or .EnumType(_) or .GenericEnum(_, _) then true,
@@ -224,68 +331,98 @@ given EscapeContext {
     }
 
     private apply_return_escape_if_needed(self mut ref, name String, current EscapeResult) EscapeResult = {
-        if current is not .NoEscape() then {
-            return current
-        }
-        if not self.in_return_context then {
-            return current
-        }
-        when self.return_type in {
-            .Some(rt) then {
-                if not result_type_may_escape_references(rt) then {
+        return when current in {
+            .NoEscape() then {
+                if not self.in_return_context then {
                     return current
                 }
-            },
-            .None() then {
-                return current
-            },
-        }
-        return when self.variable_scopes.get(name) in {
-            .Some(scope_level) then {
-                if scope_level > 0 then {
-                    self.mark_escaped(name, EscapeResult.EscapeToReturn())
-                    return EscapeResult.EscapeToReturn()
+                when self.return_type in {
+                    .Some(rt) then {
+                        if not result_type_may_escape_references(self, rt) then {
+                            return current
+                        }
+                    },
+                    .None() then {
+                        return current
+                    },
                 }
-                return current
+                yield when self.variable_scopes.get(name) in {
+                    .Some(scope_level) then {
+                        if scope_level > 0(UInt) then {
+                            self.mark_escaped(name, EscapeResult.EscapeToReturn())
+                            return EscapeResult.EscapeToReturn()
+                        }
+                        return current
+                    },
+                    .None() then current,
+                }
             },
-            .None() then current,
+            _ then current,
         }
     }
 
     private apply_field_escape_if_needed(self mut ref, name String, current EscapeResult) EscapeResult = {
-        if current is not .NoEscape() or not self.in_field_assignment_context then {
-            return current
-        }
-        return when self.variable_scopes.get(name) in {
-            .Some(scope_level) then {
-                if scope_level > 0 then {
-                    self.mark_escaped(name, EscapeResult.EscapeToField())
-                    return EscapeResult.EscapeToField()
+        return when current in {
+            .NoEscape() then {
+                if not self.in_field_assignment_context then {
+                    return current
                 }
-                return current
+                yield when self.variable_scopes.get(name) in {
+                    .Some(scope_level) then {
+                        if scope_level > 0(UInt) then {
+                            self.mark_escaped(name, EscapeResult.EscapeToField())
+                            return EscapeResult.EscapeToField()
+                        }
+                        return current
+                    },
+                    .None() then current,
+                }
             },
-            .None() then current,
+            _ then current,
         }
     }
 
     /// 分析引用表达式是否会逃逸
     ///
     /// 与 Swift EscapeAnalysis.analyzeEscape 语义对齐：
+    /// - rvalue => Unknown（保守堆分配）
     /// - 已标记逃逸优先返回历史原因
     /// - 返回上下文 + 引用返回类型 + 局部变量 => EscapeToReturn
     /// - 字段赋值上下文 + 局部变量 => EscapeToField
     /// - 无法提取变量名 => Unknown（保守）
     public analyze_escape(self mut ref, inner ref TypedExpr) EscapeResult = {
+        if typed_expr_value_category(inner) is .RValue() then {
+            return EscapeResult.Unknown()
+        }
         let var_name = extract_variable_name(self, inner)
         return when var_name in {
             .Some(name) then {
                 yield when self.escaped_variables.get(name) in {
                     .Some(existing_reason) then existing_reason,
                     .None() then {
-                        let mut result = EscapeResult.NoEscape()
-                        result = self.apply_return_escape_if_needed(name, result)
-                        result = self.apply_field_escape_if_needed(name, result)
-                        yield result
+                        let is_local_scope = when self.variable_scopes.get(name) in {
+                            .Some(scope_level) then scope_level > 0(UInt),
+                            .None() then false,
+                        }
+                        let return_can_escape = when self.return_type in {
+                            .Some(rt) then result_type_may_escape_references(self, rt),
+                            .None() then false,
+                        }
+                        let should_escape_return = self.in_return_context and return_can_escape and is_local_scope
+                        let should_escape_field = (not should_escape_return) and self.in_field_assignment_context and is_local_scope
+
+                        if should_escape_return then {
+                            self.mark_escaped(name, EscapeResult.EscapeToReturn())
+                        }
+                        if should_escape_field then {
+                            self.mark_escaped(name, EscapeResult.EscapeToField())
+                        }
+
+                        let final_result = when self.escaped_variables.get(name) in {
+                            .Some(reason) then reason,
+                            .None() then EscapeResult.NoEscape(),
+                        }
+                        yield final_result
                     },
                 }
             },
@@ -298,7 +435,7 @@ given EscapeContext {
         let var_name = extract_variable_name(self, expr)
         return when var_name in {
             .Some(name) then when self.variable_scopes.get(name) in {
-                .Some(scope_level) then scope_level > 0,
+                .Some(scope_level) then scope_level <> 0(UInt),
                 .None() then false,
             },
             .None() then false,
@@ -631,7 +768,7 @@ given EscapeContext {
             .TraitMethodPlaceholder(base, _, _, _, _) then {
                 self.pre_analyze_expr(base)
             },
-            .TraitMethodCall(receiver, _, _, args, _, _) then {
+            .TraitMethodCall(receiver, _, _, _, args) then {
                 self.pre_analyze_expr(receiver)
                 for arg in args then {
                     self.pre_analyze_expr(arg)
@@ -1220,12 +1357,48 @@ public let extract_variable_name(ctx ref EscapeContext, expr ref TypedExpr) Opti
     }
 }
 
-private let result_type_may_escape_references(type_ref Type) Bool = {
+private let is_runtime_reference_wrapper_name(name String) Bool = {
+    return name == "__koral_Ref"
+        or name == "__koral_TraitRef"
+        or name == "__koral_WeakRef"
+        or name == "__koral_TraitWeakRef"
+}
+
+private let def_id_is_runtime_reference_wrapper(ctx ref EscapeContext, def_id DefId) Bool = {
+    return when ctx.val.compiler_context in {
+        .Some(context) then {
+            when context.get_c_identifier(def_id) in {
+                .Some(name) then if is_runtime_reference_wrapper_name(name) then { return true },
+                .None() then {},
+            }
+            when context.get_cname(def_id) in {
+                .Some(name) then if is_runtime_reference_wrapper_name(name) then { return true },
+                .None() then {},
+            }
+            return when context.get_name(def_id) in {
+                .Some(name) then is_runtime_reference_wrapper_name(name),
+                .None() then false,
+            }
+        },
+        .None() then false,
+    }
+}
+
+private let result_type_may_escape_references(ctx ref EscapeContext, type_ref Type) Bool = {
     return when type_ref in {
         .ReferenceType(_) then true,
         .MutableReferenceType(_) then true,
         .WeakReferenceType(_) then true,
+        .MutableWeakReferenceType(_) then true,
         .TraitObject(_, _) then true,
+        .OpaqueType(def_id) then when ctx.val.compiler_context in {
+            .Some(context) then when context.lookup_type(def_id) in {
+                .Some(mapped_type) then result_type_may_escape_references(ctx, mapped_type),
+                .None() then def_id_is_runtime_reference_wrapper(ctx, def_id),
+            },
+            .None() then false,
+        },
+        .StructureType(def_id) then def_id_is_runtime_reference_wrapper(ctx, def_id),
         _ then false,
     }
 }
@@ -1438,20 +1611,6 @@ private let escape_summary_return_type(return_type Type) Option[Type] = {
     }
 }
 
-private let filter_non_parameter_escaped_variables(ctx ref EscapeContext, params List[TypedParam]) Dict[String, EscapeResult] = {
-    let mut escaped_variables = Dict[String, EscapeResult].new()
-    let mut param_names = Set[String].new()
-    for param in params then {
-        param_names.insert(param.name)
-    }
-    for entry in ctx.escaped_variables.iterator() then {
-        if not param_names.contains(entry.first) then {
-            escaped_variables.insert(entry.first, entry.second)
-        }
-    }
-    return escaped_variables
-}
-
 private let build_escape_param_states(ctx ref EscapeContext, params List[TypedParam]) List[ParameterEscapeState] = {
     let mut param_states = List[ParameterEscapeState].new()
     for param in params then {
@@ -1475,7 +1634,7 @@ private let analyze_escape_function_summary(
     let return_type_opt = escape_summary_return_type(info.return_type)
     ctx.reset(return_type_opt)
     ctx.pre_analyze(info.body, info.params)
-    let escaped_variables = filter_non_parameter_escaped_variables(ctx.ref, info.params)
+    let escaped_variables = ctx.escaped_variables
     let param_states = build_escape_param_states(ctx.ref, info.params)
     return EscapeFunctionAnalysis(FunctionEscapeSummary(param_states), escaped_variables)
 }
@@ -1727,7 +1886,7 @@ private let extract_escape_calls_from_expr(
         .TraitMethodPlaceholder(base, _, _, _, _) then {
             extract_escape_calls_from_expr(program, context_opt, base, callees)
         },
-        .TraitMethodCall(receiver, _, _, args, _, _) then {
+        .TraitMethodCall(receiver, _, _, _, args) then {
             extract_escape_calls_from_expr(program, context_opt, receiver, callees)
             for arg in args then {
                 extract_escape_calls_from_expr(program, context_opt, arg, callees)

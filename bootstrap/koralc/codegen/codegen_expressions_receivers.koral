@@ -9,13 +9,14 @@ given CodeGen {
                 let is_pattern_alias = when receiver_expr.expr_kind in {
                     .Variable(symbol) then {
                         let c_name = self.c_identifier_for_symbol(symbol)
-                        yield self.pattern_binding_aliases.get(c_name) is .Some(_)
+                        yield self.pattern_binding_aliases.get(c_name) is .Some(_) or self.captured_name_alias_opt(c_name).is_some()
                     },
                     _ then false,
                 }
                 let is_captured = when receiver_expr.expr_kind in {
                     .Variable(symbol) then {
-                        yield self.captured_var_aliases.get(symbol.def_id.id) is .Some(_)
+                        let c_name = self.c_identifier_for_symbol(symbol)
+                        yield self.captured_var_aliases.get(symbol.def_id.id) is .Some(_) or self.captured_name_alias_opt(c_name).is_some()
                     },
                     _ then false,
                 }
@@ -25,12 +26,16 @@ given CodeGen {
         }
     }
 
-    private heap_ref_value(self mut ref, value_expr String, value_type Type, ref_type Type, is_lvalue Bool) String = {
+    private heap_ref_value(self mut ref, value_expr String, value_type Type, ref_type Type, is_lvalue Bool, receiver_expr_opt Option[ref TypedExpr]) String = {
         let inner_c_type = self.c_type_name(value_type)
         let ref_c_type = self.c_type_name(ref_type)
         let result = self.next_temp_with_decl(ref_c_type)
+        let should_transfer_owned_local = when receiver_expr_opt in {
+            .Some(receiver_expr) then self.should_transfer_escaping_owned_local(receiver_expr, value_expr, is_lvalue),
+            .None() then false,
+        }
         self.push_indented_member_assignment(result, "ptr", "malloc(sizeof(\(inner_c_type)))")
-        if is_lvalue and self.needs_drop(value_type) then {
+        if is_lvalue and self.needs_drop(value_type) and not should_transfer_owned_local then {
             self.append_copy_assignment(value_type, value_expr, "*(\(inner_c_type)*)\(result).ptr")
         } else {
             self.push_indented_assignment("*(\(inner_c_type)*)\(result).ptr", value_expr)
@@ -59,6 +64,9 @@ given CodeGen {
         // would call __koral_release on the same control block (created with
         // strong_count = 1). This matches the Swift CodeGen behaviour where
         // .referenceExpression heap refs are returned as unregistered rvalues.
+        if should_transfer_owned_local then {
+            self.unregister_variable(value_expr)
+        }
         return result
     }
 
@@ -159,7 +167,7 @@ given CodeGen {
                     .Some(receiver_expr) then self.is_lvalue_expr(receiver_expr),
                     .None() then false,
                 }
-                return self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue)
+                return self.heap_ref_value(receiver_var, receiver_type, expected_self_type, receiver_expr_is_lvalue, receiver_expr_opt)
             }
             return self.stack_ref_value(receiver_var, expected_self_type, "NULL", true)
         }

@@ -28,7 +28,8 @@ extension Monomorphizer {
         }
         return base.type
     }
-    
+
+
     // MARK: - Expression Substitution
     
     /// Substitutes type parameters in a typed expression with concrete types.
@@ -347,12 +348,26 @@ extension Monomorphizer {
                         + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
                     returns: newType
                 )
-                if let concreteMethod = try? lookupConcreteMethodSymbol(
-                    on: lookupBaseType,
-                    name: methodName,
-                    methodTypeArgs: methodTypeArgs,
-                    expectedMethodType: expectedCallType
-                ) {
+                let concreteMethod =
+                    (try? lookupConcreteMethodSymbolWithRefLikeFallback(
+                        on: lookupBaseType,
+                        name: methodName,
+                        methodTypeArgs: methodTypeArgs,
+                        expectedMethodType: expectedCallType
+                    )) ?? {
+                        _ = try? instantiateTraitPlaceholderMethod(
+                            baseType: lookupBaseType,
+                            name: methodName,
+                            methodTypeArgs: methodTypeArgs
+                        )
+                        return try? lookupConcreteMethodSymbolWithRefLikeFallback(
+                            on: lookupBaseType,
+                            name: methodName,
+                            methodTypeArgs: methodTypeArgs,
+                            expectedMethodType: expectedCallType
+                        )
+                    }()
+                if let concreteMethod {
                     let resolvedMethodType = concreteMethod.type
                     newCallee = .methodReference(
                         base: alignMethodReferenceBase(base, to: resolvedMethodType),
@@ -379,40 +394,42 @@ extension Monomorphizer {
                     resolvedMethodTypeArgs.contains(where: { context.containsGenericParameter($0) })
                     ? []
                     : resolvedMethodTypeArgs
-                let expectedMethodType = method.type
-                let expectedCallTypeWithReceiver = Type.function(
-                    parameters: [Parameter(type: base.type, kind: .byVal)]
-                        + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
-                let expectedCallTypeWithoutReceiver = Type.function(
-                    parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
-                let preferredExpectedTypes: [Type] =
-                    methodTypeArgsForLookup.isEmpty && context.containsGenericParameter(expectedMethodType)
-                    ? [expectedCallTypeWithReceiver, expectedMethodType, expectedCallTypeWithoutReceiver]
-                    : [expectedMethodType, expectedCallTypeWithReceiver, expectedCallTypeWithoutReceiver]
-
-                let concreteMethod = preferredExpectedTypes.compactMap {
-                    try? lookupConcreteMethodSymbol(
-                        on: base.type,
-                        method: method,
-                        methodTypeArgs: methodTypeArgsForLookup,
-                        expectedMethodType: $0
+                if !shouldPreserveResolvedMethodReference(method, baseType: base.type) {
+                    let expectedMethodType = method.type
+                    let expectedCallTypeWithReceiver = Type.function(
+                        parameters: [Parameter(type: base.type, kind: .byVal)]
+                            + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                        returns: newType
                     )
-                }.first ?? nil
-
-                if let concreteMethod {
-                    let resolvedConcreteMethodType = concreteMethod.type
-                    let adjustedBase = alignMethodReferenceBase(base, to: resolvedConcreteMethodType)
-                    newCallee = .methodReference(
-                        base: adjustedBase,
-                        method: copySymbolWithNewDefId(concreteMethod, newType: resolvedConcreteMethodType),
-                        typeArgs: typeArgs,
-                        methodTypeArgs: methodTypeArgsForLookup,
-                        type: resolvedConcreteMethodType
+                    let expectedCallTypeWithoutReceiver = Type.function(
+                        parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                        returns: newType
                     )
+                    let preferredExpectedTypes: [Type] =
+                        methodTypeArgsForLookup.isEmpty && context.containsGenericParameter(expectedMethodType)
+                        ? [expectedCallTypeWithReceiver, expectedMethodType, expectedCallTypeWithoutReceiver]
+                        : [expectedMethodType, expectedCallTypeWithReceiver, expectedCallTypeWithoutReceiver]
+
+                    let concreteMethod = preferredExpectedTypes.compactMap {
+                        try? lookupConcreteMethodSymbol(
+                            on: base.type,
+                            method: method,
+                            methodTypeArgs: methodTypeArgsForLookup,
+                            expectedMethodType: $0
+                        )
+                    }.first ?? nil
+
+                    if let concreteMethod {
+                        let resolvedConcreteMethodType = concreteMethod.type
+                        let adjustedBase = alignMethodReferenceBase(base, to: resolvedConcreteMethodType)
+                        newCallee = .methodReference(
+                            base: adjustedBase,
+                            method: copySymbolWithNewDefId(concreteMethod, newType: resolvedConcreteMethodType),
+                            typeArgs: typeArgs,
+                            methodTypeArgs: methodTypeArgsForLookup,
+                            type: resolvedConcreteMethodType
+                        )
+                    }
                 }
             }
 
@@ -606,7 +623,6 @@ extension Monomorphizer {
             let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
             let substitutedType = substituteType(type, substitution: substitution)
             let lookupBaseType = newBase.type
-            
             // Enqueue trait placeholder request for later resolution
             enqueueTraitPlaceholderRequest(
                 baseType: lookupBaseType,
@@ -629,12 +645,12 @@ extension Monomorphizer {
                 }
 
                 // Look up the concrete method on the substituted base type
-                if let concreteMethod = try? lookupConcreteMethodSymbol(
+                if let concreteMethod = (try? lookupConcreteMethodSymbolWithRefLikeFallback(
                     on: lookupBaseType,
                     name: methodName,
                     methodTypeArgs: substitutedMethodTypeArgs,
                     expectedMethodType: substitutedType
-                ) {
+                )) {
                     let resolvedMethodType = concreteMethod.type
                     let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
                     return .methodReference(
@@ -651,12 +667,12 @@ extension Monomorphizer {
                         name: methodName,
                         methodTypeArgs: substitutedMethodTypeArgs
                     )
-                    if let concreteMethod = try? lookupConcreteMethodSymbol(
+                    if let concreteMethod = (try? lookupConcreteMethodSymbolWithRefLikeFallback(
                         on: lookupBaseType,
                         name: methodName,
                         methodTypeArgs: substitutedMethodTypeArgs,
                         expectedMethodType: substitutedType
-                    ) {
+                    )) {
                         let resolvedMethodType = concreteMethod.type
                         let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
                         return .methodReference(

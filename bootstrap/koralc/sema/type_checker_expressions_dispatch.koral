@@ -17,6 +17,14 @@ given TypeChecker {
         }
     }
 
+    private trait_type_declares_dispatch_method(self, trait_type Type, method_name String) Bool = {
+        let trait_name = self.trait_name_from_type(trait_type)
+        return when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then methods.get(method_name) is .Some(_),
+            .Error(_) then false,
+        }
+    }
+
     private constrained_trait_object_type_for_dispatch(self, receiver_type Type, trait_name String) Type = {
         let normalized = receiver_type
         return when normalized in {
@@ -1028,10 +1036,15 @@ given TypeChecker {
                             )
                         },
                         .None() then when self.trait_object_dispatch_type(typed_base.expr_type) in {
-                            .Some(trait_type) then make_typed_expr(
-                                TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
-                                method_symbol.symbol_type,
-                            ),
+                            .Some(trait_type) then if self.trait_type_declares_dispatch_method(trait_type, method_name)
+                                then make_typed_expr(
+                                    TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
+                                    method_symbol.symbol_type,
+                                )
+                                else make_typed_expr(
+                                    TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), List[Type].new(), effective_method_type_args, .None()),
+                                    method_symbol.symbol_type,
+                                ),
                             .None() then make_typed_expr(
                                 TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), List[Type].new(), effective_method_type_args, .None()),
                                 method_symbol.symbol_type,

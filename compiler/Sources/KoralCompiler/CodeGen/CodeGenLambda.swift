@@ -248,10 +248,10 @@ extension CodeGen {
       case .structure(let defId):
         if context.isForeignStruct(defId) { return "" }
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        return "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(fieldExpr)), .control = NULL });\n"
+        return "__koral_\(typeName)_drop(&(\(fieldExpr)));\n"
       case .`enum`(let defId):
         let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        return "__koral_\(typeName)_drop((struct __koral_Ref){ .ptr = (void*)&(\(fieldExpr)), .control = NULL });\n"
+        return "__koral_\(typeName)_drop(&(\(fieldExpr)));\n"
       default:
         return TypeHandlerRegistry.shared.generateDropCode(type, value: fieldExpr)
       }

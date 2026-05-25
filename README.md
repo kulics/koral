@@ -26,7 +26,7 @@ Because Koral compiles to C, stack allocations become standard C local variables
 // It's allocated on the stack. No ARC overhead.
 let local_point = Point(1, 2)
 
-// box(...) creates an owned mutable reference on the heap.
+// box(...) creates an owned escaping mutable reference.
 let heap_point = box(Point(3, 4))
 
 // The 'ref' keyword borrows from an existing lvalue.
@@ -246,7 +246,10 @@ Reference creation rules:
 - Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `mut ref Trait` can call both `self mut ref` and `self ref` requirements.
 - `ref T` is read-only: `.val` read only. `mut ref T` supports `.val` read and `.val = expr` assignment.
 - `ptr T` is read-only: `.val` read only. `mut ptr T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
-- Use `box(expr)` for owned heap references from literals/temporaries — returns `mut ref T`.
+- Use `box(expr)` for owned escaping references from literals/temporaries — returns `mut ref T`.
+- `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
+- Ordinary parameter `mut` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
+- `Drop` uses `drop(source mut ptr Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
 
 Weak reference rules:
 - `.weakref` on a `ref T` produces `weakref T`; on a `mut ref T` produces `mut weakref T`. It is only valid on ref types.

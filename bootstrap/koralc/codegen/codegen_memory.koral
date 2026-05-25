@@ -12,7 +12,51 @@
 //
 // Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 7.11, 7.12, 7.13
 
+public type CodegenScopeSnapshot(
+    lifetime_scope_stack List[mut ref List[Pair[String, Type]]],
+    defer_scope_stack List[mut ref List[DeferredExpr]],
+    escape_scope EscapeScopeSnapshot,
+)
+
 given CodeGen {
+    public snapshot_lifetime_scope_stack(self) List[mut ref List[Pair[String, Type]]] = {
+        let mut snapshot = List[mut ref List[Pair[String, Type]]].new()
+        for scope in self.lifetime_scope_stack.iterator() then {
+            let mut copied_scope = List[Pair[String, Type]].new()
+            for entry in scope.iterator() then {
+                copied_scope.push(entry)
+            }
+            snapshot.push(box(copied_scope))
+        }
+        return snapshot
+    }
+
+    public snapshot_defer_scope_stack(self) List[mut ref List[DeferredExpr]] = {
+        let mut snapshot = List[mut ref List[DeferredExpr]].new()
+        for scope in self.defer_scope_stack.iterator() then {
+            let mut copied_scope = List[DeferredExpr].new()
+            for entry in scope.iterator() then {
+                copied_scope.push(entry)
+            }
+            snapshot.push(box(copied_scope))
+        }
+        return snapshot
+    }
+
+    public snapshot_scope_state(self) CodegenScopeSnapshot = {
+        return CodegenScopeSnapshot(
+            self.snapshot_lifetime_scope_stack(),
+            self.snapshot_defer_scope_stack(),
+            self.escape_context.snapshot_scope_state(),
+        )
+    }
+
+    public restore_scope_state(self mut ref, snapshot CodegenScopeSnapshot) Void = {
+        self.lifetime_scope_stack = snapshot.lifetime_scope_stack
+        self.defer_scope_stack = snapshot.defer_scope_stack
+        self.escape_context.restore_scope_state(snapshot.escape_scope)
+    }
+
 
     // ── 作用域管理 ────────────────────────────────────────────────────────────
 
@@ -56,7 +100,7 @@ given CodeGen {
                 while i > 0 then {
                     i -= 1
                     let deferred = defers[i]
-                    let saved_aliases = self.pattern_binding_aliases
+                    let saved_aliases = self.snapshot_pattern_binding_aliases()
                     self.pattern_binding_aliases = deferred.pattern_binding_aliases
                     let result = self.generate_expression_ssa(deferred.expr)
                     self.drop_expression_result_if_needed(deferred.expr.expr_type, result)
@@ -208,9 +252,9 @@ given CodeGen {
     private append_drop_call_line(self mut ref, type_name String, value String) Void = {
         self.buffer.push_string("__koral_")
         self.buffer.push_string(type_name)
-        self.buffer.push_string("_drop((struct __koral_Ref){ .ptr = (void*)&(")
+        self.buffer.push_string("_drop(&(")
         self.buffer.push_string(value)
-        self.buffer.push_string("), .control = NULL });\n")
+        self.buffer.push_string("));\n")
     }
 
     private append_copy_call_line(self mut ref, type_name String, source String, dest String) Void = {
@@ -234,8 +278,8 @@ given CodeGen {
     /// 生成 drop 语句并追加到 buffer（不含前缀缩进）
     ///
     /// 根据类型生成对应的 drop 调用：
-    /// - StructureType: `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
-    /// - EnumType:     `__koral_{Name}_drop((struct __koral_Ref){ .ptr = (void*)&({v}), .control = NULL });`
+    /// - StructureType: `__koral_{Name}_drop(&({v}));`
+    /// - EnumType:     `__koral_{Name}_drop(&({v}));`
     /// - ReferenceType: `__koral_release({v}.control);`
     /// - MutableReferenceType: `__koral_release({v}.control);`
     /// - FunctionType:  `__koral_closure_release({v});`
@@ -529,7 +573,7 @@ given CodeGen {
             while i > 0 then {
                 i -= 1
                 let deferred = defers[i]
-                let saved_aliases = self.pattern_binding_aliases
+                let saved_aliases = self.snapshot_pattern_binding_aliases()
                 self.pattern_binding_aliases = deferred.pattern_binding_aliases
                 let result = self.generate_expression_ssa(deferred.expr)
                 self.drop_expression_result_if_needed(deferred.expr.expr_type, result)

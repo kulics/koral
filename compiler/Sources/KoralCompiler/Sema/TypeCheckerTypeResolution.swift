@@ -612,7 +612,7 @@ extension TypeChecker {
 
       let params: [Parameter] = try method.parameters.map { param in
         let t = try resolveTypeNode(param.type)
-        return Parameter(type: t, kind: .byVal)
+        return Parameter(type: t, kind: passKindForParameterType(t))
       }
       let ret = try resolveTypeNode(method.returnType)
       return Type.function(parameters: params, returns: ret)

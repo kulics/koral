@@ -15,20 +15,6 @@
 // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
 
 given CodeGen {
-    private generate_statement_body_expr(self mut ref, expr ref TypedExpr) Void = {
-        when expr.expr_kind in {
-            .Block(statements) then {
-                for stmt in statements then {
-                    self.generate_statement(stmt)
-                }
-            },
-            _ then {
-                let result = self.generate_expression_ssa(expr)
-                self.drop_expression_result_if_needed(expr.expr_type, result)
-            },
-        }
-    }
-
     /// 生成语句的 C 代码
     ///
     /// 主入口，根据语句类型分发到对应的处理逻辑。
@@ -245,31 +231,37 @@ given CodeGen {
             .IfStmt(condition_ref, then_ref, else_opt, _) then {
                 let raw_cond_result = self.generate_expression_ssa(condition_ref)
                 let cond_result = self.adapt_expression_result_to_type(condition_ref, raw_cond_result, Type.BoolType())
+                let saved_scope_state = self.snapshot_scope_state()
                 self.push_indented_if_open(cond_result)
                 self.with_indent(() -> {
                     self.push_scope()
                     let temp_marker = self.current_scope_temp_marker()
-                    self.generate_statement_body_expr(then_ref)
+                    let _ = self.generate_expression_ssa(then_ref)
                     self.cleanup_temporaries_in_current_scope(temp_marker)
                     self.pop_scope()
+                    self.restore_scope_state(saved_scope_state)
                 })
                 when else_opt in {
                     .Some(else_ref) then {
+                        let saved_else_scope_state = self.snapshot_scope_state()
                         self.push_indented_string("} else {\n")
                         self.with_indent(() -> {
                             self.push_scope()
                             let temp_marker = self.current_scope_temp_marker()
-                            self.generate_statement_body_expr(else_ref)
+                            let _ = self.generate_expression_ssa(else_ref)
                             self.cleanup_temporaries_in_current_scope(temp_marker)
                             self.pop_scope()
+                            self.restore_scope_state(saved_else_scope_state)
                         })
                     },
                     .None() then {},
                 }
+                self.restore_scope_state(saved_scope_state)
                 self.push_indented_string("}\n")
             },
 
             .WhileStmt(condition_ref, body_ref, _) then {
+                let saved_scope_state = self.snapshot_scope_state()
                 let label_prefix = self.next_temp()
                 let start_label = "\(label_prefix)_start"
                 let end_label = "\(label_prefix)_end"
@@ -289,17 +281,18 @@ given CodeGen {
                     self.pop_scope_without_cleanup()
                     self.push_scope()
                     let scope_index = self.lifetime_scope_stack.count() - 1
-                    self.loop_stack.push(LoopContext(start_label, end_label, scope_index))
+                    self.push_loop_context(LoopContext(start_label, end_label, scope_index))
                     let temp_marker = self.current_scope_temp_marker()
-                    self.generate_statement_body_expr(body_ref)
+                    let _ = self.generate_expression_ssa(body_ref)
                     self.cleanup_temporaries_in_current_scope(temp_marker)
-                    self.loop_stack.pop()
+                    let _ = self.pop_loop_context()
                     self.pop_scope()
                     self.push_indented_goto(start_label)
                 })
                 self.push_indented_string("}\n")
                 self.push_indented_label_block_open(end_label)
                 self.push_indented_string("}\n")
+                self.restore_scope_state(saved_scope_state)
             },
 
             .WhenStmt(subject_ref, arms, _) then {
@@ -318,7 +311,6 @@ given CodeGen {
                 when value_opt in {
                     .Some(value_ref) then {
                         let value = value_ref
-
                         // never 类型：只求值，不生成 return
                         if self.type_is_never(value.expr_type) then {
                             self.generate_expression_ssa(value)
@@ -326,7 +318,9 @@ given CodeGen {
                         }
 
                         // 求值返回表达式
+                        self.escape_context.in_return_context = true
                         let value_result = self.generate_expression_ssa(value)
+                        self.escape_context.in_return_context = false
 
                         // 将返回值保存到临时变量（在 cleanup 之前，避免 cleanup 破坏返回值）
                         let return_storage_type = when self.current_function_return_type in {
@@ -363,11 +357,12 @@ given CodeGen {
             //
             // Requirements: 6.6
             .BreakStmt(_) then {
-                let loop_count = self.loop_stack.count()
-                if loop_count > 0 then {
-                    let ctx = self.loop_stack[loop_count - 1]
+                when self.current_loop_context() in {
+                    .Some(ctx) then {
                     self.emit_cleanup(ctx.scope_index)
                     self.push_indented_goto(ctx.end_label)
+                    },
+                    .None() then {},
                 }
             },
 
@@ -376,11 +371,12 @@ given CodeGen {
             //
             // Requirements: 6.7
             .ContinueStmt(_) then {
-                let loop_count = self.loop_stack.count()
-                if loop_count > 0 then {
-                    let ctx = self.loop_stack[loop_count - 1]
+                when self.current_loop_context() in {
+                    .Some(ctx) then {
                     self.emit_cleanup(ctx.scope_index)
                     self.push_indented_goto(ctx.start_label)
+                    },
+                    .None() then {},
                 }
             },
 
@@ -392,7 +388,7 @@ given CodeGen {
                 let defer_count = self.defer_scope_stack.count()
                 if defer_count > 0 then {
                     let top = self.defer_scope_stack[defer_count - 1]
-                    top.push(DeferredExpr(expr_ref, self.pattern_binding_aliases))
+                    top.push(DeferredExpr(expr_ref, self.snapshot_pattern_binding_aliases()))
                 }
             },
 
@@ -401,8 +397,8 @@ given CodeGen {
             //
             // Requirements: 6.9
             .YieldStmt(expr_ref, _) then {
-                if not self.yield_target_stack.is_empty() then {
-                    let target = self.yield_target_stack[self.yield_target_stack.count() - 1(UInt)]
+                when self.current_yield_target() in {
+                    .Some(target) then {
                     let value_result = self.generate_expression_ssa(expr_ref)
                     if self.needs_drop(expr_ref.expr_type)
                         and not value_result.is_empty()
@@ -419,6 +415,8 @@ given CodeGen {
                         self.emit_cleanup(cleanup_start)
                     }
                     self.push_indented_goto(target.end_label)
+                    },
+                    .None() then {},
                 }
             },
         }
@@ -454,7 +452,13 @@ given CodeGen {
                 // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol
                 let c_name = when self.captured_var_aliases.get(symbol.def_id.id) in {
                     .Some(alias) then alias,
-                    .None() then self.c_identifier_for_symbol(symbol),
+                    .None() then {
+                        let raw_name = self.c_identifier_for_symbol(symbol)
+                        yield when self.captured_name_alias_opt(raw_name) in {
+                            .Some(alias) then alias,
+                            .None() then raw_name,
+                        }
+                    },
                 }
                 yield when self.pattern_binding_aliases.get(c_name) in {
                     .Some(alias) then alias,

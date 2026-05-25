@@ -1,4 +1,43 @@
 given TypeChecker {
+    private validate_drop_member_signature(self, target_type Type, members List[TypedGivenMember]) Void = {
+        let expected_param_type = Type.MutablePointerType(box(target_type))
+        for member in members then {
+            if member.name <> "drop" then {
+                continue
+            }
+            if member.params.count() <> 1(UInt) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "drop must have exactly one parameter of type 'mut ptr Self'"
+                    )
+                )
+                return
+            }
+            let actual_param_type = member.params[0(UInt)].param_type
+            if not self.same_expr_type(actual_param_type, expected_param_type) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "drop parameter must have type '\(self.context().type_display_name(expected_param_type))', got '\(self.context().type_display_name(actual_param_type))'"
+                    )
+                )
+            }
+            if member.return_type is not .VoidType() then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        "drop must return Void"
+                    )
+                )
+            }
+            return
+        }
+    }
+
     private check_decl(self mut ref, decl Decl) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
@@ -352,6 +391,9 @@ given TypeChecker {
                     let resolved_trait_args = self.trait_type_args(trait_type)
                     self.inject_trait_type_args(trait_type, trait_name)
                     let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].Some(trait_name))
+                    if self.is_std_drop_trait(trait_name) then {
+                        self.validate_drop_member_signature(resolved_target, typed_members)
+                    }
                     // 检查 Trait 一致性
                     let checker = TraitChecker.new(self.storage.trait_registry.ref, self.storage.method_table.ref)
                     when self.storage.trait_registry.get(trait_name) in {

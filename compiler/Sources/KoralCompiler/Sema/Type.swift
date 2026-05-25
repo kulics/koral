@@ -616,6 +616,17 @@ public enum PassKind: Equatable, Hashable {
   }
 }
 
+public func passKindForParameterType(_ type: Type) -> PassKind {
+  switch type {
+  case .reference:
+    return .byRef
+  case .mutableReference:
+    return .byMutRef
+  default:
+    return .byVal
+  }
+}
+
 public func fromSymbolKindToPassKind(_ kind: SymbolKind) -> PassKind {
   switch kind {
   case .variable(let varKind):

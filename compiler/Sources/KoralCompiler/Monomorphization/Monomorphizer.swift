@@ -370,7 +370,7 @@ public class Monomorphizer {
                         ?? (context.getName(method.identifier.defId) ?? "<unknown>")
 
                     let parameterTypes = method.parameters.map {
-                        Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+                        Parameter(type: $0.type, kind: passKindForParameterType($0.type))
                     }
                     let functionType = Type.function(parameters: parameterTypes, returns: method.returnType)
                     let methodSymbol = copySymbolPreservingDefId(
@@ -729,13 +729,16 @@ public class Monomorphizer {
     // MARK: - Trait Placeholder Instantiation
 
     internal func instantiateTraitPlaceholderMethod(baseType: Type, name: String, methodTypeArgs: [Type]) throws {
-        let base: Type
-        switch baseType {
-        case .reference(let inner), .mutableReference(let inner):
-            base = inner
-        default:
-            base = baseType
+        if try instantiateReferenceLikeExtensionMethod(
+            on: baseType,
+            name: name,
+            methodTypeArgs: methodTypeArgs,
+            expectedMethodType: nil
+        ) != nil {
+            return
         }
+
+        let base = baseType
 
         switch base {
         case .genericStruct(let template, let args):

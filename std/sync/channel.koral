@@ -26,34 +26,28 @@ private type ChannelStorage[T Any](
 )
 
 // ============================================================================
-// SendChannelStorage / RecvChannelStorage (intermediate ref layer, tracks holder count)
+// SendChannelStorage / RecvChannelStorage (tracks last-holder close semantics)
 // ============================================================================
 
 private type SendChannelStorage[T Any](channel mut ref ChannelStorage[T])
 
 given[T Any] SendChannelStorage[T] as Drop {
-    drop(self mut ref) Void = {
-        if ref_is_borrow(self) then {
-            return
-        }
-        self.channel.mutex.lock()
-        finally self.channel.mutex.unlock()
-        self.channel.sender_closed = true
-        self.channel.not_empty.notify_all()
+    drop(source mut ptr Self) Void = {
+        source.channel.mutex.lock()
+        finally source.channel.mutex.unlock()
+        source.channel.sender_closed = true
+        source.channel.not_empty.notify_all()
     }
 }
 
 private type RecvChannelStorage[T Any](channel mut ref ChannelStorage[T])
 
 given[T Any] RecvChannelStorage[T] as Drop {
-    drop(self mut ref) Void = {
-        if ref_is_borrow(self) then {
-            return
-        }
-        self.channel.mutex.lock()
-        finally self.channel.mutex.unlock()
-        self.channel.receiver_closed = true
-        self.channel.not_full.notify_all()
+    drop(source mut ptr Self) Void = {
+        source.channel.mutex.lock()
+        finally source.channel.mutex.unlock()
+        source.channel.receiver_closed = true
+        source.channel.not_full.notify_all()
     }
 }
 

@@ -165,7 +165,7 @@ given CodeGen {
             .TraitMethodPlaceholder(base_ref, _, _, _, _) then {
                 self.collect_captured_in_expr(base_ref, param_names, seen_ids, captured)
             },
-            .TraitMethodCall(receiver_ref, _, _, args, _, _) then {
+            .TraitMethodCall(receiver_ref, _, _, _, args) then {
                 self.collect_captured_in_expr(receiver_ref, param_names, seen_ids, captured)
                 for arg in args then {
                     self.collect_captured_in_expr(arg, param_names, seen_ids, captured)
@@ -344,11 +344,29 @@ given CodeGen {
     raw_c_identifier_for_symbol(self mut ref, symbol ref Symbol) String = {
         // 临时移除别名以获取基础名称
         let saved_opt = self.captured_var_aliases.get(symbol.def_id.id)
+        let saved_local_opt = self.local_c_identifier_overrides.get(symbol.def_id.id)
+        let saved_name_opt = when saved_local_opt in {
+            .Some(saved) then self.captured_name_aliases.get(saved),
+            .None() then Option[String].None(),
+        }
         self.captured_var_aliases.remove(symbol.def_id.id)
+        self.local_c_identifier_overrides.remove(symbol.def_id.id)
         let name = self.c_identifier_for_symbol(symbol)
         when saved_opt in {
             .Some(saved) then {
                 self.captured_var_aliases.insert(symbol.def_id.id, saved)
+            },
+            .None() then {},
+        }
+        when saved_local_opt in {
+            .Some(saved) then {
+                self.local_c_identifier_overrides.insert(symbol.def_id.id, saved)
+            },
+            .None() then {},
+        }
+        when saved_name_opt in {
+            .Some(saved) then {
+                self.captured_name_aliases.insert(name, saved)
             },
             .None() then {},
         }
@@ -357,11 +375,29 @@ given CodeGen {
 
     raw_c_identifier_for_symbol_value(self mut ref, symbol Symbol) String = {
         let saved_opt = self.captured_var_aliases.get(symbol.def_id.id)
+        let saved_local_opt = self.local_c_identifier_overrides.get(symbol.def_id.id)
+        let saved_name_opt = when saved_local_opt in {
+            .Some(saved) then self.captured_name_aliases.get(saved),
+            .None() then Option[String].None(),
+        }
         self.captured_var_aliases.remove(symbol.def_id.id)
+        self.local_c_identifier_overrides.remove(symbol.def_id.id)
         let name = self.c_identifier_for_symbol_value(symbol)
         when saved_opt in {
             .Some(saved) then {
                 self.captured_var_aliases.insert(symbol.def_id.id, saved)
+            },
+            .None() then {},
+        }
+        when saved_local_opt in {
+            .Some(saved) then {
+                self.local_c_identifier_overrides.insert(symbol.def_id.id, saved)
+            },
+            .None() then {},
+        }
+        when saved_name_opt in {
+            .Some(saved) then {
+                self.captured_name_aliases.insert(name, saved)
             },
             .None() then {},
         }
@@ -416,6 +452,15 @@ given CodeGen {
     /// 5. pop_scope
     /// 6. 如果非 void：生成 return 语句
     generate_lambda_body(self mut ref, params List[TypedParam], body ref TypedExpr) Void = {
+        let saved_escape_state = self.escape_context.snapshot_full_state()
+        let reset_return_type = when self.current_function_return_type in {
+            .Some(return_type) then Option[Type].Some(return_type),
+            .None() then saved_escape_state.return_type,
+        }
+        self.escape_context.reset(reset_return_type)
+        self.escape_context.program = Option[ref MonomorphizedProgram].Some(self.program)
+        self.escape_context.compiler_context = Option[CompilerContext].Some(self.context)
+        self.escape_context.escaped_variables = saved_escape_state.escaped_variables
         self.push_scope()
         let is_explicit_drop_function = when self.current_function_c_name in {
             .Some(name) then {
@@ -433,14 +478,16 @@ given CodeGen {
         }
 
         for p in params then {
-            let skip_param_cleanup = is_explicit_drop_function and p.name == "self"
+            let skip_param_cleanup = is_explicit_drop_function and p.name == "source"
             if skip_param_cleanup then {
                 continue
             }
             self.register_variable(self.c_identifier_for_param(p), p.param_type)
         }
 
+        self.escape_context.in_return_context = true
         let body_result = self.generate_expression_ssa(body)
+        self.escape_context.in_return_context = false
 
         if self.type_is_never(body.expr_type) then {
             self.pop_scope()
@@ -575,9 +622,12 @@ given CodeGen {
         let saved_lifetime_scope_stack = self.lifetime_scope_stack
         let saved_defer_scope_stack = self.defer_scope_stack
         let saved_loop_stack = self.loop_stack
+        let saved_yield_target_stack = self.yield_target_stack
+        let saved_escape_context = self.escape_context.snapshot_full_state()
         let saved_function_type_prefix = self.current_function_type_prefix
         let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
+        let saved_local_c_identifier_overrides = self.local_c_identifier_overrides
 
         // 重置状态
         self.buffer = box(String.new())
@@ -586,9 +636,11 @@ given CodeGen {
         self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
         self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
         self.loop_stack = List[LoopContext].new()
+        self.yield_target_stack = List[CodegenYieldTarget].new()
         self.current_function_type_prefix = Option[String].None()
         self.current_function_c_name = Option[String].Some(name)
         self.current_function_return_type = Option[Type].Some(return_type)
+        self.escape_context.reset(Option[Type].Some(return_type))
 
         // 生成函数体
         self.generate_lambda_body(params, body)
@@ -621,9 +673,12 @@ given CodeGen {
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
         self.loop_stack = saved_loop_stack
+        self.yield_target_stack = saved_yield_target_stack
+        self.escape_context.restore_full_state(saved_escape_context)
         self.current_function_type_prefix = saved_function_type_prefix
         self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
+        self.local_c_identifier_overrides = saved_local_c_identifier_overrides
     }
 
     // ── generate_capture_lambda ───────────────────────────────────────────────
@@ -652,12 +707,17 @@ given CodeGen {
         let saved_lambda_counter = self.lambda_counter
         let mut saved_lambda_functions = self.lambda_functions
         let saved_captured_var_aliases = self.captured_var_aliases
+        let saved_captured_name_aliases = self.captured_name_aliases
+        let saved_pattern_binding_aliases = self.pattern_binding_aliases
         let saved_lifetime_scope_stack = self.lifetime_scope_stack
         let saved_defer_scope_stack = self.defer_scope_stack
         let saved_loop_stack = self.loop_stack
+        let saved_yield_target_stack = self.yield_target_stack
+        let saved_escape_context = self.escape_context.snapshot_full_state()
         let saved_function_type_prefix = self.current_function_type_prefix
         let saved_function_c_name = self.current_function_c_name
         let saved_function_return_type = self.current_function_return_type
+        let saved_local_c_identifier_overrides = self.local_c_identifier_overrides
 
         // 重置状态
         self.buffer = box(String.new())
@@ -666,27 +726,47 @@ given CodeGen {
         self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
         self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
         self.loop_stack = List[LoopContext].new()
+        self.yield_target_stack = List[CodegenYieldTarget].new()
         self.current_function_type_prefix = Option[String].None()
         self.current_function_c_name = Option[String].Some(name)
         self.current_function_return_type = Option[Type].Some(return_type)
+        self.escape_context.reset(Option[Type].Some(return_type))
 
         // 设置捕获别名：qualifiedName() 将捕获变量解析为 __captured->field
+        let mut active_captured_var_aliases = self.captured_var_aliases
+        let mut active_captured_name_aliases = self.captured_name_aliases
+        let mut active_pattern_binding_aliases = self.pattern_binding_aliases
+        let mut active_local_c_identifier_overrides = self.local_c_identifier_overrides
         for sym in captures then {
             let field_name = self.raw_c_identifier_for_symbol_value(sym)
-            self.captured_var_aliases.insert(sym.def_id.id, "__captured->\(field_name)")
+            let alias = "__captured->\(field_name)"
+            active_captured_var_aliases.insert(sym.def_id.id, alias)
+            active_captured_name_aliases.insert(field_name, alias)
+            let simple_name = self.sanitize_codegen_identifier(self.context.symbol_name(sym))
+            active_captured_name_aliases.insert(simple_name, alias)
+            active_pattern_binding_aliases.insert(field_name, alias)
+            active_local_c_identifier_overrides.insert(sym.def_id.id, alias)
         }
+        self.captured_var_aliases = active_captured_var_aliases
+        self.captured_name_aliases = active_captured_name_aliases
+        self.pattern_binding_aliases = active_pattern_binding_aliases
+        self.local_c_identifier_overrides = active_local_c_identifier_overrides
 
         // 生成函数体
         self.generate_lambda_body(params, body)
 
         let nested_lambda_functions = self.lambda_functions
-        let lambda_body = self.buffer
+        let mut lambda_body = String.new()
+        lambda_body.push_string(self.buffer)
 
         // 恢复状态
         self.buffer = saved_buffer
         self.indent = saved_indent
         // lambda_counter 已在生成过程中递增，保留新值
         self.captured_var_aliases = saved_captured_var_aliases
+        self.captured_name_aliases = saved_captured_name_aliases
+        self.pattern_binding_aliases = saved_pattern_binding_aliases
+        self.local_c_identifier_overrides = saved_local_c_identifier_overrides
         let lambda_preamble = "\n// Lambda function (with capture)\n"
         let lambda_decl = "static \(return_c_type) \(name)(\(params_str));\n"
         let lambda_header = "static \(return_c_type) \(name)(\(params_str)) {\n"
@@ -710,6 +790,8 @@ given CodeGen {
         self.lifetime_scope_stack = saved_lifetime_scope_stack
         self.defer_scope_stack = saved_defer_scope_stack
         self.loop_stack = saved_loop_stack
+        self.yield_target_stack = saved_yield_target_stack
+        self.escape_context.restore_full_state(saved_escape_context)
         self.current_function_type_prefix = saved_function_type_prefix
         self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
@@ -729,7 +811,7 @@ given CodeGen {
 
         for sym in captures then {
             let field_name = self.raw_c_identifier_for_symbol_value(sym)
-            let field_c_type = self.c_type_name(sym.symbol_type)
+            let field_c_type = self.storage_c_type_name(sym.symbol_type)
             self.lambda_env_structs.push_string("  \(field_c_type) \(field_name);\n")
         }
 
@@ -759,11 +841,11 @@ given CodeGen {
             .FunctionType(_, _) then "__koral_closure_release(\(field_expr));\n",
             .StructureType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                yield "__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(field_expr)), .control = NULL });\n"
+                yield "__koral_\(type_name)_drop(&(\(field_expr)));\n"
             },
             .EnumType(def_id) then {
                 let type_name = self.c_name_for_def_id(def_id)
-                yield "__koral_\(type_name)_drop((struct __koral_Ref){ .ptr = (void*)&(\(field_expr)), .control = NULL });\n"
+                yield "__koral_\(type_name)_drop(&(\(field_expr)));\n"
             },
             .ReferenceType(_) then "__koral_release(\(field_expr).control);\n",
             .WeakReferenceType(_) then "__koral_weak_release(\(field_expr).control);\n",

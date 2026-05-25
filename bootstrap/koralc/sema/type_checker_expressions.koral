@@ -148,7 +148,8 @@ given TypeChecker {
         return when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false }
-                yield info.module_path[0(UInt)] == "Std"
+                let root = info.module_path[0(UInt)]
+                yield root == "Std" or root == "std"
             },
             .None() then false,
         }
@@ -166,6 +167,13 @@ given TypeChecker {
             return false
         }
         return self.is_std_drop_trait("Drop")
+    }
+
+    private resolve_source_method_signature(self, base_type Type, method_name String) Option[Symbol] = {
+        if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
+            return Option[Symbol].None()
+        }
+        return self.resolve_method_signature(base_type, method_name)
     }
 
     private check_expr_global_ref(self, expr ref Expr, expected Option[Type]) TypedExpr = {
@@ -423,7 +431,7 @@ given TypeChecker {
             .PointerType(inner) then {
                 let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
-                let has_pointer_method = self.resolve_method_signature(typed_base.expr_type, member) is .Some(_)
+                let has_pointer_method = self.resolve_source_method_signature(typed_base.expr_type, member) is .Some(_)
                 if resolved is .Unknown() and not has_pointer_method then {
                     when pointee in {
                         .StructureType(def_id) then {
@@ -455,7 +463,7 @@ given TypeChecker {
             .MutablePointerType(inner) then {
                 let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
-                let has_pointer_method = self.resolve_method_signature(typed_base.expr_type, member) is .Some(_)
+                let has_pointer_method = self.resolve_source_method_signature(typed_base.expr_type, member) is .Some(_)
                 self.report_pointer_member_access_issue_if_needed(resolved, has_pointer_method, pointee, member)
                 yield resolved
             },
@@ -485,6 +493,15 @@ given TypeChecker {
                             }
                         }
                     }
+                    if found is .Unknown() then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
+                            )
+                        )
+                    }
                     yield found
                 },
                 .None() then Type.Unknown(),
@@ -512,6 +529,15 @@ given TypeChecker {
                                             )
                                         }
                                 }
+                            }
+                            if found is .Unknown() then {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(template, args)))'"
+                                    )
+                                )
                             }
                             yield found
                         },
@@ -564,9 +590,9 @@ given TypeChecker {
                         return make_typed_expr(TypedExprKind.MemberPath(box(typed_receiver), field_path), member_field_type)
                     }
                     let has_method = when typed_receiver.expr_type in {
-                        .PointerType(inner) then self.resolve_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
-                        .MutablePointerType(inner) then self.resolve_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
-                        _ then self.resolve_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
+                        .PointerType(inner) then self.resolve_source_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_source_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
+                        .MutablePointerType(inner) then self.resolve_source_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_source_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
+                        _ then self.resolve_source_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
                     }
                     if not has_method then {
                         return self.check_expr_core_ref(callee, .None(), scope)
@@ -638,6 +664,10 @@ given TypeChecker {
     }
 
     private find_trait_constraint_for_method(self, base_type Type, method_name String) Option[String] = {
+        if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
+            return Option[String].None()
+        }
+
         let normalized = when base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,

@@ -196,6 +196,8 @@ Koral distinguishes read-only references (`ref T`) from mutable references (`mut
 - `ref T` supports `.val` read only. `mut ref T` supports `.val` read and `.val = expr` assignment.
 - `ptr T` supports `.val` read only. `mut ptr T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
 - `box(expr)` returns `mut ref T` — an escaping managed reference from temporaries/literals.
+- `box` should be understood as binding its parameter locally and returning `v.ref`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
+- Ordinary parameter `mut` is local binding mutability only. It is not part of the function signature, function type, or trait/given conformance comparison.
 
 ```koral
 let mut x = 10
@@ -208,6 +210,13 @@ let owned mut ref Int = box(42)   // box() returns mut ref T
 
 // let rz = 42.ref            // error: rvalue cannot be borrowed
 ```
+
+## Drop Semantics
+
+- `Drop` uses `drop(source mut ptr Self) Void`.
+- Treat `Drop.drop` as a compiler-reserved destructor entry, not a normal user-callable method.
+- The parameter is raw owned storage, so `Drop` should not rely on ref-style escape distinctions such as borrow-vs-owned checks.
+- Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
 
 ## Standard Library Receiver Design
 

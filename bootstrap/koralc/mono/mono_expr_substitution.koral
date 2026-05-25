@@ -74,7 +74,7 @@ private let recover_unknown_expr_type(
         },
         .StaticMethodCall(_, _, method, _, _, _) then recover_method_return_type(mono, method, fallback),
         .TraitMethodPlaceholder(_, _, method, _, _) then resolve_parameterized_type(mono, method.symbol_type),
-        .TraitMethodCall(_, _, method, _, _, _) then recover_method_return_type(mono, method, fallback),
+        .TraitMethodCall(_, _, _, _, _) then fallback,
         .TraitObjectConversion(_, trait_type, _) then resolve_parameterized_type(mono, trait_type),
         .IntrinsicCall(node) then when node in {
             .MakeRef(_, _, result_type) then resolve_parameterized_type(mono, result_type),
@@ -490,7 +490,7 @@ private let substitute_expr_kind(
             yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), List[Type].new(), dispatch_callsite))
         },
 
-        .TraitMethodCall(receiver, trait_type, method, args, method_index, dispatch_callsite) then {
+        .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then {
             let new_receiver = substitute_types_in_expression(mono, receiver, substitution)
             let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
@@ -503,13 +503,11 @@ private let substitute_expr_kind(
                 },
                 _ then {},
             }
-            let substituted_method = substitute_symbol(mono, method, substitution)
-            let new_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
             let mut new_args = List[ref TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, box(new_method), new_args, method_index, dispatch_callsite))
+            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, method_name, method_index, new_args))
         },
 
         .IntrinsicCall(node) then {

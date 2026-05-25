@@ -1178,7 +1178,7 @@ public class TypeChecker {
       }
       let functionType = Type.function(
         parameters: params.map {
-          Parameter(type: $0.type, kind: fromSymbolKindToPassKind($0.kind))
+          Parameter(type: $0.type, kind: passKindForParameterType($0.type))
         }, returns: returnType)
       return (typedBody, functionType)
     }

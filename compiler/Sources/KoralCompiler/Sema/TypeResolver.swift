@@ -730,7 +730,7 @@ public class TypeResolver: CompilerPass {
                             name: param.name,
                             type: .void, // 占位，实际类型在 TypeChecker 中解析
                             isMutable: param.isMutable,
-                            passKind: param.isMutable ? .byMutRef : .byVal
+                            passKind: passKindForParameterType(.void)
                         )
                     },
                     returnType: .void, // 占位，实际类型在 TypeChecker 中解析

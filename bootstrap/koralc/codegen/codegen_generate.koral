@@ -254,14 +254,7 @@ given CodeGen {
     }
 
     private is_std_drop_trait(self, trait_name String) Bool = {
-        if trait_name <> "Drop" then { return false }
-        return when self.program.semantic_traits().get(trait_name) in {
-            .Some(info) then {
-                if info.module_path.is_empty() then { return false }
-                yield info.module_path[0(UInt)] == "Std"
-            },
-            .None() then false,
-        }
+        return trait_name == "Drop"
     }
 
     private register_user_defined_drop_method(self mut ref, receiver_type Type, method_def_id DefId) Void = {
@@ -433,19 +426,28 @@ given CodeGen {
                     if self.params_contain_generic(params) then { continue }
                     if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
 
-                    let effective_return_type = when node_def_id in {
+                    let function_type_opt = when node_def_id in {
                         .Some(def_id) then {
-                            yield when return_type in {
-                                .Unknown() then {
-                                    yield when self.context.get_function_return_type(def_id) in {
-                                        .Some(return_type) then return_type,
-                                        .None() then return_type,
-                                    }
-                                },
-                                _ then return_type,
-                            }
+                            yield self.context.get_function_type(def_id)
                         },
-                        .None() then return_type,
+                        .None() then Option[Type].None(),
+                    }
+                    let effective_return_type = when function_type_opt in {
+                        .Some(function_type) then self.function_type_return_type(function_type),
+                        .None() then when node_def_id in {
+                            .Some(def_id) then {
+                                yield when return_type in {
+                                    .Unknown() then {
+                                        yield when self.context.get_function_return_type(def_id) in {
+                                            .Some(resolved_return_type) then resolved_return_type,
+                                            .None() then return_type,
+                                        }
+                                    },
+                                    _ then return_type,
+                                }
+                            },
+                            .None() then return_type,
+                        },
                     }
                     let c_name = when node_def_id in {
                         .Some(def_id) then {
@@ -456,7 +458,11 @@ given CodeGen {
                         },
                         .None() then self.sanitize_codegen_identifier(name),
                     }
-                    functions.push(EmittableFunction(node_def_id or else DefId(0(UInt)), c_name, self.build_param_type_list(params), params, effective_return_type, body_ref))
+                    let declaration_params = when function_type_opt in {
+                        .Some(function_type) then self.build_param_type_list_from_function_type(params, function_type),
+                        .None() then self.build_param_type_list(params),
+                    }
+                    functions.push(EmittableFunction(node_def_id or else DefId(0(UInt)), c_name, declaration_params, params, effective_return_type, body_ref))
                 },
                 .GivenDecl(target_type, members, _) then {
                     if self.type_contains_generic(target_type) then { continue }
@@ -799,10 +805,11 @@ given CodeGen {
                     yield copied
                 },
                 .None() then {
-                    let return_type_opt = if self.type_is_void_or_never(function.return_type) then {
+                    let concrete_return_type = self.concretize_codegen_type(function.return_type)
+                    let return_type_opt = if self.type_is_void_or_never(concrete_return_type) then {
                         yield Option[Type].None()
                     } else {
-                        yield Option[Type].Some(function.return_type)
+                        yield Option[Type].Some(concrete_return_type)
                     }
                     let mut fallback_ctx = EscapeContext.new()
                     fallback_ctx.set_global_analysis(self.program, global_escape_result.summaries, self.context)
@@ -830,16 +837,25 @@ given CodeGen {
         if self.emitted_function_names.contains(c_name) then {
             return
         }
-        self.emitted_function_names.insert(c_name)
+        let mut emitted_function_names = self.emitted_function_names
+        emitted_function_names.insert(c_name)
+        self.emitted_function_names = emitted_function_names
 
         // 逃逸分析预分析
-        let return_type_opt = if self.type_is_void_or_never(return_type) then {
+        let concrete_return_type = self.concretize_codegen_type(return_type)
+        let return_type_opt = if self.type_is_void_or_never(concrete_return_type) then {
             yield Option[Type].None()
         } else {
-            yield Option[Type].Some(return_type)
+            yield Option[Type].Some(concrete_return_type)
         }
         self.escape_context.reset(return_type_opt)
+        self.escape_context.program = Option[ref MonomorphizedProgram].Some(self.program)
+        self.escape_context.compiler_context = Option[CompilerContext].Some(self.context)
         self.escape_context.escaped_variables = escaped_variables
+        self.escape_context.variable_scopes.clear()
+        self.escape_context.current_scope_level = 0(UInt)
+        self.escape_context.reference_origins.clear()
+        self.escape_context.scope_stack.clear()
 
         // 保存函数上下文状态（轻量字段）
         let saved_type_prefix = self.current_function_type_prefix
@@ -851,14 +867,17 @@ given CodeGen {
         }
         self.current_function_type_prefix = new_prefix
         self.current_function_c_name = Option[String].Some(c_name)
-        self.current_function_return_type = Option[Type].Some(return_type)
-        self.lifetime_scope_stack.clear()
-        self.defer_scope_stack.clear()
-        self.loop_stack.clear()
-        self.pattern_binding_aliases.clear()
-        self.captured_var_aliases.clear()
-        self.local_c_identifier_overrides.clear()
-        self.type_by_c_type_name_cache.clear()
+        self.current_function_return_type = Option[Type].Some(concrete_return_type)
+        self.escape_context.return_type = Option[Type].Some(concrete_return_type)
+        self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
+        self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
+        self.loop_stack = List[LoopContext].new()
+        self.yield_target_stack = List[CodegenYieldTarget].new()
+        self.pattern_binding_aliases = Dict[String, String].new()
+        self.captured_var_aliases = Dict[UInt, String].new()
+        self.captured_name_aliases = Dict[String, String].new()
+        self.local_c_identifier_overrides = Dict[UInt, String].new()
+        self.type_by_c_type_name_cache = Dict[String, Type].new()
 
         // 保存并重置 Lambda 状态与主输出 buffer。
         let saved_lambda_functions = self.lambda_functions
@@ -869,7 +888,7 @@ given CodeGen {
         self.buffer = box(String.new())
 
         // 函数体写入独立临时 buffer，避免把所有函数实现再复制到额外 parts 列表中。
-        let return_c_type = self.c_type_name(return_type)
+        let return_c_type = self.c_type_name(concrete_return_type)
         let function_type_opt = self.context.get_function_type(def_id)
         let body_param_count = when function_type_opt in {
             .Some(function_type) then self.function_type_param_count(function_type),
@@ -888,7 +907,7 @@ given CodeGen {
             },
             .None() then params,
         }
-        self.current_generic_bindings.clear()
+        self.current_generic_bindings = Dict[String, Type].new()
         let mut binding_i UInt = 0
         while binding_i < params.count() and binding_i < body_params.count() then {
             let original_param = params[binding_i]
@@ -930,14 +949,16 @@ given CodeGen {
         self.current_function_type_prefix = saved_type_prefix
         self.current_function_c_name = saved_function_c_name
         self.current_function_return_type = saved_function_return_type
-        self.lifetime_scope_stack.clear()
-        self.defer_scope_stack.clear()
-        self.loop_stack.clear()
-        self.pattern_binding_aliases.clear()
-        self.captured_var_aliases.clear()
-        self.current_generic_bindings.clear()
-        self.local_c_identifier_overrides.clear()
-        self.type_by_c_type_name_cache.clear()
+        self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
+        self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
+        self.loop_stack = List[LoopContext].new()
+        self.yield_target_stack = List[CodegenYieldTarget].new()
+        self.pattern_binding_aliases = Dict[String, String].new()
+        self.captured_var_aliases = Dict[UInt, String].new()
+        self.captured_name_aliases = Dict[String, String].new()
+        self.current_generic_bindings = Dict[String, Type].new()
+        self.local_c_identifier_overrides = Dict[UInt, String].new()
+        self.type_by_c_type_name_cache = Dict[String, Type].new()
     }
 
     // ── emit_c_main ───────────────────────────────────────────────────────────

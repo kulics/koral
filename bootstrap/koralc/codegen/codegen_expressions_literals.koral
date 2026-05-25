@@ -379,10 +379,11 @@ given CodeGen {
 
     /// 生成块作用域（Block 表达式）的 C 代码
     ///
-    /// 创建新作用域，依次生成语句，YieldStmt 的值作为块的返回值。
+    /// 创建新作用域，依次生成语句，YieldStmt 或最后一个 ExprStmt 的值作为块的返回值。
     ///
     /// Requirements: 5.12
     public generate_block_scope(self mut ref, statements List[TypedStatement], block_type Type) String = {
+        let saved_scope_state = self.snapshot_scope_state()
         let parent_scope_index = if self.lifetime_scope_stack.is_empty()
             then 0(UInt)
             else self.lifetime_scope_stack.count() - 1(UInt)
@@ -402,13 +403,30 @@ given CodeGen {
             )
         } else Option[CodegenYieldTarget].None()
         when yield_target_opt in {
-            .Some(target) then self.yield_target_stack.push(target),
+            .Some(target) then self.push_yield_target(target),
             .None() then {},
         }
         let mut stmt_index UInt = 0
         for stmt in statements then {
             when stmt in {
                 .YieldStmt(_, _) then self.generate_statement(stmt),
+                .ExprStmt(expr_ref, _) then {
+                    let is_final_statement = stmt_index + 1(UInt) == statements.count()
+                    if is_final_statement and not self.type_is_void_or_never(block_type) then {
+                        let temp = self.generate_expression_ssa(expr_ref)
+                        if expr_ref.expr_type is not .NeverType() then {
+                            when yield_target_opt in {
+                                .Some(target) then {
+                                    let adapted_temp = self.adapt_expression_result_to_type(expr_ref, temp, block_type)
+                                    self.assign_expr_result(expr_ref, adapted_temp, block_type, target.result_var)
+                                },
+                                .None() then {},
+                            }
+                        }
+                    } else {
+                        self.generate_statement(stmt)
+                    }
+                },
                 .IfStmt(condition_ref, then_ref, else_opt, _) then {
                     let is_final_statement = stmt_index + 1(UInt) == statements.count()
                     if is_final_statement and not self.type_is_void_or_never(block_type) then {
@@ -449,12 +467,13 @@ given CodeGen {
         }
         when yield_target_opt in {
             .Some(target) then {
-                let _ = self.yield_target_stack.pop()
+                let _ = self.pop_yield_target()
                 result = target.result_var
             },
             .None() then {},
         }
         self.pop_scope()
+        self.restore_scope_state(saved_scope_state)
         when yield_target_opt in {
             .Some(target) then self.push_indented_string("\(target.end_label):;\n"),
             .None() then {},
@@ -594,7 +613,13 @@ given CodeGen {
                 // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol
                 let c_name = when self.captured_var_aliases.get(symbol.def_id.id) in {
                     .Some(alias) then alias,
-                    .None() then self.c_identifier_for_symbol(symbol),
+                    .None() then {
+                        let raw_name = self.c_identifier_for_symbol(symbol)
+                        yield when self.captured_name_alias_opt(raw_name) in {
+                            .Some(alias) then alias,
+                            .None() then raw_name,
+                        }
+                    },
                 }
                 let path = when self.pattern_binding_aliases.get(c_name) in {
                     .Some(alias) then alias,

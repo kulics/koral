@@ -108,6 +108,8 @@ public type CodeGen(
 
     // Lambda 捕获别名：DefId -> 访问表达式
     mut captured_var_aliases Dict[UInt, String],
+    // Lambda 捕获别名：C 标识符 -> 访问表达式
+    mut captured_name_aliases Dict[String, String],
 
     // 全局初始化
     mut global_initializations List[Pair[String, ref TypedExpr]],
@@ -134,6 +136,46 @@ public type CodeGen(
 )
 
 given CodeGen {
+    public push_loop_context(self mut ref, ctx LoopContext) Void = {
+        let mut loop_stack = self.loop_stack
+        loop_stack.push(ctx)
+        self.loop_stack = loop_stack
+    }
+
+    public pop_loop_context(self mut ref) Option[LoopContext] = {
+        let mut loop_stack = self.loop_stack
+        let popped = loop_stack.pop()
+        self.loop_stack = loop_stack
+        return popped
+    }
+
+    public current_loop_context(self) Option[LoopContext] = {
+        if self.loop_stack.is_empty() then {
+            return Option[LoopContext].None()
+        }
+        return Option[LoopContext].Some(self.loop_stack[self.loop_stack.count() - 1(UInt)])
+    }
+
+    public push_yield_target(self mut ref, target CodegenYieldTarget) Void = {
+        let mut yield_target_stack = self.yield_target_stack
+        yield_target_stack.push(target)
+        self.yield_target_stack = yield_target_stack
+    }
+
+    public pop_yield_target(self mut ref) Option[CodegenYieldTarget] = {
+        let mut yield_target_stack = self.yield_target_stack
+        let popped = yield_target_stack.pop()
+        self.yield_target_stack = yield_target_stack
+        return popped
+    }
+
+    public current_yield_target(self) Option[CodegenYieldTarget] = {
+        if self.yield_target_stack.is_empty() then {
+            return Option[CodegenYieldTarget].None()
+        }
+        return Option[CodegenYieldTarget].Some(self.yield_target_stack[self.yield_target_stack.count() - 1(UInt)])
+    }
+
     // ── 构造函数 ──────────────────────────────────────────────────────────────
 
     /// 构造 CodeGen 实例，初始化所有状态并构建 C 标识符映射
@@ -179,6 +221,8 @@ given CodeGen {
             Dict[String, String].new(),
             // captured_var_aliases
             Dict[UInt, String].new(),
+            // captured_name_aliases
+            Dict[String, String].new(),
             // global_initializations
             List[Pair[String, ref TypedExpr]].new(),
             // user_main_function_name
@@ -655,7 +699,39 @@ given CodeGen {
         return Option[DefId].None()
     }
 
+    private concrete_struct_fields_from_program(self, def_id DefId) Option[List[TypedField]] = {
+        for node in self.program.semantic_global_nodes() then {
+            when node in {
+                .TypeStructDecl(_, _, fields, _, id) then {
+                    if id.def_id.id == def_id.id then {
+                        return Option[List[TypedField]].Some(fields)
+                    }
+                },
+                .ForeignTypeDecl(_, _, typed_fields_opt, _, id) then {
+                    if id.def_id.id == def_id.id then {
+                        return when typed_fields_opt in {
+                            .Some(typed_fields) then Option[List[TypedField]].Some(typed_fields),
+                            .None() then Option[List[TypedField]].None(),
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+        return Option[List[TypedField]].None()
+    }
+
     private concrete_enum_cases_from_program(self, def_id DefId) Option[List[TypedEnumCase]] = {
+        for node in self.program.semantic_global_nodes() then {
+            when node in {
+                .TypeEnumDecl(_, _, cases, _, id) then {
+                    if id.def_id.id == def_id.id then {
+                        return Option[List[TypedEnumCase]].Some(cases)
+                    }
+                },
+                _ then {},
+            }
+        }
         return Option[List[TypedEnumCase]].None()
     }
 
@@ -797,19 +873,87 @@ given CodeGen {
         return self.sanitize_codegen_identifier(param.name)
     }
 
+    public captured_name_alias_opt(self, c_name String) Option[String] = {
+        return when self.captured_name_aliases.get(c_name) in {
+            .Some(alias) then Option[String].Some(alias),
+            .None() then {
+                let base_name_opt = when c_name.split_last_once("_") in {
+                    .Some(parts) then {
+                        let maybe_suffix = parts.second
+                        let mut is_digits = not maybe_suffix.is_empty()
+                        if is_digits then {
+                            for ch in maybe_suffix.to_runes() then {
+                                if ch < '0' or ch > '9' then { is_digits = false }
+                            }
+                        }
+                        yield if is_digits then Option[String].Some(parts.first) else Option[String].None()
+                    },
+                    .None() then Option[String].None(),
+                }
+                yield when base_name_opt in {
+                    .Some(base_name) then self.captured_name_aliases.get(base_name),
+                    .None() then Option[String].None(),
+                }
+            },
+        }
+    }
+
     // ── 类型名称映射 ──────────────────────────────────────────────────────────
 
     private ref_wrapper_c_type_name(self, inner_type Type, weak Bool) String = {
-        return when inner_type in {
-            .TraitObject(_, _) then if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef",
+        return if self.type_looks_traitlike_for_storage(inner_type)
+            then if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef"
+            else if weak then "struct __koral_WeakRef" else "struct __koral_Ref"
+    }
+
+    private type_looks_traitlike_for_storage(self, t Type) Bool = {
+        return when t in {
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
+            .MutableReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
+            .WeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
-                .Some(mapped_type) then when mapped_type in {
-                    .TraitObject(_, _) then if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef",
-                    _ then if weak then "struct __koral_WeakRef" else "struct __koral_Ref",
+                .Some(mapped_type) then self.type_looks_traitlike_for_storage(mapped_type),
+                .None() then {
+                    let trait_name = self.context.get_name(def_id) or else ""
+                    yield when self.context.get_kind(def_id) in {
+                        .Some(kind) then when kind in {
+                            .TypeDef(type_kind) then when type_kind in {
+                                .Trait() then true,
+                                _ then self.program.semantic_traits().get(trait_name).is_some(),
+                            },
+                            _ then self.program.semantic_traits().get(trait_name).is_some(),
+                        },
+                        .None() then self.program.semantic_traits().get(trait_name).is_some(),
+                    }
                 },
-                .None() then if weak then "struct __koral_WeakRef" else "struct __koral_Ref",
             },
-            _ then if weak then "struct __koral_WeakRef" else "struct __koral_Ref",
+            _ then false,
+        }
+    }
+
+    private storage_ref_wrapper_c_type_name(self, inner_type Type, weak Bool) Option[String] = {
+        return if self.type_looks_traitlike_for_storage(inner_type)
+            then Option[String].Some(if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef")
+            else Option[String].None()
+    }
+
+    public storage_c_type_name(self, t Type) String = {
+        let storage_c_type_opt = when t in {
+            .ReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, false),
+            .MutableReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, false),
+            .WeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, true),
+            .MutableWeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, true),
+            .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
+            .OpaqueType(def_id) then if self.type_looks_traitlike_for_storage(Type.OpaqueType(def_id))
+                then Option[String].Some("struct __koral_TraitRef")
+                else Option[String].None(),
+            _ then Option[String].None(),
+        }
+        return when storage_c_type_opt in {
+            .Some(storage_c_type) then storage_c_type,
+            .None() then self.c_type_name(t),
         }
     }
 

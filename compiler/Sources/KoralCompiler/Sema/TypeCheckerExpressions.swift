@@ -4131,7 +4131,7 @@ extension TypeChecker {
         }
         let resolvedParams = try template.parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
-          return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+          return Parameter(type: paramType, kind: passKindForParameterType(paramType))
         }
         let resolvedReturn = try resolveTypeNode(template.returnType)
         return (resolvedParams, resolvedReturn)
@@ -4216,7 +4216,12 @@ extension TypeChecker {
     var typedArguments: [TypedExpressionNode] = []
     for (argExpr, param) in zip(arguments, template.parameters) {
       let expectedType = try resolveTemplateTypeNode(param.type, inferredBindings: inferred)
-      var typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
+      var typedArg: TypedExpressionNode
+      if case .genericParameter = expectedType {
+        typedArg = try inferTypedExpression(argExpr)
+      } else {
+        typedArg = try inferTypedExpression(argExpr, expectedType: expectedType)
+      }
       typedArg = try coerceLiteral(typedArg, to: expectedType)
       typedArguments.append(typedArg)
     }
@@ -6042,7 +6047,7 @@ extension TypeChecker {
 
         let params = try methodInfo.method.parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
-          return Parameter(type: paramType, kind: param.mutable ? .byMutRef : .byVal)
+          return Parameter(type: paramType, kind: passKindForParameterType(paramType))
         }
         let returns = try resolveTypeNode(methodInfo.method.returnType)
         return Type.function(parameters: params, returns: returns)
@@ -6216,29 +6221,44 @@ extension TypeChecker {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
     }
 
+    let traitName = "Eq"
     let methodName = "equals"
     let receiverType = lhs.type
-
-    // Handle generic parameter case - create trait method placeholder
-    if case .genericParameter(let paramName) = receiverType {
-      guard hasTraitBound(paramName, "Eq") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Eq"), span: currentSpan)
+    let shouldUseTraitPlaceholder: Bool = {
+      switch receiverType {
+      case .genericParameter, .reference, .mutableReference, .weakReference, .mutableWeakReference:
+        return true
+      default:
+        return false
       }
-      let methods = try flattenedTraitMethods("Eq")
+    }()
+    if shouldUseTraitPlaceholder {
+      if case .genericParameter(let paramName) = receiverType {
+        guard hasTraitBound(paramName, traitName) else {
+          throw SemanticError(.generic("Type \(receiverType) is not constrained by trait \(traitName)"), span: currentSpan)
+        }
+      } else {
+        try enforceTraitConformance(
+          receiverType,
+          traitName: traitName,
+          context: "operator 'equals'"
+        )
+      }
+
+      let methods = try flattenedTraitMethods(traitName)
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Eq is missing required method \(methodName)"), span: currentSpan)
+        throw SemanticError(.generic("Trait \(traitName) is missing required method \(methodName)"), span: currentSpan)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
-      
+
       recordTraitPlaceholderInstantiation(
         baseType: receiverType,
         methodName: methodName,
         methodTypeArgs: []
       )
-      
-      // Create trait method placeholder instead of methodReference with __trait_ prefix
+
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
-        traitName: "Eq",
+        traitName: traitName,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -6249,11 +6269,10 @@ extension TypeChecker {
 
     try enforceTraitConformance(
       receiverType,
-      traitName: "Eq",
+      traitName: traitName,
       context: "operator 'equals'"
     )
-    
-    // Concrete type case - look up the actual method
+
     guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
       throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
@@ -6268,7 +6287,6 @@ extension TypeChecker {
       throw SemanticError.typeMismatch(expected: "Bool", got: returns.description)
     }
 
-    // Value-passing semantics: pass lhs and rhs directly
     let callee: TypedExpressionNode = .methodReference(base: lhs, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
     return .call(callee: callee, arguments: [rhs], type: .bool)
   }
@@ -6279,29 +6297,44 @@ extension TypeChecker {
       throw SemanticError.typeMismatch(expected: lhs.type.description, got: rhs.type.description)
     }
 
+    let traitName = "Ord"
     let methodName = "compare"
     let receiverType = lhs.type
-
-    // Handle generic parameter case - create trait method placeholder
-    if case .genericParameter(let paramName) = receiverType {
-      guard hasTraitBound(paramName, "Ord") else {
-        throw SemanticError(.generic("Type \(receiverType) is not constrained by trait Ord"), span: currentSpan)
+    let shouldUseTraitPlaceholder: Bool = {
+      switch receiverType {
+      case .genericParameter, .reference, .mutableReference, .weakReference, .mutableWeakReference:
+        return true
+      default:
+        return false
       }
-      let methods = try flattenedTraitMethods("Ord")
+    }()
+    if shouldUseTraitPlaceholder {
+      if case .genericParameter(let paramName) = receiverType {
+        guard hasTraitBound(paramName, traitName) else {
+          throw SemanticError(.generic("Type \(receiverType) is not constrained by trait \(traitName)"), span: currentSpan)
+        }
+      } else {
+        try enforceTraitConformance(
+          receiverType,
+          traitName: traitName,
+          context: "operator 'compare'"
+        )
+      }
+
+      let methods = try flattenedTraitMethods(traitName)
       guard let sig = methods[methodName] else {
-        throw SemanticError(.generic("Trait Ord is missing required method \(methodName)"), span: currentSpan)
+        throw SemanticError(.generic("Trait \(traitName) is missing required method \(methodName)"), span: currentSpan)
       }
       let expectedType = try expectedFunctionTypeForTraitMethod(sig, selfType: receiverType)
-      
+
       recordTraitPlaceholderInstantiation(
         baseType: receiverType,
         methodName: methodName,
         methodTypeArgs: []
       )
-      
-      // Create trait method placeholder instead of methodReference with __trait_ prefix
+
       let callee: TypedExpressionNode = .traitMethodPlaceholder(
-        traitName: "Ord",
+        traitName: traitName,
         methodName: methodName,
         base: lhs,
         methodTypeArgs: [],
@@ -6312,11 +6345,10 @@ extension TypeChecker {
 
     try enforceTraitConformance(
       receiverType,
-      traitName: "Ord",
+      traitName: traitName,
       context: "operator 'compare'"
     )
-    
-    // Concrete type case - look up the actual method
+
     guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
       throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
@@ -6331,7 +6363,6 @@ extension TypeChecker {
       throw SemanticError.typeMismatch(expected: "Int", got: returns.description)
     }
 
-    // Value-passing semantics: pass lhs and rhs directly
     let callee: TypedExpressionNode = .methodReference(base: lhs, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
     return .call(callee: callee, arguments: [rhs], type: .int)
   }
