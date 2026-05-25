@@ -1,3 +1,10 @@
+private type BuiltinSubscriptKind {
+    String(),
+    List(element Type),
+    Deque(element Type),
+    Pointer(element Type, mutable Bool),
+}
+
 given TypeChecker {
     private method_param_specs(self, method Symbol) List[FunctionParamSpec] = {
         return self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new()
@@ -56,6 +63,127 @@ given TypeChecker {
             idx += 1
         }
         return self.make_method_callable_symbol(method_name, typed_params, return_type)
+    }
+
+    protected builtin_subscript_base_type(self, t Type) Type = {
+        let _ = self
+        return when t in {
+            .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
+            _ then t,
+        }
+    }
+
+    protected resolve_builtin_subscript_kind(self, base_type Type) Option[BuiltinSubscriptKind] = {
+        let unwrapped = self.builtin_subscript_base_type(base_type)
+        return when unwrapped in {
+            .StructureType(def_id) then {
+                let type_name = self.context().get_name(def_id) or else ""
+                if type_name == "String" then {
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.String())
+                }
+                let template_name_opt = self.context().get_template_name(def_id)
+                let type_args_opt = self.context().get_type_arguments(def_id)
+                yield when template_name_opt in {
+                    .Some(template_name) then when type_args_opt in {
+                        .Some(type_args) then {
+                            if type_args.count() == 1(UInt) and template_name == "List" then {
+                                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List(type_args[0(UInt)]))
+                            }
+                            if type_args.count() == 1(UInt) and template_name == "Deque" then {
+                                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(type_args[0(UInt)]))
+                            }
+                            yield Option[BuiltinSubscriptKind].None()
+                        },
+                        .None() then Option[BuiltinSubscriptKind].None(),
+                    },
+                    .None() then Option[BuiltinSubscriptKind].None(),
+                }
+            },
+            .GenericStruct(template_name, type_args) then {
+                if template_name == "List" and type_args.count() == 1(UInt) then {
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.List(type_args[0(UInt)].val))
+                }
+                if template_name == "Deque" and type_args.count() == 1(UInt) then {
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(type_args[0(UInt)].val))
+                }
+                yield Option[BuiltinSubscriptKind].None()
+            },
+            .PointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner.val, false)),
+            .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Pointer(inner.val, true)),
+            _ then Option[BuiltinSubscriptKind].None(),
+        }
+    }
+
+    protected build_builtin_subscript_helper_call(self, base TypedExpr, args List[ref TypedExpr], helper_name String) TypedExpr = {
+        let expected_self_type = self.resolve_method_self_type(base.expr_type, helper_name)
+        let prepared_base = self.prepare_call_receiver(base, expected_self_type)
+        let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, helper_name)
+        let param_types = self.resolve_method_param_types(adapted_base.expr_type, helper_name)
+
+        let mut typed_args = List[ref TypedExpr].new()
+        let mut arg_idx UInt = 0
+        for arg_ref in args then {
+            let expected_arg_type = when param_types.get(arg_idx) in {
+                .Some(param_type) then Option[Type].Some(param_type),
+                .None() then Option[Type].None(),
+            }
+            typed_args.push(box(self.adapt_expr_to_expected_type(arg_ref.val, expected_arg_type)))
+            arg_idx += 1
+        }
+
+        let normalized_base_type = self.builtin_subscript_base_type(base.expr_type)
+        self.maybe_record_extension_method_instantiation(normalized_base_type, helper_name, List[Type].new())
+        let return_type = self.resolve_method_return_type(adapted_base.expr_type, helper_name)
+        let method_symbol = self.make_method_symbol(helper_name, return_type)
+        let callee = make_typed_expr(
+            TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
+            method_symbol.symbol_type,
+        )
+        let call_expr = make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
+        return self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)
+    }
+
+    protected resolve_builtin_subscript_as_reference(self, base TypedExpr, args List[ref TypedExpr], mutable Bool) TypedExpr = {
+        return when self.resolve_builtin_subscript_kind(base.expr_type) in {
+            .Some(kind) then when kind in {
+                .String() then {
+                    self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(base)))
+                    yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown())
+                },
+                .List(_) or .Deque(_) then {
+                    let helper_name = if mutable then "__index_mut_ref" else "__index_ref"
+                    yield self.build_builtin_subscript_helper_call(base, args, helper_name)
+                },
+                .Pointer(element_type, _) then {
+                    let index_expr = if args.is_empty()
+                        then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType())
+                        else args[0(UInt)].val
+                    let pointer_base_type = self.builtin_subscript_base_type(base.expr_type)
+                    let pointer_expr = when base.expr_type in {
+                        .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
+                        .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
+                        _ then base,
+                    }
+                    let offset_expr = make_typed_expr(
+                        TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(index_expr)),
+                        pointer_base_type,
+                    )
+                    let deref_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                    let expected_ref_type = if mutable
+                        then Option[Type].Some(Type.MutableReferenceType(box(element_type)))
+                        else Option[Type].Some(Type.ReferenceType(box(element_type)))
+                    yield self.adapt_expr_to_expected_type(deref_expr, expected_ref_type)
+                },
+            },
+            .None() then {
+                self.push_diagnostic_at_span(
+                    "subscript is only supported for String, List, Deque, and pointer types",
+                    self.typed_expr_span(box(base))
+                )
+                yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown())
+            },
+        }
     }
 
     protected lookup_method_signature(self, type_key String, method_name String) Option[Symbol] = {
@@ -660,7 +788,17 @@ given TypeChecker {
                         .Some(ret) then self.apply_type_bindings(ret, bindings),
                         .None() then Type.Unknown(),
                     }
-                    yield Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, return_type))
+                    yield Option[Symbol].Some(
+                        self.make_method_callable_symbol_with_visibility(
+                            method_name,
+                            typed_params,
+                            return_type,
+                            template.method.access,
+                            template.module_path,
+                            template.source_file,
+                            template.package_id,
+                        )
+                    )
                 },
                 .None() then Option[Symbol].None(),
             },

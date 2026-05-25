@@ -27,6 +27,40 @@ given TypeChecker {
         return method_symbol
     }
 
+    private make_method_callable_symbol_with_visibility(
+        self,
+        method_name String,
+        params List[TypedParam],
+        return_type Type,
+        access AccessModifier,
+        module_path List[String],
+        source_file String,
+        package_id String,
+    ) Symbol = {
+        if not (access is .Private()) then {
+            return self.make_method_callable_symbol(method_name, params, return_type)
+        }
+        let mut param_types = List[ref Type].new()
+        for param in params then {
+            param_types.push(box(param.param_type))
+        }
+        let mut context = self.context()
+        let method_symbol = context.create_symbol_with_package(
+            method_name,
+            module_path,
+            source_file,
+            make_function_type(param_types, return_type),
+            SymbolKind.Function(),
+            MethodKind.Normal(),
+            access,
+            unknown_span(),
+            false,
+            package_id,
+        )
+        context.set_param_specs(method_symbol.def_id, self.function_param_specs_from_typed_params(params))
+        return method_symbol
+    }
+
     private given_member_phase_label(self, prefix String, target_type Type, member_name String) String = {
         let mut message = prefix
         message.push_string(" ")

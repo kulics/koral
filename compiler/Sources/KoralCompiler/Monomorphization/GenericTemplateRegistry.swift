@@ -46,6 +46,9 @@ public struct GenericExtensionMethodTemplate {
     public let typeParams: [TypeParameterDecl]
     public let method: MethodDeclaration
     public let conformanceTraitName: String?
+    public let sourceFile: String
+    public let modulePath: [String]
+    public let packageID: String
 
     // Declaration-time type checking results (with genericParameter types and generic Self)
     public var checkedBody: TypedExpressionNode?
@@ -56,6 +59,9 @@ public struct GenericExtensionMethodTemplate {
         typeParams: [TypeParameterDecl],
         method: MethodDeclaration,
         conformanceTraitName: String? = nil,
+        sourceFile: String = "",
+        modulePath: [String] = [],
+        packageID: String = "",
         checkedBody: TypedExpressionNode? = nil,
         checkedParameters: [Symbol]? = nil,
         checkedReturnType: Type? = nil
@@ -63,6 +69,9 @@ public struct GenericExtensionMethodTemplate {
         self.typeParams = typeParams
         self.method = method
         self.conformanceTraitName = conformanceTraitName
+        self.sourceFile = sourceFile
+        self.modulePath = modulePath
+        self.packageID = packageID
         self.checkedBody = checkedBody
         self.checkedParameters = checkedParameters
         self.checkedReturnType = checkedReturnType

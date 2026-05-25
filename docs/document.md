@@ -620,7 +620,7 @@ y >>= 2     // y = y >> 2
 
 ### Operator Overloading
 
-Koral supports trait-based operator overloading for arithmetic, comparison, and indexing operations.
+Koral supports trait-based operator overloading for arithmetic and comparison operations. Subscripts are built in and are not user-overloadable.
 
 The built-in operator mappings are:
 
@@ -632,8 +632,6 @@ The built-in operator mappings are:
 - `%` -> `Rem[R]` via `rem(self, other R) Self`
 - `==` / `<>` -> `Eq` via `equals(self, other Self) Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord` via `compare(self, other Self) Int`
-- `value[key]` -> `Index[K, V]` via `ref_at(self ref, key K) ref V`
-- `value[key] = expr` -> `MutIndex[K, V]` via `mut_ref_at(self mut ref, key K) mut ref V`
 
 Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are currently built-in and are not customized through public operator traits.
 
@@ -663,27 +661,26 @@ let same = sum == Vec2(4, 6)
 let ordered = Vec2(1, 0) < Vec2(2, 0)
 ```
 
-Custom subscripts use `Index[K, V]` and `MutIndex[K, V]`:
+Builtin subscript rules:
+
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `ptr T`, and `mut ptr T`.
+- `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
+- `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `ref` / `mut ref` contexts.
+- `ptr T` supports reads only. `mut ptr T` supports both reads and writes.
+- User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
-type Pair(mut left Int, mut right Int)
+let mut list = [10, 20, 30]
+println(list[0])
+list[1] = 99
 
-given Pair as Index[Int, Int] {
-    ref_at(self ref, key Int) ref Int =
-        if key == 0 then self.left.ref else self.right.ref
-}
+let text = "abc"
+let b UInt8 = text[1]
 
-given Pair as MutIndex[Int, Int] {
-    mut_ref_at(self mut ref, key Int) mut ref Int =
-        if key == 0 then self.left.ref else self.right.ref
-}
-
-let pair = Pair(10, 20)
-println(pair[0])
-
-let mut pair2 = Pair(1, 2)
-pair2[1] = 99
-println(pair2[1])
+let p mut ptr Int = alloc_memory[Int](2)
+p[0] = list[0]
+let first = p[0]
+dealloc_memory(p)
 ```
 
 ### Value Coalescing and Optional Chaining
@@ -1584,13 +1581,12 @@ The most commonly used core traits are:
 - `Add[R]` / `Sub[R]` / `Neg` / `Mul[R]` / `Div[R]` / `Rem[R]`: arithmetic operator traits.
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
-- `Index[K, V]` / `MutIndex[K, V]`: subscript access and subscript assignment.
 - `ToString`: conversion to string.
 - `Iterator[T]`: iteration protocol (`next(self mut ref) Option[T]`).
 - `Error`: error message interface (`message(self ref) String`).
 - `Drop`: destructor hook (`drop(source mut ptr Self) Void`).
 
-Operators are lowered to trait methods internally (for example `+` to `Add`, and indexing to `Index`/`MutIndex`).
+Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
 `Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source mut ptr Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
 

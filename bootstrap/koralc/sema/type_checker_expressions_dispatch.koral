@@ -945,12 +945,26 @@ given TypeChecker {
                 let trait_constraint_opt = self.find_trait_constraint_for_method(initial_typed_base.expr_type, method_name)
                 let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
+                let raw_method_signature = self.resolve_method_signature(typed_base.expr_type, method_name)
+                let source_method_signature = self.resolve_source_method_signature(typed_base.expr_type, method_name)
+                let method_is_accessible = when raw_method_signature in {
+                    .Some(sig) then {
+                        yield not (
+                            source_method_signature is .None()
+                            and self.reject_inaccessible_method_from_current_context(sig, method_name, expr_span(expr))
+                        )
+                    },
+                    .None() then true,
+                }
+                if not method_is_accessible then {
+                    yield self.empty_typed_block(Type.Unknown())
+                }
                 let mut resolved_method_type_args = List[Type].new()
                 for method_type_arg in method_type_args then {
                     resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
                 }
                 let gmc_param_types = self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args)
-                let gmc_param_specs = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                let gmc_param_specs = when source_method_signature in {
                     .Some(sig) then self.drop_receiver_param_specs(sig),
                     .None() then List[FunctionParamSpec].new(),
                 }
@@ -965,7 +979,7 @@ given TypeChecker {
                     typed_args.push(box(self.adapt_expr_to_expected_type_at(typed_arg, gmc_param_expected, Option[SourceSpan].Some(expr_span(a)))))
                     gmc_arg_idx += 1
                 }
-                let effective_method_type_args = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                let effective_method_type_args = when source_method_signature in {
                     .Some(sig) then {
                         let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, resolved_method_type_args, expected)
                         yield if inferred_method_type_args.is_empty() then resolved_method_type_args else inferred_method_type_args
@@ -973,7 +987,7 @@ given TypeChecker {
                     .None() then resolved_method_type_args,
                 }
                 self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
-                let ret_type = when self.resolve_method_signature(typed_base.expr_type, method_name) in {
+                let ret_type = when source_method_signature in {
                     .Some(sig) then {
                         yield self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, effective_method_type_args)
                     },
@@ -1161,58 +1175,103 @@ given TypeChecker {
                 self.check_static_method_call_ref(type_name, type_args, method_name, args, expected, scope),
             .SubscriptExpr(base, args, _) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
-                let base_inner_type = when typed_base.expr_type in {
-                    .MutableReferenceType(inner) then inner.val,
-                    .ReferenceType(inner) then inner.val,
-                    _ then typed_base.expr_type,
-                }
-                yield when base_inner_type in {
-                    .PointerType(element_ref) then {
-                        let element = element_ref.val
-                        let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
-                        let ptr_expr = box(typed_base)
-                        let offset_expr = make_typed_expr(
-                            TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
-                            base_inner_type,
-                        )
-                        yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element)
-                    },
-                    .MutablePointerType(element_ref) then {
-                        let element = element_ref.val
-                        let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
-                        let ptr_expr = box(typed_base)
-                        let offset_expr = make_typed_expr(
-                            TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
-                            base_inner_type,
-                        )
-                        yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element)
-                    },
-                    _ then {
-                        let subscript_param_types = self.resolve_method_param_types(typed_base.expr_type, "ref_at")
-                        let mut typed_args = List[ref TypedExpr].new()
-                        let mut sub_arg_idx UInt = 0
-                        for a in args then {
-                            let sub_param_expected = when subscript_param_types.get(sub_arg_idx) in {
-                                .Some(pt) then Option[Type].Some(pt),
-                                .None() then Option[Type].None(),
+                yield when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
+                    .Some(kind) then when kind in {
+                        .Pointer(element_type, _) then {
+                            let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
+                            let pointer_base_type = self.builtin_subscript_base_type(typed_base.expr_type)
+                            let pointer_expr = when typed_base.expr_type in {
+                                .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
+                                .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
+                                _ then typed_base,
                             }
-                            typed_args.push(box(self.check_expr_scoped_ref(a, sub_param_expected, scope)))
-                            sub_arg_idx += 1
-                        }
-                        let normalized_base_type = when typed_base.expr_type in {
-                            .MutableReferenceType(inner) then inner.val,
-                            .ReferenceType(inner) then inner.val,
-                            .WeakReferenceType(inner) then inner.val,
-                            .MutableWeakReferenceType(inner) then inner.val,
-                            _ then typed_base.expr_type,
-                        }
-                        let ref_subscript_type = self.resolve_method_return_type(normalized_base_type, "ref_at")
-                        let subscript_type = when ref_subscript_type in {
-                            .ReferenceType(inner) then inner.val,
-                            .MutableReferenceType(inner) then inner.val,
-                            _ then ref_subscript_type,
-                        }
-                        yield self.lower_subscript_read_expr(typed_base, typed_args, subscript_type)
+                            let offset_expr = make_typed_expr(
+                                TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
+                                pointer_base_type,
+                            )
+                            let deref_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                            yield self.adapt_expr_to_expected_type(deref_expr, expected)
+                        },
+                        .String() then {
+                            let mut typed_args = List[ref TypedExpr].new()
+                            for a in args then {
+                                typed_args.push(box(self.check_expr_scoped_ref(a, Option[Type].Some(Type.UIntType()), scope)))
+                            }
+                            yield when expected in {
+                                .Some(expected_type) then when expected_type in {
+                                    .ReferenceType(_) or .MutableReferenceType(_) then {
+                                        self.push_expr_diagnostic(expr, "String subscript is not addressable")
+                                        yield self.empty_typed_block(Type.Unknown())
+                                    },
+                                    _ then self.lower_subscript_read_expr(typed_base, typed_args, Type.UInt8Type()),
+                                },
+                                .None() then self.lower_subscript_read_expr(typed_base, typed_args, Type.UInt8Type()),
+                            }
+                        },
+                        .List(element_type) then {
+                            let wants_mut_ref = when expected in {
+                                .Some(expected_type) then expected_type is .MutableReferenceType(_),
+                                .None() then false,
+                            }
+                            let expects_shared_ref = when expected in {
+                                .Some(expected_type) then expected_type is .ReferenceType(_),
+                                .None() then false,
+                            }
+                            let wants_ref = wants_mut_ref or expects_shared_ref
+                            let helper_name = if wants_mut_ref
+                                then "__index_mut_ref"
+                                else if wants_ref
+                                    then "__index_ref"
+                                    else "__index_get"
+                            let param_types = self.resolve_method_param_types(typed_base.expr_type, helper_name)
+                            let mut typed_args = List[ref TypedExpr].new()
+                            let mut arg_idx UInt = 0
+                            for a in args then {
+                                let arg_expected = when param_types.get(arg_idx) in {
+                                    .Some(param_type) then Option[Type].Some(param_type),
+                                    .None() then Option[Type].None(),
+                                }
+                                typed_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
+                                arg_idx += 1
+                            }
+                            yield if wants_ref
+                                then self.resolve_builtin_subscript_as_reference(typed_base, typed_args, wants_mut_ref)
+                                else self.lower_subscript_read_expr(typed_base, typed_args, element_type)
+                        },
+                        .Deque(element_type) then {
+                            let wants_mut_ref = when expected in {
+                                .Some(expected_type) then expected_type is .MutableReferenceType(_),
+                                .None() then false,
+                            }
+                            let expects_shared_ref = when expected in {
+                                .Some(expected_type) then expected_type is .ReferenceType(_),
+                                .None() then false,
+                            }
+                            let wants_ref = wants_mut_ref or expects_shared_ref
+                            let helper_name = if wants_mut_ref
+                                then "__index_mut_ref"
+                                else if wants_ref
+                                    then "__index_ref"
+                                    else "__index_get"
+                            let param_types = self.resolve_method_param_types(typed_base.expr_type, helper_name)
+                            let mut typed_args = List[ref TypedExpr].new()
+                            let mut arg_idx UInt = 0
+                            for a in args then {
+                                let arg_expected = when param_types.get(arg_idx) in {
+                                    .Some(param_type) then Option[Type].Some(param_type),
+                                    .None() then Option[Type].None(),
+                                }
+                                typed_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
+                                arg_idx += 1
+                            }
+                            yield if wants_ref
+                                then self.resolve_builtin_subscript_as_reference(typed_base, typed_args, wants_mut_ref)
+                                else self.lower_subscript_read_expr(typed_base, typed_args, element_type)
+                        },
+                    },
+                    .None() then {
+                        self.push_expr_diagnostic(expr, "subscript is only supported for String, List, Deque, and pointer types")
+                        yield self.empty_typed_block(Type.Unknown())
                     },
                 }
             },
@@ -1391,6 +1450,38 @@ given TypeChecker {
                         _ then {},
                     },
                     .None() then {},
+                }
+                when inner in {
+                    .SubscriptExpr(base, args, _) then {
+                        let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                        let wants_mutable = expected_mutable or self.can_take_ref_of_expr(box(typed_base))
+                        let helper_name = if wants_mutable then "__index_mut_ref" else "__index_ref"
+                        let mut typed_args = List[ref TypedExpr].new()
+                        when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
+                            .Some(kind) then when kind in {
+                                .Pointer(_, _) or .String() then {
+                                    for arg in args then {
+                                        typed_args.push(box(self.check_expr_scoped_ref(arg, Option[Type].Some(Type.UIntType()), scope)))
+                                    }
+                                },
+                                .List(_) or .Deque(_) then {
+                                    let param_types = self.resolve_method_param_types(typed_base.expr_type, helper_name)
+                                    let mut arg_idx UInt = 0
+                                    for arg in args then {
+                                        let arg_expected = when param_types.get(arg_idx) in {
+                                            .Some(param_type) then Option[Type].Some(param_type),
+                                            .None() then Option[Type].None(),
+                                        }
+                                        typed_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
+                                        arg_idx += 1
+                                    }
+                                },
+                            },
+                            .None() then {},
+                        }
+                        yield self.resolve_builtin_subscript_as_reference(typed_base, typed_args, wants_mutable)
+                    },
+                    _ then {},
                 }
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
                 let typed_inner_ref = box(typed_inner)

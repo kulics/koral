@@ -380,10 +380,20 @@ extension TypeChecker {
   }
 
   func canTakeImplicitReference(to expr: TypedExpressionNode, mutable: Bool) -> Bool {
-    guard expr.valueCategory == .lvalue else {
+    guard isAddressableForReference(expr) else {
       return false
     }
     return mutable ? canTakeMutableReference(to: expr) : true
+  }
+
+  func isAddressableForReference(_ expr: TypedExpressionNode) -> Bool {
+    if expr.valueCategory == .lvalue {
+      return true
+    }
+    if case .derefExpression = expr {
+      return true
+    }
+    return false
   }
 
   func implicitReferenceInnerMatches(_ expectedInner: Type, actualType: Type) -> Bool {
@@ -410,7 +420,7 @@ extension TypeChecker {
       implicitReferenceInnerMatches(inner, actualType: expr.type) else {
       return nil
     }
-    guard expr.valueCategory == .lvalue else {
+    guard isAddressableForReference(expr) else {
       throw SemanticError.invalidOperation(
         op: "implicit ref", type1: expr.type.description, type2: "rvalue")
     }
@@ -1956,6 +1966,17 @@ extension TypeChecker {
           break
         }
       }
+      if case .subscriptExpression(let baseExpr, let arguments) = inner {
+        let typedBase = try inferTypedExpression(baseExpr)
+        let typedArguments = try arguments.map { try inferTypedExpression($0) }
+        let wantsMutable = expectedMutable || canTakeMutableReference(to: typedBase)
+        return try resolveBuiltinSubscriptAsReference(
+          base: typedBase,
+          args: typedArguments,
+          mutable: wantsMutable
+        )
+      }
+
       let typedInner = try inferTypedExpression(inner)
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
       if !isAddressable {
@@ -2008,7 +2029,11 @@ extension TypeChecker {
     case .subscriptExpression(let base, let arguments):
       let typedBase = try inferTypedExpression(base)
       let typedArguments = try arguments.map { try inferTypedExpression($0) }
-      let resolvedSubscript = try resolveSubscript(base: typedBase, args: typedArguments)
+      let resolvedSubscript = try resolveSubscript(
+        base: typedBase,
+        args: typedArguments,
+        expectedType: expectedType
+      )
 
       return resolvedSubscript
 
@@ -4679,6 +4704,7 @@ extension TypeChecker {
       methodName: methodName,
       methodTypeArgs: resolvedMethodTypeArgs
     )
+    try ensureMethodAccessibleForMemberAccess(methodResult.methodSymbol, memberName: methodName)
 
     var resolvedMethodType = methodResult.methodType
     if !methodResult.methodTypeArgs.isEmpty {
@@ -5056,6 +5082,26 @@ extension TypeChecker {
     }
   }
 
+  private func isMethodAccessibleForMemberAccess(_ method: Symbol) -> Bool {
+    guard let methodAccess = context.getAccess(method.defId) else {
+      return true
+    }
+    guard methodAccess == .private else {
+      return true
+    }
+    let defSourceFile = context.getSourceFile(method.defId) ?? ""
+    return isSameSourceFile(defSourceFile, currentSourceFile)
+  }
+
+  private func ensureMethodAccessibleForMemberAccess(_ method: Symbol, memberName: String) throws {
+    guard context.getAccess(method.defId) == .private,
+          !isMethodAccessibleForMemberAccess(method) else {
+      return
+    }
+
+    throw SemanticError(.generic("Cannot access private method '\(memberName)'"), span: currentSpan)
+  }
+
   /// Helper to infer generic instantiation member path
   private func inferGenericInstantiationMemberPath(baseName: String, args: [TypeNode], path: [String]) throws -> TypedExpressionNode? {
     if let template = currentScope.lookupGenericStructTemplate(baseName) {
@@ -5178,27 +5224,28 @@ extension TypeChecker {
     default:
       typeName = typeToLookup.description
     }
+    func makeMethodReference(_ methodSym: Symbol, typeArgs: [Type]? = nil) throws -> TypedExpressionNode {
+      try ensureMethodAccessibleForMemberAccess(methodSym, memberName: memberName)
+      let base: TypedExpressionNode = typedPath.isEmpty
+        ? typedBase
+        : .memberPath(source: typedBase, path: typedPath)
+      return .methodReference(
+        base: base,
+        method: methodSym,
+        typeArgs: typeArgs,
+        methodTypeArgs: nil,
+        type: methodSym.type
+      )
+    }
     if let methods = extensionMethods[typeName], let methodSym = methods[memberName] {
       guard isReceiverStyleMethod(methodSym) else {
         return nil
       }
-      let base: TypedExpressionNode
-      if typedPath.isEmpty {
-        base = typedBase
-      } else {
-        base = .memberPath(source: typedBase, path: typedPath)
-      }
-      return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
+      return try makeMethodReference(methodSym)
     }
 
     if let methodSym = try lookupConcreteMethodSymbol(on: typeToLookup, name: memberName) {
-      let base: TypedExpressionNode
-      if typedPath.isEmpty {
-        base = typedBase
-      } else {
-        base = .memberPath(source: typedBase, path: typedPath)
-      }
-      return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
+      return try makeMethodReference(methodSym)
     }
 
     if case .pointer(let element) = typeToLookup {
@@ -5214,13 +5261,7 @@ extension TypeChecker {
               typeArgs: [element],
               methodInfo: ext
             )
-            let base: TypedExpressionNode
-            if typedPath.isEmpty {
-              base = typedBase
-            } else {
-              base = .memberPath(source: typedBase, path: typedPath)
-            }
-            return .methodReference(base: base, method: methodSym, typeArgs: [element], methodTypeArgs: nil, type: methodSym.type)
+            return try makeMethodReference(methodSym, typeArgs: [element])
           }
         }
       }
@@ -5237,13 +5278,7 @@ extension TypeChecker {
               typeArgs: [element],
               methodInfo: ext
             )
-            let base: TypedExpressionNode
-            if typedPath.isEmpty {
-              base = typedBase
-            } else {
-              base = .memberPath(source: typedBase, path: typedPath)
-            }
-            return .methodReference(base: base, method: methodSym, typeArgs: [element], methodTypeArgs: nil, type: methodSym.type)
+            return try makeMethodReference(methodSym, typeArgs: [element])
           }
         }
       }
@@ -5263,13 +5298,7 @@ extension TypeChecker {
               typeArgs: typeArgs,
               methodInfo: ext
             )
-            let base: TypedExpressionNode
-            if typedPath.isEmpty {
-              base = typedBase
-            } else {
-              base = .memberPath(source: typedBase, path: typedPath)
-            }
-            return .methodReference(base: base, method: methodSym, typeArgs: typeArgs, methodTypeArgs: nil, type: methodSym.type)
+            return try makeMethodReference(methodSym, typeArgs: typeArgs)
           }
         }
       }
@@ -5289,13 +5318,7 @@ extension TypeChecker {
               typeArgs: typeArgs,
               methodInfo: ext
             )
-            let base: TypedExpressionNode
-            if typedPath.isEmpty {
-              base = typedBase
-            } else {
-              base = .memberPath(source: typedBase, path: typedPath)
-            }
-            return .methodReference(base: base, method: methodSym, typeArgs: typeArgs, methodTypeArgs: nil, type: methodSym.type)
+            return try makeMethodReference(methodSym, typeArgs: typeArgs)
           }
         }
       }
@@ -6737,34 +6760,28 @@ extension TypeChecker {
       func inferWritableMemberBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
         if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
           let typedOuterBase = try inferWritableMemberBase(outerBaseExpr)
-          var typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
+          let typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
 
-          let (resolvedMethod, _, _) = try resolveSubscriptUpdateMethod(
-            base: typedOuterBase, args: typedOuterArgs)
-
-          if case .function(let params, _) = resolvedMethod.type {
-            let indexParams = Array(params.dropFirst())
-            for i in 0..<typedOuterArgs.count {
-              typedOuterArgs[i] = try coerceLiteral(typedOuterArgs[i], to: indexParams[i].type)
+          switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
+          case .string:
+            throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
+          case .list, .deque:
+            let ptrExpr = try buildBuiltinSubscriptHelperCall(
+              base: typedOuterBase,
+              args: typedOuterArgs,
+              helperName: "__index_mut_ptr"
+            )
+            guard case .mutablePointer(let valueType) = ptrExpr.type else {
+              throw SemanticError.typeMismatch(expected: "mut ptr return", got: ptrExpr.type.description)
             }
+            return .derefExpression(expression: ptrExpr, type: valueType)
+          case .pointer:
+            return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+          case .none:
+            throw SemanticError(.generic(
+              "subscript is only supported for String, List, Deque, and pointer types"
+            ), span: currentSpan)
           }
-
-          let (updateMethod, finalBase, valueType) = try resolveSubscriptUpdateMethod(
-            base: typedOuterBase, args: typedOuterArgs)
-
-          let callee: TypedExpressionNode = .methodReference(
-            base: finalBase,
-            method: updateMethod,
-            typeArgs: nil,
-            methodTypeArgs: nil,
-            type: updateMethod.type
-          )
-
-          return .call(
-            callee: callee,
-            arguments: typedOuterArgs,
-            type: .mutableReference(inner: valueType)
-          )
         }
 
         return try inferTypedExpression(baseExpr)

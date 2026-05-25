@@ -181,6 +181,7 @@ Notes:
 
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
 - Type aliases must start with an uppercase letter.
+- `[]` is builtin syntax only for `String`, `List`, `Deque`, `ptr`, and `mut ptr`; custom traits do not define subscript behavior.
 - `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
 
 ## Reference Creation Semantics (`.ref` / `box`)

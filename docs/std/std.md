@@ -115,18 +115,14 @@ public trait Error {
 public trait Drop {
     drop(source mut ptr Self) Void
 }
-
-public trait Index[K Any, V Any] {
-    ref_at(self ref, key K) ref V
-}
-
-public trait MutIndex[K Any, V Any] Index[K, V] {
-    mut_ref_at(self mut ref, key K) mut ref V
-}
 ```
 
 ## Types
 ```koral
+public type Deque[T Any]
+
+public type DequeIterator[T Any]
+
 public type Dict[K Hash, V Any]
 
 public type DictIterator[K Hash, V Any]
@@ -878,6 +874,36 @@ given Float64 as Bounded {
     public min_value() Self
 }
 
+given[T Deref] Deque[T] {
+    public new() Self
+    public with_capacity(capacity UInt) Self
+    public count(self ref) UInt
+    public reserve(self mut ref, additional UInt) Void
+    public is_empty(self ref) Bool
+    public push_back(self mut ref, value T) Void
+    public push_front(self mut ref, value T) Void
+    public pop_front(self mut ref) Option[T]
+    public pop_back(self mut ref) Option[T]
+    public first(self ref) Option[T]
+    public last(self ref) Option[T]
+    public get(self ref, index UInt) Option[T]
+    public clear(self mut ref) Void
+    public reverse(self mut ref) Void
+    public retain(self mut ref, predicate Func[T, Bool]) Void
+}
+
+given[T Eq and Deref] Deque[T] {
+    public contains(self ref, value T) Bool
+}
+
+given[T Deref] Deque[T] as Iterable[T, DequeIterator[T]] {
+    public iterator(self ref) DequeIterator[T]
+}
+
+given[T Deref] DequeIterator[T] as Iterator[T] {
+    public next(self mut ref) Option[T]
+}
+
 given[K Hash, V Any] Dict[K, V] {
     public new() Self
     public with_capacity(capacity UInt) Self
@@ -1104,14 +1130,6 @@ given[T Deref] ListIterator[T] as Iterator[T] {
 
 given[T Deref] List[T] as Iterable[T, ListIterator[T]] {
     public iterator(self ref) ListIterator[T]
-}
-
-given[T Deref] List[T] as Index[UInt, T] {
-    public ref_at(self ref, key UInt) ref T
-}
-
-given[T Deref] List[T] as MutIndex[UInt, T] {
-    public mut_ref_at(self mut ref, key UInt) mut ref T
 }
 
 given[T Ord and Deref] List[T] {
@@ -1490,6 +1508,7 @@ given String {
     public count(self ref) UInt
     public is_empty(self ref) Bool
     public capacity(self ref) UInt
+    public borrow_ptr(self ref) ptr UInt8
     public to_bytes(self ref) List[UInt8]
     public get(self ref, index UInt) Option[UInt8]
     public push_byte(self mut ref, value UInt8) Void
@@ -1541,10 +1560,6 @@ given String as Ord {
 
 given String as Hash {
     public hash(self) UInt
-}
-
-given String as Index[UInt, UInt8] {
-    public ref_at(self ref, key UInt) ref UInt8
 }
 
 given StringSplitAsciiWhitespaceIterator as Iterator[String] {

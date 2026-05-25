@@ -4,7 +4,6 @@ import Foundation
 // This extension contains methods for resolving methods and handling intrinsic calls.
 
 extension TypeChecker {
-
   private func lookupConcreteMethodSymbolDirect(on selfType: Type, name: String) throws -> Symbol? {
     switch selfType {
     case .reference(let inner):
@@ -499,6 +498,35 @@ extension TypeChecker {
 
     return nil
   }
+
+  private func makeExtensionTemplateMethodSymbol(
+    _ method: MethodDeclaration,
+    functionType: Type,
+    sourceFile: String,
+    modulePath: [String],
+    packageID: String
+  ) -> Symbol {
+    if method.access == .private {
+      return context.createSymbol(
+        name: method.name,
+        modulePath: modulePath,
+        sourceFile: sourceFile,
+        type: functionType,
+        kind: .function,
+        access: .private,
+        span: currentSpan,
+        packageID: packageID,
+        isMutable: false
+      )
+    }
+
+    return makeGlobalSymbol(
+      name: method.name,
+      type: functionType,
+      kind: .function,
+      access: .protected
+    )
+  }
   
   /// Resolves a generic extension method without instantiating it.
   /// Returns a symbol with the substituted function type and records an instantiation request.
@@ -563,11 +591,12 @@ extension TypeChecker {
       ))
     }
     
-    let methodSymbol = makeGlobalSymbol(
-      name: method.name,
-      type: functionType,
-      kind: .function,
-      access: .protected
+    let methodSymbol = makeExtensionTemplateMethodSymbol(
+      method,
+      functionType: functionType,
+      sourceFile: methodInfo.sourceFile,
+      modulePath: methodInfo.modulePath,
+      packageID: methodInfo.packageID
     )
     registerReceiverStyleMethod(
       methodSymbol,
@@ -798,11 +827,12 @@ extension TypeChecker {
       ))
     }
     
-    let methodSymbol = makeGlobalSymbol(
-      name: method.name,
-      type: functionType,
-      kind: .function,
-      access: .protected
+    let methodSymbol = makeExtensionTemplateMethodSymbol(
+      method,
+      functionType: functionType,
+      sourceFile: methodInfo.sourceFile,
+      modulePath: methodInfo.modulePath,
+      packageID: methodInfo.packageID
     )
     
     return GenericMethodResolutionResult(
@@ -917,225 +947,78 @@ extension TypeChecker {
     throw SemanticError(.generic("Method '\(methodName)' not found in trait bounds of \(paramName)"), span: currentSpan)
   }
 
-  func resolveSubscriptUpdateMethod(
-    base: TypedExpressionNode,
-    args: [TypedExpressionNode]
-  ) throws -> (method: Symbol, finalBase: TypedExpressionNode, valueType: Type) {
-    let methodName = "mut_ref_at"
-    let type = base.type
-
-    // Unwrap reference for method lookup
-    let structType: Type
-    switch type {
-    case .reference(let inner), .mutableReference(let inner):
-      structType = inner
-    default:
-      structType = type
-    }
-
-    // Get the type name for error messages
-    let typeName: String
-    switch structType {
-    case .structure(let defId):
-      typeName = context.getName(defId) ?? ""
-    case .genericStruct(let template, _):
-      typeName = template
-    default:
-      throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
-    }
-
-    var methodSymbol: Symbol? = nil
-    
-    // Try to look up method on concrete type first
-    if case .structure(let defId) = structType {
-      let name = context.getName(defId) ?? ""
-      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
-        methodSymbol = sym
-      }
-    }
-    
-    // If not found, try generic type lookup
-    if methodSymbol == nil {
-      if case .genericStruct(let templateName, let args) = structType {
-        if let extensions = genericExtensionMethods[templateName],
-           let ext = extensions.first(where: { $0.method.name == methodName })
-        {
-          methodSymbol = try resolveGenericExtensionMethod(
-            baseType: structType,
-            templateName: templateName,
-            typeArgs: args,
-            methodInfo: ext
-          )
-        }
-      }
-    }
-
-    guard let method = methodSymbol else {
-      throw SemanticError.undefinedMember(methodName, typeName)
-    }
-    guard case .function(let params, let returns) = method.type else { fatalError() }
-    guard case .mutableReference(let valueType) = returns else {
-      throw SemanticError.typeMismatch(expected: "mut ref return", got: returns.description)
-    }
-
-    if params.count >= 2 {
-      let keyType = params[1].type
-      try enforceGenericTraitConformance(
-        structType,
-        traitName: "MutIndex",
-        traitTypeArgs: [keyType, valueType],
-        context: "subscript update"
-      )
-    }
-
-    let expectedIndexArgCount = params.count - 1  // excluding self
-    if args.count != expectedIndexArgCount {
-      throw SemanticError.invalidArgumentCount(
-        function: methodName, expected: expectedIndexArgCount, got: args.count)
-    }
-
-    // Adjust base for self param (implicit ref/deref rules)
-    var finalBase = base
-    if let firstParam = params.first {
-      if firstParam.type != base.type {
-        if case (.mutableReference(let baseInner), .reference(let paramInner)) = (base.type, firstParam.type),
-           baseInner == paramInner
-        {
-          finalBase = base
-        } else if let implicitRef = try makeImplicitReference(base, expectedType: firstParam.type) {
-          // Implicit Ref for self requires an addressable base
-          finalBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(base, expectedType: firstParam.type) {
-          // Implicit deref: only safe for Copy
-          finalBase = implicitDeref
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: firstParam.type.description, got: base.type.description)
-        }
-      }
-    }
-
-    // Check index argument types
-    if params.count >= 2 {
-      let indexParams = Array(params.dropFirst())
-      for i in 0..<args.count {
-        var arg = args[i]
-        let param = indexParams[i]
-        arg = try coerceLiteral(arg, to: param.type)
-        if arg.type != param.type {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description, got: arg.type.description)
-        }
-      }
-    }
-
-    return (method: method, finalBase: finalBase, valueType: valueType)
+  enum BuiltinSubscriptKind {
+    case string
+    case list(element: Type)
+    case deque(element: Type)
+    case pointer(element: Type, mutable: Bool)
   }
 
-  func resolveSubscriptReference(
-    base: TypedExpressionNode,
-    args: [TypedExpressionNode]
-  ) throws -> TypedExpressionNode {
-    let methodName = "ref_at"
-    let type = base.type
-
-    // Unwrap reference
-    let structType: Type
+  private func builtinSubscriptBaseType(_ type: Type) -> Type {
     switch type {
     case .reference(let inner), .mutableReference(let inner):
-      structType = inner
+      return inner
     default:
-      structType = type
+      return type
     }
+  }
 
-    // Get the type name for error messages
-    let typeName: String
-    switch structType {
+  func resolveBuiltinSubscriptKind(baseType: Type) -> BuiltinSubscriptKind? {
+    let unwrapped = builtinSubscriptBaseType(baseType)
+    switch unwrapped {
     case .structure(let defId):
-      typeName = context.getName(defId) ?? ""
-    case .genericStruct(let template, _):
-      typeName = template
-    default:
-      throw SemanticError.invalidOperation(op: "subscript", type1: type.description, type2: "")
-    }
-
-    var methodSymbol: Symbol? = nil
-
-    if case .structure(let defId) = structType {
-      let name = context.getName(defId) ?? ""
-      if let extensions = extensionMethods[name], let sym = extensions[methodName] {
-        methodSymbol = sym
+      if context.getName(defId) == "String" {
+        return .string
       }
-    }
-
-    if methodSymbol == nil {
-      if case .genericStruct(let templateName, let typeArgs) = structType {
-        if let extensions = genericExtensionMethods[templateName],
-           let ext = extensions.first(where: { $0.method.name == methodName })
-        {
-          methodSymbol = try resolveGenericExtensionMethod(
-            baseType: structType,
-            templateName: templateName,
-            typeArgs: typeArgs,
-            methodInfo: ext
-          )
-        }
-      }
-    }
-
-    guard let method = methodSymbol else {
-      if case .structure(let defId) = structType {
-        let name = context.getName(defId) ?? ""
-        if let atMethod = extensionMethods[name]?["at"],
-           case .function(let params, let returns) = atMethod.type,
-           params.count >= 2
-        {
-          let keyType = params[1].type
-          throw SemanticError(.generic(
-            "Type \(structType) does not explicitly implement trait [\(keyType), \(returns)]Index"
-          ), span: currentSpan)
-        }
-      }
-
-      if case .genericStruct(let templateName, let typeArgs) = structType,
-         let extensions = genericExtensionMethods[templateName],
-         let atMethodTemplate = extensions.first(where: { $0.method.name == "at" })
+      if let template = context.getTemplateName(defId),
+         let typeArgs = context.getTypeArguments(defId),
+         typeArgs.count == 1
       {
-        let atMethod = try resolveGenericExtensionMethod(
-          baseType: structType,
-          templateName: templateName,
-          typeArgs: typeArgs,
-          methodInfo: atMethodTemplate
-        )
-        if case .function(let params, let returns) = atMethod.type,
-           params.count >= 2
-        {
-          let keyType = params[1].type
-          throw SemanticError(.generic(
-            "Type \(structType) does not explicitly implement trait [\(keyType), \(returns)]Index"
-          ), span: currentSpan)
+        if template == "List" {
+          return .list(element: typeArgs[0])
+        }
+        if template == "Deque" {
+          return .deque(element: typeArgs[0])
         }
       }
-
-      throw SemanticError.undefinedMember(methodName, typeName)
-    }
-
-    guard case .function(let params, let returns) = method.type else { fatalError() }
-    let elementType: Type
-    switch returns {
-    case .reference(let inner), .mutableReference(let inner):
-      elementType = inner
+      return nil
+    case .genericStruct(let template, let args):
+      if template == "List", args.count == 1 {
+        return .list(element: args[0])
+      }
+      if template == "Deque", args.count == 1 {
+        return .deque(element: args[0])
+      }
+      return nil
+    case .pointer(let element):
+      return .pointer(element: element, mutable: false)
+    case .mutablePointer(let element):
+      return .pointer(element: element, mutable: true)
     default:
-      throw SemanticError.typeMismatch(expected: "ref return", got: returns.description)
+      return nil
+    }
+  }
+
+  func buildBuiltinSubscriptHelperCall(
+    base: TypedExpressionNode,
+    args: [TypedExpressionNode],
+    helperName: String
+  ) throws -> TypedExpressionNode {
+    let lookupType = builtinSubscriptBaseType(base.type)
+    guard let method = try lookupConcreteMethodSymbol(on: lookupType, name: helperName) else {
+      throw SemanticError(.generic(
+        "Missing builtin subscript helper '\(helperName)' for type '\(lookupType)'"
+      ), span: currentSpan)
+    }
+    guard case .function(let params, let returns) = method.type else {
+      fatalError("builtin subscript helper must be a function")
     }
 
-    if params.count >= 2 {
-      let keyType = params[1].type
-      try enforceGenericTraitConformance(
-        structType,
-        traitName: "Index",
-        traitTypeArgs: [keyType, elementType],
-        context: "subscript access"
+    if args.count != params.count - 1 {
+      throw SemanticError.invalidArgumentCount(
+        function: helperName,
+        expected: params.count - 1,
+        got: args.count
       )
     }
 
@@ -1158,15 +1041,14 @@ extension TypeChecker {
         finalBase = implicitRef
       } else if let implicitDeref = makeImplicitDereference(resolvedBase, expectedType: firstParam.type) {
         finalBase = implicitDeref
+      } else if canWidenMutableReference(resolvedBase, expectedType: firstParam.type) {
+        finalBase = resolvedBase
       } else {
         throw SemanticError.typeMismatch(
-          expected: firstParam.type.description, got: resolvedBase.type.description)
+          expected: firstParam.type.description,
+          got: resolvedBase.type.description
+        )
       }
-    }
-
-    if args.count != params.count - 1 {
-      throw SemanticError.invalidArgumentCount(
-        function: methodName, expected: params.count - 1, got: args.count)
     }
 
     var coercedArgs = args
@@ -1175,19 +1057,21 @@ extension TypeChecker {
       coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: param.type)
       if coercedArgs[i].type != param.type {
         throw SemanticError.typeMismatch(
-          expected: param.type.description, got: coercedArgs[i].type.description)
+          expected: param.type.description,
+          got: coercedArgs[i].type.description
+        )
       }
     }
 
-    let loweredCallee: TypedExpressionNode = .methodReference(
+    let callee: TypedExpressionNode = .methodReference(
       base: finalBase,
       method: method,
       typeArgs: nil,
       methodTypeArgs: nil,
       type: method.type
     )
-    let loweredCall: TypedExpressionNode = .call(
-      callee: loweredCallee,
+    let call: TypedExpressionNode = .call(
+      callee: callee,
       arguments: coercedArgs,
       type: returns
     )
@@ -1196,29 +1080,47 @@ extension TypeChecker {
       return .makeLetBlock(
         identifier: tempSym,
         value: base,
-        body: loweredCall,
+        body: call,
         type: returns
       )
     }
 
-    return loweredCall
+    return call
   }
 
-  func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode]) throws
+  func resolveSubscriptReference(
+    base: TypedExpressionNode,
+    args: [TypedExpressionNode]
+  ) throws -> TypedExpressionNode {
+    return try resolveBuiltinSubscriptAsReference(base: base, args: args, mutable: false)
+  }
+
+  func resolveBuiltinSubscriptAsReference(
+    base: TypedExpressionNode,
+    args: [TypedExpressionNode],
+    mutable: Bool
+  ) throws -> TypedExpressionNode {
+    switch resolveBuiltinSubscriptKind(baseType: base.type) {
+    case .string:
+      throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
+    case .list, .deque:
+      let helperName = mutable ? "__index_mut_ref" : "__index_ref"
+      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: helperName)
+    case .pointer:
+      return try resolveSubscript(base: base, args: args, expectedType: mutable ? .mutableReference(inner: .void) : .reference(inner: .void))
+    case .none:
+      throw SemanticError(.generic(
+        "subscript is only supported for String, List, Deque, and pointer types"
+      ), span: currentSpan)
+    }
+  }
+
+  func resolveSubscript(base: TypedExpressionNode, args: [TypedExpressionNode], expectedType: Type? = nil) throws
     -> TypedExpressionNode
   {
     let type = base.type
+    let structType = builtinSubscriptBaseType(type)
 
-    // Unwrap reference
-    let structType: Type
-    switch type {
-    case .reference(let inner), .mutableReference(let inner):
-      structType = inner
-    default:
-      structType = type
-    }
-
-    // Built-in pointer subscript: ptr[i] → deref (ptr + i)
     if case .pointer(let element) = structType {
       guard args.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
@@ -1260,12 +1162,28 @@ extension TypeChecker {
       return .derefExpression(expression: offsetExpr, type: element)
     }
 
-    let refExpr = try resolveSubscriptReference(base: base, args: args)
-    switch refExpr.type {
-    case .reference(let inner), .mutableReference(let inner):
-      return .derefExpression(expression: refExpr, type: inner)
-    default:
-      return refExpr
+    guard let builtinKind = resolveBuiltinSubscriptKind(baseType: base.type) else {
+      throw SemanticError(.generic(
+        "subscript is only supported for String, List, Deque, and pointer types"
+      ), span: currentSpan)
+    }
+
+    if let expectedType {
+      switch expectedType {
+      case .reference:
+        return try resolveBuiltinSubscriptAsReference(base: base, args: args, mutable: false)
+      case .mutableReference:
+        return try resolveBuiltinSubscriptAsReference(base: base, args: args, mutable: true)
+      default:
+        break
+      }
+    }
+
+    switch builtinKind {
+    case .string, .list, .deque:
+      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
+    case .pointer:
+      fatalError("pointer subscript should have returned above")
     }
   }
 

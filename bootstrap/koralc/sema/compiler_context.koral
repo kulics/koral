@@ -186,14 +186,56 @@ given CompilerContext {
             .Module() then DefKind.Module(),
         }
 
-        let lookup_source = when access in {
-            .Private() then Option[String].Some(source_file),
-            _ then Option[String].None(),
+        let def_id = when access in {
+            .Private() then when self.def_id_map.lookup_exact(module_path, name, source_file) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
+            },
+            _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
+            },
         }
 
-        let def_id = when self.def_id_map.lookup(module_path, name, lookup_source) in {
-            .Some(existing) then existing,
-            .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, "", access, span),
+        self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable))
+
+        return Symbol(def_id, symbol_type, kind)
+    }
+
+    public create_symbol_with_package(
+        self mut ref,
+        name String,
+        module_path List[String],
+        source_file String,
+        symbol_type Type,
+        kind SymbolKind,
+        method_kind MethodKind,
+        access AccessModifier,
+        span SourceSpan,
+        is_mutable Bool,
+        package_id String,
+    ) Symbol = {
+        let def_kind = when kind in {
+            .Function() then DefKind.Function(),
+            .Variable(_) then DefKind.Variable(),
+            .TypeSymbol() then {
+                yield when symbol_type in {
+                    .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
+                    _ then DefKind.TypeDef(TypeDefKind.Structure()),
+                }
+            },
+            .Module() then DefKind.Module(),
+        }
+
+        let def_id = when access in {
+            .Private() then when self.def_id_map.lookup_exact(module_path, name, source_file) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, package_id, access, span),
+            },
+            _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
+                .Some(existing) then existing,
+                .None() then self.def_id_map.allocate_full(name, def_kind, module_path, source_file, package_id, access, span),
+            },
         }
 
         self.def_id_map.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, method_kind, is_mutable))

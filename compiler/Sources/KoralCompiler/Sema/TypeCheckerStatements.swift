@@ -142,39 +142,33 @@ extension TypeChecker {
 
   /// For subscript assignment targets, recursively infer base expressions in writable context.
   ///
-  /// If the base itself is a subscript expression, lower it through `mut_ref_at` and keep
-  /// the result as `T mut ref` so chained writes like `a[i][j] = v` remain writable.
+  /// If the base itself is a subscript expression, lower it through builtin
+  /// mutable pointer projection so chained writes like `a[i][j] = v` remain writable.
   private func inferWritableSubscriptBase(_ baseExpr: ExpressionNode) throws -> TypedExpressionNode {
     if case .subscriptExpression(let outerBaseExpr, let outerArgExprs) = baseExpr {
       let typedOuterBase = try inferWritableSubscriptBase(outerBaseExpr)
-      var typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
+      let typedOuterArgs = try outerArgExprs.map { try inferTypedExpression($0) }
 
-      let (resolvedMethod, _, _) = try resolveSubscriptUpdateMethod(
-        base: typedOuterBase, args: typedOuterArgs)
-
-      if case .function(let params, _) = resolvedMethod.type {
-        let indexParams = Array(params.dropFirst())
-        for i in 0..<typedOuterArgs.count {
-          typedOuterArgs[i] = try coerceLiteral(typedOuterArgs[i], to: indexParams[i].type)
+      switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
+      case .string:
+        throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
+      case .list, .deque:
+        let ptrExpr = try buildBuiltinSubscriptHelperCall(
+          base: typedOuterBase,
+          args: typedOuterArgs,
+          helperName: "__index_mut_ptr"
+        )
+        guard case .mutablePointer(let valueType) = ptrExpr.type else {
+          throw SemanticError.typeMismatch(expected: "mut ptr return", got: ptrExpr.type.description)
         }
+        return .derefExpression(expression: ptrExpr, type: valueType)
+      case .pointer:
+        return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
+      case .none:
+        throw SemanticError(.generic(
+          "subscript is only supported for String, List, Deque, and pointer types"
+        ), span: currentSpan)
       }
-
-      let (updateMethod, finalBase, valueType) = try resolveSubscriptUpdateMethod(
-        base: typedOuterBase, args: typedOuterArgs)
-
-      let callee: TypedExpressionNode = .methodReference(
-        base: finalBase,
-        method: updateMethod,
-        typeArgs: nil,
-        methodTypeArgs: nil,
-        type: updateMethod.type
-      )
-
-      return .call(
-        callee: callee,
-        arguments: typedOuterArgs,
-        type: .mutableReference(inner: valueType)
-      )
     }
 
     return try inferTypedExpression(baseExpr)
@@ -320,10 +314,13 @@ extension TypeChecker {
     case .assignment(let target, let op, let value, let span):
       self.currentSpan = span
       if let op {
-        // Lower `x[i] op= v` into a write through `x.mut_ref_at(i)`.
+        // Lower `x[i] op= v` into builtin get/set or pointer write.
         if case .subscriptExpression(let baseExpr, let argExprs) = target {
           let typedBase = try inferWritableSubscriptBase(baseExpr)
-          let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+          var typedArgs = try argExprs.map { try inferTypedExpression($0) }
+          if typedArgs.count == 1 {
+            typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
+          }
 
           // Built-in pointer subscript compound assignment: ptr[i] op= v → deref (ptr + i) = deref (ptr + i) op v
           let baseStructType: Type
@@ -380,6 +377,10 @@ extension TypeChecker {
             }
           }
 
+          if case .string = resolveBuiltinSubscriptKind(baseType: typedBase.type) {
+            throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
+          }
+
           // Evaluate base (by reference), args once.
           let baseStoredExpr: TypedExpressionNode
           let baseStoredType: Type
@@ -388,7 +389,7 @@ extension TypeChecker {
             baseStoredExpr = typedBase
             baseStoredType = typedBase.type
           default:
-            if typedBase.valueCategory != .lvalue {
+            if !isAddressableForReference(typedBase) {
               throw SemanticError.invalidOperation(
                 op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
             }
@@ -412,17 +413,8 @@ extension TypeChecker {
 
           let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
           let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
-          let readRef = try resolveSubscriptReference(base: baseVar, args: argVars)
-
-          let elementType: Type
-          let oldValueExpr: TypedExpressionNode
-          if case .reference(let inner) = readRef.type {
-            elementType = inner
-            oldValueExpr = .derefExpression(expression: readRef, type: inner)
-          } else {
-            elementType = readRef.type
-            oldValueExpr = readRef
-          }
+          let oldValueExpr = try resolveSubscript(base: baseVar, args: argVars)
+          let elementType = oldValueExpr.type
           let oldSym = nextSynthSymbol(prefix: "sub_old", type: elementType)
           stmts.append(.variableDeclaration(identifier: oldSym, value: oldValueExpr, mutable: false))
 
@@ -462,24 +454,12 @@ extension TypeChecker {
             fatalError("Unknown compound assignment operator")
           }
 
-          let (updateMethod, finalBase, expectedValueType) = try resolveSubscriptUpdateMethod(
-            base: baseVar, args: argVars)
-          if expectedValueType != elementType {
-            throw SemanticError.typeMismatch(
-              expected: expectedValueType.description, got: elementType.description)
-          }
-          let callee: TypedExpressionNode = .methodReference(
-            base: finalBase, method: updateMethod, typeArgs: nil, methodTypeArgs: nil, type: updateMethod.type)
-          let callExpr: TypedExpressionNode = .call(
-            callee: callee,
-            arguments: argVars,
-            type: .mutableReference(inner: expectedValueType)
+          let setCall = try buildBuiltinSubscriptHelperCall(
+            base: baseVar,
+            args: argVars + [newValueExpr],
+            helperName: "__index_set"
           )
-          let writeTarget: TypedExpressionNode = .derefExpression(
-            expression: callExpr,
-            type: expectedValueType
-          )
-          stmts.append(.assignment(target: writeTarget, operator: nil, value: newValueExpr))
+          stmts.append(.expression(setCall))
 
           return .expression(.blockExpression(statements: stmts, type: .void))
         }
@@ -518,10 +498,13 @@ extension TypeChecker {
       }
 
       // Simple assignment
-      // Lower `x[i] = v` into a write through `x.mut_ref_at(i)`.
+      // Lower `x[i] = v` into builtin set or pointer write.
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferWritableSubscriptBase(baseExpr)
-        let typedArgs = try argExprs.map { try inferTypedExpression($0) }
+        var typedArgs = try argExprs.map { try inferTypedExpression($0) }
+        if typedArgs.count == 1 {
+          typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
+        }
 
         // Built-in pointer subscript assignment: ptr[i] = v → deref (ptr + i) = v
         let baseStructType: Type
@@ -566,17 +549,18 @@ extension TypeChecker {
           return .assignment(target: derefTarget, operator: nil, value: typedValue)
         }
 
-        // Resolve expected value type from `mut_ref_at`.
-        let (resolvedMethod, _, expectedValueType) = try resolveSubscriptUpdateMethod(
-          base: typedBase, args: typedArgs)
-
-        // Coerce index arguments to match mut_ref_at parameter types
-        var coercedArgs = typedArgs
-        if case .function(let params, _) = resolvedMethod.type {
-          let indexParams = Array(params.dropFirst())
-          for i in 0..<coercedArgs.count {
-            coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: indexParams[i].type)
-          }
+        let expectedValueType: Type
+        switch resolveBuiltinSubscriptKind(baseType: typedBase.type) {
+        case .string:
+          throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
+        case .list(let element), .deque(let element):
+          expectedValueType = element
+        case .pointer:
+          fatalError("pointer case should have returned above")
+        case .none:
+          throw SemanticError(.generic(
+            "subscript is only supported for String, List, Deque, and pointer types"
+          ), span: span)
         }
 
         // Evaluate base (by reference), args, rhs once.
@@ -587,7 +571,7 @@ extension TypeChecker {
           baseStoredExpr = typedBase
           baseStoredType = typedBase.type
         default:
-          if typedBase.valueCategory != .lvalue {
+          if !isAddressableForReference(typedBase) {
             throw SemanticError.invalidOperation(
               op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
           }
@@ -603,7 +587,7 @@ extension TypeChecker {
         ]
 
         var argSyms: [Symbol] = []
-        for a in coercedArgs {
+        for a in typedArgs {
           let s = nextSynthSymbol(prefix: "sub_idx", type: a.type)
           argSyms.append(s)
           stmts.append(.variableDeclaration(identifier: s, value: a, mutable: false))
@@ -620,26 +604,12 @@ extension TypeChecker {
 
         let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
         let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
-        let (updateMethod, finalBase, _) = try resolveSubscriptUpdateMethod(
-          base: baseVar, args: argVars)
-
-        let callee: TypedExpressionNode = .methodReference(
-          base: finalBase,
-          method: updateMethod,
-          typeArgs: nil,
-          methodTypeArgs: nil,
-          type: updateMethod.type
+        let setCall = try buildBuiltinSubscriptHelperCall(
+          base: baseVar,
+          args: argVars + [.variable(identifier: valSym)],
+          helperName: "__index_set"
         )
-        let callExpr: TypedExpressionNode = .call(
-          callee: callee,
-          arguments: argVars,
-          type: .mutableReference(inner: expectedValueType)
-        )
-        let writeTarget: TypedExpressionNode = .derefExpression(
-          expression: callExpr,
-          type: expectedValueType
-        )
-        stmts.append(.assignment(target: writeTarget, operator: nil, value: .variable(identifier: valSym)))
+        stmts.append(.expression(setCall))
 
         return .expression(.blockExpression(statements: stmts, type: .void))
       }

@@ -1542,7 +1542,14 @@ public class CodeGen {
         }
         return false
       }()
-      let shouldHeapAllocate = isPatternAliasRef || (!isCapturedVar && escapeContext.shouldUseHeapAllocation(inner))
+      let isAddressableDeref: Bool = {
+        if case .derefExpression = inner {
+          return true
+        }
+        return false
+      }()
+      let shouldHeapAllocate = isPatternAliasRef
+        || (!isCapturedVar && !isAddressableDeref && escapeContext.shouldUseHeapAllocation(inner))
       
       if inner.valueCategory == .lvalue && !shouldHeapAllocate {
         // 不逃逸的 lvalue：栈分配（取地址）

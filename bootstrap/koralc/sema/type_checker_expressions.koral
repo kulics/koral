@@ -173,7 +173,12 @@ given TypeChecker {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[Symbol].None()
         }
-        return self.resolve_method_signature(base_type, method_name)
+        return when self.resolve_method_signature(base_type, method_name) in {
+            .Some(method) then if self.is_method_accessible_from_current_context(method)
+                then Option[Symbol].Some(method)
+                else Option[Symbol].None(),
+            .None() then Option[Symbol].None(),
+        }
     }
 
     private check_expr_global_ref(self, expr ref Expr, expected Option[Type]) TypedExpr = {
@@ -589,10 +594,82 @@ given TypeChecker {
                         field_path.push(parts.second)
                         return make_typed_expr(TypedExprKind.MemberPath(box(typed_receiver), field_path), member_field_type)
                     }
-                    let has_method = when typed_receiver.expr_type in {
-                        .PointerType(inner) then self.resolve_source_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_source_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
-                        .MutablePointerType(inner) then self.resolve_source_method_signature(inner.val, parts.second) is .Some(_) or self.resolve_source_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
-                        _ then self.resolve_source_method_signature(typed_receiver.expr_type, parts.second) is .Some(_),
+                    let mut has_method = false
+                    let mut inaccessible_method = false
+                    when typed_receiver.expr_type in {
+                        .PointerType(inner) then {
+                            let inner_raw = self.resolve_method_signature(inner.val, parts.second)
+                            let inner_visible = self.resolve_source_method_signature(inner.val, parts.second)
+                            when inner_raw in {
+                                .Some(method) then {
+                                    if inner_visible is .Some(_) then {
+                                        has_method = true
+                                    } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
+                                        inaccessible_method = true
+                                    }
+                                },
+                                .None() then {},
+                            }
+                            if not has_method and not inaccessible_method then {
+                                let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
+                                let outer_visible = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                                when outer_raw in {
+                                    .Some(method) then {
+                                        if outer_visible is .Some(_) then {
+                                            has_method = true
+                                        } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
+                                            inaccessible_method = true
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        .MutablePointerType(inner) then {
+                            let inner_raw = self.resolve_method_signature(inner.val, parts.second)
+                            let inner_visible = self.resolve_source_method_signature(inner.val, parts.second)
+                            when inner_raw in {
+                                .Some(method) then {
+                                    if inner_visible is .Some(_) then {
+                                        has_method = true
+                                    } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
+                                        inaccessible_method = true
+                                    }
+                                },
+                                .None() then {},
+                            }
+                            if not has_method and not inaccessible_method then {
+                                let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
+                                let outer_visible = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                                when outer_raw in {
+                                    .Some(method) then {
+                                        if outer_visible is .Some(_) then {
+                                            has_method = true
+                                        } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
+                                            inaccessible_method = true
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        _ then {
+                            let raw_method = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
+                            let visible_method = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                            when raw_method in {
+                                .Some(method) then {
+                                    if visible_method is .Some(_) then {
+                                        has_method = true
+                                    } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
+                                        inaccessible_method = true
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        },
+                    }
+                    if inaccessible_method then {
+                        return self.empty_typed_block(Type.Unknown())
                     }
                     if not has_method then {
                         return self.check_expr_core_ref(callee, .None(), scope)

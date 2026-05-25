@@ -559,6 +559,15 @@ public class DefIdMap {
         let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
         return nameToDefId[keyWithoutFile]
     }
+
+    public func lookupExact(
+        modulePath: [String],
+        name: String,
+        sourceFile: String
+    ) -> DefId? {
+        let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
+        return nameToDefId[keyWithFile]
+    }
     
     /// 通过 ID 查找 DefId
     ///

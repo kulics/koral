@@ -173,7 +173,7 @@ given File as Writer {
 }
 
 given File as Seeker {
-    public seek(self ref, pos Io.SeekOrigin) Result[UInt64]
+    public seek(self ref, pos SeekOrigin) Result[UInt64]
 }
 
 given FileType {
@@ -211,9 +211,9 @@ given FileInfo {
     public file_size(self ref) UInt64
     public file_type(self ref) FileType
     public permissions(self ref) Permission
-    public modified_time(self ref) Time.DateTime
-    public accessed_time(self ref) Time.DateTime
-    public created_time(self ref) Time.DateTime
+    public modified_time(self ref) DateTime
+    public accessed_time(self ref) DateTime
+    public created_time(self ref) DateTime
     public is_file(self ref) Bool
     public is_dir(self ref) Bool
     public is_symlink(self ref) Bool

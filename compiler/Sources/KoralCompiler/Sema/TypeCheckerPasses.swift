@@ -1201,6 +1201,9 @@ extension TypeChecker {
             typeParams: typeParams,
             method: method,
             conformanceTraitName: nil,
+            sourceFile: currentSourceFile,
+            modulePath: currentModulePath,
+            packageID: currentPackageID,
             checkedBody: nil,
             checkedParameters: checkedParams,
             checkedReturnType: checkedReturnType
@@ -1288,6 +1291,9 @@ extension TypeChecker {
               typeParams: [],
               method: method,
               conformanceTraitName: nil,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
               checkedBody: nil,
               checkedParameters: nil,
               checkedReturnType: nil
@@ -2321,6 +2327,9 @@ extension TypeChecker {
             typeParams: template.typeParams,
             method: template.method,
             conformanceTraitName: template.conformanceTraitName,
+            sourceFile: template.sourceFile,
+            modulePath: template.modulePath,
+            packageID: template.packageID,
             checkedBody: checkedBody,
             checkedParameters: template.checkedParameters,
             checkedReturnType: template.checkedReturnType
@@ -2451,6 +2460,9 @@ extension TypeChecker {
               typeParams: [],
               method: info.method,
               conformanceTraitName: nil,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
               checkedBody: typedBody,
               checkedParameters: info.params,
               checkedReturnType: info.returnType
@@ -2460,6 +2472,9 @@ extension TypeChecker {
               typeParams: [],
               method: info.method,
               conformanceTraitName: nil,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
               checkedBody: typedBody,
               checkedParameters: info.params,
               checkedReturnType: info.returnType
@@ -3004,6 +3019,9 @@ extension TypeChecker {
                 typeParams: typeParams,
                 method: info.method,
                 conformanceTraitName: traitName,
+                sourceFile: currentSourceFile,
+                modulePath: currentModulePath,
+                packageID: currentPackageID,
                 checkedBody: entry.typedMethod.body,
                 checkedParameters: info.parameters,
                 checkedReturnType: info.returnType
@@ -3014,6 +3032,9 @@ extension TypeChecker {
                   typeParams: typeParams,
                   method: info.method,
                   conformanceTraitName: traitName,
+                  sourceFile: currentSourceFile,
+                  modulePath: currentModulePath,
+                  packageID: currentPackageID,
                   checkedBody: entry.typedMethod.body,
                   checkedParameters: info.parameters,
                   checkedReturnType: info.returnType
@@ -3061,6 +3082,9 @@ extension TypeChecker {
               typeParams: [],
               method: info.method,
               conformanceTraitName: traitName,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
               checkedBody: typedEntry.typedMethod.body,
               checkedParameters: info.parameters,
               checkedReturnType: info.returnType
@@ -3071,6 +3095,9 @@ extension TypeChecker {
                 typeParams: [],
                 method: info.method,
                 conformanceTraitName: traitName,
+                sourceFile: currentSourceFile,
+                modulePath: currentModulePath,
+                packageID: currentPackageID,
                 checkedBody: typedEntry.typedMethod.body,
                 checkedParameters: info.parameters,
                 checkedReturnType: info.returnType

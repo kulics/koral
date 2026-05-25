@@ -499,6 +499,8 @@ extension TypedExpressionNode {
     case .memberPath(let source, _):
       // member access is lvalue if the source is lvalue
       return source.valueCategory
+    case .derefExpression:
+      return .lvalue
     case .referenceExpression:
 
       // &expr 是一个临时值（指针）

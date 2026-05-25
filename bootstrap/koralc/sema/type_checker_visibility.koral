@@ -127,6 +127,29 @@ given TypeChecker {
         }
     }
 
+    protected is_method_accessible_from_current_context(self, method Symbol) Bool = {
+        return when self.context().get_access(method.def_id) in {
+            .Some(access) then if access is .Private() then {
+                let def_source_file = self.context().get_source_file(method.def_id) or else ""
+                yield def_source_file == self.storage.file_path
+            } else true,
+            .None() then true,
+        }
+    }
+
+    protected reject_inaccessible_method_from_current_context(self, method Symbol, method_name String, span SourceSpan) Bool = {
+        return when self.context().get_access(method.def_id) in {
+            .Some(access) then {
+                if not (access is .Private()) or self.is_method_accessible_from_current_context(method) then {
+                    return false
+                }
+                self.push_diagnostic_at_span("Cannot access private method '\(method_name)'", span)
+                yield true
+            },
+            .None() then false,
+        }
+    }
+
     protected ensure_struct_construction_access(self, type_name String, def_id DefId) Void = {
         when self.context().get_struct_fields(def_id) in {
             .Some(fields) then {

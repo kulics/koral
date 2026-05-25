@@ -1,6 +1,8 @@
-using std { .. }
 // ============================================================================
-// std.Container.Deque
+// Koral Standard Library - Deque Type
+// ============================================================================
+// NOTE: This file is merged into core.koral, so primitives, traits, option,
+// and list are already available.
 // ============================================================================
 
 protected type DequeStorage[T Any](mut source mut ptr T, mut len UInt, mut cap UInt, mut head UInt)
@@ -148,6 +150,57 @@ given[T Deref] Deque[T] {
         return Option[T].Some(self.storage.source[physical])
     }
 
+    private __index_get(self ref, key UInt) T = {
+        if key >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        let physical = self.physical_index(key)
+        return self.storage.source[physical]
+    }
+
+    private __index_set(self mut ref, key UInt, value T) Void = {
+        if key >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        self.ensure_unique()
+        let physical = self.physical_index(key)
+        self.storage.source[physical] = value
+    }
+
+    private __index_ptr(self ref, key UInt) ptr T = {
+        if key >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        let physical = self.physical_index(key)
+        return self.storage.source + physical
+    }
+
+    private __index_mut_ptr(self mut ref, key UInt) mut ptr T = {
+        if key >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        self.ensure_unique()
+        let physical = self.physical_index(key)
+        return self.storage.source + physical
+    }
+
+    private __index_ref(self ref, key UInt) ref T = {
+        if key >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        let physical = self.physical_index(key)
+        return make_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage)
+    }
+
+    private __index_mut_ref(self mut ref, key UInt) mut ref T = {
+        if key >= self.storage.len then {
+            panic("Deque index out of bounds")
+        }
+        self.ensure_unique()
+        let physical = self.physical_index(key)
+        return make_mut_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage)
+    }
+
     public clear(self mut ref) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.len then {
@@ -231,34 +284,5 @@ given[T Deref] DequeIterator[T] as Iterator[T] {
         let value = self.storage.source[index]
         self.index += 1
         return Option[T].Some(value)
-    }
-}
-
-given[T Deref] Deque[T] as Index[UInt, T] {
-
-    public ref_at(self ref, key UInt) ref T = {
-        if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        let physical = self.physical_index(key)
-        if ref_is_borrow(self) then {
-            return make_ref[T, Deque[T]](self.storage.source + physical, self)
-        }
-        return make_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage)
-    }
-}
-
-given[T Deref] Deque[T] as MutIndex[UInt, T] {
-
-    public mut_ref_at(self mut ref, key UInt) mut ref T = {
-        if key >= self.storage.len then {
-            panic("Deque index out of bounds")
-        }
-        self.ensure_unique()
-        let physical = self.physical_index(key)
-        if ref_is_borrow(self) then {
-            return make_mut_ref[T, Deque[T]](self.storage.source + physical, self)
-        }
-        return make_mut_ref[T, DequeStorage[T]](self.storage.source + physical, self.storage)
     }
 }

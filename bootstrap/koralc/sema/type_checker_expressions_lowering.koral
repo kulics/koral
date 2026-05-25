@@ -96,72 +96,34 @@ given TypeChecker {
     }
 
     private lower_subscript_read_expr(self, typed_base TypedExpr, typed_args List[ref TypedExpr], result_type Type) TypedExpr = {
-        let ref_return_type = Type.ReferenceType(box(result_type))
-        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "ref_at")
-        let normalized_base_type = when typed_base.expr_type in {
-            .MutableReferenceType(inner) then inner.val,
-            .ReferenceType(inner) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
-            _ then typed_base.expr_type,
-        }
-        if typed_args.count() == 1 and not self.should_defer_explicit_trait_check(normalized_base_type) then {
-            let index_type = self.concretize_default_literal_type(typed_args[0(UInt)].val.expr_type)
-            let index_result_type = when result_type in {
-                .Unknown() then Type.IntType(),
-                .TypeVar(_) then Type.IntType(),
-                _ then result_type,
-            }
-            let mut index_trait_args = List[Type].new()
-            index_trait_args.push(index_type)
-            index_trait_args.push(index_result_type)
-            let _ = self.enforce_explicit_generic_trait_conformance(normalized_base_type, "Index", index_trait_args)
-        }
-        self.maybe_record_extension_method_instantiation(normalized_base_type, "ref_at", List[Type].new())
-        let method_symbol = self.make_method_symbol("ref_at", ref_return_type)
-
-        let needs_temp = when typed_base.expr_kind in {
-            .Variable(_) then false,
-            .MemberPath(_, _) then false,
-            .DerefExpr(inner_ref) then {
-                // DerefExpr of an lvalue inner (e.g. deref of a variable ref)
-                // is addressable and doesn't need a temp.
-                // DerefExpr of an rvalue inner (e.g. deref of ref_at result)
-                // produces an rvalue that needs materialization into a let-bound
-                // temp so ref_at receives a stack borrow instead of heap allocation.
-                yield when inner_ref.expr_kind in {
-                    .Variable(_) then false,
-                    .MemberPath(_, _) then false,
-                    .DerefExpr(_) then false,
-                    _ then true,
-                }
+        return when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
+            .Some(kind) then when kind in {
+                .String() or .List(_) or .Deque(_) then self.build_builtin_subscript_helper_call(typed_base, typed_args, "__index_get"),
+                .Pointer(element_type, _) then {
+                    let pointer_base_type = self.builtin_subscript_base_type(typed_base.expr_type)
+                    let pointer_expr = when typed_base.expr_type in {
+                        .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
+                        .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
+                        _ then typed_base,
+                    }
+                    let index_expr = if typed_args.is_empty()
+                        then make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.UIntType())
+                        else typed_args[0(UInt)].val
+                    let offset_expr = make_typed_expr(
+                        TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(index_expr)),
+                        pointer_base_type,
+                    )
+                    yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                },
             },
-            _ then true,
+            .None() then {
+                self.push_diagnostic_at_span(
+                    "subscript is only supported for String, List, Deque, and pointer types",
+                    self.typed_expr_span(box(typed_base))
+                )
+                yield self.empty_typed_block(result_type)
+            },
         }
-
-        if not needs_temp then {
-            let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
-            let ref_callee = make_typed_expr(
-                TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
-                method_symbol.symbol_type,
-            )
-            let ref_call = make_typed_expr(TypedExprKind.Call(box(ref_callee), typed_args), ref_return_type)
-            return make_typed_expr(TypedExprKind.DerefExpr(box(ref_call)), result_type)
-        }
-
-        let temp_symbol = self.make_expr_temp_symbol("__sub_base", typed_base.expr_type, VariableKind.SubscriptBaseBorrowAlias())
-        let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
-        let adapted_base = self.adapt_receiver_to_expected_self_type(temp_var, expected_self_type)
-        let ref_callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
-            method_symbol.symbol_type,
-        )
-        let ref_call = make_typed_expr(TypedExprKind.Call(box(ref_callee), typed_args), ref_return_type)
-        let lowered_call = make_typed_expr(TypedExprKind.DerefExpr(box(ref_call)), result_type)
-        let mut block_statements = List[TypedStatement].new()
-        block_statements.push(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span()))
-        block_statements.push(TypedStatement.ExprStmt(box(lowered_call), unknown_span()))
-        return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
     }
 
     private empty_typed_block(self, t Type) TypedExpr = {

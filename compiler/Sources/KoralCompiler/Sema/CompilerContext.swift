@@ -124,20 +124,36 @@ public final class CompilerContext: @unchecked Sendable {
             defKind = .module
         }
 
-        let lookupSourceFile = access == .private ? sourceFile : nil
-        let defId = defIdMap.lookup(
-            modulePath: modulePath,
-            name: name,
-            sourceFile: lookupSourceFile
-        ) ?? defIdMap.allocate(
-            modulePath: modulePath,
-            name: name,
-            kind: defKind,
-            sourceFile: sourceFile,
-            access: access,
-            packageID: packageID,
-            span: span
-        )
+        let defId: DefId
+        if access == .private {
+            defId = defIdMap.lookupExact(
+                modulePath: modulePath,
+                name: name,
+                sourceFile: sourceFile
+            ) ?? defIdMap.allocate(
+                modulePath: modulePath,
+                name: name,
+                kind: defKind,
+                sourceFile: sourceFile,
+                access: access,
+                packageID: packageID,
+                span: span
+            )
+        } else {
+            defId = defIdMap.lookup(
+                modulePath: modulePath,
+                name: name,
+                sourceFile: nil
+            ) ?? defIdMap.allocate(
+                modulePath: modulePath,
+                name: name,
+                kind: defKind,
+                sourceFile: sourceFile,
+                access: access,
+                packageID: packageID,
+                span: span
+            )
+        }
 
         defIdMap.addSymbolInfo(
             defId: defId,

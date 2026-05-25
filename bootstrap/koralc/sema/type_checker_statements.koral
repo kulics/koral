@@ -329,35 +329,58 @@ given TypeChecker {
         return when base in {
             .SubscriptExpr(outer_base, outer_args, _) then {
                 let typed_outer_base = self.infer_writable_subscript_base_expr_ref(outer_base, scope)
-                let mut_ref_param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "mut_ref_at")
-
-                let mut typed_outer_args = List[ref TypedExpr].new()
-                let mut arg_idx UInt = 0
-                for arg in outer_args then {
-                    let arg_expected = if arg_idx < mut_ref_param_types.count()
-                        then Option[Type].Some(mut_ref_param_types[arg_idx])
-                        else Option[Type].None()
-                    typed_outer_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
-                    arg_idx += 1
+                return when self.resolve_builtin_subscript_kind(typed_outer_base.expr_type) in {
+                    .Some(kind) then when kind in {
+                        .String() then {
+                            self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(typed_outer_base)))
+                            yield self.empty_typed_block(Type.Unknown())
+                        },
+                        .List(_) or .Deque(_) then {
+                            let param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "__index_mut_ptr")
+                            let mut typed_outer_args = List[ref TypedExpr].new()
+                            let mut arg_idx UInt = 0
+                            for arg in outer_args then {
+                                let arg_expected = if arg_idx < param_types.count()
+                                    then Option[Type].Some(param_types[arg_idx])
+                                    else Option[Type].None()
+                                typed_outer_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
+                                arg_idx += 1
+                            }
+                            let ptr_expr = self.build_builtin_subscript_helper_call(typed_outer_base, typed_outer_args, "__index_mut_ptr")
+                            yield when ptr_expr.expr_type in {
+                                .MutablePointerType(inner) then make_typed_expr(TypedExprKind.DerefExpr(box(ptr_expr)), inner.val),
+                                _ then {
+                                    self.push_diagnostic_at_span(
+                                        "Type mismatch: expected mut ptr return, got \(self.display_type_name(ptr_expr.expr_type))",
+                                        self.typed_expr_span(box(ptr_expr))
+                                    )
+                                    yield self.empty_typed_block(Type.Unknown())
+                                },
+                            }
+                        },
+                        .Pointer(element_type, _) then {
+                            let typed_index = self.check_expr_scoped_ref(outer_args[0], Option[Type].Some(Type.UIntType()), scope)
+                            let pointer_base_type = self.builtin_subscript_base_type(typed_outer_base.expr_type)
+                            let pointer_expr = when typed_outer_base.expr_type in {
+                                .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_outer_base)), pointer_base_type),
+                                .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_outer_base)), pointer_base_type),
+                                _ then typed_outer_base,
+                            }
+                            let offset_expr = make_typed_expr(
+                                TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
+                                pointer_base_type,
+                            )
+                            yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                        },
+                    },
+                    .None() then {
+                        self.push_diagnostic_at_span(
+                            "subscript is only supported for String, List, Deque, and pointer types",
+                            self.typed_expr_span(box(typed_outer_base))
+                        )
+                        yield self.empty_typed_block(Type.Unknown())
+                    },
                 }
-
-                let mut_ref_return_type = self.resolve_method_return_type(typed_outer_base.expr_type, "mut_ref_at")
-                let expected_self_type = self.resolve_method_self_type(typed_outer_base.expr_type, "mut_ref_at")
-                let adapted_base = self.adapt_receiver_to_expected_self_type(typed_outer_base, expected_self_type)
-                let normalized_base_type = when typed_outer_base.expr_type in {
-                    .MutableReferenceType(inner) then inner.val,
-                    .ReferenceType(inner) then inner.val,
-                    .WeakReferenceType(inner) then inner.val,
-                    .MutableWeakReferenceType(inner) then inner.val,
-                    _ then typed_outer_base.expr_type,
-                }
-                self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", List[Type].new())
-                let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
-                let callee = make_typed_expr(
-                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None()),
-                    mut_ref_method_symbol.symbol_type,
-                )
-                return make_typed_expr(TypedExprKind.Call(box(callee), typed_outer_args), mut_ref_return_type)
             },
             _ then self.check_expr_scoped_ref(base, .None(), scope),
         }
@@ -365,70 +388,82 @@ given TypeChecker {
 
     private lower_subscript_assignment_stmt(self, base ref Expr, args List[ref Expr], value ref Expr, typed_target TypedExpr, op Option[CompoundAssignmentOperator], scope Scope) TypedStatement = {
         let typed_base = self.infer_writable_subscript_base_expr_ref(base, scope)
-        let base_inner_type = when typed_base.expr_type in {
-            .MutableReferenceType(inner) then inner.val,
-            .ReferenceType(inner) then inner.val,
-            _ then typed_base.expr_type,
-        }
-        when base_inner_type in {
-            .MutablePointerType(element_ref) then {
-                let element_type = element_ref.val
-                let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
-                let ptr_expr = box(typed_base)
-                let offset_expr = make_typed_expr(
-                    TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
-                    base_inner_type,
-                )
-                let lvalue_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
-                let lowered_value = when op in {
-                    .Some(compound_op) then {
-                        let typed_rhs = self.check_expr_scoped_ref(value, .Some(element_type), scope)
-                        yield when compound_op in {
-                            .AddAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Add(), box(typed_rhs)), element_type),
-                            .SubtractAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Subtract(), box(typed_rhs)), element_type),
-                            .MultiplyAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Multiply(), box(typed_rhs)), element_type),
-                            .DivideAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Divide(), box(typed_rhs)), element_type),
-                            .RemainderAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Remainder(), box(typed_rhs)), element_type),
-                            .BitAndAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.BitAnd(), box(typed_rhs)), element_type),
-                            .BitOrAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.BitOr(), box(typed_rhs)), element_type),
-                            .BitXorAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.BitXor(), box(typed_rhs)), element_type),
-                            .LeftShiftAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.LeftShift(), box(typed_rhs)), element_type),
-                            .RightShiftAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.RightShift(), box(typed_rhs)), element_type),
-                        }
-                    },
-                    .None() then self.check_expr_scoped_ref(value, .Some(element_type), scope),
-                }
-                return TypedStatement.AssignmentStmt(box(lvalue_expr), box(lowered_value), unknown_span())
+        let base_inner_type = self.builtin_subscript_base_type(typed_base.expr_type)
+        when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
+            .Some(kind) then when kind in {
+                .Pointer(element_type, mutable_pointer) then {
+                    if not mutable_pointer then {
+                        self.push_diagnostic_at_span(
+                            "Cannot assign through read-only pointer of type '\(self.display_type_name(base_inner_type))'",
+                            self.typed_expr_span(box(typed_base))
+                        )
+                        return TypedStatement.ExprStmt(box(self.empty_typed_block(Type.Unknown())), unknown_span())
+                    }
+                    let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
+                    let ptr_expr = box(when typed_base.expr_type in {
+                        .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), base_inner_type),
+                        .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), base_inner_type),
+                        _ then typed_base,
+                    })
+                    let offset_expr = make_typed_expr(
+                        TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
+                        base_inner_type,
+                    )
+                    let lvalue_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                    let lowered_value = when op in {
+                        .Some(compound_op) then {
+                            let typed_rhs = self.check_expr_scoped_ref(value, .Some(element_type), scope)
+                            yield when compound_op in {
+                                .AddAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Add(), box(typed_rhs)), element_type),
+                                .SubtractAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Subtract(), box(typed_rhs)), element_type),
+                                .MultiplyAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Multiply(), box(typed_rhs)), element_type),
+                                .DivideAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Divide(), box(typed_rhs)), element_type),
+                                .RemainderAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Remainder(), box(typed_rhs)), element_type),
+                                .BitAndAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.BitAnd(), box(typed_rhs)), element_type),
+                                .BitOrAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.BitOr(), box(typed_rhs)), element_type),
+                                .BitXorAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.BitXor(), box(typed_rhs)), element_type),
+                                .LeftShiftAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.LeftShift(), box(typed_rhs)), element_type),
+                                .RightShiftAssign() then make_typed_expr(TypedExprKind.BitwiseExpr(box(lvalue_expr), BitwiseOperator.RightShift(), box(typed_rhs)), element_type),
+                            }
+                        },
+                        .None() then self.check_expr_scoped_ref(value, .Some(element_type), scope),
+                    }
+                    return TypedStatement.AssignmentStmt(box(lvalue_expr), box(lowered_value), unknown_span())
+                },
+                .String() then {
+                    self.push_diagnostic_at_span(
+                        "String subscript returns a UInt8 value and cannot be assigned",
+                        self.typed_expr_span(box(typed_base))
+                    )
+                    return TypedStatement.ExprStmt(box(self.empty_typed_block(Type.Unknown())), unknown_span())
+                },
+                .List(_) or .Deque(_) then {},
             },
-            _ then {},
+            .None() then {
+                self.push_diagnostic_at_span(
+                    "subscript is only supported for String, List, Deque, and pointer types",
+                    self.typed_expr_span(box(typed_base))
+                )
+                return TypedStatement.ExprStmt(box(self.empty_typed_block(Type.Unknown())), unknown_span())
+            },
         }
-        let mut_ref_param_types = self.resolve_method_param_types(typed_base.expr_type, "mut_ref_at")
-        let expected_index_count = mut_ref_param_types.count()
+        let set_param_types = self.resolve_method_param_types(typed_base.expr_type, "__index_set")
+        let expected_index_count = if set_param_types.is_empty() then 0(UInt) else set_param_types.count() - 1(UInt)
 
         let mut typed_args = List[ref TypedExpr].new()
         let mut arg_idx UInt = 0
         for arg in args then {
-            let arg_expected = if arg_idx < expected_index_count then Option[Type].Some(mut_ref_param_types[arg_idx]) else Option[Type].None()
+            let arg_expected = if arg_idx < expected_index_count then Option[Type].Some(set_param_types[arg_idx]) else Option[Type].None()
             typed_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
             arg_idx += 1
         }
 
-        let mut_ref_return_type = self.resolve_method_return_type(typed_base.expr_type, "mut_ref_at")
-        let expected_value_type = when mut_ref_return_type in {
-            .MutableReferenceType(inner) then inner.val,
-            _ then typed_target.expr_type,
-        }
-        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "mut_ref_at")
+        let expected_value_type = if expected_index_count < set_param_types.count()
+            then set_param_types[expected_index_count]
+            else typed_target.expr_type
+
+        let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "__index_set")
         let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
-        let normalized_base_type = when typed_base.expr_type in {
-            .MutableReferenceType(inner) then inner.val,
-            .ReferenceType(inner) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
-            _ then typed_base.expr_type,
-        }
-        self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", List[Type].new())
-        let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
 
         let mut block_statements = List[TypedStatement].new()
         let base_symbol = self.push_assignment_temp_decl("__sub_base", adapted_base, VariableKind.SubscriptBaseBorrowAlias(), block_statements.ref)
@@ -469,14 +504,13 @@ given TypeChecker {
 
         let value_symbol = self.push_assignment_temp_decl("__sub_val", lowered_value, VariableKind.Value(), block_statements.ref)
         let value_var = make_typed_expr(TypedExprKind.Variable(value_symbol), value_symbol.symbol_type)
-
-        let call_callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(base_var), base_var.expr_type, box(mut_ref_method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None()),
-            mut_ref_method_symbol.symbol_type,
-        )
-        let call_expr = make_typed_expr(TypedExprKind.Call(box(call_callee), arg_vars), mut_ref_return_type)
-        let write_target = make_typed_expr(TypedExprKind.DerefExpr(box(call_expr)), expected_value_type)
-        block_statements.push(TypedStatement.AssignmentStmt(box(write_target), box(value_var), unknown_span()))
+        let mut call_args = List[ref TypedExpr].new()
+        for arg_var in arg_vars then {
+            call_args.push(arg_var)
+        }
+        call_args.push(box(value_var))
+        let set_call = self.build_builtin_subscript_helper_call(base_var, call_args, "__index_set")
+        block_statements.push(TypedStatement.ExprStmt(box(set_call), unknown_span()))
         return TypedStatement.ExprStmt(box(make_typed_expr(TypedExprKind.Block(block_statements), Type.VoidType())), unknown_span())
     }
 
@@ -984,33 +1018,50 @@ given TypeChecker {
         return when base in {
             .SubscriptExpr(outer_base, outer_args, _) then {
                 let typed_outer_base = self.infer_writable_member_base(outer_base, scope)
-                let mut_ref_param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "mut_ref_at")
-
-                let mut typed_outer_args = List[ref TypedExpr].new()
-                let mut arg_idx UInt = 0
-                for arg in outer_args then {
-                    let arg_expected = if arg_idx < mut_ref_param_types.count() then Option[Type].Some(mut_ref_param_types[arg_idx]) else Option[Type].None()
-                    typed_outer_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
-                    arg_idx += 1
+                return when self.resolve_builtin_subscript_kind(typed_outer_base.expr_type) in {
+                    .Some(kind) then when kind in {
+                        .String() then {
+                            self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(typed_outer_base)))
+                            yield self.empty_typed_block(Type.Unknown())
+                        },
+                        .List(_) or .Deque(_) then {
+                            let param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "__index_mut_ptr")
+                            let mut typed_outer_args = List[ref TypedExpr].new()
+                            let mut arg_idx UInt = 0
+                            for arg in outer_args then {
+                                let arg_expected = if arg_idx < param_types.count() then Option[Type].Some(param_types[arg_idx]) else Option[Type].None()
+                                typed_outer_args.push(box(self.check_expr_scoped_ref(arg, arg_expected, scope)))
+                                arg_idx += 1
+                            }
+                            let ptr_expr = self.build_builtin_subscript_helper_call(typed_outer_base, typed_outer_args, "__index_mut_ptr")
+                            yield when ptr_expr.expr_type in {
+                                .MutablePointerType(inner) then make_typed_expr(TypedExprKind.DerefExpr(box(ptr_expr)), inner.val),
+                                _ then self.empty_typed_block(Type.Unknown()),
+                            }
+                        },
+                        .Pointer(element_type, _) then {
+                            let typed_index = self.check_expr_scoped_ref(outer_args[0], Option[Type].Some(Type.UIntType()), scope)
+                            let pointer_base_type = self.builtin_subscript_base_type(typed_outer_base.expr_type)
+                            let pointer_expr = when typed_outer_base.expr_type in {
+                                .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_outer_base)), pointer_base_type),
+                                .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_outer_base)), pointer_base_type),
+                                _ then typed_outer_base,
+                            }
+                            let offset_expr = make_typed_expr(
+                                TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
+                                pointer_base_type,
+                            )
+                            yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                        },
+                    },
+                    .None() then {
+                        self.push_diagnostic_at_span(
+                            "subscript is only supported for String, List, Deque, and pointer types",
+                            self.typed_expr_span(box(typed_outer_base))
+                        )
+                        yield self.empty_typed_block(Type.Unknown())
+                    },
                 }
-
-                let mut_ref_return_type = self.resolve_method_return_type(typed_outer_base.expr_type, "mut_ref_at")
-                let expected_self_type = self.resolve_method_self_type(typed_outer_base.expr_type, "mut_ref_at")
-                let adapted_base = self.adapt_receiver_to_expected_self_type(typed_outer_base, expected_self_type)
-                let normalized_base_type = when typed_outer_base.expr_type in {
-                    .MutableReferenceType(inner) then inner.val,
-                    .ReferenceType(inner) then inner.val,
-                    .WeakReferenceType(inner) then inner.val,
-                    .MutableWeakReferenceType(inner) then inner.val,
-                    _ then typed_outer_base.expr_type,
-                }
-                self.maybe_record_extension_method_instantiation(normalized_base_type, "mut_ref_at", List[Type].new())
-                let mut_ref_method_symbol = self.make_method_symbol("mut_ref_at", mut_ref_return_type)
-                let callee = make_typed_expr(
-                    TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(mut_ref_method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None()),
-                    mut_ref_method_symbol.symbol_type,
-                )
-                return make_typed_expr(TypedExprKind.Call(box(callee), typed_outer_args), mut_ref_return_type)
             },
             _ then self.check_expr_scoped_ref(base, .None(), scope),
         }
