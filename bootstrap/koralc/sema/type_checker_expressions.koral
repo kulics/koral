@@ -499,13 +499,22 @@ given TypeChecker {
                         }
                     }
                     if found is .Unknown() then {
-                        self.storage.diagnostics.push(
-                            make_diagnostic(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
+                        let raw_method = self.resolve_method_signature(typed_base.expr_type, member)
+                        let visible_method = self.resolve_source_method_signature(typed_base.expr_type, member)
+                        let inaccessible_method = when raw_method in {
+                            .Some(method) then visible_method is .None()
+                                and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
+                            .None() then false,
+                        }
+                        if not inaccessible_method then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
+                                )
                             )
-                        )
+                        }
                     }
                     yield found
                 },
@@ -536,13 +545,23 @@ given TypeChecker {
                                 }
                             }
                             if found is .Unknown() then {
-                                self.storage.diagnostics.push(
-                                    make_diagnostic(
-                                        DiagnosticStage.Semantic(),
-                                        self.storage.file_path,
-                                        "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(template, args)))'"
+                                let base_type = Type.GenericStruct(template, args)
+                                let raw_method = self.resolve_method_signature(base_type, member)
+                                let visible_method = self.resolve_source_method_signature(base_type, member)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
+                                    .None() then false,
+                                }
+                                if not inaccessible_method then {
+                                    self.storage.diagnostics.push(
+                                        make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(template, args)))'"
+                                        )
                                     )
-                                )
+                                }
                             }
                             yield found
                         },
