@@ -1,4 +1,27 @@
 given TypeChecker {
+    private spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
+        let _ = self
+        return left.start.line == right.start.line and
+               left.start.column == right.start.column and
+               left.end.line == right.end.line and
+               left.end.column == right.end.column
+    }
+
+    private has_matching_last_diagnostic(self, message String, span SourceSpan) Bool = {
+        return when self.storage.diagnostics.last() in {
+            .Some(last_diag) then {
+                if last_diag.file_path <> self.storage.file_path or last_diag.message <> message then {
+                    return false
+                }
+                yield when last_diag.span in {
+                    .Some(last_span) then self.spans_equal(last_span, span),
+                    .None() then false,
+                }
+            },
+            .None() then false,
+        }
+    }
+
     private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
         let mut msg = "Type "
         msg.push_string(self.context().type_display_name(bound_type))
@@ -143,7 +166,10 @@ given TypeChecker {
                 if not (access is .Private()) or self.is_method_accessible_from_current_context(method) then {
                     return false
                 }
-                self.push_diagnostic_at_span("Cannot access private method '\(method_name)'", span)
+                let message = "Cannot access private method '\(method_name)'"
+                if not self.has_matching_last_diagnostic(message, span) then {
+                    self.push_diagnostic_at_span(message, span)
+                }
                 yield true
             },
             .None() then false,

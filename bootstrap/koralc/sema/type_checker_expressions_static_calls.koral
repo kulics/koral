@@ -1,4 +1,12 @@
 given TypeChecker {
+    private should_suppress_missing_member_call_diagnostic(self, typed_callee TypedExpr) Bool = {
+        let _ = self
+        return when typed_callee.expr_kind in {
+            .Block(statements) then statements.is_empty() and typed_callee.expr_type is .Unknown(),
+            _ then false,
+        }
+    }
+
     private dispatches_via_trait_object_for_static_call(self, receiver_type Type) Bool = {
         return when receiver_type in {
             .TraitObject(_, _) then true,
@@ -41,14 +49,26 @@ given TypeChecker {
     }
 
     private missing_member_call_expr(self, typed_callee TypedExpr, typed_args List[ref TypedExpr], base_expr ref Expr, member String, scope Scope) TypedExpr = {
+        if self.should_suppress_missing_member_call_diagnostic(typed_callee) then {
+            return make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), Type.Unknown())
+        }
         let typed_base = self.check_child_expr_ref(base_expr, .None(), scope)
-        self.storage.diagnostics.push(
-            make_diagnostic(
-                DiagnosticStage.Semantic(),
-                self.storage.file_path,
-                "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
+        let raw_method = self.resolve_method_signature(typed_base.expr_type, member)
+        let visible_method = self.resolve_source_method_signature(typed_base.expr_type, member)
+        let inaccessible_method = when raw_method in {
+            .Some(method) then visible_method is .None()
+                and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base_expr)),
+            .None() then false,
+        }
+        if not inaccessible_method then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'"
+                )
             )
-        )
+        }
         return make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), Type.Unknown())
     }
 

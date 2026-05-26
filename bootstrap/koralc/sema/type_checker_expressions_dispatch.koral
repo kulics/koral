@@ -893,6 +893,7 @@ given TypeChecker {
             .MemberPath(base, path, _) then {
                 let typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 let mut current_type = typed_base.expr_type
+                let mut inaccessible_method_member = false
                 let mut copied_path = List[String].new()
                 for seg in path then {
                     copied_path.push(seg)
@@ -903,35 +904,61 @@ given TypeChecker {
                             let pointee = inner.val
                             let segment_type = self.resolve_member_type(pointee, seg)
                             if segment_type is .Unknown() then {
-                                when pointee in {
-                                    .StructureType(def_id) then {
-                                        if self.context().is_foreign_struct(def_id) then {
-                                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
+                                let raw_method = self.resolve_method_signature(pointee, seg)
+                                let visible_method = self.resolve_source_method_signature(pointee, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
+                                if not inaccessible_method then {
+                                    when pointee in {
+                                        .StructureType(def_id) then {
+                                            if self.context().is_foreign_struct(def_id) then {
+                                                let type_name = self.context().get_name(def_id) or else self.context().type_display_name(pointee)
+                                                self.storage.diagnostics.push(
+                                                    make_diagnostic(
+                                                        DiagnosticStage.Semantic(),
+                                                        self.storage.file_path,
+                                                        "foreign struct '\(type_name)' has no field '\(seg)'"
+                                                    )
+                                                )
+                                            }
+                                        },
+                                        .GenericStruct(_, _) then {},
+                                        _ then {
                                             self.storage.diagnostics.push(
                                                 make_diagnostic(
                                                     DiagnosticStage.Semantic(),
                                                     self.storage.file_path,
-                                                    "foreign struct '\(type_name)' has no field '\(seg)'"
+                                                    "cannot access member '\(seg)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
                                                 )
                                             )
-                                        }
-                                    },
-                                    .GenericStruct(_, _) then {},
-                                    _ then {
-                                        self.storage.diagnostics.push(
-                                            make_diagnostic(
-                                                DiagnosticStage.Semantic(),
-                                                self.storage.file_path,
-                                                "cannot access member '\(seg)' on pointer to non-struct type '\(self.context().type_display_name(pointee))'"
-                                            )
-                                        )
-                                    },
+                                        },
+                                    }
                                 }
                             }
                             yield segment_type
                         },
-                        _ then self.resolve_member_type(current_type, seg),
+                        _ then {
+                            let segment_type = self.resolve_member_type(current_type, seg)
+                            if segment_type is .Unknown() then {
+                                let raw_method = self.resolve_method_signature(current_type, seg)
+                                let visible_method = self.resolve_source_method_signature(current_type, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
+                            }
+                            yield segment_type
+                        },
                     }
+                }
+                if inaccessible_method_member then {
+                    yield self.empty_typed_block(Type.Unknown())
                 }
                 let member_expr = make_typed_expr(TypedExprKind.MemberPath(box(typed_base), copied_path), current_type)
                 yield self.adapt_expr_to_expected_type_at(

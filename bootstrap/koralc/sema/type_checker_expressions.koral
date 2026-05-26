@@ -432,6 +432,18 @@ given TypeChecker {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             _ then self.check_expr_core_ref(base, .None(), scope),
         }
+        let raw_method = self.resolve_method_signature(typed_base.expr_type, member)
+        let visible_method = self.resolve_source_method_signature(typed_base.expr_type, member)
+        when raw_method in {
+            .Some(method) then {
+                if visible_method is .None()
+                    and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)) then {
+                    return self.empty_typed_block(Type.Unknown())
+                }
+            },
+            .None() then {},
+        }
+        let mut inaccessible_method_member = false
         let member_type = when typed_base.expr_type in {
             .PointerType(inner) then {
                 let pointee = inner.val
@@ -506,6 +518,7 @@ given TypeChecker {
                                 and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
                             .None() then false,
                         }
+                        inaccessible_method_member = inaccessible_method
                         if not inaccessible_method then {
                             self.storage.diagnostics.push(
                                 make_diagnostic(
@@ -553,6 +566,7 @@ given TypeChecker {
                                         and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
                                     .None() then false,
                                 }
+                                inaccessible_method_member = inaccessible_method
                                 if not inaccessible_method then {
                                     self.storage.diagnostics.push(
                                         make_diagnostic(
@@ -589,6 +603,9 @@ given TypeChecker {
             .GenericEnum(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
         }
+        if inaccessible_method_member then {
+            return self.empty_typed_block(Type.Unknown())
+        }
         return self.make_typed_member_path_expr(typed_base, member, member_type)
     }
 
@@ -603,16 +620,6 @@ given TypeChecker {
                     let typed_receiver = if self.same_expr_type(raw_typed_receiver.expr_type, normalized_receiver_type)
                         then raw_typed_receiver
                         else make_typed_expr_ref(raw_typed_receiver.expr_kind, normalized_receiver_type)
-                    let member_field_type = when typed_receiver.expr_type in {
-                        .PointerType(inner) then self.resolve_member_type(inner.val, parts.second),
-                        .MutablePointerType(inner) then self.resolve_member_type(inner.val, parts.second),
-                        _ then self.resolve_member_type(typed_receiver.expr_type, parts.second),
-                    }
-                    if member_field_type is .FunctionType(_, _) then {
-                        let mut field_path = List[String].new()
-                        field_path.push(parts.second)
-                        return make_typed_expr(TypedExprKind.MemberPath(box(typed_receiver), field_path), member_field_type)
-                    }
                     let mut has_method = false
                     let mut inaccessible_method = false
                     when typed_receiver.expr_type in {
@@ -690,12 +697,22 @@ given TypeChecker {
                     if inaccessible_method then {
                         return self.empty_typed_block(Type.Unknown())
                     }
-                    if not has_method then {
-                        return self.check_expr_core_ref(callee, .None(), scope)
+                    if has_method then {
+                        let member_type = self.resolve_method_return_type(typed_receiver.expr_type, parts.second)
+                        let method_symbol = self.make_method_symbol(parts.second, member_type)
+                        yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None()), member_type)
                     }
-                    let member_type = self.resolve_method_return_type(typed_receiver.expr_type, parts.second)
-                    let method_symbol = self.make_method_symbol(parts.second, member_type)
-                    yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None()), member_type)
+                    let member_field_type = when typed_receiver.expr_type in {
+                        .PointerType(inner) then self.resolve_member_type(inner.val, parts.second),
+                        .MutablePointerType(inner) then self.resolve_member_type(inner.val, parts.second),
+                        _ then self.resolve_member_type(typed_receiver.expr_type, parts.second),
+                    }
+                    if member_field_type is .FunctionType(_, _) then {
+                        let mut field_path = List[String].new()
+                        field_path.push(parts.second)
+                        return make_typed_expr(TypedExprKind.MemberPath(box(typed_receiver), field_path), member_field_type)
+                    }
+                    return self.check_expr_core_ref(callee, .None(), scope)
                     },
                     .None() then self.check_expr_core_ref(callee, .None(), scope),
                 }
