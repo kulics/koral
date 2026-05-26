@@ -465,6 +465,11 @@ extension TypeChecker {
       return  // All other types automatically satisfy Deref
     }
 
+    if case .genericParameter(let paramName) = selfType,
+       hasTraitBound(paramName, traitName) {
+      return
+    }
+
     // trait object self-conformance: traitObject("X") satisfies X bound
     if case .traitObject(let toTraitName, _) = selfType {
       if toTraitName == traitName {
@@ -767,8 +772,15 @@ extension TypeChecker {
     // Extract trait object info from expected type
     let traitName: String
     let traitTypeArgs: [Type]
+    let expectsMutableReference: Bool
     switch expected {
     case .reference(let inner), .mutableReference(let inner):
+      expectsMutableReference = {
+        if case .mutableReference = expected {
+          return true
+        }
+        return false
+      }()
       if case .traitObject(let name, let args) = inner {
         traitName = name
         traitTypeArgs = args
@@ -776,6 +788,7 @@ extension TypeChecker {
         return expr
       }
     case .weakReference(let inner):
+      expectsMutableReference = false
       if case .traitObject(let name, let args) = inner {
         traitName = name
         traitTypeArgs = args
@@ -783,6 +796,7 @@ extension TypeChecker {
         return expr
       }
     case .mutableWeakReference(let inner):
+      expectsMutableReference = false
       if case .traitObject(let name, let args) = inner {
         traitName = name
         traitTypeArgs = args
@@ -801,7 +815,13 @@ extension TypeChecker {
     // Get the concrete type from the source — only T ref can convert to trait object
     let concreteType: Type
     switch expr.type {
-    case .reference(let inner), .mutableReference(let inner):
+    case .reference(let inner):
+      if expectsMutableReference {
+        return expr
+      }
+      if case .traitObject = inner { return expr } // trait object → trait object: not supported
+      concreteType = inner
+    case .mutableReference(let inner):
       if case .traitObject = inner { return expr } // trait object → trait object: not supported
       concreteType = inner
     default:
@@ -811,7 +831,12 @@ extension TypeChecker {
 
     // Check trait conformance (with type args if generic trait)
     if traitTypeArgs.isEmpty {
-      try enforceTraitConformance(concreteType, traitName: traitName)
+      if case .genericParameter(let paramName) = concreteType,
+         hasTraitBound(paramName, traitName) {
+        // Bound generic parameters can be erased directly to the trait object.
+      } else {
+        try enforceTraitConformance(concreteType, traitName: traitName)
+      }
     } else {
       try enforceGenericTraitConformance(concreteType, traitName: traitName, traitTypeArgs: traitTypeArgs, context: nil)
     }

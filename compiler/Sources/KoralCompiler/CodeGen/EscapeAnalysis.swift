@@ -918,9 +918,7 @@ public class EscapeContext {
             preAnalyzeExpression(dest)
             preAnalyzeExpression(src)
             preAnalyzeExpression(count)
-        case .refCount(let val):
-            preAnalyzeExpression(val)
-        case .refIsBorrow(let val):
+        case .isUniqueMutable(let val):
             preAnalyzeExpression(val)
         case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _):
             preAnalyzeExpression(ptr)
@@ -1425,9 +1423,7 @@ public class GlobalEscapeAnalyzer {
             extractCallsFromExpression(dest, callerDefId: callerDefId)
             extractCallsFromExpression(src, callerDefId: callerDefId)
             extractCallsFromExpression(count, callerDefId: callerDefId)
-        case .refCount(let val):
-            extractCallsFromExpression(val, callerDefId: callerDefId)
-        case .refIsBorrow(let val):
+        case .isUniqueMutable(let val):
             extractCallsFromExpression(val, callerDefId: callerDefId)
         case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _):
             extractCallsFromExpression(ptr, callerDefId: callerDefId)

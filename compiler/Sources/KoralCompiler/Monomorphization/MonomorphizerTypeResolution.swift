@@ -1593,11 +1593,8 @@ extension Monomorphizer {
                 count: resolveTypesInExpression(count)
             )
             
-        case .refCount(let val):
-            return .refCount(val: resolveTypesInExpression(val))
-
-        case .refIsBorrow(let val):
-            return .refIsBorrow(val: resolveTypesInExpression(val))
+        case .isUniqueMutable(let val):
+            return .isUniqueMutable(val: resolveTypesInExpression(val))
 
         case .makeRef(let ptr, let owner, let resultType):
             return .makeRef(

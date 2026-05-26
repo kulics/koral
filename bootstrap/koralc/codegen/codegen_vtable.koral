@@ -1417,8 +1417,7 @@ given CodeGen {
             .TraitMethodPlaceholder(base, _, _, _, _) then self.collect_implicit_trait_ref_requests_in_expr(base, out),
             .IntrinsicCall(intrinsic_node) then {
                 when intrinsic_node in {
-                    .RefCount(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
-                    .RefIsBorrow(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
+                    .IsUniqueMutable(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
                     .DeallocMemory(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
                     .DeinitMemory(inner) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
                     .TakeMemory(inner, _) then self.collect_implicit_trait_ref_requests_in_expr(inner, out),
@@ -1552,8 +1551,18 @@ given CodeGen {
                     self.collect_return_trait_ref_requests_in_expr(arg, expected_return_type, out)
                 }
             },
-            .TraitObjectConversion(inner, _, _) then {
+            .TraitObjectConversion(inner, trait_type, concrete_type) then {
                 self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out)
+                let trait_name = self.trait_name_of_trait_type(trait_type)
+                let trait_type_args = self.trait_type_args_of_trait_type(trait_type)
+                let normalized_concrete = self.trait_vtable_receiver_type(trait_name, concrete_type)
+                when normalized_concrete in {
+                    .Unknown() then {},
+                    .TraitObject(_, _) then {},
+                    _ then {
+                        out.push(VtableRequest(normalized_concrete, trait_name, trait_type_args))
+                    },
+                }
             },
             .MethodReference(base, _, _, _, _, _) then self.collect_return_trait_ref_requests_in_expr(base, expected_return_type, out),
             .MemberPath(base, _) then self.collect_return_trait_ref_requests_in_expr(base, expected_return_type, out),
@@ -1599,8 +1608,7 @@ given CodeGen {
             .TraitMethodPlaceholder(base, _, _, _, _) then self.collect_return_trait_ref_requests_in_expr(base, expected_return_type, out),
             .IntrinsicCall(intrinsic_node) then {
                 when intrinsic_node in {
-                    .RefCount(inner) then self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out),
-                    .RefIsBorrow(inner) then self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out),
+                    .IsUniqueMutable(inner) then self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out),
                     .DeallocMemory(inner) then self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out),
                     .DeinitMemory(inner) then self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out),
                     .TakeMemory(inner, _) then self.collect_return_trait_ref_requests_in_expr(inner, expected_return_type, out),
@@ -1647,6 +1655,10 @@ given CodeGen {
     private collect_implicit_trait_ref_vtable_requests(self) List[VtableRequest] = {
         let mut out = List[VtableRequest].new()
         for function in self.program_scan.emittable_functions then {
+            when function.body.expr_kind in {
+                .Block(_) then {},
+                _ then self.maybe_collect_implicit_trait_ref_request(function.return_type, function.body.expr_type, out),
+            }
             self.collect_implicit_trait_ref_requests_in_expr(function.body, out)
             self.collect_return_trait_ref_requests_in_expr(function.body, function.return_type, out)
         }

@@ -4020,16 +4020,7 @@ extension TypeChecker {
         return .intrinsicCall(.nullPtr(resultType: resultType))
       }
 
-      if base == "ref_count" {
-        _ = try args.map { try resolveTypeNode($0) }
-        guard arguments.count == 1 else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 1, got: arguments.count)
-        }
-        let val = try inferTypedExpression(arguments[0])
-        return .intrinsicCall(.refCount(val: val))
-      }
-      if base == "ref_is_borrow" {
+      if base == "is_unique_mutable" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
           throw SemanticError.typeMismatch(
@@ -4043,7 +4034,7 @@ extension TypeChecker {
           arguments[0],
           expectedType: .reference(inner: resolvedArgs[0])
         )
-        return .intrinsicCall(.refIsBorrow(val: val))
+        return .intrinsicCall(.isUniqueMutable(val: val))
       }
 
       if base == "make_ref" {
@@ -4330,11 +4321,8 @@ extension TypeChecker {
         .moveMemory(
           dest: typedArguments[0], source: typedArguments[1], count: typedArguments[2]))
     }
-    if templateName == "ref_count" {
-      return .intrinsicCall(.refCount(val: typedArguments[0]))
-    }
-    if templateName == "ref_is_borrow" {
-      return .intrinsicCall(.refIsBorrow(val: typedArguments[0]))
+    if templateName == "is_unique_mutable" {
+      return .intrinsicCall(.isUniqueMutable(val: typedArguments[0]))
     }
 
     if templateName == "make_ref" {

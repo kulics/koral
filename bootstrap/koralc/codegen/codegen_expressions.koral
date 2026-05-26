@@ -329,6 +329,40 @@ given CodeGen {
             return source_value
         }
 
+        when target_type in {
+            .ReferenceType(target_inner_ref) then when target_inner_ref.val in {
+                .TraitObject(trait_name, _) then when source_type in {
+                    .ReferenceType(actual_inner_ref) then when actual_inner_ref.val in {
+                        .TraitObject(_, _) then {},
+                        _ then {
+                            return self.generate_trait_object_conversion_from_ref_value(source_value, trait_name, source_type, self.is_lvalue_expr(expr))
+                        },
+                    },
+                    .MutableReferenceType(actual_inner_ref) then when actual_inner_ref.val in {
+                        .TraitObject(_, _) then {},
+                        _ then {
+                            return self.generate_trait_object_conversion_from_ref_value(source_value, trait_name, source_type, self.is_lvalue_expr(expr))
+                        },
+                    },
+                    _ then {},
+                },
+                _ then {},
+            },
+            .MutableReferenceType(target_inner_ref) then when target_inner_ref.val in {
+                .TraitObject(trait_name, _) then when source_type in {
+                    .MutableReferenceType(actual_inner_ref) then when actual_inner_ref.val in {
+                        .TraitObject(_, _) then {},
+                        _ then {
+                            return self.generate_trait_object_conversion_from_ref_value(source_value, trait_name, source_type, self.is_lvalue_expr(expr))
+                        },
+                    },
+                    _ then {},
+                },
+                _ then {},
+            },
+            _ then {},
+        }
+
         let target_c_type = self.c_type_name(target_type)
         let source_is_scalar = self.is_integer_type(source_type) or self.is_float_type(source_type) or source_type is .BoolType()
         let target_is_scalar = self.is_integer_type(target_type) or self.is_float_type(target_type) or target_type is .BoolType()
@@ -796,6 +830,54 @@ given CodeGen {
         let preadapted_value = self.adapt_expression_result_to_type(arg, arg_value, expected_type)
         let expected_is_ref = expected_type is .ReferenceType(_) or expected_type is .MutableReferenceType(_)
         if expected_is_ref then {
+            when expected_type in {
+                .ReferenceType(expected_inner_ref) then when expected_inner_ref.val in {
+                    .TraitObject(trait_name, _) then when arg.expr_type in {
+                        .ReferenceType(actual_inner_ref) then when actual_inner_ref.val in {
+                            .TraitObject(_, _) then {},
+                            _ then {
+                                return self.generate_trait_object_conversion_from_ref_value(
+                                    preadapted_value,
+                                    trait_name,
+                                    arg.expr_type,
+                                    is_lvalue,
+                                )
+                            },
+                        },
+                        .MutableReferenceType(actual_inner_ref) then when actual_inner_ref.val in {
+                            .TraitObject(_, _) then {},
+                            _ then {
+                                return self.generate_trait_object_conversion_from_ref_value(
+                                    preadapted_value,
+                                    trait_name,
+                                    arg.expr_type,
+                                    is_lvalue,
+                                )
+                            },
+                        },
+                        _ then {},
+                    },
+                    _ then {},
+                },
+                .MutableReferenceType(expected_inner_ref) then when expected_inner_ref.val in {
+                    .TraitObject(trait_name, _) then when arg.expr_type in {
+                        .MutableReferenceType(actual_inner_ref) then when actual_inner_ref.val in {
+                            .TraitObject(_, _) then {},
+                            _ then {
+                                return self.generate_trait_object_conversion_from_ref_value(
+                                    preadapted_value,
+                                    trait_name,
+                                    arg.expr_type,
+                                    is_lvalue,
+                                )
+                            },
+                        },
+                        _ then {},
+                    },
+                    _ then {},
+                },
+                _ then {},
+            }
             when arg.expr_type in {
                 .ReferenceType(_) or .MutableReferenceType(_) then {
                     return preadapted_value
@@ -1568,7 +1650,20 @@ given CodeGen {
                 let saved_scope_state = self.snapshot_scope_state()
                 let raw_cond_result = self.generate_expression_ssa(cond_ref)
                 let cond_result = self.adapt_expression_result_to_type(cond_ref, raw_cond_result, Type.BoolType())
-                let final_if_expr_type = expr.expr_type
+                let final_if_expr_type = when self.current_yield_target() in {
+                    .Some(target) then when target.result_type in {
+                        .ReferenceType(inner_ref) then when inner_ref.val in {
+                            .TraitObject(_, _) then target.result_type,
+                            _ then expr.expr_type,
+                        },
+                        .MutableReferenceType(inner_ref) then when inner_ref.val in {
+                            .TraitObject(_, _) then target.result_type,
+                            _ then expr.expr_type,
+                        },
+                        _ then expr.expr_type,
+                    },
+                    .None() then expr.expr_type,
+                }
 
                 yield if self.type_is_void_or_never(final_if_expr_type) then {
                     // void/never：不需要结果变量
@@ -1886,25 +1981,19 @@ given CodeGen {
 
     private generate_intrinsic_call_ssa(self mut ref, node TypedIntrinsic) String = {
         return when node in {
-            .RefCount(ref_expr) then {
+            .IsUniqueMutable(ref_expr) then {
                 let ref_value = self.intrinsic_ref_value(ref_expr)
-                let result = self.next_temp_with_decl("intptr_t")
+                let result = self.next_temp_with_decl("int")
                 self.add_indent()
                 self.buffer.push_string("\(result) = 0;\n")
                 self.add_indent()
                 self.buffer.push_string("if (\(ref_value).control) {\n")
                 self.with_indent(() -> {
                     self.add_indent()
-                    self.buffer.push_string("\(result) = atomic_load(&((struct __koral_Control*)\(ref_value).control)->strong_count);\n")
+                    self.buffer.push_string("\(result) = (atomic_load(&((struct __koral_Control*)\(ref_value).control)->strong_count) == 1);\n")
                 })
                 self.add_indent()
                 self.buffer.push_string("}\n")
-                self.register_variable(result, Type.IntType())
-                yield result
-            },
-            .RefIsBorrow(ref_expr) then {
-                let ref_value = self.intrinsic_ref_value(ref_expr)
-                let result = self.next_temp_with_init("int", "(\(ref_value).control == NULL)")
                 self.register_variable(result, Type.BoolType())
                 yield result
             },

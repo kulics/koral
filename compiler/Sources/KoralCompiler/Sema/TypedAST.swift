@@ -334,8 +334,7 @@ public indirect enum TypedIntrinsic {
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
   case moveMemory(
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
-  case refCount(val: TypedExpressionNode)
-  case refIsBorrow(val: TypedExpressionNode)
+  case isUniqueMutable(val: TypedExpressionNode)
   case makeRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
   case makeMutRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
 
@@ -362,8 +361,7 @@ public indirect enum TypedIntrinsic {
     case .deallocMemory: return .void
     case .copyMemory: return .void
     case .moveMemory: return .void
-    case .refCount: return .int
-    case .refIsBorrow: return .bool
+    case .isUniqueMutable: return .bool
     case .makeRef(_, _, let resultType): return resultType
     case .makeMutRef(_, _, let resultType): return resultType
     case .downgradeRef(_, let resultType): return resultType

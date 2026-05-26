@@ -478,7 +478,7 @@ let mut n = 42
 let a = n.ref            // let mut → mut ref T
 let b = a.val            // Dereference, gets 42
 a.val = 100              // Deref assignment (mut ref supports .val = expr)
-println(ref_count(a))    // Reference count
+println(is_unique_mutable(a)) // True only for owning, uniquely-held refs
 
 let m = 42
 let c = m.ref            // let → ref T (read-only)
@@ -1966,5 +1966,5 @@ The `intrinsic` keyword declares types and functions built into the compiler:
 
 ```koral
 public intrinsic type Int
-public intrinsic let ref_count[T Any](r ref T) Int
+public intrinsic let is_unique_mutable[T Any](r ref T) Bool
 ```

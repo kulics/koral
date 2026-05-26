@@ -1350,19 +1350,12 @@ extension TypeChecker {
       }
       return .intrinsicCall(.spawnThread(outHandle: outHandle, outTid: outTid, closure: closure, stackSize: stackSize))
 
-    case "ref_count":
+    case "is_unique_mutable":
       guard arguments.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
       let val = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.refCount(val: val))
-
-    case "ref_is_borrow":
-      guard arguments.count == 1 else {
-        throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
-      }
-      let val = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.refIsBorrow(val: val))
+      return .intrinsicCall(.isUniqueMutable(val: val))
 
     default: return nil
     }

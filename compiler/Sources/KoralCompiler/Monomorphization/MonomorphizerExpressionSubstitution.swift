@@ -1072,11 +1072,8 @@ extension Monomorphizer {
             )
 
             
-        case .refCount(let val):
-            return .refCount(val: substituteTypesInExpression(val, substitution: substitution))
-
-        case .refIsBorrow(let val):
-            return .refIsBorrow(val: substituteTypesInExpression(val, substitution: substitution))
+        case .isUniqueMutable(let val):
+            return .isUniqueMutable(val: substituteTypesInExpression(val, substitution: substitution))
 
         case .makeRef(let ptr, let owner, let resultType):
             return .makeRef(

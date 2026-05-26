@@ -173,7 +173,7 @@ private let find_built_executable(output_dir Path) Result[Path] = {
     return Result[Path].Error(box("multiple executable candidates produced"))
 }
 
-private let prepared_run_executable_path(info CaseInfo, output_dir Path) Result[Path] = {
+private let prepared_run_executable_path(info CaseInfo, output_dir Path, launch_attempt UInt) Result[Path] = {
     let exe_path = when path_exist(executable_path_for_case(info, output_dir)) in {
         true then executable_path_for_case(info, output_dir),
         false then find_built_executable(output_dir) or return,
@@ -185,15 +185,31 @@ private let prepared_run_executable_path(info CaseInfo, output_dir Path) Result[
     // Windows can apply elevation / compatibility heuristics based on the
     // executable basename. Test names such as "...dispatch..." contain
     // "patch", which can make the exact same binary fail to launch normally.
-    // Run through a neutral filename to keep execution deterministic.
-    let launch_path = output_dir.join("run.exe")
-    return when copy_file(exe_path, to: launch_path) in {
-        .Ok(_) then {
-            sleep(100ms)
-            yield Result[Path].Ok(launch_path)
-        },
-        .Error(e) then Result[Path].Error(e),
+    // Run through a fresh neutral filename on each attempt to avoid transient
+    // Windows file-visibility and file-lock races immediately after build.
+    let mut copy_attempt = launch_attempt
+    while copy_attempt < launch_attempt + 16 then {
+        let launch_path = output_dir.join("run-" + copy_attempt.to_string() + ".exe")
+        if path_exist(launch_path) then {
+            copy_attempt += 1
+            continue
+        }
+        when copy_file(exe_path, to: launch_path) in {
+            .Ok(_) then {
+                sleep(100ms)
+                return Result[Path].Ok(launch_path)
+            },
+            .Error(e) then {
+                if path_exist(launch_path) then {
+                    copy_attempt += 1
+                    continue
+                }
+                return Result[Path].Error(e)
+            },
+        }
     }
+
+    return Result[Path].Error(box("failed to create launch executable copy"))
 }
 
 private let run_command_args_for_case() List[String] = List[String].new()
@@ -318,14 +334,18 @@ private let execute_command_with_timeout(
 
 private let execute_built_executable_with_retry(
     config RunnerConfig,
-    program Path,
+    info CaseInfo,
+    output_dir Path,
     capture_root Path,
     start MonoTime,
     timeout_secs Int64,
 ) CommandExecution = {
+    let first_program = prepared_run_executable_path(info, output_dir, 0(UInt)) or else {
+        return .InfrastructureError("failed to prepare built executable: " + it.message())
+    }
     let first = execute_command_with_timeout(
         config,
-        program.to_string(),
+        first_program.to_string(),
         run_command_args_for_case(),
         capture_root,
         "run",
@@ -336,9 +356,12 @@ private let execute_built_executable_with_retry(
     return when first in {
         .InfrastructureError(_) then {
             sleep(100ms)
+            let second_program = prepared_run_executable_path(info, output_dir, 1(UInt)) or else {
+                return .InfrastructureError("failed to prepare built executable: " + it.message())
+            }
             let second = execute_command_with_timeout(
                 config,
-                program.to_string(),
+                second_program.to_string(),
                 run_command_args_for_case(),
                 capture_root,
                 "run",
@@ -349,9 +372,12 @@ private let execute_built_executable_with_retry(
             yield when second in {
                 .InfrastructureError(_) then {
                     sleep(150ms)
+                    let third_program = prepared_run_executable_path(info, output_dir, 2(UInt)) or else {
+                        return .InfrastructureError("failed to prepare built executable: " + it.message())
+                    }
                     yield execute_command_with_timeout(
                         config,
-                        program.to_string(),
+                        third_program.to_string(),
                         run_command_args_for_case(),
                         capture_root,
                         "run",
@@ -600,22 +626,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             return pass_result(info, duration_ms, build_exit_code)
         }
 
-        let launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
-            let current_duration_ms = start.elapsed().as_milliseconds()
-            return failure_result(
-                info,
-                "failed",
-                "infrastructure_error",
-                "failed to prepare built executable: " + it.message(),
-                build_exit_code,
-                current_duration_ms,
-            )
-        }
-
         let run_output = when execute_built_executable_with_retry(
-                config,
-            launch_exe_path,
-                active_output_dir,
+            config,
+            info,
+            active_output_dir,
+            active_output_dir,
             start,
             timeout_secs,
         ) in {
@@ -632,20 +647,10 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 )
             },
             .InfrastructureError(message) then {
-                let retry_launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
-                    let current_duration_ms = start.elapsed().as_milliseconds()
-                    return failure_result(
-                        info,
-                        "failed",
-                        "infrastructure_error",
-                        "failed to re-prepare built executable: " + it.message(),
-                        build_exit_code,
-                        current_duration_ms,
-                    )
-                }
                 yield when execute_built_executable_with_retry(
                     config,
-                    retry_launch_exe_path,
+                    info,
+                    active_output_dir,
                     active_output_dir,
                     start,
                     timeout_secs,
@@ -736,22 +741,11 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         return pass_result(info, duration_ms, build_exit_code)
     }
 
-    let launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
-        let current_duration_ms = start.elapsed().as_milliseconds()
-        return failure_result(
-            info,
-            "failed",
-            "infrastructure_error",
-            "failed to prepare built executable: " + it.message(),
-            build_exit_code,
-            current_duration_ms,
-        )
-    }
-
     let run_output = when execute_built_executable_with_retry(
-            config,
-        launch_exe_path,
-            active_output_dir,
+        config,
+        info,
+        active_output_dir,
+        active_output_dir,
         start,
         timeout_secs,
     ) in {
@@ -768,20 +762,10 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         },
         .InfrastructureError(message) then {
-            let retry_launch_exe_path = prepared_run_executable_path(info, active_output_dir) or else {
-                let current_duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "failed",
-                    "infrastructure_error",
-                    "failed to re-prepare built executable: " + it.message(),
-                    build_exit_code,
-                    current_duration_ms,
-                )
-            }
             yield when execute_built_executable_with_retry(
                 config,
-                retry_launch_exe_path,
+                info,
+                active_output_dir,
                 active_output_dir,
                 start,
                 timeout_secs,

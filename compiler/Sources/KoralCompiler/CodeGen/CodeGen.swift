@@ -1983,7 +1983,7 @@ public class CodeGen {
       buffer += "memmove(\(d), \(s), \(c) * \(elemSize));\n"
       return ""
 
-    case .refCount(let val):
+    case .isUniqueMutable(let val):
       let controlPath: String
       switch val.type {
       case .reference where isAddressableLValueExpr(val),
@@ -2000,23 +2000,10 @@ public class CodeGen {
       buffer += "if (\(controlPath)) {\n"
       withIndent {
         addIndent()
-        buffer += "\(result) = atomic_load(&((struct __koral_Control*)\(controlPath))->strong_count);\n"
+        buffer += "\(result) = (atomic_load(&((struct __koral_Control*)\(controlPath))->strong_count) == 1);\n"
       }
       addIndent()
       buffer += "}\n"
-      return result
-
-    case .refIsBorrow(let val):
-      let controlPath: String
-      switch val.type {
-      case .reference where isAddressableLValueExpr(val),
-           .mutableReference where isAddressableLValueExpr(val):
-        controlPath = buildRefComponents(val).control
-      default:
-        let valRes = generateExpressionSSA(val)
-        controlPath = "\(valRes).control"
-      }
-      let result = nextTempWithInit(cType: "int", initExpr: "(\(controlPath) == NULL)")
       return result
 
     case .makeRef(let ptr, let owner, let resultType),
@@ -2162,7 +2149,7 @@ public class CodeGen {
         if case .traitObject = inner {
           buffer += "*(\(cType)*)\(p) = \(v);\n"
           addIndent()
-          buffer += "__koral_retain(((\(cType)*)\(p))->ref.control);\n"
+          buffer += "__koral_retain(((\(cType)*)\(p))->control);\n"
         } else {
           buffer += "*(struct __koral_Ref*)\(p) = \(v);\n"
           addIndent()
@@ -2173,7 +2160,7 @@ public class CodeGen {
         if case .traitObject = inner {
           buffer += "*(\(cType)*)\(p) = \(v);\n"
           addIndent()
-          buffer += "__koral_retain(((\(cType)*)\(p))->ref.control);\n"
+          buffer += "__koral_retain(((\(cType)*)\(p))->control);\n"
         } else {
           buffer += "*(struct __koral_Ref*)\(p) = \(v);\n"
           addIndent()
@@ -2199,7 +2186,7 @@ public class CodeGen {
         let cType = cTypeName(element)
         if case .traitObject = inner {
           addIndent()
-          buffer += "__koral_release(((\(cType)*)\(p))->ref.control);\n"
+          buffer += "__koral_release(((\(cType)*)\(p))->control);\n"
         } else {
           addIndent()
           buffer += "__koral_release(((struct __koral_Ref*)\(p))->control);\n"
@@ -2208,7 +2195,7 @@ public class CodeGen {
         let cType = cTypeName(element)
         if case .traitObject = inner {
           addIndent()
-          buffer += "__koral_release(((\(cType)*)\(p))->ref.control);\n"
+          buffer += "__koral_release(((\(cType)*)\(p))->control);\n"
         } else {
           addIndent()
           buffer += "__koral_release(((struct __koral_Ref*)\(p))->control);\n"

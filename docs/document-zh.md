@@ -502,7 +502,7 @@ let mut n = 42
 let a = n.ref            // let mut → mut ref T
 let b = a.val            // 解引用，得到 42
 a.val = 100              // 解引用赋值（mut ref 支持 .val = expr）
-println(ref_count(a))    // 引用计数
+println(is_unique_mutable(a)) // 仅当引用拥有所有权且唯一时为 true
 
 let m = 42
 let c = m.ref            // let → ref T（只读）
@@ -2003,5 +2003,5 @@ foreign type KoralTimespec(tv_sec Int64, tv_nsec Int64)
 
 ```koral
 public intrinsic type Int
-public intrinsic let ref_count[T Any](r ref T) Int
+public intrinsic let is_unique_mutable[T Any](r ref T) Bool
 ```
