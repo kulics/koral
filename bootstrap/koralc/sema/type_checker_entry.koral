@@ -6,11 +6,11 @@ public let type_check(program Program, file_path String) BodyCheckerOutput = {
 
     if collector.diagnostics.has_errors() then {
         diagnostics.merge(collector.diagnostics)
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
+        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
     }
 
     let mut checker = TypeChecker.new(collector.global_scope, collector.context, file_path)
-    let typed = checker.check_program(program)
+    let typed = checker.check_program(program, true)
 
     if checker.has_errors() then {
         return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
@@ -65,15 +65,12 @@ private let run_type_resolver_pass(input TypeResolverInput) TypeResolverOutput =
     return TypeResolverOutput(input.collector_output, input.resolver_output)
 }
 
-private let run_body_checker_pass_with_options(input BodyCheckerInput, retain_checked_template_bodies Bool, keep_typed_program Bool) BodyCheckerOutput = {
+private let run_body_checker_pass(input BodyCheckerInput, retain_checked_template_bodies Bool) BodyCheckerOutput = {
     let mut checker = TypeChecker.new(
         input.type_resolver_output.collector_output.global_scope,
         input.type_resolver_output.collector_output.context,
         input.user_file_path,
     )
-    if not retain_checked_template_bodies then {
-        checker.disable_checked_template_body_retention()
-    }
     checker.storage.import_graph = Option[ImportGraph].Some(input.type_resolver_output.resolver_output.import_graph)
 
     // 注入 enum 类型名称到 constraint solver，用于 Instantiate 约束判断。
@@ -84,12 +81,7 @@ private let run_body_checker_pass_with_options(input BodyCheckerInput, retain_ch
         }
     }
 
-    let typed = if keep_typed_program then {
-        yield Option[TypedProgram].Some(checker.check_loaded_nodes(input.type_resolver_output.resolver_output.loaded_nodes_with_path))
-    } else {
-        checker.check_loaded_nodes_without_program(input.type_resolver_output.resolver_output.loaded_nodes_with_path)
-        yield Option[TypedProgram].None()
-    }
+    let typed = Option[TypedProgram].Some(checker.check_loaded_nodes(input.type_resolver_output.resolver_output.loaded_nodes_with_path, retain_checked_template_bodies))
 
     if checker.has_errors() then {
         return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates, checker.storage.instantiation_requests)
@@ -117,15 +109,11 @@ private let run_body_checker_pass_with_options(input BodyCheckerInput, retain_ch
     )
 }
 
-private let run_body_checker_pass(input BodyCheckerInput) BodyCheckerOutput = {
-    return run_body_checker_pass_with_options(input, true, true)
-}
-
-private let type_check_resolver_output(resolver_output ModuleResolverOutput, user_file_path String) BodyCheckerOutput = {
+private let type_check_resolver_output(resolver_output ModuleResolverOutput, user_file_path String, retain_checked_template_bodies Bool) BodyCheckerOutput = {
     let name_input = NameCollectorInput(resolver_output, user_file_path)
     let name_pass = run_name_collector_pass(name_input)
     if name_pass.output is .None() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
+        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
     }
 
     let type_input = TypeResolverInput(
@@ -136,31 +124,16 @@ private let type_check_resolver_output(resolver_output ModuleResolverOutput, use
     let type_output = run_type_resolver_pass(type_input)
 
     let body_input = BodyCheckerInput(type_output, user_file_path)
-    let output = run_body_checker_pass(body_input)
+    let output = run_body_checker_pass(body_input, retain_checked_template_bodies)
     return output
 }
 
 public let type_check_resolved_graph(resolved_graph ResolvedModuleGraph, user_file_path String) BodyCheckerOutput = {
-    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path)
+    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, true)
 }
 
 public let check_resolved_graph(resolved_graph ResolvedModuleGraph, user_file_path String) BodyCheckerOutput = {
-    let resolver_output = build_module_resolver_output(resolved_graph)
-    let name_input = NameCollectorInput(resolver_output, user_file_path)
-    let name_pass = run_name_collector_pass(name_input)
-    if name_pass.output is .None() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
-    }
-
-    let type_input = TypeResolverInput(
-        name_pass.output.unwrap(),
-        resolver_output,
-        user_file_path,
-    )
-    let type_output = run_type_resolver_pass(type_input)
-    let body_input = BodyCheckerInput(type_output, user_file_path)
-    let output = run_body_checker_pass_with_options(body_input, false, false)
-    return output
+    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, false)
 }
 
 public let type_check_entry_file(user_file_path String, no_std Bool) BodyCheckerOutput = {
@@ -170,8 +143,8 @@ public let type_check_entry_file(user_file_path String, no_std Bool) BodyChecker
         .Error(err) then {
             let mut diagnostics = DiagnosticCollector.new()
             diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, err.message()))
-            return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), List[InstantiationRequest].new())
+            return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
         },
     }
-    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path)
+    return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, true)
 }

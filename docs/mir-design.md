@@ -330,6 +330,12 @@ exit edge to the expression join block. The current MIR lowerer handles explicit
 branch-expression yields in `if`, `if is`, and `when`, and includes registered
 `finally` actions while emitting those scope exits.
 
+C backend lifetime planning must be CFG-aware enough not to extend loop-body
+temporaries to function-root lifetime. A local declared in a MIR scope should
+stay scoped when all recorded uses occur while that scope is active; only values
+genuinely used after the scope exit, such as branch result locals, should be
+promoted to an outer cleanup boundary.
+
 ### Lexical Cleanup And `finally`
 
 MIR lowering should build lexical scopes and cleanup stacks before backend
@@ -345,6 +351,11 @@ The Swift backend has already removed `lifetimeScopeStack`, `deferScopeStack`,
 and `yieldTargetStack`. Bootstrap should follow the same owner split: CodeGen
 may emit C for MIR `scopeExit`/cleanup effects, but it should not maintain a
 parallel lexical-scope model.
+
+Bootstrap `check` should run the same type-checking body pipeline as build and
+the Swift compiler. A separate "check without typed program" body pass diverges
+from the Swift pipeline, keeps different ownership pressure on typed bodies, and
+has already exposed runaway memory use during stdlib checking.
 
 ### Value Semantics And Ownership
 
@@ -401,6 +412,11 @@ binding-free `or`/`and` pattern conditions, and direct enum payload aliases such
 as `.Some(v)` or `.Closed(start, end)` for simple `when`, `if is`, and `while is`
 CFG lowering. More complex subpatterns, pattern combinators with bindings, and
 cleanup-sensitive plans remain for the full decision-tree pass.
+
+Pattern subjects are evaluated into a dedicated MIR temporary before tests and
+payload bindings. If the subject expression is an lvalue, this preparation must
+use `copy`, not `move`, even for parameters; source-level pattern tests do not
+consume reusable locals. Rvalue subjects can still be moved into the temporary.
 
 Important cases:
 
@@ -726,3 +742,99 @@ This design matches the current Swift implementation boundaries:
   type helper emission, and vtable instance text. It should not regain
   `MonomorphizedProgram`, typed AST bodies, escape analysis, pattern aliases,
   lambda capture buffers, lifetime stacks, or defer/yield stacks.
+
+## Bootstrap Alignment Log
+
+### 2026-05-30 Stage 1 (MIR lowering parity pass)
+
+Completed in bootstrap MIR lowering/builder:
+
+- Aligned function lowering eligibility with Swift `shouldLowerFunction` logic:
+  bootstrap now skips lowering functions whose symbol type still contains
+  generic parameters.
+- Aligned place-read ownership in MIR builder:
+  `lower_value` and `lower_operand` now materialize place reads with `Copy`
+  ownership, matching Swift MIRLowerer behavior.
+- Aligned `return ref-lvalue` lowering:
+  bootstrap now emits `MIRValue.Ref(..., HeapOwned)` when returning direct
+  reference expressions over lvalues, matching Swift's explicit return path.
+
+Validation notes:
+
+- Rebuilt bootstrap compiler from source using Swift compiler after patch.
+- Added operational memory guard requirement for local runs:
+  all compile/check/build runs in this stage were executed with a hard kill when
+  RSS exceeded 8GB.
+- Current blocker remains in bootstrap semantic/type-check phase:
+  `./bin/bootstrap/koralc check --package-config std/koral.json --target-module std`
+  still crosses 8GB RSS and is force-killed by the guard before MIR lowering.
+
+Next stage focus:
+
+- Keep MIR/codegen alignment direction (no typed-AST fallback reintroduction).
+- Debug and remove semantic-phase memory blow-up first, because it blocks all
+  full-stdlib bootstrap MIR validation.
+- After sema memory stabilization, rerun MIR regression cases and continue
+  parity work for reference-allocation promotion and verifier checks.
+
+### 2026-05-30 Stage 2 (sema memory differential pass)
+
+Completed in bootstrap sema alignment work:
+
+- Added iterative lowering guard for statement-level `if` condition rewriting,
+  replacing recursive rewrite entry with bounded loop progression.
+- Removed a loop-control hazard in recursive type cycle checking
+  (`recursive_type_checker`) to avoid unstable traversal behavior.
+- Added method callable symbol cache for synthesized non-private callable
+  symbols to reduce repeated `DefId` allocation churn on identical signatures.
+- Added method lookup caches in `TypeCheckerMethods` for both general method
+  lookup and conformance method lookup, including miss caches to avoid repeated
+  full-path re-resolution in hot loops.
+- Aligned check-only sema mode with lower-retention behavior:
+  `check_resolved_graph` now disables checked template body retention
+  (`disable_checked_template_body_retention`) before checking loaded nodes.
+
+Validation notes (all runs with hard RSS kill > 8GB):
+
+- Bootstrap compiler rebuild from source remains successful.
+- Latest guarded std check still fails memory guard in semantic phase:
+  `./bin/bootstrap/koralc check --package-config std/koral.json --target-module std`
+  peaks around 8.40 GB RSS and is killed before completion.
+- Swift reference still does not reproduce this behavior under the same
+  workload scale, so this remains a bootstrap-specific sema growth issue.
+
+Current blocker after Stage 2:
+
+- The dominant high-memory stack remains in bootstrap sema checking paths
+  centered around `check_loaded_nodes -> check_decl -> check_statement_body_expr`
+  with repeated `if`/method-signature resolution activity.
+
+Next stage focus:
+
+- Add narrow, low-overhead counters around statement/body re-check and method
+  signature resolution fan-out to identify the first runaway multiplier.
+- Continue Swift/bootstrap pass-order and state-retention parity checks in sema
+  before touching MIR/codegen again.
+
+### 2026-05-30 Stage 3 (check-only output retention cut)
+
+Completed in bootstrap sema check path:
+
+- Added check-only typed program suppression:
+  `TypeChecker.disable_typed_program_emission()` and wiring from
+  `check_resolved_graph` path.
+- `check_resolved_graph` now runs with both:
+  - checked-template-body retention disabled
+  - typed-program emission disabled
+
+Validation notes (with hard RSS kill > 8GB):
+
+- Bootstrap rebuild remains successful after this change.
+- std check still exceeds memory guard during semantic/type-check phase,
+  with peak remaining around 8.4 GB RSS.
+
+Conclusion from Stage 3:
+
+- Retained output volume in check-only mode is not the primary driver of the
+  runaway memory growth; root cause remains inside sema checking traversal/
+  resolution behavior before check completion.

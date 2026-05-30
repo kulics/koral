@@ -70,25 +70,6 @@ given TypeChecker {
         return msg
     }
 
-    private type_trait_key(self, left String, right String) String = {
-        let mut key = left
-        key.push_string("::")
-        key.push_string(right)
-        return key
-    }
-
-    private iterator_template_struct_key(self, template String) String = {
-        let mut key = "S:"
-        key.push_string(template)
-        return key
-    }
-
-    private iterator_template_enum_key(self, template String) String = {
-        let mut key = "U:"
-        key.push_string(template)
-        return key
-    }
-
     private is_upper_first_char(self, s String) Bool = {
         if s.is_empty() then { return false }
         when s.get(0) in {
@@ -325,14 +306,13 @@ given TypeChecker {
         }
     }
 
-    private trait_conformance_key(self, target_type Type, trait_name String) String = {
-        let type_key = self.context().type_display_name(self.canonicalize_alias_type(target_type))
+    private trait_conformance_key(self, target_type Type, trait_name String, trait_arg_types List[Type]) ExplicitTraitConformanceKey = {
         let _ = self
-        return self.type_trait_key(type_key, trait_name)
+        return ExplicitTraitConformanceKey(self.canonicalize_alias_type(target_type), trait_name, trait_arg_types)
     }
 
-    private record_explicit_trait_conformance(self, target_type Type, trait_name String) Void = {
-        self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name))
+    private record_explicit_trait_conformance(self, target_type Type, trait_name String, trait_arg_types List[Type]) Void = {
+        self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name, trait_arg_types))
     }
 
     private primitive_scalar_satisfies_std_trait(self, target_type Type, trait_name String) Bool = {
@@ -396,6 +376,10 @@ given TypeChecker {
     }
 
     private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
+        return self.has_explicit_trait_conformance_with_args(target_type, trait_name, List[Type].new())
+    }
+
+    private has_explicit_trait_conformance_with_args(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
         if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
             return true
         }
@@ -415,7 +399,7 @@ given TypeChecker {
             },
             _ then {},
         }
-        return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name))
+        return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name, trait_arg_types))
     }
 
     private trait_type_args(self, trait_type TypeNode) List[Type] = {
@@ -672,77 +656,19 @@ given TypeChecker {
             .Generic(_, trait_args) then {
                 if trait_args.count() > 0(UInt) then {
                     let item_type = self.resolve_type(trait_args[0(UInt)].val)
-                    self.record_explicit_iterator_conformance(target_type, item_type)
+                    let mut args = List[Type].new()
+                    args.push(item_type)
+                    self.record_explicit_trait_conformance(target_type, "Iterator", args)
                 }
             },
             _ then {},
         }
-    }
-
-    private iterator_conformance_key(self, iterator_type Type, item_type Type) String = {
-        let iter_key = self.context().type_display_name(iterator_type)
-        let item_key = stable_type_key(item_type)
-        return self.type_trait_key(iter_key, item_key)
-    }
-
-    private iterator_template_key(self, iterator_type Type) Option[String] = {
-        return when iterator_type in {
-            .GenericStruct(template, _) then Option[String].Some(self.iterator_template_struct_key(template)),
-            .GenericEnum(template, _) then Option[String].Some(self.iterator_template_enum_key(template)),
-            _ then Option[String].None(),
-        }
-    }
-
-    private generic_argument_index_for_item(self, type_args List[ref Type], item_type Type) Option[UInt] = {
-        let mut i UInt = 0
-        while i < type_args.count() then {
-            if type_args[i].val == item_type then {
-                return Option[UInt].Some(i)
-            }
-            i += 1
-        }
-        return Option[UInt].None()
     }
 
     protected has_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Bool = {
-        if self.storage.explicit_iterator_conformances.contains(self.iterator_conformance_key(iterator_type, item_type)) then {
-            return true
-        }
-        when iterator_type in {
-            .GenericStruct(template, args) then {
-                if self.storage.explicit_iterator_template_item_index.get(self.iterator_template_struct_key(template)) is .Some(item_index) then {
-                    if item_index < args.count() and self.same_expr_type(args[item_index].val, item_type) then {
-                        return true
-                    }
-                }
-            },
-            .GenericEnum(template, args) then {
-                if self.storage.explicit_iterator_template_item_index.get(self.iterator_template_enum_key(template)) is .Some(item_index) then {
-                    if item_index < args.count() and self.same_expr_type(args[item_index].val, item_type) then {
-                        return true
-                    }
-                }
-            },
-            _ then {},
-        }
-        return false
-    }
-
-    private record_explicit_iterator_conformance(self, iterator_type Type, item_type Type) Void = {
-        self.storage.explicit_iterator_conformances.insert(self.iterator_conformance_key(iterator_type, item_type))
-        when iterator_type in {
-            .GenericStruct(template, args) then {
-                if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
-                    self.storage.explicit_iterator_template_item_index.insert(self.iterator_template_struct_key(template), item_index)
-                }
-            },
-            .GenericEnum(template, args) then {
-                if self.generic_argument_index_for_item(args, item_type) is .Some(item_index) then {
-                    self.storage.explicit_iterator_template_item_index.insert(self.iterator_template_enum_key(template), item_index)
-                }
-            },
-            _ then {},
-        }
+        let mut args = List[Type].new()
+        args.push(item_type)
+        return self.has_explicit_trait_conformance_with_args(iterator_type, "Iterator", args)
     }
 
 }

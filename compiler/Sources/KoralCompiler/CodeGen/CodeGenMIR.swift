@@ -78,15 +78,14 @@ final class MIRFunctionCodeEmitter {
     needsDrop: (Type) -> Bool
   ) -> MIRLocalLifetimePlan {
     var parentScopeByScope: [MIRScopeID: MIRScopeID] = [:]
-    var exitPositionByScope: [MIRScopeID: Int] = [:]
     var declaredScopeByLocal: [MIRLocalID: MIRScopeID] = [:]
     var declarationOrderByLocal: [MIRLocalID: Int] = [:]
-    var lastUseByLocal: [MIRLocalID: Int] = [:]
+    var useScopesByLocal: [MIRLocalID: [Set<MIRScopeID>]] = [:]
     var activeScopes: [MIRScopeID] = []
     var position = 0
 
     func recordUse(_ local: MIRLocalID) {
-      lastUseByLocal[local] = max(lastUseByLocal[local] ?? Int.min, position)
+      useScopesByLocal[local, default: []].append(Set(activeScopes))
     }
 
     func walkOperand(_ operand: MIROperand) {
@@ -200,7 +199,6 @@ final class MIRFunctionCodeEmitter {
           }
           activeScopes.append(scope)
         case .scopeExit(let scope):
-          exitPositionByScope[scope] = position
           if let index = activeScopes.lastIndex(of: scope) {
             activeScopes.remove(at: index)
           }
@@ -247,11 +245,10 @@ final class MIRFunctionCodeEmitter {
     var localsByScope: [MIRScopeID: [MIRLocalID]] = [:]
 
     for local in function.locals where local.type != .void && local.type != .never && needsDrop(local.type) {
-      let usePosition = lastUseByLocal[local.id] ?? declarationOrderByLocal[local.id] ?? Int.min
       var scope = declaredScopeByLocal[local.id]
+      let useScopes = useScopesByLocal[local.id] ?? []
       while let scopeID = scope,
-            let exitPosition = exitPositionByScope[scopeID],
-            usePosition > exitPosition {
+            useScopes.contains(where: { !$0.contains(scopeID) }) {
         scope = parentScopeByScope[scopeID]
       }
 

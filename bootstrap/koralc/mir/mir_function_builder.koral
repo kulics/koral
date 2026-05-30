@@ -420,6 +420,19 @@ given MIRFunctionBuilder {
     private lower_return(self mut ref, value Option[ref TypedExpr]) Void = {
         when value in {
             .Some(expr) then {
+                when expr.expr_kind in {
+                    .RefExpr(inner) then when self.lower_place(inner) in {
+                        .Some(place) then {
+                            let kind = self.reference_kind(expr.expr_type)
+                            let operand = self.materialize(MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned()), expr.expr_type)
+                            self.emit_scope_exits(0(UInt))
+                            self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)))
+                            return
+                        },
+                        .None() then {},
+                    },
+                    _ then {},
+                }
                 let operand = self.lower_operand(expr)
                 self.emit_scope_exits(0(UInt))
                 self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)))
@@ -1017,7 +1030,7 @@ given MIRFunctionBuilder {
             .Some(result) then when result.operand in {
                 .Some(operand) then MIRValue.Operand(operand),
                 .None() then when result.place in {
-                    .Some(place) then MIRValue.PlaceRead(place, self.ownership_use(expression)),
+                    .Some(place) then MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
                     .None() then MIRValue.Operand(MIROperand.Constant(MIRConstant.Void())),
                 },
             },
@@ -1032,7 +1045,7 @@ given MIRFunctionBuilder {
             .Some(result) then when result.operand in {
                 .Some(operand) then operand,
                 .None() then when result.place in {
-                    .Some(place) then self.materialize(MIRValue.PlaceRead(place, self.ownership_use(expression)), result.result_type),
+                    .Some(place) then self.materialize(MIRValue.PlaceRead(place, MIROwnershipUse.Copy()), result.result_type),
                     .None() then MIROperand.Constant(MIRConstant.Void()),
                 },
             },

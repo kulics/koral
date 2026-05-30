@@ -71,7 +71,7 @@ given TypeChecker {
         if new_type is .NeverType() or self.is_unresolved_expr_type(new_type) then {
             return
         }
-        self.storage.inferred_function_return_type = when self.storage.inferred_function_return_type in {
+            self.storage.function_return_context.inferred_return_type = when self.storage.function_return_context.inferred_return_type in {
             .Some(existing) then Option[Type].Some(
                 self.choose_conditional_result_type(
                     Option[Type].None(),
@@ -84,10 +84,10 @@ given TypeChecker {
     }
 
     private note_inferred_void_return(self, span SourceSpan) Void = {
-        if not self.storage.is_inferring_function_return_type then {
+        if not self.storage.function_return_context.is_inferring then {
             return
         }
-        when self.storage.inferred_function_return_type in {
+            when self.storage.function_return_context.inferred_return_type in {
             .Some(inferred_return_type) then {
                 if inferred_return_type is not .VoidType() then {
                     self.push_diagnostic_at_span(
@@ -98,7 +98,7 @@ given TypeChecker {
             },
             .None() then {},
         }
-        self.storage.inferred_function_return_type = Option[Type].Some(Type.VoidType())
+        self.storage.function_return_context.inferred_return_type = Option[Type].Some(Type.VoidType())
     }
 
     private merge_statement_branch_result_types(self, left Option[Type], right Option[Type]) Option[Type] = {
@@ -192,30 +192,49 @@ given TypeChecker {
     }
 
     private check_if_statement_expr(self, expr ref Expr, span SourceSpan, scope Scope) TypedStatement = {
-        return when expr in {
-            .IfExpr(condition, then_branch, else_branch, _) then {
-                let lowered_opt = self.lower_if_condition_with_bindings(condition, then_branch, else_branch, span)
-                yield when lowered_opt in {
-                    .Some(lowered) then self.check_statement_expr_ref(lowered, span, scope),
-                    .None() then {
-                        let typed_cond = when condition in {
-                            .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
-                            _ then self.check_expr_core_ref(condition, .Some(Type.BoolType()), scope),
-                        }
-                        let typed_then = self.check_statement_body_expr(then_branch, scope)
-                        let typed_else = when else_branch in {
-                            .Some(else_ref) then Option[ref TypedExpr].Some(box(self.check_statement_body_expr(else_ref, scope))),
-                            .None() then Option[ref TypedExpr].None(),
-                        }
-                        yield TypedStatement.IfStmt(box(typed_cond), box(typed_then), typed_else, span)
-                    },
-                }
-            },
-            _ then {
-                let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
-                yield TypedStatement.ExprStmt(box(typed_expr), span)
-            },
+        let mut current = expr
+        let mut current_span = span
+        let mut lower_steps UInt = 0
+
+        while true then {
+            when current in {
+                .IfExpr(condition, then_branch, else_branch, _) then {
+                    let lowered_opt = self.lower_if_condition_with_bindings(condition, then_branch, else_branch, current_span)
+                    when lowered_opt in {
+                        .Some(lowered) then {
+                            // Keep condition-lowering iterative to avoid recursive stack/memory blowups.
+                            lower_steps += 1
+                            if lower_steps > 1024(UInt) then {
+                                self.push_diagnostic_at_span("Condition lowering exceeded maximum rewrite steps", current_span)
+                                let typed_expr = self.check_expr_core_ref(current, .None(), scope)
+                                return TypedStatement.ExprStmt(box(typed_expr), current_span)
+                            }
+                            current = lowered
+                            current_span = expr_span(lowered)
+                        },
+                        .None() then {
+                            let typed_cond = when condition in {
+                                .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
+                                _ then self.check_expr_core_ref(condition, .Some(Type.BoolType()), scope),
+                            }
+                            let typed_then = self.check_statement_body_expr(then_branch, scope)
+                            let typed_else = when else_branch in {
+                                .Some(else_ref) then Option[ref TypedExpr].Some(box(self.check_statement_body_expr(else_ref, scope))),
+                                .None() then Option[ref TypedExpr].None(),
+                            }
+                            return TypedStatement.IfStmt(box(typed_cond), box(typed_then), typed_else, current_span)
+                        },
+                    }
+                },
+                _ then {
+                    let typed_expr = self.check_expr_core_ref(current, .None(), scope)
+                    return TypedStatement.ExprStmt(box(typed_expr), current_span)
+                },
+            }
         }
+
+        let fallback_expr = self.check_expr_core_ref(current, .None(), scope)
+        return TypedStatement.ExprStmt(box(fallback_expr), current_span)
     }
 
     private check_when_statement_expr(self, expr ref Expr, span SourceSpan, scope Scope) TypedStatement = {
@@ -768,18 +787,18 @@ given TypeChecker {
                 return self.check_statement_expr_ref(expr, span, scope)
             },
             .ReturnStmt(value, span) then {
-                if not self.storage.in_function then {
+                if not self.in_function_context() then {
                     self.push_diagnostic_at_span("'return' used outside of function", span)
                 }
                 if self.storage.in_finally then {
                     self.push_diagnostic_at_span("control flow statement 'return' is not allowed in finally expression", span)
                 }
-                let expected_return = self.storage.current_function_return_type
+                let expected_return = self.storage.function_return_context.expected_return_type
                 let typed_val = when value in {
                     .Some(v) then {
                         let value_expected = if expected_return is .Some(_)
                             then expected_return
-                            else self.storage.inferred_function_return_type
+                            else self.storage.function_return_context.inferred_return_type
                         let raw_checked = when v in {
                             .StaticMethodCall(type_name, type_args, method_name, args, _) then {
                                 yield self.check_static_method_call_ref(type_name, type_args, method_name, args, value_expected, scope)
@@ -804,7 +823,7 @@ given TypeChecker {
                                 }
                             },
                             .None() then {
-                                if self.storage.is_inferring_function_return_type then {
+                                if self.storage.function_return_context.is_inferring then {
                                     self.merge_inferred_function_return_type(checked.expr_type)
                                 }
                             },

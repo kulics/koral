@@ -134,7 +134,7 @@ given TypeChecker {
             .OrReturnExpr(operand, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope)
 
-                yield if not self.storage.in_function then {
+                yield if not self.in_function_context() then {
                     self.storage.diagnostics.push(
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
@@ -423,29 +423,25 @@ given TypeChecker {
                         let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
                         lambda_scope.define(self.context(), Symbol(def_id, p.param_type, kind))
                     }
-                    let prev_in_function = self.storage.in_function
-                    let prev_current_function_return_type = self.storage.current_function_return_type
-                    let prev_inferred_function_return_type = self.storage.inferred_function_return_type
-                    let prev_is_inferring_function_return_type = self.storage.is_inferring_function_return_type
+                    let prev_function_return_context = self.storage.function_return_context
                     let prev_in_loop = self.storage.in_loop
                     let prev_in_finally = self.storage.in_finally
                     let prev_yield_targets = self.storage.yield_targets
-                    self.storage.in_function = true
                     self.storage.in_loop = false
                     self.storage.in_finally = false
                     self.storage.yield_targets = List[mut ref YieldTarget].new()
                     let infer_return_type_from_block_returns = return_type is .None() and body is .Block(_, _)
                     if infer_return_type_from_block_returns then {
-                        self.storage.current_function_return_type = Option[Type].None()
-                        self.storage.inferred_function_return_type = Option[Type].None()
-                        self.storage.is_inferring_function_return_type = true
+                        self.storage.function_return_context.expected_return_type = Option[Type].None()
+                        self.storage.function_return_context.inferred_return_type = Option[Type].None()
+                        self.storage.function_return_context.is_inferring = true
                     } else {
                         let lambda_return_type_for_body_check = if self.is_unresolved_expr_type(ret)
                             then Type.VoidType()
                             else ret
-                        self.storage.current_function_return_type = Option[Type].Some(lambda_return_type_for_body_check)
-                        self.storage.inferred_function_return_type = Option[Type].None()
-                        self.storage.is_inferring_function_return_type = false
+                        self.storage.function_return_context.expected_return_type = Option[Type].Some(lambda_return_type_for_body_check)
+                        self.storage.function_return_context.inferred_return_type = Option[Type].None()
+                        self.storage.function_return_context.is_inferring = false
                     }
                     let body_expected = if body is .Block(_, _)
                         then Option[Type].None()
@@ -453,12 +449,9 @@ given TypeChecker {
                             then Option[Type].None()
                             else Option[Type].Some(ret)
                     let typed_body = self.check_expr_in_yield_body_context(body, body_expected, lambda_scope)
-                    let inferred_return_type = self.storage.inferred_function_return_type
+                    let inferred_return_type = self.storage.function_return_context.inferred_return_type
                     self.storage.yield_targets = prev_yield_targets
-                    self.storage.in_function = prev_in_function
-                    self.storage.current_function_return_type = prev_current_function_return_type
-                    self.storage.inferred_function_return_type = prev_inferred_function_return_type
-                    self.storage.is_inferring_function_return_type = prev_is_inferring_function_return_type
+                    self.storage.function_return_context = prev_function_return_context
                     self.storage.in_loop = prev_in_loop
                     self.storage.in_finally = prev_in_finally
                     self.validate_lambda_captures(typed_params, box(typed_body))

@@ -1313,12 +1313,10 @@ private let ensure_receiver_dispatch_callsite(
     }
 
     let effective_logical_method_name = logical_method_name or else mono.storage.context.symbol_name(method)
-    if not mono.storage.receiver_method_dispatch.contains_key(callsite_def_id.id) then {
-        mono.storage.receiver_method_dispatch.insert(
-            callsite_def_id.id,
-            ReceiverMethodDispatchInfo(method.def_id, effective_logical_method_name, Option[ReceiverMethodOwner].None(), Option[String].None()),
-        )
-    }
+    mono.set_receiver_method_dispatch_if_absent(
+        callsite_def_id,
+        ReceiverMethodDispatchInfo(method.def_id, effective_logical_method_name, Option[ReceiverMethodOwner].None(), Option[String].None())
+    )
     return Option[DefId].Some(callsite_def_id)
 }
 
@@ -1451,7 +1449,7 @@ private let method_semantic_name_from_callsite(
 ) Option[String] = {
     return when dispatch_callsite in {
         .Some(def_id) then {
-            yield when mono.storage.receiver_method_dispatch.get(def_id.id) in {
+            yield when mono.receiver_method_dispatch_info(def_id) in {
                 .Some(info) then Option[String].Some(info.method_name),
                 .None() then Option[String].None(),
             }
@@ -1571,7 +1569,7 @@ private let try_lower_to_ref_method_call(
     // Use structured lookup instead of brute-force string matching.
     // Priority: callsite dispatch info > semantic method name from defId.
     let method_name = when dispatch_callsite in {
-        .Some(def_id) then when mono.storage.receiver_method_dispatch.get(def_id.id) in {
+        .Some(def_id) then when mono.receiver_method_dispatch_info(def_id) in {
             .Some(info) then info.method_name,
             .None() then get_semantic_method_name(mono, method),
         },
@@ -1763,7 +1761,7 @@ private let should_preserve_resolved_method_reference(
     if has_generic_parameter(resolved_method_type) then {
         return false
     }
-    return when mono.storage.concrete_callables_by_def_id.get(method.def_id.id) in {
+    return when mono.concrete_callable_info(method.def_id) in {
         .Some(_) then true,
         .None() then false,
     }
@@ -2115,7 +2113,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                     when receiver_trait_name_opt in {
                         .Some(trait_name) then {
                             let logical_method_name = when effective_dispatch_callsite in {
-                                .Some(def_id) then when mono.storage.receiver_method_dispatch.get(def_id.id) in {
+                                .Some(def_id) then when mono.receiver_method_dispatch_info(def_id) in {
                                     .Some(info) then info.method_name,
                                     .None() then get_semantic_method_name(mono, bound_method),
                                 },
@@ -4157,12 +4155,12 @@ private let get_semantic_method_name(
 ) String = {
     // 1. Try receiver_method_dispatch (from sema)
     if method.def_id.id > 0 then {
-        when mono.storage.receiver_method_dispatch.get(method.def_id.id) in {
+        when mono.receiver_method_dispatch_info(method.def_id) in {
             .Some(info) then { return info.method_name },
             .None() then {},
         }
         // 2. Try concrete_callable metadata (from mono)
-        when mono.storage.concrete_callables_by_def_id.get(method.def_id.id) in {
+        when mono.concrete_callable_info(method.def_id) in {
             .Some(info) then { return info.logical_name },
             .None() then {},
         }
@@ -4898,7 +4896,7 @@ private let resolve_static_method_call_to_call(
                 for remapped in remapped_list then {
                     let candidate_def_id = remapped.first
                     let candidate_type = resolve_parameterized_type(mono, remapped.second)
-                    let owner_matches_receiver = when mono.storage.concrete_callables_by_def_id.get(candidate_def_id.id) in {
+                    let owner_matches_receiver = when mono.concrete_callable_info(candidate_def_id) in {
                         .Some(info) then when info.owner_type in {
                             .Some(owner_type) then layout_key(resolve_parameterized_type(mono, owner_type)) == layout_key(new_receiver_type),
                             .None() then true,
@@ -4928,7 +4926,7 @@ private let resolve_static_method_call_to_call(
         .None() then enqueue_extension_method_for_static_call(mono, new_receiver_type, method_name, template_name, new_method_type_args, new_args, resolved_return_type),
     }
     if concrete_sym is .None() then {
-        let dispatch_trait_name_opt = if new_method.def_id.id > 0 then when mono.storage.receiver_method_dispatch.get(new_method.def_id.id) in {
+        let dispatch_trait_name_opt = if new_method.def_id.id > 0 then when mono.receiver_method_dispatch_info(new_method.def_id) in {
                 .Some(info) then info.conformance_trait_name,
                 .None() then Option[String].None(),
             } else Option[String].None()
@@ -5042,7 +5040,7 @@ private let resolve_static_method_call_to_call(
                     let receiver_param_type = resolve_parameterized_type(mono, fn_params[0(UInt)].val.param_type)
                     let actual_receiver_expr = static_dispatch_receiver_expr(new_args[0(UInt)])
                     let actual_receiver_type = resolve_parameterized_type(mono, actual_receiver_expr.expr_type)
-                    let owner_matches = when mono.storage.concrete_callables_by_def_id.get(sym.def_id.id) in {
+                    let owner_matches = when mono.concrete_callable_info(sym.def_id) in {
                         .Some(info) then when info.owner_type in {
                             .Some(owner_type) then {
                                 let normalized_owner_type = resolve_parameterized_type(mono, owner_type)
@@ -5365,7 +5363,7 @@ private let lookup_concrete_method_for_static_call(
 
     let resolved_base_key = layout_key(resolved_base_type)
     for entry in mono.storage.concrete_callables_by_def_id.iterator() then {
-        let def_id = DefId(entry.first)
+        let def_id = entry.first
         let concrete = entry.second
         if concrete.logical_name <> method_name then {
             continue
@@ -5465,7 +5463,7 @@ private let lookup_concrete_method_for_static_call(
         let key = "\(type_name).\(method_name)"
         when mono.storage.extension_method_def_ids.get(key) in {
             .Some(def_id) then {
-                let owner_matches_receiver = when mono.storage.concrete_callables_by_def_id.get(def_id.id) in {
+                let owner_matches_receiver = when mono.concrete_callable_info(def_id) in {
                     .Some(info) then when info.owner_type in {
                         .Some(owner_type) then layout_key(resolve_parameterized_type(mono, owner_type)) == resolved_base_key,
                         .None() then true,
@@ -5492,7 +5490,7 @@ private let lookup_concrete_method_for_static_call(
             .Some(method_map) then {
                 when method_map.get(method_name) in {
                     .Some(entry) then {
-                        let owner_matches_receiver = when mono.storage.concrete_callables_by_def_id.get(entry.symbol.def_id.id) in {
+                        let owner_matches_receiver = when mono.concrete_callable_info(entry.symbol.def_id) in {
                             .Some(info) then when info.owner_type in {
                                 .Some(owner_type) then layout_key(resolve_parameterized_type(mono, owner_type)) == resolved_base_key,
                                 .None() then true,

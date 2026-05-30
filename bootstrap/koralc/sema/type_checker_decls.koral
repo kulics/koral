@@ -38,7 +38,7 @@ given TypeChecker {
         }
     }
 
-    private check_decl(self mut ref, decl Decl) TypedDecl = {
+    private check_decl(self mut ref, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
@@ -56,26 +56,22 @@ given TypeChecker {
                 yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
-                let prev_in_function = self.storage.in_function
-                let prev_current_function_return_type = self.storage.current_function_return_type
-                let prev_inferred_function_return_type = self.storage.inferred_function_return_type
-                let prev_is_inferring_function_return_type = self.storage.is_inferring_function_return_type
+                let prev_function_return_context = self.storage.function_return_context
                 let prev_in_loop = self.storage.in_loop
                 let prev_in_finally = self.storage.in_finally
                 let prev_yield_targets = self.storage.yield_targets
-                self.storage.in_function = true
                 self.storage.in_loop = false
                 self.storage.in_finally = false
                 self.storage.yield_targets = List[mut ref YieldTarget].new()
-                self.storage.inferred_function_return_type = Option[Type].None()
-                self.storage.is_inferring_function_return_type = false
+                self.storage.function_return_context.inferred_return_type = Option[Type].None()
+                self.storage.function_return_context.is_inferring = false
                 let type_binding_snapshot = self.snapshot_type_bindings()
                 for tp in type_params then {
                     self.bind_type_param(tp)
                 }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
-                    self.storage.current_function_return_type = Option[Type].Some(resolved_ret)
+                    self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
                     let typed_params = self.check_params(params)
                     let mut fn_scope = self.make_fn_scope(typed_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
@@ -105,7 +101,7 @@ given TypeChecker {
                     }
                     let typed_params = self.check_params_in_scope(params, generic_type_scope)
                     let resolved_ret = self.resolve_type_in_scope(return_type, generic_type_scope)
-                    self.storage.current_function_return_type = Option[Type].Some(resolved_ret)
+                    self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     self.register_generic_function_template(
@@ -113,7 +109,7 @@ given TypeChecker {
                         type_params,
                         params,
                         return_type,
-                        self.template_checked_body(Option[ref TypedExpr].Some(box(typed_body))),
+                        self.template_checked_body(Option[ref TypedExpr].Some(box(typed_body)), retain_checked_template_bodies),
                         Option[Type].Some(resolved_ret),
                     )
                     yield TypedDecl.GenericFunctionDecl(
@@ -122,10 +118,7 @@ given TypeChecker {
                         span,
                     )
                 }
-                self.storage.in_function = prev_in_function
-                self.storage.current_function_return_type = prev_current_function_return_type
-                self.storage.inferred_function_return_type = prev_inferred_function_return_type
-                self.storage.is_inferring_function_return_type = prev_is_inferring_function_return_type
+                self.storage.function_return_context = prev_function_return_context
                 self.storage.in_loop = prev_in_loop
                 self.storage.in_finally = prev_in_finally
                 self.storage.yield_targets = prev_yield_targets
@@ -326,17 +319,8 @@ given TypeChecker {
                     }
                     parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes))
                 }
-                let mut param_names = List[String].new()
-                for tp in type_params then {
-                    param_names.push(tp.name)
-                }
                 let typed_members = self.check_trait_members(members, type_params)
-                let info = TraitInfo(name, param_names, parent_constraints, typed_members, self.storage.module_path)
-                self.storage.trait_registry.register(info)
-                self.storage.generic_templates.traits.insert(
-                    name,
-                    TraitDeclInfo(name, self.to_template_type_params(type_params), parent_constraints, members, typed_members, self.storage.module_path)
-                )
+                self.register_trait_metadata(name, type_params, parent_constraints, members, typed_members)
                 yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
             .GivenDecl(target_type, type_params, members, span) then {
@@ -359,7 +343,8 @@ given TypeChecker {
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None())
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies)
+                    self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members)
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
                 }
@@ -374,7 +359,8 @@ given TypeChecker {
                     }
                     let trait_name = self.type_node_name(trait_type)
                     let resolved_target = self.resolve_type(target_type)
-                    self.record_explicit_trait_conformance(resolved_target, trait_name)
+                    let resolved_trait_args = self.trait_type_args(trait_type)
+                    self.record_explicit_trait_conformance(resolved_target, trait_name, resolved_trait_args)
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
@@ -388,9 +374,8 @@ given TypeChecker {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
                     // 注入 trait 类型参数：如 given Duration [Int]Mul，把 Mul 的 R 绑定为 Int
-                    let resolved_trait_args = self.trait_type_args(trait_type)
                     self.inject_trait_type_args(trait_type, trait_name)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].Some(trait_name))
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].Some(trait_name), retain_checked_template_bodies)
                     if self.is_std_drop_trait(trait_name) then {
                         self.validate_drop_member_signature(resolved_target, typed_members)
                     }
@@ -452,6 +437,7 @@ given TypeChecker {
                     if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     }
+                    self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), typed_members)
                     self.register_trait_tool_templates_for_concrete_type(resolved_target, type_params, trait_name, typed_members.ref)
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span)
@@ -466,7 +452,8 @@ given TypeChecker {
                         self.bind_type_param(tp)
                     }
                     let resolved_target = self.resolve_type(target_type)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None())
+                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies)
+                    self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members)
                     self.restore_type_bindings(type_binding_snapshot)
                     yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
                 }

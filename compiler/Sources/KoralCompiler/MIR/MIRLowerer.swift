@@ -1065,17 +1065,7 @@ private final class MIRFunctionBuilder {
     if let operand = result.operand {
       subjectValue = .operand(operand)
     } else if let place = result.place {
-      let ownership: MIROwnershipUse
-      if result.category == .lvalue,
-         case .local(let localID) = place,
-         let local = locals.first(where: { $0.id == localID }),
-         local.storage == .parameter {
-        ownership = .move
-      } else if result.category == .lvalue {
-        ownership = .copy
-      } else {
-        ownership = .move
-      }
+      let ownership: MIROwnershipUse = result.category == .lvalue ? .copy : .move
       subjectValue = .placeRead(place, ownership: ownership)
     } else {
       return nil

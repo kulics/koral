@@ -11,11 +11,11 @@ given MIRLowerer {
         let mut globals = List[MIRGlobal].new()
         let mut functions = List[MIRFunction].new()
 
-        for request in self.program.semantic_vtable_requests() then {
+        for request in self.program.vtable_requests then {
             globals.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
         }
 
-        for node in self.program.semantic_global_nodes() then {
+        for node in self.program.global_nodes then {
             when node in {
                 .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
                     globals.push(MIRGlobal.ForeignFunction(identifier, params, return_type))
@@ -37,7 +37,7 @@ given MIRLowerer {
                 .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                     let kind = MIRFunctionKind.Global()
                     globals.push(MIRGlobal.Function(identifier, params, return_type, kind))
-                    if not self.context.contains_generic_parameter(return_type) then {
+                    if self.should_lower_function(identifier) then {
                         functions.push(self.make_function(identifier, params, return_type, kind, body))
                     }
                 },
@@ -58,7 +58,9 @@ given MIRLowerer {
                         when member.body in {
                             .Some(body) then {
                                 let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                                functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
+                                if self.should_lower_function(symbol) then {
+                                    functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
+                                }
                             },
                             .None() then {},
                         }
@@ -83,7 +85,9 @@ given MIRLowerer {
                         when member.body in {
                             .Some(body) then {
                                 let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
-                                functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
+                                if self.should_lower_function(symbol) then {
+                                    functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
+                                }
                             },
                             .None() then {},
                         }
@@ -105,19 +109,9 @@ given MIRLowerer {
             functions,
             self.context,
             self.program.static_method_by_key,
-            self.program.semantic_traits(),
-            self.program.semantic_receiver_method_dispatch(),
+            self.program.traits,
+            self.program.receiver_method_dispatch,
             self.program.concrete_callables_by_def_id,
-            self.program.c_identifier_by_def_id,
-            self.program.def_ids_by_name,
-            self.program.type_def_ids_by_name,
-            self.program.type_by_c_type_name,
-            self.program.callable_by_def_id,
-            self.program.trait_method_by_key,
-            self.program.type_layout_by_key,
-            self.program.foreign_function_def_ids,
-            self.program.foreign_global_var_def_ids,
-            self.program.foreign_type_def_ids,
         )
     }
 
@@ -140,6 +134,11 @@ given MIRLowerer {
             self.context,
         )
         return builder.lower()
+    }
+
+    private should_lower_function(self, identifier ref Symbol) Bool = {
+        let _ = self
+        return not self.context.contains_generic_parameter(identifier.symbol_type)
     }
 
     private make_global_initializer(self, identifier ref Symbol, value ref TypedExpr) MIRFunction = {
@@ -205,7 +204,7 @@ given MIRLowerer {
     ) Void = {
         if visited_traits.contains(trait_name) then { return }
         visited_traits.insert(trait_name)
-        when self.program.semantic_traits().get(trait_name) in {
+        when self.program.traits.get(trait_name) in {
             .Some(trait_info) then {
                 for parent in trait_info.parent_traits then {
                     self.collect_ordered_trait_members(parent.name, ordered, visited_traits, seen_methods)
@@ -224,7 +223,7 @@ given MIRLowerer {
     private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         bindings.insert("Self", request.concrete_type)
-        when self.program.semantic_traits().get(request.trait_name) in {
+        when self.program.traits.get(request.trait_name) in {
             .Some(trait_info) then {
                 let mut index UInt = 0
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {

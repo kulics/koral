@@ -1,43 +1,11 @@
 // Type Checker - Pass 2 + 3
+
 using std::os { env }
 
 // Pass 2: collect_signatures - resolves type members and function signatures
 // Pass 3: check_decl - checks function bodies and generates TypedAST
 // All mutable checker state lives in storage so TypeChecker can be passed by
 // value without losing mutations (mirrors the List/storage ref pattern).
-private let debug_typecheck_enabled() Bool =
-    when env("KORAL_DEBUG_TYPECHECK") in {
-        .Some(value) then value == "1" or value == "true" or value == "TRUE",
-        .None() then false,
-    }
-
-protected let debug_typecheck(message String) Void = {
-    if debug_typecheck_enabled() then {
-        eprintln("[typecheck] \(message)")
-    }
-}
-
-private let debug_decl_label(decl Decl) String = {
-    return when decl in {
-        .LetDecl(_, name, _, _, _, span) then "let \(name):\(span.start.line)",
-        .FunctionDecl(_, name, _, _, _, _, span) then "fn \(name):\(span.start.line)",
-        .IntrinsicFunctionDecl(_, name, _, _, _, span) then "intrinsic fn \(name):\(span.start.line)",
-        .ForeignFunctionDecl(_, name, _, _, span) then "foreign fn \(name):\(span.start.line)",
-        .ForeignLetDecl(_, name, _, _, span) then "foreign let \(name):\(span.start.line)",
-        .TypeStructDecl(_, name, _, _, span) then "struct \(name):\(span.start.line)",
-        .TypeEnumDecl(_, name, _, _, span) then "enum \(name):\(span.start.line)",
-        .TypeAliasDecl(_, name, _, span) then "alias \(name):\(span.start.line)",
-        .IntrinsicTypeDecl(_, name, _, span) then "intrinsic type \(name):\(span.start.line)",
-        .ForeignTypeDecl(_, name, _, _, span) then "foreign type \(name):\(span.start.line)",
-        .FileUsingDecl(file_name, span) then "using file \(file_name):\(span.start.line)",
-        .ModuleUsingDecl(_, _, span) then "using module:\(span.start.line)",
-        .TraitDecl(_, name, _, _, _, span) then "trait \(name):\(span.start.line)",
-        .GivenDecl(_, _, _, span) then "given:\(span.start.line)",
-        .GivenTraitDecl(_, _, _, _, span) then "given trait:\(span.start.line)",
-        .GivenNotTraitDecl(_, _, trait_name, span) then "given not \(trait_name):\(span.start.line)",
-        .IntrinsicGivenDecl(_, _, _, span) then "intrinsic given:\(span.start.line)",
-    }
-}
 
 protected type TypeCheckerStorage(
     mut global_scope Scope,
@@ -47,10 +15,7 @@ protected type TypeCheckerStorage(
     mut file_path String,
     mut module_path List[String],
     mut package_id String,
-    mut in_function Bool,
-    mut current_function_return_type Option[Type],
-    mut inferred_function_return_type Option[Type],
-    mut is_inferring_function_return_type Bool,
+    mut function_return_context FunctionReturnContext,
     mut in_loop Bool,
     mut in_finally Bool,
     mut yield_targets List[mut ref YieldTarget],
@@ -58,18 +23,11 @@ protected type TypeCheckerStorage(
     mut trait_registry TraitRegistry,
     mut generic_param_constraints Dict[String, List[String]],
     mut generic_templates GenericTemplateRegistry,
-    mut instantiation_requests List[InstantiationRequest],
-    mut instantiation_request_keys Set[InstantiationKey],
+    mut instantiation_requests Set[InstantiationRequest],
     mut import_graph Option[ImportGraph],
-    mut known_root_modules Set[String],
-    mut explicit_trait_conformances Set[String],
+    mut explicit_trait_conformances Set[ExplicitTraitConformanceKey],
     mut generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
-    mut explicit_iterator_conformances Set[String],
-    mut explicit_iterator_template_item_index Dict[String, UInt],
-    mut next_type_variable_id UInt,
-    mut retain_checked_template_bodies Bool,
     mut type_binding_snapshots List[TypeBindingSnapshot],
-    mut type_binding_snapshot_stack List[UInt],
 )
 
 public type TypeChecker(protected mut storage mut ref TypeCheckerStorage)
@@ -82,6 +40,12 @@ protected type IfChain(
 protected type YieldTarget(
     span SourceSpan,
     mut did_explicit_yield Bool,
+)
+
+protected type FunctionReturnContext(
+    mut expected_return_type Option[Type],
+    mut inferred_return_type Option[Type],
+    mut is_inferring Bool,
 )
 
 protected type TypeBindingSnapshot(
@@ -101,12 +65,29 @@ protected type GenericTraitConformanceTemplate(
     trait_arg_types List[Type],
 )
 
-protected type LoadedDeclInput(
-    decl Decl,
-    source_file String,
-    module_path List[String],
-    package_id String,
+protected type ExplicitTraitConformanceKey(
+    target_type Type,
+    trait_name String,
+    trait_arg_types List[Type],
 )
+
+given ExplicitTraitConformanceKey as Eq {
+    public equals(self, other ExplicitTraitConformanceKey) Bool = {
+        return self.target_type == other.target_type
+            and self.trait_name == other.trait_name
+            and self.trait_arg_types == other.trait_arg_types
+    }
+}
+
+given ExplicitTraitConformanceKey as Hash {
+    public hash(self) UInt = {
+        let mut h = self.target_type.hash().combine_hash(self.trait_name.hash())
+        for arg in self.trait_arg_types then {
+            h = h.combine_hash(arg.hash())
+        }
+        return h
+    }
+}
 
 protected type GenericTraitConformanceStatus {
     Satisfied(),
@@ -124,10 +105,7 @@ given TypeChecker {
             file_path,
             List[String].new(),
             "",
-            false,
-            Option[Type].None(),
-            Option[Type].None(),
-            false,
+            FunctionReturnContext(Option[Type].None(), Option[Type].None(), false),
             false,
             false,
             List[mut ref YieldTarget].new(),
@@ -135,18 +113,11 @@ given TypeChecker {
             TraitRegistry.new(),
             Dict[String, List[String]].new(),
             GenericTemplateRegistry.new(),
-            List[InstantiationRequest].new(),
-            Set[InstantiationKey].new(),
+            Set[InstantiationRequest].new(),
             Option[ImportGraph].None(),
-            Set[String].new(),
-            Set[String].new(),
+            Set[ExplicitTraitConformanceKey].new(),
             List[GenericTraitConformanceTemplate].new(),
-            Set[String].new(),
-            Dict[String, UInt].new(),
-            0(UInt),
-            true,
-            List[TypeBindingSnapshot].new(),
-            List[UInt].new()
+            List[TypeBindingSnapshot].new()
         ))
         return TypeChecker(s)
     }
@@ -155,6 +126,26 @@ given TypeChecker {
 
     public compiler_context(self) CompilerContext = {
         return self.context()
+    }
+
+    protected register_receiver_dispatch_for_given_members(
+        self mut ref,
+        target_type Type,
+        trait_name Option[String],
+        members List[TypedGivenMember],
+    ) Void = {
+        let owner = Option[ReceiverMethodOwner].Some(ReceiverMethodOwner.ConcreteType(self.context().type_display_name(target_type)))
+        for member in members then {
+            let is_receiver_style = member.params.count() > 0(UInt) and member.params[0(UInt)].name == "self"
+            if is_receiver_style then {
+                self.storage.generic_templates.receiver_method_dispatch.insert(
+                    member.def_id,
+                    ReceiverMethodDispatchInfo(member.def_id, member.name, owner, trait_name),
+                )
+            } else {
+                self.storage.generic_templates.receiver_method_dispatch.remove(member.def_id)
+            }
+        }
     }
 
     private duplicate_definition_message(self, name String) String = {
@@ -168,21 +159,73 @@ given TypeChecker {
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
     }
 
-    protected record_instantiation_request(self, request InstantiationRequest) Void = {
-        let key = request.deduplication_key()
-        if self.storage.instantiation_request_keys.contains(key) then {
-            return
+    private sema_progress_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SEMA_PROGRESS") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
         }
-        self.storage.instantiation_request_keys.insert(key)
-        self.storage.instantiation_requests.push(request)
+        return false
     }
 
-    public disable_checked_template_body_retention(self) Void = {
-        self.storage.retain_checked_template_bodies = false
+    private log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
+        let pending_constraints = self.storage.constraint_solver.constraints.count()
+        let pending_default_constraints = self.storage.constraint_solver.default_constraints.count()
+        let mut binding_count = 0(UInt)
+        for _entry in self.storage.constraint_solver.unifier.current_bindings() then {
+            binding_count += 1
+        }
+        println("[sema-progress] checked=\(checked_decl_count)/\(total_nodes) file=\(self.storage.file_path) generic_conformance_templates=\(self.storage.generic_trait_conformance_templates.count()) constraints=\(pending_constraints) default_constraints=\(pending_default_constraints) bindings=\(binding_count) diagnostics=\(self.storage.diagnostics.count())")
     }
 
-    protected template_checked_body(self, body Option[ref TypedExpr]) Option[ref TypedExpr] = {
-        return if self.storage.retain_checked_template_bodies then when body in {
+    private decl_debug_label(self, decl Decl) String = {
+        let _ = self
+        return when decl in {
+            .LetDecl(_, name, _, _, _, _) then "let \(name)",
+            .FunctionDecl(_, name, _, _, _, _, _) then "fn \(name)",
+            .IntrinsicFunctionDecl(_, name, _, _, _, _) then "intrinsic fn \(name)",
+            .ForeignFunctionDecl(_, name, _, _, _) then "foreign fn \(name)",
+            .ForeignLetDecl(_, name, _, _, _) then "foreign let \(name)",
+            .TypeStructDecl(_, name, _, _, _) then "struct \(name)",
+            .TypeEnumDecl(_, name, _, _, _) then "enum \(name)",
+            .TypeAliasDecl(_, name, _, _) then "type \(name)",
+            .IntrinsicTypeDecl(_, name, _, _) then "intrinsic type \(name)",
+            .ForeignTypeDecl(_, name, _, _, _) then "foreign type \(name)",
+            .FileUsingDecl(file_name, _) then "using file \(file_name)",
+            .ModuleUsingDecl(_, _, _) then "using module",
+            .TraitDecl(_, name, _, _, _, _) then "trait \(name)",
+            .GivenDecl(_, _, _, _) then "given",
+            .GivenTraitDecl(_, _, _, _, _) then "given as trait",
+            .IntrinsicGivenDecl(_, _, _, _) then "intrinsic given",
+            .GivenNotTraitDecl(_, _, trait_name, _) then "given-not-trait as \(trait_name)",
+        }
+    }
+
+    protected record_instantiation_request(self, request InstantiationRequest) Void = {
+        self.storage.instantiation_requests.insert(request)
+    }
+
+    protected register_trait_metadata(
+        self,
+        name String,
+        type_params List[TypeParameter],
+        parent_constraints List[ParentTraitConstraint],
+        raw_members List[TraitMember],
+        typed_members List[TypedTraitMember],
+    ) Void = {
+        let mut param_names = List[String].new()
+        for tp in type_params then {
+            param_names.push(tp.name)
+        }
+        let info = TraitInfo(name, param_names, parent_constraints, typed_members, self.storage.module_path)
+        self.storage.trait_registry.register(info)
+        self.storage.generic_templates.traits.insert(
+            name,
+            TraitDeclInfo(name, self.to_template_type_params(type_params), parent_constraints, raw_members, typed_members, self.storage.module_path)
+        )
+    }
+
+    protected template_checked_body(self, body Option[ref TypedExpr], retain_checked_template_bodies Bool) Option[ref TypedExpr] = {
+        return if retain_checked_template_bodies then when body in {
             .Some(typed_body) then Option[ref TypedExpr].Some(typed_body),
             .None() then Option[ref TypedExpr].None(),
         } else Option[ref TypedExpr].None()
@@ -204,21 +247,24 @@ given TypeChecker {
         return self.storage.context
     }
 
+    protected in_function_context(self) Bool = {
+        if self.storage.function_return_context.is_inferring then {
+            return true
+        }
+        return self.storage.function_return_context.expected_return_type is .Some(_)
+    }
+
     protected allocate_unindexed_def_id(self, name String, kind DefKind) DefId = {
         let mut context = self.context()
         return context.allocate_unindexed(name, kind)
     }
 
     protected fresh_type_variable(self, name Option[String], span SourceSpan) TypeVariable = {
-        let id = self.storage.next_type_variable_id
-        self.storage.next_type_variable_id += 1
-        return TypeVariable(id, name, Option[LiteralDefaultKind].None(), span)
+        return self.storage.constraint_solver.fresh_type_variable(name, span)
     }
 
     protected fresh_literal_type_variable(self, kind LiteralDefaultKind, span SourceSpan) TypeVariable = {
-        let id = self.storage.next_type_variable_id
-        self.storage.next_type_variable_id += 1
-        return TypeVariable(id, Option[String].None(), Option[LiteralDefaultKind].Some(kind), span)
+        return self.storage.constraint_solver.fresh_literal_type_variable(kind, span)
     }
 
     protected typed_expr_span(self, expr ref TypedExpr) SourceSpan = {
@@ -704,7 +750,7 @@ given TypeChecker {
         return false
     }
 
-    public check_program(self mut ref, program Program) TypedProgram = {
+    public check_program(self mut ref, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
         let mut typed_decls = List[TypedDecl].new()
         for decl in program.declarations then {
@@ -713,8 +759,10 @@ given TypeChecker {
                     self.check_given_not_trait_decl(target_type, type_params, trait_name, span)
                 },
                 _ then {
-                    let td = self.check_decl(decl)
-                    typed_decls.push(td)
+                    let td = self.check_decl(decl, retain_checked_template_bodies)
+                    if retain_checked_template_bodies then {
+                        typed_decls.push(td)
+                    }
                 },
             }
         }
@@ -726,70 +774,63 @@ given TypeChecker {
 
     // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
     // Each node carries its own source_file for accurate diagnostics.
-    public check_loaded_nodes(self mut ref, nodes List[Pair[LoadedNode, List[String]]]) TypedProgram = {
-        self.storage.known_root_modules = Set[String].new()
-        for pair in nodes then {
-            if pair.second.count() > 0(UInt) then {
-                self.storage.known_root_modules.insert(pair.second[0(UInt)])
-            }
-        }
-
-        let mut pass_inputs = List[LoadedDeclInput].new()
-        for pair in nodes then {
-            pass_inputs.push(LoadedDeclInput(pair.first.decl, pair.first.source_file, pair.second, pair.first.package_id))
-        }
+    public check_loaded_nodes(self mut ref, nodes List[Pair[LoadedNode, List[String]]], retain_checked_template_bodies Bool) TypedProgram = {
+        let debug_progress = self.sema_progress_debug_enabled()
 
         // Pass 2: collect signatures (with per-node file_path context)
         // Match the Swift pipeline and the single-program path by registering
         // all traits first. Otherwise cross-file references like
         // `ref Error` inside generic enum templates can degrade to Unknown
         // when the owning declaration is visited before the trait file.
-        let mut sig_index UInt = 0
-        while sig_index < pass_inputs.count() then {
-            let input = pass_inputs[sig_index]
-            when input.decl in {
+        for pair in nodes then {
+            when pair.first.decl in {
                 .TraitDecl(_, _, _, _, _, _) then {
-                    self.storage.file_path = input.source_file
-                    self.storage.module_path = input.module_path
-                    self.storage.package_id = input.package_id
-                    self.collect_decl_signature(input.decl)
+                    self.storage.file_path = pair.first.source_file
+                    self.storage.module_path = pair.second
+                    self.storage.package_id = pair.first.package_id
+                    self.collect_decl_signature(pair.first.decl)
                 },
                 _ then {},
             }
-            sig_index += 1
         }
-        sig_index = 0(UInt)
-        while sig_index < pass_inputs.count() then {
-            let input = pass_inputs[sig_index]
-            when input.decl in {
+        for pair in nodes then {
+            when pair.first.decl in {
                 .TraitDecl(_, _, _, _, _, _) then {},
                 _ then {
-                    self.storage.file_path = input.source_file
-                    self.storage.module_path = input.module_path
-                    self.storage.package_id = input.package_id
-                    self.collect_decl_signature(input.decl)
+                    self.storage.file_path = pair.first.source_file
+                    self.storage.module_path = pair.second
+                    self.storage.package_id = pair.first.package_id
+                    self.collect_decl_signature(pair.first.decl)
                 },
             }
-            sig_index += 1
         }
         // Pass 3: check bodies
         let mut typed_decls = List[TypedDecl].new()
-        let mut body_index UInt = 0
-        while body_index < pass_inputs.count() then {
-            let input = pass_inputs[body_index]
-            self.storage.file_path = input.source_file
-            self.storage.module_path = input.module_path
-            self.storage.package_id = input.package_id
-            when input.decl in {
+        let total_nodes = nodes.count()
+        let mut checked_decl_count = 0(UInt)
+        for pair in nodes then {
+            self.storage.file_path = pair.first.source_file
+            self.storage.module_path = pair.second
+            self.storage.package_id = pair.first.package_id
+            if debug_progress then {
+                println("[sema-decl] next=\(checked_decl_count + 1(UInt))/\(total_nodes) file=\(self.storage.file_path) label=\(self.decl_debug_label(pair.first.decl))")
+            }
+            when pair.first.decl in {
                 .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
                     self.check_given_not_trait_decl(target_type, type_params, trait_name, span)
+                    checked_decl_count += 1
                 },
                 _ then {
-                    let td = self.check_decl(input.decl)
-                    typed_decls.push(td)
+                    let td = self.check_decl(pair.first.decl, retain_checked_template_bodies)
+                    if retain_checked_template_bodies then {
+                        typed_decls.push(td)
+                    }
+                    checked_decl_count += 1
                 },
             }
-            body_index += 1
+            if debug_progress and checked_decl_count % 8(UInt) == 0(UInt) then {
+                self.log_sema_progress(checked_decl_count, total_nodes)
+            }
         }
         if self.has_errors() then {
             return TypedProgram(typed_decls, self.context().get_names())
@@ -797,84 +838,6 @@ given TypeChecker {
         // Pass 4: constraint solving + type substitution
         let final_program = self.finalize_typed_decls(typed_decls)
         return final_program
-    }
-
-    public check_loaded_nodes_without_program(self mut ref, nodes List[Pair[LoadedNode, List[String]]]) Void = {
-        debug_typecheck("without-program start nodes=\(nodes.count())")
-        self.storage.known_root_modules = Set[String].new()
-        for pair in nodes then {
-            if pair.second.count() > 0(UInt) then {
-                self.storage.known_root_modules.insert(pair.second[0(UInt)])
-            }
-        }
-
-        let mut pass_inputs = List[LoadedDeclInput].new()
-        for pair in nodes then {
-            pass_inputs.push(LoadedDeclInput(pair.first.decl, pair.first.source_file, pair.second, pair.first.package_id))
-        }
-
-        let mut sig_index UInt = 0
-        while sig_index < pass_inputs.count() then {
-            let input = pass_inputs[sig_index]
-            when input.decl in {
-                .TraitDecl(_, _, _, _, _, _) then {
-                    debug_typecheck("pass2 traits index=\(sig_index) file=\(input.source_file) decl=\(debug_decl_label(input.decl))")
-                    self.storage.file_path = input.source_file
-                    self.storage.module_path = input.module_path
-                    self.storage.package_id = input.package_id
-                    self.collect_decl_signature(input.decl)
-                },
-                _ then {},
-            }
-            sig_index += 1
-        }
-
-        sig_index = 0(UInt)
-        while sig_index < pass_inputs.count() then {
-            let input = pass_inputs[sig_index]
-            when input.decl in {
-                .TraitDecl(_, _, _, _, _, _) then {},
-                _ then {
-                    debug_typecheck("pass2 decl index=\(sig_index) file=\(input.source_file) decl=\(debug_decl_label(input.decl))")
-                    self.storage.file_path = input.source_file
-                    self.storage.module_path = input.module_path
-                    self.storage.package_id = input.package_id
-                    self.collect_decl_signature(input.decl)
-                },
-            }
-            sig_index += 1
-        }
-
-        let mut body_index UInt = 0
-        while body_index < pass_inputs.count() then {
-            let input = pass_inputs[body_index]
-            debug_typecheck("pass3 body index=\(body_index) file=\(input.source_file) decl=\(debug_decl_label(input.decl))")
-            self.storage.file_path = input.source_file
-            self.storage.module_path = input.module_path
-            self.storage.package_id = input.package_id
-            when input.decl in {
-                .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
-                    self.check_given_not_trait_decl(target_type, type_params, trait_name, span)
-                },
-                _ then {
-                    let _ = self.check_decl(input.decl)
-                },
-            }
-            body_index += 1
-        }
-        if self.has_errors() then {
-            debug_typecheck("without-program errors before solve")
-            return
-        }
-
-        debug_typecheck("pass4 solve start")
-        when self.storage.constraint_solver.solve() in {
-            .Ok(_) then {},
-            .Error(e) then {
-                self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-            },
-        }
-        debug_typecheck("without-program done")
     }
 
     private finalize_typed_decls(self, typed_decls List[TypedDecl]) TypedProgram = {
@@ -1161,7 +1124,8 @@ given TypeChecker {
                     let resolved_target = self.resolve_type(target_type)
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     let trait_name = self.type_node_name(trait_type)
-                    self.record_explicit_trait_conformance(resolved_target, trait_name)
+                    let resolved_trait_args = self.trait_type_args(trait_type)
+                    self.record_explicit_trait_conformance(resolved_target, trait_name, resolved_trait_args)
                     self.record_generic_trait_conformance_template(resolved_target, type_params, trait_type, trait_name)
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
                     // 注入 trait 类型参数
@@ -1288,24 +1252,8 @@ given TypeChecker {
                     }
                     parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes))
                 }
-                let mut param_names = List[String].new()
-                for tp in type_params then {
-                    param_names.push(tp.name)
-                }
                 let typed_members = self.check_trait_members(members, type_params)
-                let info = TraitInfo(name, param_names, parent_constraints, typed_members, self.storage.module_path)
-                self.storage.trait_registry.register(info)
-                self.storage.generic_templates.traits.insert(
-                    name,
-                    TraitDeclInfo(
-                        name,
-                        self.to_template_type_params(type_params),
-                        parent_constraints,
-                        members,
-                        typed_members,
-                        self.storage.module_path
-                    )
-                )
+                self.register_trait_metadata(name, type_params, parent_constraints, members, typed_members)
             },
             _ then {},
         }
@@ -1456,15 +1404,17 @@ given TypeChecker {
     private snapshot_type_bindings(self) UInt = {
         let snapshot_index = self.storage.type_binding_snapshots.count()
         self.storage.type_binding_snapshots.push(TypeBindingSnapshot(Dict[String, TypeBindingRestoreEntry].new()))
-        self.storage.type_binding_snapshot_stack.push(snapshot_index)
         return snapshot_index
     }
 
     private restore_type_bindings(self, snapshot_index UInt) Void = {
-        let snapshot = self.storage.type_binding_snapshots[snapshot_index]
-        if not self.storage.type_binding_snapshot_stack.is_empty() then {
-            let _ = self.storage.type_binding_snapshot_stack.pop()
+        let _ = snapshot_index
+        if self.storage.type_binding_snapshots.is_empty() then {
+            return
         }
+        let top_index = self.storage.type_binding_snapshots.count() - 1(UInt)
+        let snapshot = self.storage.type_binding_snapshots[top_index]
+        let _ = self.storage.type_binding_snapshots.pop()
         for entry in snapshot.restore_entries then {
             let name = entry.first
             let restore = entry.second
@@ -1486,11 +1436,10 @@ given TypeChecker {
     }
 
     private record_type_binding_restore(self, name String) Void = {
-        if self.storage.type_binding_snapshot_stack.is_empty() then {
+        if self.storage.type_binding_snapshots.is_empty() then {
             return
         }
-        let top_index = self.storage.type_binding_snapshot_stack.count() - 1(UInt)
-        let snapshot_index = self.storage.type_binding_snapshot_stack[top_index]
+        let snapshot_index = self.storage.type_binding_snapshots.count() - 1(UInt)
         let mut active_snapshot = self.storage.type_binding_snapshots[snapshot_index]
         if active_snapshot.restore_entries.get(name) is .Some(_) then {
             return
