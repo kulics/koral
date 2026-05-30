@@ -1,57 +1,47 @@
-// codegen_expressions_literals.koral - 字面量、类型转换、运算符辅助
-//
-// 实现 CodeGen 的字面量生成、类型转换、运算符辅助函数、
-// block 作用域、member path、build_ref_components 等方法。
-//
-// Requirements: 5.3, 5.6, 5.12, 5.17
+// codegen_expressions_literals.koral - MIR literal and operator helpers
+
+let format_hex_byte(b UInt8) String = {
+    let hex_chars = "0123456789ABCDEF"
+    let hi = (b >> 4)(UInt)
+    let lo = (b & 0x0F(UInt8))(UInt)
+    let hi_char = hex_chars[hi]
+    let lo_char = hex_chars[lo]
+    let mut result = "0x"
+    result.push_byte(hi_char)
+    result.push_byte(lo_char)
+    return result
+}
 
 given CodeGen {
-
-    // ── 字符串字面量生成 ──────────────────────────────────────────────────────
-
-    /// 生成字符串字面量的 C 代码
-    ///
-    /// 生成静态 UTF-8 字节数组 + StringStorage 常量 + String 结构体
-    ///
-    /// Requirements: 5.3
     generate_string_literal(self mut ref, value String, str_type Type) String = {
         let bytes_var = self.next_temp()
         let bytes_var_name = "\(bytes_var)_bytes"
         let storage_var_name = "\(bytes_var)_storage"
-
-        // 生成 UTF-8 字节数组
         let utf8_bytes = value.to_bytes()
         let mut byte_literals = String.new()
         let mut i UInt = 0
         while i < utf8_bytes.count() then {
-            let b = utf8_bytes[i]
-            if i > 0 then {
-                byte_literals.push_string(", ")
-            }
-            // 格式化为十六进制
-            byte_literals.push_string(format_hex_byte(b))
+            if i > 0 then { byte_literals.push_string(", ") }
+            byte_literals.push_string(format_hex_byte(utf8_bytes[i]))
             i += 1
         }
-        if not byte_literals.is_empty() then {
-            byte_literals.push_string(", ")
-        }
+        if not byte_literals.is_empty() then { byte_literals.push_string(", ") }
         byte_literals.push_string("0x00")
 
         self.add_indent()
         self.buffer.push_string("static const uint8_t \(bytes_var_name)[] = { \(byte_literals) };\n")
 
-        // 查找 String 结构体的 storage 字段类型
         let storage_c_type = when str_type in {
             .StructureType(def_id) then {
                 yield when self.context.get_struct_fields(def_id) in {
                     .Some(fields) then {
                         let mut found_type = "struct Std_StringStorage"
-                        for f in fields then {
-                            if f.name == "storage" then {
-                                found_type = when f.field_type in {
+                        for field in fields then {
+                            if field.name == "storage" then {
+                                found_type = when field.field_type in {
                                     .ReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
                                     .MutableReferenceType(inner_ref) then self.c_type_name(inner_ref.val),
-                                    _ then self.c_type_name(f.field_type),
+                                    _ then self.c_type_name(field.field_type),
                                 }
                             }
                         }
@@ -68,176 +58,17 @@ given CodeGen {
         self.buffer.push_string("static const \(storage_c_type) \(storage_var_name) = { (uint8_t*)\(bytes_var_name), \(byte_count), \(byte_count + 1) };\n")
 
         let c_type = self.c_type_name(str_type)
-        let result = self.next_temp_with_init(c_type, "(\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var_name), NULL } }")
-        return result
+        return self.next_temp_with_init(c_type, "(\(c_type)){ (struct __koral_Ref){ (void*)&\(storage_var_name), NULL } }")
     }
 
-
-    // ── 类型转换生成 ──────────────────────────────────────────────────────────
-
-    /// 生成类型转换表达式的 C 代码
-    ///
-    /// Requirements: 5.6
-    generate_cast_expr(self mut ref, target_type Type, inner ref TypedExpr) String = {
-        let inner_result = self.generate_expression_ssa(inner)
-        let target_c_type = self.c_type_name(target_type)
-
-        // 相同类型不需要转换
-        if self.codegen_types_equal(inner.expr_type, target_type) then {
-            return inner_result
+    sanitize_c_numeric_literal(self, value String) String = {
+        let cleaned = value.replace_all("_", with: "")
+        if cleaned.starts_with("0o") or cleaned.starts_with("0O") then {
+            return "0" + cleaned.substring(2..)
         }
-
-        let adapted_inner_result = when target_type in {
-            .TraitObject(_, _) then inner_result,
-            _ then when inner.expr_type in {
-                .ReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
-                .MutableReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
-                .WeakReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
-                .MutableWeakReferenceType(inner_type) then self.adapt_expression_result_to_type(inner, inner_result, inner_type.val),
-                _ then inner_result,
-            },
-        }
-        let source_type = when target_type in {
-            .TraitObject(_, _) then inner.expr_type,
-            _ then when inner.expr_type in {
-                .ReferenceType(inner_type) then inner_type.val,
-                .MutableReferenceType(inner_type) then inner_type.val,
-                .WeakReferenceType(inner_type) then inner_type.val,
-                .MutableWeakReferenceType(inner_type) then inner_type.val,
-                _ then inner.expr_type,
-            },
-        }
-
-        when target_type in {
-            .TraitObject(trait_name, _) then {
-                when inner.expr_type in {
-                    .ReferenceType(concrete_ref) then {
-                        let concrete_inner = concrete_ref.val
-                        when concrete_inner in {
-                            .GenericParameter(_) then {
-                                let result = self.next_temp_with_decl(target_c_type)
-                                self.add_indent()
-                                self.buffer.push_string("\(result) = *(struct __koral_TraitRef*)*(void**)\(inner_result).ptr;\n")
-                                self.add_indent()
-                                self.buffer.push_string("__koral_retain(\(result).control);\n")
-                                return result
-                            },
-                            .TraitObject(inner_trait_name, _) then {
-                                if inner_trait_name == trait_name then {
-                                    when inner.expr_kind in {
-                                        .RefExpr(original_inner_ref) then {
-                                            return self.generate_expression_ssa(original_inner_ref)
-                                        },
-                                        _ then {},
-                                    }
-                                    let result = self.next_temp_with_decl(target_c_type)
-                                    self.add_indent()
-                                    self.buffer.push_string("\(result) = \(inner_result);\n")
-                                    if self.is_lvalue_expr(inner) then {
-                                        self.add_indent()
-                                        self.buffer.push_string("__koral_retain(\(result).control);\n")
-                                    }
-                                    return result
-                                }
-                            },
-                            _ then {},
-                        }
-                        return self.generate_trait_object_conversion_typed(inner, target_type, concrete_inner)
-                    },
-                    .TraitObject(inner_trait_name, _) then {
-                        if inner_trait_name == trait_name then {
-                            return inner_result
-                        }
-                        return inner_result
-                    },
-                    _ then {
-                        let concrete_type = inner.expr_type
-                        let concrete_c_type = self.c_type_name(concrete_type)
-                        let value_result = if self.is_lvalue_expr(inner) and self.needs_drop(concrete_type) then {
-                            let copied_value = self.next_temp_with_decl(concrete_c_type)
-                            self.append_copy_assignment(concrete_type, inner_result, copied_value)
-                            yield copied_value
-                        } else {
-                            yield inner_result
-                        }
-                        let stored_value = self.next_temp_with_init(concrete_c_type, value_result)
-                        let trait_result = self.next_temp_with_decl(target_c_type)
-                        let concrete_c_name = when self.concrete_type_c_name(concrete_type) in {
-                            .Some(name) then name,
-                            .None() then self.c_type_name(concrete_type),
-                        }
-                        let vtable_name = self.vtable_instance_name(trait_name, concrete_c_name)
-                        self.add_indent()
-                        self.buffer.push_string("\(trait_result).ptr = (void*)&(\(stored_value));\n")
-                        self.add_indent()
-                        self.buffer.push_string("\(trait_result).control = NULL;\n")
-                        self.add_indent()
-                        self.buffer.push_string("\(trait_result).vtable = &\(vtable_name);\n")
-                        return trait_result
-                    },
-                }
-            },
-            _ then {},
-        }
-
-        let is_float_src = self.is_float_type(source_type)
-        let is_int_dst = self.is_integer_type(target_type)
-
-        // 浮点 -> 整数：运行时范围检查
-        if is_float_src and is_int_dst then {
-            let min_macro = self.int_type_min_macro(target_type)
-            let max_macro = self.int_type_max_macro(target_type)
-
-            let f_var = self.next_temp_with_init("double", "(double)\(adapted_inner_result)")
-
-            self.add_indent()
-            self.buffer.push_string("if (!(\(f_var) >= (double)\(min_macro) && \(f_var) <= (double)\(max_macro))) {\n")
-            self.with_indent(() -> {
-                self.add_indent()
-                self.buffer.push_string("__koral_panic_float_cast_overflow();\n")
-            })
-            self.add_indent()
-            self.buffer.push_string("}\n")
-
-            return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(f_var)")
-        }
-
-        // 指针 <-> Int/UInt 转换
-        let is_ptr_dst = when target_type in {
-            .PointerType(_) then true,
-            _ then false,
-        }
-        let is_ptr_src = when source_type in {
-            .PointerType(_) then true,
-            _ then false,
-        }
-
-        if is_ptr_dst then {
-            when source_type in {
-                .UIntType() then {
-                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(uintptr_t)\(adapted_inner_result)")
-                },
-                .IntType() then {
-                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))(intptr_t)\(adapted_inner_result)")
-                },
-                _ then {
-                    return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(adapted_inner_result)")
-                },
-            }
-        }
-
-        if is_ptr_src then {
-            return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(adapted_inner_result)")
-        }
-
-        // 默认标量转换
-        return self.next_temp_with_init(target_c_type, "(\(target_c_type))\(adapted_inner_result)")
+        return cleaned
     }
 
-
-    // ── 运算符转换辅助函数 ────────────────────────────────────────────────────
-
-    /// 将 ArithmeticOperator 转换为 C 运算符字符串
     arithmetic_op_to_c(self, op ArithmeticOperator) String = {
         return when op in {
             .Add() then "+",
@@ -248,7 +79,6 @@ given CodeGen {
         }
     }
 
-    /// 将 ComparisonOperator 转换为 C 运算符字符串
     comparison_op_to_c(self, op ComparisonOperator) String = {
         return when op in {
             .Equal() then "==",
@@ -260,7 +90,6 @@ given CodeGen {
         }
     }
 
-    /// 将 BitwiseOperator 转换为 C 运算符字符串
     bitwise_op_to_c(self, op BitwiseOperator) String = {
         return when op in {
             .BitAnd() then "&",
@@ -271,9 +100,6 @@ given CodeGen {
         }
     }
 
-    // ── Checked Arithmetic 函数名生成 ─────────────────────────────────────────
-
-    /// 生成 checked arithmetic 函数名，格式：koral_checked_{op}_{type_suffix}
     checked_arithmetic_func_name(self, op ArithmeticOperator, t Type) String = {
         let op_name = when op in {
             .Add() then "add",
@@ -285,7 +111,6 @@ given CodeGen {
         return "koral_checked_\(op_name)_\(self.type_suffix(t))"
     }
 
-    /// 生成 checked shift 函数名，格式：koral_checked_{op}_{type_suffix}
     checked_shift_func_name(self, op BitwiseOperator, t Type) String = {
         let op_name = when op in {
             .LeftShift() then "shl",
@@ -295,7 +120,6 @@ given CodeGen {
         return "koral_checked_\(op_name)_\(self.type_suffix(t))"
     }
 
-    /// 获取整数类型的后缀字符串（用于 checked arithmetic 函数名）
     type_suffix(self, t Type) String = {
         return when t in {
             .IntType() then "isize",
@@ -312,10 +136,6 @@ given CodeGen {
         }
     }
 
-
-    // ── 类型判断辅助方法 ──────────────────────────────────────────────────────
-
-    /// 判断类型是否为整数类型
     is_integer_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
@@ -332,7 +152,6 @@ given CodeGen {
         }
     }
 
-    /// 判断类型是否为浮点类型
     is_float_type(self, t Type) Bool = {
         return when t in {
             .Float32Type() then true,
@@ -340,414 +159,4 @@ given CodeGen {
             _ then false,
         }
     }
-
-    /// 获取整数类型的最小值宏名称（用于浮点转整数的范围检查）
-    int_type_min_macro(self, t Type) String = {
-        return when t in {
-            .Int8Type() then "INT8_MIN",
-            .Int16Type() then "INT16_MIN",
-            .Int32Type() then "INT32_MIN",
-            .Int64Type() then "INT64_MIN",
-            .IntType() then "INTPTR_MIN",
-            .UInt8Type() then "0",
-            .UInt16Type() then "0",
-            .UInt32Type() then "0",
-            .UInt64Type() then "0",
-            .UIntType() then "0",
-            _ then "0",
-        }
-    }
-
-    /// 获取整数类型的最大值宏名称（用于浮点转整数的范围检查）
-    int_type_max_macro(self, t Type) String = {
-        return when t in {
-            .Int8Type() then "INT8_MAX",
-            .Int16Type() then "INT16_MAX",
-            .Int32Type() then "INT32_MAX",
-            .Int64Type() then "INT64_MAX",
-            .IntType() then "INTPTR_MAX",
-            .UInt8Type() then "UINT8_MAX",
-            .UInt16Type() then "UINT16_MAX",
-            .UInt32Type() then "UINT32_MAX",
-            .UInt64Type() then "UINT64_MAX",
-            .UIntType() then "UINTPTR_MAX",
-            _ then "INTPTR_MAX",
-        }
-    }
-
-    // ── 控制流辅助方法 ────────────────────────────────────────────────────────
-
-    /// 生成块作用域（Block 表达式）的 C 代码
-    ///
-    /// 创建新作用域，依次生成语句，YieldStmt 或最后一个 ExprStmt 的值作为块的返回值。
-    ///
-    /// Requirements: 5.12
-    public generate_block_scope(self mut ref, statements List[TypedStatement], block_type Type) String = {
-        let saved_scope_state = self.snapshot_scope_state()
-        let parent_scope_index = if self.lifetime_scope_stack.is_empty()
-            then 0(UInt)
-            else self.lifetime_scope_stack.count() - 1(UInt)
-        self.push_scope()
-        let has_result = not self.type_is_void_or_never(block_type)
-        let mut result = String.new()
-        let yield_target_opt = if has_result then {
-            let c_type = self.c_type_name(block_type)
-            let result_var = self.next_temp_with_decl(c_type)
-            yield Option[CodegenYieldTarget].Some(
-                CodegenYieldTarget(
-                    result_var,
-                    block_type,
-                    "\(self.next_temp())_yield_end",
-                    parent_scope_index,
-                )
-            )
-        } else Option[CodegenYieldTarget].None()
-        when yield_target_opt in {
-            .Some(target) then self.push_yield_target(target),
-            .None() then {},
-        }
-        let mut stmt_index UInt = 0
-        for stmt in statements then {
-            when stmt in {
-                .YieldStmt(_, _) then self.generate_statement(stmt),
-                .ExprStmt(expr_ref, _) then {
-                    let is_final_statement = stmt_index + 1(UInt) == statements.count()
-                    if is_final_statement and not self.type_is_void_or_never(block_type) then {
-                        let temp = self.generate_expression_ssa(expr_ref)
-                        if expr_ref.expr_type is not .NeverType() then {
-                            when yield_target_opt in {
-                                .Some(target) then {
-                                    let adapted_temp = self.adapt_expression_result_to_type(expr_ref, temp, block_type)
-                                    self.assign_expr_result(expr_ref, adapted_temp, block_type, target.result_var)
-                                },
-                                .None() then {},
-                            }
-                        }
-                    } else {
-                        self.generate_statement(stmt)
-                    }
-                },
-                .IfStmt(condition_ref, then_ref, else_opt, _) then {
-                    let is_final_statement = stmt_index + 1(UInt) == statements.count()
-                    if is_final_statement and not self.type_is_void_or_never(block_type) then {
-                        let if_expr = make_typed_expr(TypedExprKind.IfExpr(condition_ref, then_ref, else_opt), block_type)
-                        let temp = self.generate_expression_ssa(box(if_expr))
-                        when yield_target_opt in {
-                            .Some(target) then {
-                                let adapted_temp = self.adapt_expression_result_to_type(box(if_expr), temp, block_type)
-                                self.assign_expr_result(box(if_expr), adapted_temp, block_type, target.result_var)
-                            },
-                            .None() then {},
-                        }
-                    } else {
-                        self.generate_statement(stmt)
-                    }
-                },
-                .WhenStmt(subject_ref, arms, _) then {
-                    let is_final_statement = stmt_index + 1(UInt) == statements.count()
-                    if is_final_statement and not self.type_is_void_or_never(block_type) then {
-                        let when_expr = make_typed_expr(TypedExprKind.WhenExpr(subject_ref, arms), block_type)
-                        let temp = self.generate_expression_ssa(box(when_expr))
-                        when yield_target_opt in {
-                            .Some(target) then {
-                                let adapted_temp = self.adapt_expression_result_to_type(box(when_expr), temp, block_type)
-                                self.assign_expr_result(box(when_expr), adapted_temp, block_type, target.result_var)
-                            },
-                            .None() then {},
-                        }
-                    } else {
-                        self.generate_statement(stmt)
-                    }
-                },
-                _ then {
-                    self.generate_statement(stmt)
-                },
-            }
-            stmt_index += 1
-        }
-        when yield_target_opt in {
-            .Some(target) then {
-                let _ = self.pop_yield_target()
-                result = target.result_var
-            },
-            .None() then {},
-        }
-        self.pop_scope()
-        self.restore_scope_state(saved_scope_state)
-        when yield_target_opt in {
-            .Some(target) then self.push_indented_string("\(target.end_label):;\n"),
-            .None() then {},
-        }
-        return result
-    }
-
-    // ── MemberPath 辅助方法 ───────────────────────────────────────────────────
-
-    /// 生成 MemberPath 表达式的 C 代码
-    ///
-    /// 遍历成员路径链，处理 ref 类型的解引用（`.ptr` 访问）。
-    ///
-    /// Requirements: 5.17
-    public generate_member_path(self mut ref, source ref TypedExpr, path List[String]) String = {
-        let source_result = self.generate_expression_ssa(source)
-        let should_drop_rvalue_source = not self.is_lvalue_expr(source) and self.needs_drop(source.expr_type) and not source_result.is_empty()
-        let mut access = source_result
-        let mut cur_type = source.expr_type
-
-        for member_name_raw in path then {
-            let member_name = self.sanitize_codegen_identifier(member_name_raw)
-
-            let member_access = when cur_type in {
-                .ReferenceType(inner_ref) then {
-                    let inner_c_type = self.c_type_name(inner_ref.val)
-                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
-                },
-                .MutableReferenceType(inner_ref) then {
-                    let inner_c_type = self.c_type_name(inner_ref.val)
-                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
-                },
-                .PointerType(_) then {
-                    yield "\(access)->\(member_name)"
-                },
-                .MutablePointerType(_) then {
-                    yield "\(access)->\(member_name)"
-                },
-                .WeakReferenceType(inner_ref) then {
-                    let inner_c_type = self.c_type_name(inner_ref.val)
-                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
-                },
-                .MutableWeakReferenceType(inner_ref) then {
-                    let inner_c_type = self.c_type_name(inner_ref.val)
-                    yield "((\(inner_c_type)*)\(access).ptr)->\(member_name)"
-                },
-                _ then {
-                    yield "\(access).\(member_name)"
-                },
-            }
-
-            access = member_access
-            // Update cur_type by looking up the field type in the struct definition
-            cur_type = self.lookup_field_type(cur_type, member_name_raw)
-        }
-
-        let result = self.load_member_value(access, cur_type)
-        if should_drop_rvalue_source then {
-            if self.is_registered_for_cleanup(source_result) then {
-                self.unregister_variable(source_result)
-            }
-            self.add_indent()
-            self.append_drop_statement(source.expr_type, source_result)
-        }
-        return result
-    }
-
-    /// Look up the type of a field in a struct/enum type
-    lookup_field_type(self, t Type, field_name String) Type = {
-        when t in {
-            .StructureType(def_id) then {
-                let fields_opt = when self.context.is_foreign_struct(def_id) in {
-                    true then self.context.get_foreign_struct_fields(def_id),
-                    false then self.context.get_struct_fields(def_id),
-                }
-                when fields_opt in {
-                    .Some(fields) then {
-                        for f in fields then {
-                            if f.name == field_name then {
-                                if self.is_unresolved_codegen_type(f.field_type) then {
-                                    let struct_name = self.context.get_name(def_id) or else ""
-                                    when self.lookup_field_type_by_name(struct_name, field_name) in {
-                                        .Some(t2) then { return t2 },
-                                        .None() then { return f.field_type },
-                                    }
-                                }
-                                return f.field_type
-                            }
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .GenericStruct(template, _) then {
-                when self.find_type_def_id_by_layout_or_template(t, template) in {
-                    .Some(def_id) then {
-                        when self.context.get_struct_fields(def_id) in {
-                            .Some(fields) then {
-                                for f in fields then {
-                                    if f.name == field_name then {
-                                        return f.field_type
-                                    }
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            .ReferenceType(inner_ref) then {
-                return self.lookup_field_type(inner_ref.val, field_name)
-            },
-            .MutableReferenceType(inner_ref) then {
-                return self.lookup_field_type(inner_ref.val, field_name)
-            },
-            .PointerType(inner_ref) then {
-                return self.lookup_field_type(inner_ref.val, field_name)
-            },
-            .MutablePointerType(inner_ref) then {
-                return self.lookup_field_type(inner_ref.val, field_name)
-            },
-            .WeakReferenceType(inner_ref) then {
-                return self.lookup_field_type(inner_ref.val, field_name)
-            },
-            .MutableWeakReferenceType(inner_ref) then {
-                return self.lookup_field_type(inner_ref.val, field_name)
-            },
-            _ then {},
-        }
-        return Type.Unknown()
-    }
-
-    build_ref_components(self mut ref, expr ref TypedExpr) Pair[String, String] = {
-        return when expr.expr_kind in {
-            .Variable(symbol) then {
-                // 先检查 lambda 捕获别名，再用 c_identifier_for_symbol
-                let c_name = when self.captured_var_aliases.get(symbol.def_id.id) in {
-                    .Some(alias) then alias,
-                    .None() then {
-                        let raw_name = self.c_identifier_for_symbol(symbol)
-                        yield when self.captured_name_alias_opt(raw_name) in {
-                            .Some(alias) then alias,
-                            .None() then raw_name,
-                        }
-                    },
-                }
-                let path = when self.pattern_binding_aliases.get(c_name) in {
-                    .Some(alias) then alias,
-                    .None() then c_name,
-                }
-                yield when symbol.symbol_type in {
-                    .ReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
-                    .MutableReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
-                    .WeakReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
-                    .MutableWeakReferenceType(_) then Pair[String, String](path, "(\(path)).control"),
-                    _ then Pair[String, String](path, "NULL"),
-                }
-            },
-            .RefExpr(inner_ref) then {
-                // For an explicit ref expression, forward to the referenced
-                // lvalue components so callers can materialize/copy the
-                // underlying value instead of treating the ref object as value.
-                yield self.build_ref_components(inner_ref)
-            },
-            .MemberPath(base_ref, path) then {
-                let base = base_ref
-                let mut base_path = String.new()
-                let mut base_control = String.new()
-                if self.is_addressable_lvalue_expr(base) then {
-                    let base_components = self.build_ref_components(base)
-                    base_path = base_components.first
-                    base_control = base_components.second
-                } else {
-                    base_path = self.generate_expression_ssa(base)
-                    if self.needs_drop(base.expr_type) and not base_path.is_empty() and not self.is_registered_for_cleanup(base_path) then {
-                        self.register_variable(base_path, base.expr_type)
-                    }
-                    when base.expr_type in {
-                        .ReferenceType(_) then {
-                            base_control = "\(base_path).control"
-                        },
-                        .MutableReferenceType(_) then {
-                            base_control = "\(base_path).control"
-                        },
-                        .WeakReferenceType(_) then {
-                            base_control = "\(base_path).control"
-                        },
-                        .MutableWeakReferenceType(_) then {
-                            base_control = "\(base_path).control"
-                        },
-                        _ then {
-                            base_control = "NULL"
-                        },
-                    }
-                }
-                let mut cur_type = base.expr_type
-
-                for member_name_raw in path then {
-                    let member_name = self.sanitize_codegen_identifier(member_name_raw)
-                    when cur_type in {
-                        .ReferenceType(inner_ref) then {
-                            let inner_c_type = self.c_type_name(inner_ref.val)
-                            base_control = "(\(base_path)).control"
-                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
-                        },
-                        .MutableReferenceType(inner_ref) then {
-                            let inner_c_type = self.c_type_name(inner_ref.val)
-                            base_control = "(\(base_path)).control"
-                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
-                        },
-                        .PointerType(_) then {
-                            base_path = "\(base_path)->\(member_name)"
-                        },
-                        .MutablePointerType(_) then {
-                            base_path = "\(base_path)->\(member_name)"
-                        },
-                        .WeakReferenceType(inner_ref) then {
-                            let inner_c_type = self.c_type_name(inner_ref.val)
-                            base_control = "(\(base_path)).control"
-                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
-                        },
-                        .MutableWeakReferenceType(inner_ref) then {
-                            let inner_c_type = self.c_type_name(inner_ref.val)
-                            base_control = "(\(base_path)).control"
-                            base_path = "((\(inner_c_type)*)\(base_path).ptr)->\(member_name)"
-                        },
-                        _ then {
-                            base_path = "\(base_path).\(member_name)"
-                        },
-                    }
-                    cur_type = self.lookup_field_type(cur_type, member_name_raw)
-                }
-                yield Pair[String, String](base_path, base_control)
-            },
-            .DerefExpr(inner_ref) then {
-                let inner = inner_ref
-                let is_addressable = self.is_addressable_lvalue_expr(inner)
-                let c_type = self.c_type_name(expr.expr_type)
-                let inner_path = if is_addressable then self.build_ref_components_path(inner) else String.new()
-                let ref_result = if is_addressable then String.new() else self.generate_expression_ssa(inner)
-                if not is_addressable and self.needs_drop(inner.expr_type) and not ref_result.is_empty() and not self.is_registered_for_cleanup(ref_result) then {
-                    self.register_variable(ref_result, inner.expr_type)
-                }
-                let path = when inner.expr_type in {
-                    .ReferenceType(_) then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
-                    .MutableReferenceType(_) then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
-                    .PointerType(_) then if is_addressable then "(*\(inner_path))" else "(*\(ref_result))",
-                    .MutablePointerType(_) then if is_addressable then "(*\(inner_path))" else "(*\(ref_result))",
-                    _ then if is_addressable then "(*(\(c_type)*)\(inner_path).ptr)" else "(*(\(c_type)*)\(ref_result).ptr)",
-                }
-                let control = when inner.expr_type in {
-                    .ReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
-                    .MutableReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
-                    .WeakReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
-                    .MutableWeakReferenceType(_) then if is_addressable then "(\(inner_path)).control" else "\(ref_result).control",
-                    _ then "NULL",
-                }
-                yield Pair[String, String](path, control)
-            },
-            _ then {
-                let result = self.generate_expression_ssa(expr)
-                yield Pair[String, String](result, "NULL")
-            },
-        }
-    }
-
-
-
-    // ── 函数调用生成 ──────────────────────────────────────────────────────────
-
-    /// 生成函数调用代码
-    ///
-    /// 处理普通函数调用和闭包调用。
-    ///
-    /// Requirements: 5.16
 }

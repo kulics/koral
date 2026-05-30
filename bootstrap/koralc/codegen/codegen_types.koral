@@ -4,7 +4,6 @@
 // - generate_type_declaration: 生成结构体定义 + copy + drop 函数
 // - generate_enum_declaration: 生成枚举定义 + copy + drop 函数
 // - generate_foreign_struct_declaration: 生成 foreign struct 定义
-// - generate_enum_constructor: 生成枚举构造代码
 // - 类型声明收集、依赖图构建和 Kahn 拓扑排序
 //
 // 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGenTypes.swift
@@ -24,110 +23,6 @@ private let is_void_like_type(t Type) Bool = {
 }
 
 given CodeGen {
-
-    private enum_constructor_def_id(self, enum_type Type) DefId = {
-        return when enum_type in {
-            .EnumType(def_id) then def_id,
-            .GenericEnum(template, _) then when self.find_type_def_id_by_layout_or_template(enum_type, template) in {
-                .Some(def_id) then def_id,
-                .None() then DefId(0(UInt)),
-            },
-            _ then DefId(0(UInt)),
-        }
-    }
-
-    private enum_constructor_type_name(self, enum_type Type) String = {
-        return when enum_type in {
-            .EnumType(def_id) then {
-                yield when self.c_identifier_opt(def_id) in {
-                    .Some(n) then n,
-                    .None() then {
-                        yield when self.context.get_name(def_id) in {
-                            .Some(n) then self.sanitize_codegen_identifier(n),
-                            .None() then "U_\(def_id.id)",
-                        }
-                    },
-                }
-            },
-            .GenericEnum(_, _) then {
-                let def_id = self.enum_constructor_def_id(enum_type)
-                if def_id.id <> 0 then {
-                    return when self.c_identifier_opt(def_id) in {
-                        .Some(n) then n,
-                        .None() then self.sanitize_codegen_identifier(layout_key(enum_type)),
-                    }
-                }
-                yield self.sanitize_codegen_identifier(layout_key(enum_type))
-            },
-            _ then "unknown_enum",
-        }
-    }
-
-    private enum_constructor_expected_trait_type(self, param_type Type) Type = {
-        return when param_type in {
-            .ReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(_, _) then inner_ref.val,
-                .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
-                    .Some(mapped) then when mapped in {
-                        .TraitObject(_, _) then mapped,
-                        _ then Type.Unknown(),
-                    },
-                    .None() then {
-                        let trait_name = self.context.get_name(def_id) or else ""
-                        yield if self.program.semantic_traits().get(trait_name).is_some()
-                            then Type.TraitObject(trait_name, List[ref Type].new())
-                            else Type.Unknown()
-                    },
-                },
-                _ then Type.Unknown(),
-            },
-            .TraitObject(_, _) then param_type,
-            .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
-                .Some(mapped) then when mapped in {
-                    .TraitObject(_, _) then mapped,
-                    _ then Type.Unknown(),
-                },
-                .None() then {
-                    let trait_name = self.context.get_name(def_id) or else ""
-                    yield if self.program.semantic_traits().get(trait_name).is_some()
-                        then Type.TraitObject(trait_name, List[ref Type].new())
-                        else Type.Unknown()
-                },
-            },
-            _ then Type.Unknown(),
-        }
-    }
-
-    private enum_constructor_arg_value(self mut ref, arg_expr_ref ref TypedExpr, param_type Type, expected_trait_type Type) String = {
-        if expected_trait_type is .Unknown() then {
-            return self.generate_expression_ssa(arg_expr_ref)
-        }
-
-        let source_type = arg_expr_ref.expr_type
-        return when source_type in {
-            .TraitObject(_, _) then self.generate_expression_ssa(arg_expr_ref),
-            .ReferenceType(source_inner_ref) then when source_inner_ref.val in {
-                .TraitObject(_, _) then self.generate_cast_expr(param_type, arg_expr_ref),
-                .OpaqueType(source_def_id) then when self.context.lookup_type(source_def_id) in {
-                    .Some(mapped) then when mapped in {
-                        .TraitObject(_, _) then self.generate_cast_expr(param_type, arg_expr_ref),
-                        _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
-                    },
-                    .None() then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
-                },
-                _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
-            },
-            .WeakReferenceType(source_inner_ref) then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_inner_ref.val),
-            .OpaqueType(source_def_id) then when self.context.lookup_type(source_def_id) in {
-                .Some(mapped) then when mapped in {
-                    .TraitObject(_, _) then self.generate_expression_ssa(arg_expr_ref),
-                    _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type),
-                },
-                .None() then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type),
-            },
-            _ then self.generate_trait_object_conversion_typed(arg_expr_ref, expected_trait_type, source_type),
-        }
-    }
 
     private concrete_struct_fields_from_def(self, def_id DefId) Option[List[TypedField]] = {
         when self.concrete_struct_fields_from_program(def_id) in {
@@ -229,7 +124,7 @@ given CodeGen {
         self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n")
         self.with_indent(() -> {
             // 调用用户定义的 drop（如果存在）
-            when self.user_defined_drops.get(name) in {
+            when self.user_defined_drop_for_type_name(name) in {
                 .Some(user_drop) then {
                     // 提前提取，避免在 lambda 中捕获 pattern-bound 变量
                     let user_drop_name = user_drop
@@ -274,7 +169,6 @@ given CodeGen {
             self.with_indent(() -> {
                 for case_info in cases then {
                     let case_c_name = self.sanitize_codegen_identifier(case_info.name)
-                    // 过滤掉 Void 类型字段（保留 void-like 类型但用 char 占位）
                     let mut has_non_void = false
                     for f in case_info.fields then {
                         when f.field_type in {
@@ -325,7 +219,6 @@ given CodeGen {
                 let case_c_name = self.sanitize_codegen_identifier(case_info.name)
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
-                // 过滤掉 Void 类型字段
                 let mut non_void_fields = List[TypedEnumCaseField].new()
                 for f in case_info.fields then {
                     when f.field_type in {
@@ -353,10 +246,8 @@ given CodeGen {
         // 生成 drop 函数
         self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n")
         self.with_indent(() -> {
-            // 调用用户定义的 drop（如果存在）
-            when self.user_defined_drops.get(name) in {
+            when self.user_defined_drop_for_type_name(name) in {
                 .Some(user_drop) then {
-                    // 提前提取，避免在 lambda 中捕获 pattern-bound 变量
                     let user_drop_name = user_drop
                     self.add_indent()
                     self.buffer.push_string("{\n")
@@ -378,7 +269,6 @@ given CodeGen {
                 let case_c_name = self.sanitize_codegen_identifier(case_info.name)
                 self.add_indent()
                 self.buffer.push_string("case \(case_index): // \(case_info.name)\n")
-                // 过滤掉 Void 类型字段
                 let mut non_void_fields = List[TypedEnumCaseField].new()
                 for f in case_info.fields then {
                     when f.field_type in {
@@ -422,101 +312,11 @@ given CodeGen {
         self.buffer.push_string("};\n\n")
     }
 
-    // ── 枚举构造代码生成 ────────────────────────────────────────────────────
-
-    /// 生成枚举构造代码，返回持有结果的临时变量名
-    ///
-    /// Requirements: 3.6
-    public generate_enum_constructor(self mut ref, enum_type Type, case_name String, args List[ref TypedExpr]) String = {
-        let type_name = self.enum_constructor_type_name(enum_type)
-
-        let c_type = "struct \(type_name)"
-        let result = self.next_temp_with_decl(c_type)
-
-        let case_name_tail = when case_name.split_last_once(".") in {
-            .Some(parts) then parts.second,
-            .None() then case_name,
-        }
-
-        let def_id = self.enum_constructor_def_id(enum_type)
-        let mut tag_index UInt = 0
-        let mut case_params = List[EnumCaseParam].new()
-        let missing_case_metadata = def_id.id == 0
-        if def_id.id <> 0 then {
-            tag_index = self.context.enum_case_tag_index_by_raw_id(def_id.id, case_name)
-            case_params = self.context.enum_case_params_by_raw_id(def_id.id, case_name)
-        }
-        if case_params.count() == 0 and args.count() > 0 then {
-            // 元数据缺失兜底：不再按名称猜测 tag，仅保留参数占位。
-            let mut fallback_index UInt = 0
-            while fallback_index < args.count() then {
-                let param_name = if fallback_index == 0 then "value" else "value_\(fallback_index)"
-                case_params.push(EnumCaseParam(param_name, Type.Unknown(), false))
-                fallback_index += 1
-            }
-        }
-
-        self.add_indent()
-        if missing_case_metadata then {
-            self.buffer.push_string("/* WARNING: missing enum case metadata for \(case_name_tail); using fallback field mapping */\n")
-            self.add_indent()
-        }
-        self.buffer.push_string("\(result).tag = \(tag_index);\n")
-
-        let escaped_case_name = self.sanitize_codegen_identifier(case_name_tail)
-
-        // 过滤掉 Void 类型参数，并与 args 对应
-        let mut non_void_pairs = List[Pair[ref TypedExpr, EnumCaseParam]].new()
-        let param_count = case_params.count()
-        let arg_count = args.count()
-        let min_count = if param_count < arg_count then param_count else arg_count
-        let mut idx UInt = 0
-        while idx < min_count then {
-            let param = case_params[idx]
-            when param.param_type in {
-                .VoidType() then {},
-                _ then {
-                    non_void_pairs.push(Pair[ref TypedExpr, EnumCaseParam](args[idx], param))
-                },
-            }
-            idx += 1
-        }
-
-        if non_void_pairs.count() > 0 then {
-            let union_member_path = "\(result).data.\(escaped_case_name)"
-            for pair in non_void_pairs then {
-                let arg_expr_ref = pair.first
-                let param = pair.second
-                let expected_trait_type = self.enum_constructor_expected_trait_type(param.param_type)
-                let arg_result = self.enum_constructor_arg_value(arg_expr_ref, param.param_type, expected_trait_type)
-
-                if arg_result == "" then { continue }
-                let field_c_name = self.sanitize_codegen_identifier(param.name)
-                let dest = "\(union_member_path).\(field_c_name)"
-                // 仅当源表达式本身是 lvalue 时才保留 copy；rvalue case payload 应直接移动到结果槽。
-                let is_lvalue = self.is_lvalue_expr(arg_expr_ref)
-                if is_lvalue then {
-                    self.append_copy_assignment(param.param_type, arg_result, dest)
-                } else {
-                    let moved_arg = self.transfer_owned_rvalue_cleanup(arg_result, arg_result, param.param_type, false)
-                    self.add_indent()
-                    self.buffer.push_string("\(dest) = \(moved_arg);\n")
-                }
-            }
-        }
-
-        return result
-    }
     // ── 类型声明收集与拓扑排序 ────────────────────────────────────────────────
 
-    /// 从 global_nodes 中收集所有类型声明，去重后按依赖拓扑排序
-    ///
-    /// Requirements: 3.7, 3.8
     public collect_and_sort_type_declarations(self mut ref) List[TypeDeclaration] = {
-        // 第一步：从 def_id_map 收集所有具体类型声明，去重。
         let mut decl_map = Dict[String, TypeDeclaration].new()
 
-        // 收集已单态化的具体类型定义。
         let mut id UInt = 1
         while id < self.context.next_def_id() then {
             let def_id = DefId(id)

@@ -73,6 +73,8 @@ private let recover_unknown_expr_type(
             yield Type.FunctionType(param_entries, box(resolve_parameterized_type(mono, return_type)))
         },
         .StaticMethodCall(_, _, method, _, _, _) then recover_method_return_type(mono, method, fallback),
+        .TypeConstruction(_, _, _) then fallback,
+        .EnumConstruction(enum_type, _, _) then resolve_parameterized_type(mono, enum_type),
         .TraitMethodPlaceholder(_, _, method, _, _) then resolve_parameterized_type(mono, method.symbol_type),
         .TraitMethodCall(_, _, _, _, _) then fallback,
         .TraitObjectConversion(_, trait_type, _) then resolve_parameterized_type(mono, trait_type),
@@ -540,6 +542,24 @@ private let substitute_expr_kind(
                 new_type_args.push(mono.substitute_type_impl(ta, substitution))
             }
             yield box(TypedExprKind.GenericInstantiation(new_base_type, new_type_args))
+        },
+        .TypeConstruction(identifier, type_args, args) then {
+            let mut new_type_args = List[Type].new()
+            for ta in type_args then {
+                new_type_args.push(mono.substitute_type_impl(ta, substitution))
+            }
+            let mut new_args = List[ref TypedExpr].new()
+            for arg in args then {
+                new_args.push(substitute_types_in_expression(mono, arg, substitution))
+            }
+            yield box(TypedExprKind.TypeConstruction(box(substitute_symbol(mono, identifier, substitution)), new_type_args, new_args))
+        },
+        .EnumConstruction(enum_type, case_name, args) then {
+            let mut new_args = List[ref TypedExpr].new()
+            for arg in args then {
+                new_args.push(substitute_types_in_expression(mono, arg, substitution))
+            }
+            yield box(TypedExprKind.EnumConstruction(mono.substitute_type_impl(enum_type, substitution), case_name, new_args))
         },
     }
 }

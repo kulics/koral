@@ -730,11 +730,16 @@ given TypeChecker {
             arg_idx += 1
         }
 
+        if typed_callee.expr_type is .Unknown() then {
+            return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown())
+        }
+
         when callee in {
             .Identifier(_, _) then when typed_callee.expr_kind in {
                 .Variable(sym) then {
-                    if sym.kind is not .TypeSymbol() then {
-                        self.validate_named_arguments(call_args, callee_param_specs)
+                    when sym.kind in {
+                        .TypeSymbol() then {},
+                        _ then self.validate_named_arguments(call_args, callee_param_specs),
                     }
                 },
                 _ then self.validate_named_arguments(call_args, callee_param_specs),
@@ -742,7 +747,10 @@ given TypeChecker {
             _ then {},
         }
 
-        self.validate_generic_function_call_constraints(callee, typed_callee_ref, typed_args, scope)
+        when generic_function_template_opt in {
+            .Some(_) then self.validate_generic_function_call_constraints(callee, typed_callee_ref, typed_args, scope),
+            .None() then {},
+        }
 
         let inferred_method_call_info = when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
@@ -776,11 +784,20 @@ given TypeChecker {
             _ then Option[Pair[Type, List[Type]]].None(),
         }
 
-        let generic_return_type = self.resolve_generic_function_call_return_type(callee, typed_callee_ref, typed_args, expected, scope)
-        let generic_struct_ctor_return_type = self.infer_generic_struct_constructor_return_type(callee, typed_args)
-        let resolved_ret_type = when generic_struct_ctor_return_type in {
-            .Some(ret_type) then ret_type,
-            .None() then when typed_callee.expr_kind in {
+        let generic_return_type = when generic_function_template_opt in {
+            .Some(_) then self.resolve_generic_function_call_return_type(callee, typed_callee_ref, typed_args, expected, scope),
+            .None() then Option[Type].None(),
+        }
+        let mut has_direct_generic_instantiation_return_type = false
+        let mut direct_generic_instantiation_return_type = Type.Unknown()
+        when typed_callee.expr_kind in {
+            .GenericInstantiation(_, _) then {
+                direct_generic_instantiation_return_type = typed_callee.expr_type
+                has_direct_generic_instantiation_return_type = true
+            }
+            _ then {},
+        }
+        let resolved_ret_type = if has_direct_generic_instantiation_return_type then direct_generic_instantiation_return_type else when typed_callee.expr_kind in {
                 .Variable(_) then when generic_return_type in {
                     .Some(ret_type) then ret_type,
                     .None() then when inferred_method_call_info in {
@@ -795,7 +812,6 @@ given TypeChecker {
                         .None() then self.resolve_call_return_type(typed_callee_ref),
                     },
                 },
-            },
         }
         let mut ret_type = when resolved_ret_type in {
             .Unknown() then when expected in {
@@ -812,8 +828,8 @@ given TypeChecker {
         if not skip_zero_arg_member_expected_refine then {
             when expected in {
                 .Some(expected_t) then {
-                    if self.contains_generic_parameter(ret_type)
-                       and not self.contains_generic_parameter(expected_t)
+                          if self.mentions_unresolved_generic_placeholder(ret_type)
+                              and not self.mentions_unresolved_generic_placeholder(expected_t)
                        and not self.is_unresolved_expr_type(expected_t)
                     then {
                         ret_type = expected_t
@@ -821,6 +837,23 @@ given TypeChecker {
                 },
                 .None() then {},
             }
+        }
+        when typed_callee.expr_kind in {
+            .GenericInstantiation(base_type, type_args) then {
+                if ret_type is .GenericStruct(_, _) or ret_type is .StructureType(_) then {
+                    let identifier = self.type_construction_symbol_for_type(base_type, ret_type)
+                    return make_typed_expr(TypedExprKind.TypeConstruction(identifier, type_args, typed_args), ret_type)
+                }
+            },
+            .Variable(sym) then {
+                if sym.kind is .TypeSymbol() then {
+                    if ret_type is .StructureType(_) or ret_type is .GenericStruct(_, _) then {
+                        let identifier = box(Symbol(sym.def_id, ret_type, SymbolKind.TypeSymbol()))
+                        return make_typed_expr(TypedExprKind.TypeConstruction(identifier, List[Type].new(), typed_args), ret_type)
+                    }
+                }
+            },
+            _ then {},
         }
         when typed_callee.expr_kind in {
             .Variable(sym) then {

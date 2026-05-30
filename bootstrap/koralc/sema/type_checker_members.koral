@@ -7,6 +7,14 @@ given TypeChecker {
         return specs
     }
 
+    private function_param_specs_from_params(self, params List[Param]) List[FunctionParamSpec] = {
+        let mut specs = List[FunctionParamSpec].new()
+        for param in params then {
+            specs.push(FunctionParamSpec(param.name, param.named))
+        }
+        return specs
+    }
+
     private register_function_symbol_metadata(self, symbol Symbol, param_specs List[FunctionParamSpec]) Void = {
         let mut context = self.context()
         context.set_symbol_info(symbol.def_id, SymbolInfo(symbol.symbol_type, symbol.kind, MethodKind.Normal(), false))
@@ -58,6 +66,43 @@ given TypeChecker {
             package_id,
         )
         context.set_param_specs(method_symbol.def_id, self.function_param_specs_from_typed_params(params))
+        return method_symbol
+    }
+
+    private make_method_callable_symbol_with_param_types(
+        self,
+        method_name String,
+        param_types List[Type],
+        param_specs List[FunctionParamSpec],
+        return_type Type,
+        access AccessModifier,
+        module_path List[String],
+        source_file String,
+        package_id String,
+    ) Symbol = {
+        if access is .Private() then {
+            let mut context = self.context()
+            let method_symbol = context.create_symbol_with_package(
+                method_name,
+                module_path,
+                source_file,
+                make_function_type(self.to_type_ref_list(param_types), return_type),
+                SymbolKind.Function(),
+                MethodKind.Normal(),
+                access,
+                unknown_span(),
+                false,
+                package_id,
+            )
+            context.set_param_specs(method_symbol.def_id, param_specs)
+            return method_symbol
+        }
+        let method_symbol = Symbol(
+            self.allocate_unindexed_def_id(method_name, DefKind.Function()),
+            make_function_type(self.to_type_ref_list(param_types), return_type),
+            SymbolKind.Function(),
+        )
+        self.register_function_symbol_metadata(method_symbol, param_specs)
         return method_symbol
     }
 
@@ -120,6 +165,24 @@ given TypeChecker {
             out.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, scope), p.named))
         }
         return out
+    }
+
+    private resolve_given_member_type(self, node TypeNode, self_type Type) Type = {
+        let snapshot = self.snapshot_type_bindings()
+        self.record_type_binding_restore("Self")
+        self.storage.global_scope.define_type("Self", self_type)
+        let resolved = self.resolve_type(node)
+        self.restore_type_bindings(snapshot)
+        return resolved
+    }
+
+    private check_given_member_params(self, params List[Param], self_type Type) List[TypedParam] = {
+        let snapshot = self.snapshot_type_bindings()
+        self.record_type_binding_restore("Self")
+        self.storage.global_scope.define_type("Self", self_type)
+        let typed_params = self.check_params(params)
+        self.restore_type_bindings(snapshot)
+        return typed_params
     }
 
     private make_given_member_type_scope(self, self_type Type, owner_type_params List[TypeParameter], method_type_params List[TypeParameter]) Scope = {
@@ -279,22 +342,29 @@ given TypeChecker {
     }
 
     private check_given_members_for_type(self mut ref, members List[GivenMember], target_type Type, type_params List[TypeParameter], conformance_trait_name Option[String]) List[TypedGivenMember] = {
+        debug_typecheck("given members start count=\(members.count()) target=\(self.context().type_display_name(target_type))")
         let mut out = List[TypedGivenMember].with_capacity(members.count())
         let is_generic_given_target = when target_type in {
             .TraitObject(_, _) then true,
             _ then self.contains_generic_parameter(target_type),
         }
         for m in members then {
+            debug_typecheck("given member enter name=\(m.name)")
+            let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty()
+            let should_store_checked_body = self.storage.retain_checked_template_bodies or not should_retain_template_body
             let type_binding_snapshot = self.snapshot_type_bindings()
             // 注入方法级别的泛型类型参数（如 [K Ord]max_by 里的 K）
             for tp in m.type_params then {
                 self.bind_type_param(tp)
             }
             let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
+            debug_typecheck("given member params name=\(m.name)")
             let typed_params = self.check_params_in_scope(m.params, member_type_scope)
+            debug_typecheck("given member return name=\(m.name)")
             let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             let typed_body = when m.body in {
                 .Some(b) then {
+                    debug_typecheck("given member body start name=\(m.name)")
                     let prev_in_function = self.storage.in_function
                     let prev_current_function_return_type = self.storage.current_function_return_type
                     let prev_inferred_function_return_type = self.storage.inferred_function_return_type
@@ -315,6 +385,7 @@ given TypeChecker {
                         method_scope.define_type(tp.name, Type.GenericParameter(tp.name))
                     }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
+                    debug_typecheck("given member body done name=\(m.name)")
                     self.storage.in_function = prev_in_function
                     self.storage.current_function_return_type = prev_current_function_return_type
                     self.storage.inferred_function_return_type = prev_inferred_function_return_type
@@ -322,13 +393,13 @@ given TypeChecker {
                     self.storage.in_loop = prev_in_loop
                     self.storage.in_finally = prev_in_finally
                     self.storage.yield_targets = prev_yield_targets
-                    yield Option[ref TypedExpr].Some(box(result))
+                    yield if should_store_checked_body then Option[ref TypedExpr].Some(box(result)) else Option[ref TypedExpr].None()
                 },
                 .None() then Option[ref TypedExpr].None(),
             }
-            let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty()
             let template_body = if should_retain_template_body
             then {
+                debug_typecheck("given member template body name=\(m.name)")
                 yield self.template_checked_body(typed_body)
             }
             else Option[ref TypedExpr].None()
@@ -337,6 +408,7 @@ given TypeChecker {
             then self.resolve_type_in_scope(m.return_type, member_type_scope)
             else Type.Unknown()
             if should_retain_template_body then {
+                debug_typecheck("given member update template name=\(m.name)")
                 self.update_extension_method_checked_template(
                     target_type,
                     type_params.count(),
@@ -348,6 +420,7 @@ given TypeChecker {
                 )
             }
             if is_generic_given_target then {
+                debug_typecheck("given member generic symbol name=\(m.name)")
                 let generic_method_def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
                 let generic_typed_params = self.check_params_in_scope(m.params, member_type_scope)
                 let generic_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
@@ -365,9 +438,11 @@ given TypeChecker {
                     generic_ret,
                     Option[ref TypedExpr].None(),
                 ))
+                debug_typecheck("given member restore generic name=\(m.name)")
                 self.restore_type_bindings(type_binding_snapshot)
                 continue
             }
+            debug_typecheck("given member concrete symbol name=\(m.name)")
             let mut context = self.context()
             let method_def_id = context.allocate(method_name, DefKind.Function())
             let stored_typed_params = self.check_params_in_scope(m.params, member_type_scope)
@@ -390,8 +465,10 @@ given TypeChecker {
                 stored_ret,
                 program_body,
             ))
+            debug_typecheck("given member restore concrete name=\(m.name)")
             self.restore_type_bindings(type_binding_snapshot)
         }
+        debug_typecheck("given members done")
         return out
     }
 

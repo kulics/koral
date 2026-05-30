@@ -19,7 +19,6 @@ public class Driver {
     var stdConfigPath: String?
     var outputDir: String?
     var noStd = false
-    var escapeAnalysisReport = false
   }
   
   public init() {}
@@ -86,7 +85,6 @@ public class Driver {
 
     // Parse options
     var options = InvocationOptions()
-    var escapeAnalysisLevel = 0
     var i = 0
     while i < remainingArgs.count {
       let arg = remainingArgs[i]
@@ -133,21 +131,6 @@ public class Driver {
       } else if arg == "--no-std" {
         options.noStd = true
         i += 1
-      } else if arg == "-m" {
-        // Go-style escape analysis flag.
-        // Repeated -m increases verbosity level (currently same output).
-        escapeAnalysisLevel += 1
-        i += 1
-      } else if arg.hasPrefix("-m=") {
-        // Go-style explicit level: -m=1, -m=2, ...
-        let levelString = String(arg.dropFirst(3))
-        if let level = Int(levelString), level > 0 {
-          escapeAnalysisLevel = max(escapeAnalysisLevel, level)
-          i += 1
-        } else {
-          writeStderr("Error: Invalid value for -m: \(levelString)")
-          exit(1)
-        }
       } else if arg.hasPrefix("-") {
         i += 1
       } else {
@@ -161,8 +144,6 @@ public class Driver {
         }
       }
     }
-
-    options.escapeAnalysisReport = escapeAnalysisLevel > 0
 
     if options.packageConfigPath == nil && options.entryFilePath == nil {
       writeStderr("Error: Missing input file or --package-config")
@@ -350,7 +331,6 @@ public class Driver {
         mode: mode,
         outputDir: options.outputDir,
         noStd: options.noStd,
-        escapeAnalysisReport: options.escapeAnalysisReport,
         depsRoot: options.depsRoot,
         stdConfigPath: options.stdConfigPath
       )
@@ -370,7 +350,6 @@ public class Driver {
       mode: mode,
       outputDir: options.outputDir,
       noStd: options.noStd,
-      escapeAnalysisReport: options.escapeAnalysisReport,
       stdConfigPath: options.stdConfigPath
     )
   }
@@ -438,7 +417,6 @@ public class Driver {
     mode: DriverCommand,
     outputDir: String?,
     noStd: Bool,
-    escapeAnalysisReport: Bool,
     depsRoot: String?,
     stdConfigPath: String?
   ) throws {
@@ -554,7 +532,6 @@ public class Driver {
       baseName: baseName,
       outputDirectory: outputDirectory,
       mode: mode,
-      escapeAnalysisReport: escapeAnalysisReport,
       stdDisplayName: resolvedStdConfigPath ?? "std/koral.json",
       userDisplayName: packageGraph.targetModuleName,
       stdGlobalNodes: stdGlobalNodes,
@@ -570,7 +547,6 @@ public class Driver {
     mode: DriverCommand,
     outputDir: String?,
     noStd: Bool,
-    escapeAnalysisReport: Bool,
     stdConfigPath: String?
   ) throws {
     let entryURL = URL(fileURLWithPath: entryFilePath).standardized
@@ -624,7 +600,6 @@ public class Driver {
       baseName: baseName,
       outputDirectory: outputDirectory,
       mode: mode,
-      escapeAnalysisReport: escapeAnalysisReport,
       stdDisplayName: stdConfigPath ?? "std/koral.json",
       userDisplayName: entryURL.path,
       stdGlobalNodes: stdGlobalNodes,
@@ -639,7 +614,6 @@ public class Driver {
     baseName: String,
     outputDirectory: URL,
     mode: DriverCommand,
-    escapeAnalysisReport: Bool,
     stdDisplayName: String,
     userDisplayName: String,
     stdGlobalNodes: [GlobalNode],
@@ -697,22 +671,33 @@ public class Driver {
     }
     profilePhase("\(phasePrefix): monomorphize", start: monoStart)
 
+    debugPhase("\(phasePrefix): mir")
+    let mirStart = DispatchTime.now()
+    let mirProgram = MIRLowerer(
+      program: monomorphizedProgram,
+      context: monomorphizer.context
+    ).lower()
+    try MIRVerifier(program: mirProgram).verify()
+    let dumpMIR = envFlag("KORAL_DUMP_MIR")
+    let dumpMIRStats = envFlag("KORAL_DUMP_MIR_STATS")
+    if dumpMIR || dumpMIRStats {
+      let mirPrinter = MIRPrinter(program: mirProgram)
+      if dumpMIR {
+        writeStderr(mirPrinter.render(), newline: false)
+      } else {
+        writeStderr(mirPrinter.renderSummary(), newline: false)
+      }
+    }
+    profilePhase("\(phasePrefix): mir", start: mirStart)
+
     debugPhase("\(phasePrefix): codegen")
     let codegenStart = DispatchTime.now()
     let codeGen = CodeGen(
-      ast: monomorphizedProgram,
-      context: monomorphizer.context,
-      escapeAnalysisReportEnabled: escapeAnalysisReport
+      mirProgram: mirProgram,
+      context: monomorphizer.context
     )
     let cSource = codeGen.generate()
     profilePhase("\(phasePrefix): codegen", start: codegenStart)
-
-    if escapeAnalysisReport {
-      let diagnostics = codeGen.getEscapeAnalysisDiagnostics()
-      if !diagnostics.isEmpty {
-        writeStdout(diagnostics)
-      }
-    }
 
     if !fileManager.fileExists(atPath: outputDirectory.path) {
       try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true, attributes: nil)
@@ -991,7 +976,6 @@ public class Driver {
         --deps-root <path>        Dependency root directory (default unresolved)
         --std-config <path>       Standard library manifest path
         --no-std                  Compile without standard library
-        -m, -m=<N>                Print escape analysis diagnostics (Go-style)
       """
     )
   }

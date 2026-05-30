@@ -805,8 +805,9 @@ Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier(
 
 1. Add a new intrinsic case in `AST.swift`
 2. Add type checking in `TypeCheckerExpressions.swift`
-3. Add code generation in `CodeGenExpressions.swift`
-4. Declare it in stdlib with `intrinsic`
+3. Add MIR lowering in `MIRLowerer.swift`
+4. Add target C emission in `CodeGenMIR.swift` only if the intrinsic needs a backend-specific spelling or runtime helper
+5. Declare it in stdlib with `intrinsic`
 
 ### How do I add a new foreign binding?
 

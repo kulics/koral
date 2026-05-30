@@ -230,12 +230,9 @@ given TypeChecker {
                     _ then typed_subj.expr_type,
                 }
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
-                let mut checked_arms = List[WhenArm].new()
-                for arm in arms then {
-                    checked_arms.push(WhenArm(arm.pattern, arm.body))
-                }
                 let mut typed_arms = List[TypedWhenArm].new()
-                for arm in checked_arms then {
+                let mut patterns = List[ref TypedPattern].new()
+                for arm in arms then {
                     let mut arm_scope = Scope.new_child(scope)
                     let arm_pattern_ref = box(arm.pattern)
                     self.bind_pattern_vars(arm_pattern_ref, pattern_subject_type, arm_scope)
@@ -245,11 +242,9 @@ given TypeChecker {
                         .Some(result_type) then self.concretize_default_literal_type(result_type),
                         .None() then self.concretize_default_literal_type(typed_body.expr_type),
                     }
-                    typed_arms.push(TypedWhenArm(box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope)), box(typed_body), typed_arm_type))
-                }
-                let mut patterns = List[ref TypedPattern].new()
-                for typed_arm in typed_arms then {
-                    patterns.push(typed_arm.pattern)
+                    let lowered_pattern_ref = box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope))
+                    patterns.push(lowered_pattern_ref)
+                    typed_arms.push(TypedWhenArm(lowered_pattern_ref, box(typed_body), typed_arm_type))
                 }
                 let ex_checker = ExhaustivenessChecker.new(
                     exhaustiveness_subject_type,
@@ -259,7 +254,7 @@ given TypeChecker {
                     span
                 )
                 when ex_checker.check() in {
-                    .Error(e) then self.push_expr_diagnostic(box(Expr.WhenExpr(subject, checked_arms, span)), e.message()),
+                    .Error(e) then self.push_diagnostic_at_span(e.message(), span),
                     .Ok(_) then {},
                 }
                 yield TypedStatement.WhenStmt(box(typed_subj), typed_arms, span)
@@ -311,7 +306,8 @@ given TypeChecker {
 
     private check_block(self, statements List[Statement], expected Option[Type], scope Scope) TypedExpr = {
         let mut block_scope = Scope.new_child(scope)
-        return self.check_block_in_scope(statements, expected, block_scope)
+        let typed_block = self.check_block_in_scope(statements, expected, block_scope)
+        return typed_block
     }
 
     private make_assignment_temp_symbol(self, prefix String, t Type, variable_kind VariableKind) ref Symbol = {

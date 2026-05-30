@@ -7,40 +7,12 @@
 
 using "c_identifier_utils"
 using "codegen_indexes"
-using "codegen_escape"
-using "codegen_expressions"
 using "codegen_expressions_literals"
-using "codegen_expressions_calls"
-using "codegen_expressions_dispatch"
-using "codegen_expressions_patterns"
-using "codegen_expressions_receivers"
-using "codegen_statements"
 using "codegen_memory"
 using "codegen_types"
-using "codegen_lambda"
 using "codegen_vtable"
+using "codegen_mir"
 using "codegen_generate"
-
-// ── LoopContext ───────────────────────────────────────────────────────────────
-
-/// 循环上下文，用于 break/continue 的 goto 标签生成
-public type LoopContext(
-    start_label String,
-    end_label String,
-    scope_index UInt,
-)
-
-public type CodegenYieldTarget(
-    result_var String,
-    result_type Type,
-    end_label String,
-    base_scope_index UInt,
-)
-
-public type DeferredExpr(
-    expr ref TypedExpr,
-    pattern_binding_aliases Dict[String, String],
-)
 
 // ── TypeDeclaration ───────────────────────────────────────────────────────────
 
@@ -66,11 +38,11 @@ given TypeDeclaration {
 
 /// C 代码生成器
 ///
-/// 接收单态化阶段输出的 MonomorphizedProgram，遍历其 global_nodes，
+/// 接收 MIRProgram，遍历其 backend-facing globals/metadata，
 /// 生成等价的 C 语言源代码字符串。
 public type CodeGen(
     // 输入
-    program ref MonomorphizedProgram,
+    program ref MIRProgram,
     context CompilerContext,
     c_keywords Set[String],
 
@@ -80,39 +52,6 @@ public type CodeGen(
     // 代码生成状态
     mut indent String,
     mut temp_var_counter UInt,
-    mut lambda_counter UInt,
-    mut lambda_functions mut ref String,
-    mut lambda_env_structs mut ref String,
-
-    // 本地符号的 C 标识符覆盖（全局符号直接读取 program projection）
-    mut local_c_identifier_overrides Dict[UInt, String],
-    // 内存管理
-    mut lifetime_scope_stack List[mut ref List[Pair[String, Type]]],
-    mut defer_scope_stack List[mut ref List[DeferredExpr]],
-
-    // 用户定义的 drop 函数：TypeName -> C 函数名
-    mut user_defined_drops Dict[String, String],
-
-    // 代码生成入口扫描缓存
-    mut program_scan ProgramCodegenScan,
-
-    // 循环上下文
-    mut loop_stack List[LoopContext],
-    mut yield_target_stack List[CodegenYieldTarget],
-
-    // 逃逸分析
-    mut escape_context EscapeContext,
-
-    // 模式匹配别名：C 标识符 -> 字段路径表达式
-    mut pattern_binding_aliases Dict[String, String],
-
-    // Lambda 捕获别名：DefId -> 访问表达式
-    mut captured_var_aliases Dict[UInt, String],
-    // Lambda 捕获别名：C 标识符 -> 访问表达式
-    mut captured_name_aliases Dict[String, String],
-
-    // 全局初始化
-    mut global_initializations List[Pair[String, ref TypedExpr]],
 
     // 用户 main 函数
     mut user_main_function_name Option[String],
@@ -123,12 +62,6 @@ public type CodeGen(
 
     // 当前正在生成的函数的类型前缀（如 "_k__T_Deque"），用于解析 self 方法调用
     mut current_function_type_prefix Option[String],
-    // 当前正在生成函数的 C 名称
-    mut current_function_c_name Option[String],
-    // 当前正在生成函数的返回类型
-    mut current_function_return_type Option[Type],
-    // 当前函数实例化时的泛型参数绑定
-    mut current_generic_bindings Dict[String, Type],
     mut type_by_c_type_name_cache Dict[String, Type],
 
     // 已输出函数实现名（避免同名函数重复定义）
@@ -136,50 +69,10 @@ public type CodeGen(
 )
 
 given CodeGen {
-    public push_loop_context(self mut ref, ctx LoopContext) Void = {
-        let mut loop_stack = self.loop_stack
-        loop_stack.push(ctx)
-        self.loop_stack = loop_stack
-    }
-
-    public pop_loop_context(self mut ref) Option[LoopContext] = {
-        let mut loop_stack = self.loop_stack
-        let popped = loop_stack.pop()
-        self.loop_stack = loop_stack
-        return popped
-    }
-
-    public current_loop_context(self) Option[LoopContext] = {
-        if self.loop_stack.is_empty() then {
-            return Option[LoopContext].None()
-        }
-        return Option[LoopContext].Some(self.loop_stack[self.loop_stack.count() - 1(UInt)])
-    }
-
-    public push_yield_target(self mut ref, target CodegenYieldTarget) Void = {
-        let mut yield_target_stack = self.yield_target_stack
-        yield_target_stack.push(target)
-        self.yield_target_stack = yield_target_stack
-    }
-
-    public pop_yield_target(self mut ref) Option[CodegenYieldTarget] = {
-        let mut yield_target_stack = self.yield_target_stack
-        let popped = yield_target_stack.pop()
-        self.yield_target_stack = yield_target_stack
-        return popped
-    }
-
-    public current_yield_target(self) Option[CodegenYieldTarget] = {
-        if self.yield_target_stack.is_empty() then {
-            return Option[CodegenYieldTarget].None()
-        }
-        return Option[CodegenYieldTarget].Some(self.yield_target_stack[self.yield_target_stack.count() - 1(UInt)])
-    }
-
     // ── 构造函数 ──────────────────────────────────────────────────────────────
 
     /// 构造 CodeGen 实例，初始化所有状态并构建 C 标识符映射
-    public new(program ref MonomorphizedProgram, context CompilerContext) CodeGen = {
+    public new(program ref MIRProgram, context CompilerContext) CodeGen = {
         let mut cg = CodeGen(
             program,
             context,
@@ -190,41 +83,6 @@ given CodeGen {
             String.new(),
             // temp_var_counter
             0,
-            // lambda_counter
-            0,
-            // lambda_functions
-            box(String.new()),
-            // lambda_env_structs
-            box(String.new()),
-            // local_c_identifier_overrides
-            Dict[UInt, String].new(),
-            // lifetime_scope_stack
-            List[mut ref List[Pair[String, Type]]].new(),
-            // defer_scope_stack
-            List[mut ref List[DeferredExpr]].new(),
-            // user_defined_drops
-            Dict[String, String].new(),
-            // program_scan
-            ProgramCodegenScan(
-                ForeignDeclarations(List[String].new(), List[ForeignFunctionPrototype].new()),
-                List[EmittableFunction].new(),
-                List[ForeignGlobalVariable].new(),
-                List[EmittableGlobalVariable].new(),
-            ),
-            // loop_stack
-            List[LoopContext].new(),
-            // yield_target_stack
-            List[CodegenYieldTarget].new(),
-            // escape_context
-            EscapeContext.new(),
-            // pattern_binding_aliases
-            Dict[String, String].new(),
-            // captured_var_aliases
-            Dict[UInt, String].new(),
-            // captured_name_aliases
-            Dict[String, String].new(),
-            // global_initializations
-            List[Pair[String, ref TypedExpr]].new(),
             // user_main_function_name
             Option[String].None(),
             // user_main_return_type
@@ -233,19 +91,11 @@ given CodeGen {
             Set[String].new(),
             // current_function_type_prefix
             Option[String].None(),
-            // current_function_c_name
-            Option[String].None(),
-            // current_function_return_type
-            Option[Type].None(),
-            // current_generic_bindings
-            Dict[String, Type].new(),
             // type_by_c_type_name_cache
             Dict[String, Type].new(),
             // emitted_function_names
             Set[String].new(),
         )
-
-        cg.program_scan = cg.scan_program_codegen_inputs()
         return cg
     }
 
@@ -320,18 +170,440 @@ given CodeGen {
     }
 
     c_identifier_opt(self, def_id DefId) Option[String] = {
-        return when self.local_c_identifier_overrides.get(def_id.id) in {
-            .Some(c_id) then Option[String].Some(c_id),
-            .None() then self.program.c_identifier(def_id),
-        }
+        return self.program.c_identifier(def_id)
     }
 
-    set_local_c_identifier(self mut ref, def_id DefId, c_id String) Void = {
-        self.local_c_identifier_overrides.insert(def_id.id, c_id)
+    c_name_for_def_id(self, def_id DefId) String = {
+        return when self.c_identifier_opt(def_id) in {
+            .Some(name) then name,
+            .None() then when self.context.get_cname(def_id) in {
+                .Some(name) then name,
+                .None() then when self.context.get_name(def_id) in {
+                    .Some(name) then self.sanitize_codegen_identifier(name),
+                    .None() then "T_\(def_id.id)",
+                },
+            },
+        }
     }
 
     has_c_identifier(self, def_id DefId) Bool = {
         return self.c_identifier_opt(def_id).is_some()
+    }
+
+    concretize_codegen_type(self, t Type) Type = {
+        return t
+    }
+
+    trait_object_type_from_name(self, trait_name String) Type = {
+        let mut trait_type_args = List[ref Type].new()
+        when self.program.semantic_traits().get(trait_name) in {
+            .Some(info) then {
+                for type_param in info.type_params then {
+                    trait_type_args.push(box(Type.GenericParameter(type_param.name)))
+                }
+            },
+            .None() then {},
+        }
+        return Type.TraitObject(trait_name, trait_type_args)
+    }
+
+    trait_name_of_trait_type(self, trait_type Type) String = {
+        return when trait_type in {
+            .ReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .MutableReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .WeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .TraitObject(trait_name, _) then trait_name,
+            _ then self.context.type_display_name(trait_type),
+        }
+    }
+
+    trait_type_args_of_trait_type(self, trait_type Type) List[ref Type] = {
+        return when trait_type in {
+            .TraitObject(_, type_args) then type_args,
+            _ then List[ref Type].new(),
+        }
+    }
+
+    private apply_codegen_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+        if bindings.is_empty() then { return t }
+        return when t in {
+            .GenericParameter(name) then when bindings.get(name) in {
+                .Some(bound) then bound,
+                .None() then t,
+            },
+            .ReferenceType(inner_ref) then Type.ReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .PointerType(inner_ref) then Type.PointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .MutablePointerType(inner_ref) then Type.MutablePointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .GenericStruct(template, args) then {
+                let mut bound_args = List[ref Type].new()
+                for arg_ref in args then { bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings))) }
+                yield Type.GenericStruct(template, bound_args)
+            },
+            .GenericEnum(template, args) then {
+                let mut bound_args = List[ref Type].new()
+                for arg_ref in args then { bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings))) }
+                yield Type.GenericEnum(template, bound_args)
+            },
+            .FunctionType(fn_params, return_type_ref) then {
+                let mut bound_param_types = List[ref Type].new()
+                for entry in fn_params then {
+                    bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, bindings)))
+                }
+                yield make_function_type(bound_param_types, self.apply_codegen_type_bindings(return_type_ref.val, bindings))
+            },
+            _ then t,
+        }
+    }
+
+    private append_generic_parameter_bindings(self, mut bindings Dict[String, Type], target_args List[ref Type], base_args List[ref Type]) Void = {
+        let mut i UInt = 0
+        let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
+        while i < n then {
+            when target_args[i].val in {
+                .GenericParameter(name) then { bindings.insert(name, base_args[i].val) },
+                _ then {},
+            }
+            i += 1
+        }
+    }
+
+    build_receiver_bindings(self, target_type Type, base_type Type) Dict[String, Type] = {
+        let mut bindings = Dict[String, Type].new()
+        let concrete_base_type = self.concretize_codegen_type(base_type)
+        let effective_base_type = when concrete_base_type in {
+            .StructureType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped_type) then mapped_type,
+                .None() then when self.context.get_template_name(def_id) in {
+                    .Some(template_name) then when self.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut type_arg_refs = List[ref Type].new()
+                            for type_arg in type_args then { type_arg_refs.push(box(type_arg)) }
+                            yield Type.GenericStruct(template_name, type_arg_refs)
+                        },
+                        .None() then concrete_base_type,
+                    },
+                    .None() then concrete_base_type,
+                },
+            },
+            .EnumType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped_type) then mapped_type,
+                .None() then when self.context.get_template_name(def_id) in {
+                    .Some(template_name) then when self.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut type_arg_refs = List[ref Type].new()
+                            for type_arg in type_args then { type_arg_refs.push(box(type_arg)) }
+                            yield Type.GenericEnum(template_name, type_arg_refs)
+                        },
+                        .None() then concrete_base_type,
+                    },
+                    .None() then concrete_base_type,
+                },
+            },
+            _ then concrete_base_type,
+        }
+        when target_type in {
+            .GenericStruct(_, target_args) then when effective_base_type in {
+                .GenericStruct(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
+                _ then {},
+            },
+            .GenericEnum(_, target_args) then when effective_base_type in {
+                .GenericEnum(_, base_args) then self.append_generic_parameter_bindings(bindings, target_args, base_args),
+                _ then {},
+            },
+            _ then {},
+        }
+        return bindings
+    }
+
+    private method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) Dict[String, Type] = {
+        return when self.method_owner_type(method_def_id) in {
+            .Some(target_type) then self.build_receiver_bindings(target_type, concrete_receiver_type),
+            .None() then Dict[String, Type].new(),
+        }
+    }
+
+    private bind_function_type(self, fn_type Type, receiver_bindings Dict[String, Type]) Type = {
+        return when fn_type in {
+            .FunctionType(fn_params, return_type_ref) then {
+                let mut bound_param_types = List[ref Type].new()
+                for entry in fn_params then {
+                    bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, receiver_bindings)))
+                }
+                let bound_return_type = self.apply_codegen_type_bindings(return_type_ref.val, receiver_bindings)
+                yield make_function_type(bound_param_types, bound_return_type)
+            },
+            _ then fn_type,
+        }
+    }
+
+    bind_method_function_type(self, method_def_id DefId, concrete_receiver_type Type, fn_type Type) Type = {
+        let receiver_bindings = self.method_receiver_bindings(method_def_id, concrete_receiver_type)
+        return self.bind_function_type(fn_type, receiver_bindings)
+    }
+
+    function_type_param_count(self, fn_type Type) UInt = {
+        return when fn_type in {
+            .FunctionType(fn_params, _) then fn_params.count(),
+            _ then 0(UInt),
+        }
+    }
+
+    function_type_param_type(self, fn_type Type, index UInt) Option[Type] = {
+        return when fn_type in {
+            .FunctionType(fn_params, _) then if index < fn_params.count()
+                then Option[Type].Some(fn_params[index].val.param_type)
+                else Option[Type].None(),
+            _ then Option[Type].None(),
+        }
+    }
+
+    function_type_return_type(self, fn_type Type) Type = {
+        return when fn_type in {
+            .FunctionType(_, return_type_ref) then return_type_ref.val,
+            _ then Type.Unknown(),
+        }
+    }
+
+    function_param_specs(self, def_id DefId) List[FunctionParamSpec] = {
+        return self.context.get_param_specs(def_id) or else List[FunctionParamSpec].new()
+    }
+
+    requested_or_symbol_result_type(self, requested_result_type Type, symbol_type Type) Type = {
+        return when requested_result_type in {
+            .Unknown() then symbol_type,
+            .VoidType() then when symbol_type in {
+                .VoidType() then requested_result_type,
+                .NeverType() then requested_result_type,
+                .Unknown() then requested_result_type,
+                _ then symbol_type,
+            },
+            _ then requested_result_type,
+        }
+    }
+
+    codegen_types_equal(self, lhs Type, rhs Type) Bool = {
+        let left = self.concrete_layout_key_for_type(self.concretize_codegen_type(lhs))
+        let right = self.concrete_layout_key_for_type(self.concretize_codegen_type(rhs))
+        return left == right
+    }
+
+    private concrete_callable_symbol(self, def_id DefId, requested_result_type Type) Option[Symbol] = {
+        return when self.c_identifier_opt(def_id) in {
+            .Some(_) then {
+                let result_type = when self.context.get_function_return_type(def_id) in {
+                    .Some(return_type) then self.requested_or_symbol_result_type(requested_result_type, return_type),
+                    .None() then requested_result_type,
+                }
+                yield Option[Symbol].Some(Symbol(def_id, result_type, SymbolKind.Function()))
+            },
+            .None() then Option[Symbol].None(),
+        }
+    }
+
+    bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, requested_result_type Type) Option[Symbol] = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let bound_result_type = when self.context.get_function_type(def_id) in {
+            .Some(function_type) then self.function_type_return_type(self.bind_method_function_type(def_id, concrete_receiver_type, function_type)),
+            .None() then requested_result_type,
+        }
+        return self.concrete_callable_symbol(def_id, bound_result_type)
+    }
+
+    lookup_trait_method_def_id(self, concrete_type Type, trait_name String, method_name String) Option[DefId] = {
+        let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
+        let receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        return when self.program.lookup_trait_method(receiver_key, trait_name, method_name) in {
+            .Some(def_id) then Option[DefId].Some(def_id),
+            .None() then when self.program.semantic_traits().get(trait_name) in {
+                .Some(trait_info) then {
+                    let mut found = Option[DefId].None()
+                    for parent_trait_name in trait_info.parent_traits then {
+                        found = self.lookup_trait_method_def_id(concrete_receiver_type, parent_trait_name.name, method_name)
+                        if found is .Some(_) then { break }
+                    }
+                    yield found
+                },
+                .None() then Option[DefId].None(),
+            },
+        }
+    }
+
+    private lookup_receiver_method_def_id(self, receiver_type Type, method_name String) Option[DefId] = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let concrete_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        let direct_indexed_key = "\(concrete_key).\(method_name)"
+        when self.program.lookup_receiver_method_by_indexed_key(direct_indexed_key) in {
+            .Some(def_id) then { return Option[DefId].Some(def_id) },
+            .None() then {},
+        }
+
+        let receiver_key = self.receiver_type_lookup_name_fallback(concrete_receiver_type)
+        let indexed_key = "\(receiver_key).\(method_name)"
+        when self.program.lookup_receiver_method_by_indexed_key(indexed_key) in {
+            .Some(def_id) then { return Option[DefId].Some(def_id) },
+            .None() then {},
+        }
+
+        when concrete_receiver_type in {
+            .GenericStruct(template_name, _) then {
+                if template_name <> receiver_key then {
+                    let template_key = "\(template_name).\(method_name)"
+                    when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                        .Some(found_def_id) then { return Option[DefId].Some(found_def_id) },
+                        .None() then {},
+                    }
+                }
+            },
+            .GenericEnum(template_name, _) then {
+                if template_name <> receiver_key then {
+                    let template_key = "\(template_name).\(method_name)"
+                    when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                        .Some(found_def_id) then { return Option[DefId].Some(found_def_id) },
+                        .None() then {},
+                    }
+                }
+            },
+            .StructureType(def_id) then when self.context.get_template_name(def_id) in {
+                .Some(template_name) then {
+                    if template_name <> receiver_key then {
+                        let template_key = "\(template_name).\(method_name)"
+                        when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                            .Some(found_def_id) then { return Option[DefId].Some(found_def_id) },
+                            .None() then {},
+                        }
+                    }
+                },
+                .None() then {},
+            },
+            .EnumType(def_id) then when self.context.get_template_name(def_id) in {
+                .Some(template_name) then {
+                    if template_name <> receiver_key then {
+                        let template_key = "\(template_name).\(method_name)"
+                        when self.program.lookup_receiver_method_by_indexed_key(template_key) in {
+                            .Some(found_def_id) then { return Option[DefId].Some(found_def_id) },
+                            .None() then {},
+                        }
+                    }
+                },
+                .None() then {},
+            },
+            _ then {},
+        }
+        return Option[DefId].None()
+    }
+
+    private receiver_method_matches_lookup(self, def_id DefId, receiver_type Type) Bool = {
+        if self.program.semantic_receiver_method_dispatch().get(def_id.id) is .Some(_) then { return true }
+
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        let concrete_receiver_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
+        when self.method_owner_type(def_id) in {
+            .Some(owner_type) then {
+                let concrete_owner_type = self.concretize_codegen_type(owner_type)
+                if self.concrete_receiver_lookup_key(concrete_owner_type) == concrete_receiver_key then when self.context.get_function_type(def_id) in {
+                    .Some(function_type) then {
+                        if self.function_type_param_count(function_type) > 0(UInt) then { return true }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        let receiver_base_type = when concrete_receiver_type in {
+            .ReferenceType(inner_ref) then inner_ref.val,
+            .MutableReferenceType(inner_ref) then inner_ref.val,
+            .WeakReferenceType(inner_ref) then inner_ref.val,
+            .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+            _ then concrete_receiver_type,
+        }
+        let receiver_base_key = self.concrete_receiver_lookup_key(receiver_base_type)
+
+        return when self.context.get_function_type(def_id) in {
+            .Some(function_type) then {
+                if self.function_type_param_count(function_type) == 0(UInt) then { return false }
+                let receiver_param_type = self.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown()
+                let concrete_param_type = self.concretize_codegen_type(receiver_param_type)
+                let param_base_type = when concrete_param_type in {
+                    .ReferenceType(inner_ref) then inner_ref.val,
+                    .MutableReferenceType(inner_ref) then inner_ref.val,
+                    .WeakReferenceType(inner_ref) then inner_ref.val,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+                    _ then concrete_param_type,
+                }
+                yield self.concrete_receiver_lookup_key(param_base_type) == receiver_base_key
+            },
+            .None() then false,
+        }
+    }
+
+    private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String, requested_result_type Type) Option[Symbol] = {
+        let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
+        when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
+            .Some(def_id) then {
+                if not self.receiver_method_matches_lookup(def_id, concrete_receiver_type) then {
+                    return Option[Symbol].None()
+                }
+                return self.bound_concrete_method_symbol(def_id, concrete_receiver_type, requested_result_type)
+            },
+            .None() then {},
+        }
+        return Option[Symbol].None()
+    }
+
+    lookup_receiver_method(self, receiver_type Type, method_name String) Option[Symbol] = {
+        if self.lookup_receiver_method_via_metadata(receiver_type, method_name, Type.Unknown()) is .Some(symbol) then {
+            return Option[Symbol].Some(symbol)
+        }
+        when receiver_type in {
+            .ReferenceType(_) then {},
+            .MutableReferenceType(_) then {},
+            .WeakReferenceType(_) then {},
+            .MutableWeakReferenceType(_) then {},
+            _ then {
+                let mut_ref_type = Type.MutableReferenceType(box(receiver_type))
+                when self.lookup_receiver_method_via_metadata(mut_ref_type, method_name, Type.Unknown()) in {
+                    .Some(symbol) then { return Option[Symbol].Some(symbol) },
+                    .None() then {},
+                }
+                let shared_ref_type = Type.ReferenceType(box(receiver_type))
+                when self.lookup_receiver_method_via_metadata(shared_ref_type, method_name, Type.Unknown()) in {
+                    .Some(symbol) then { return Option[Symbol].Some(symbol) },
+                    .None() then {},
+                }
+            },
+        }
+        return when receiver_type in {
+            .ReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
+            .MutableReferenceType(inner_ref) then {
+                let shared_ref_type = Type.ReferenceType(box(inner_ref.val))
+                yield when self.lookup_receiver_method_via_metadata(shared_ref_type, method_name, Type.Unknown()) in {
+                    .Some(symbol) then Option[Symbol].Some(symbol),
+                    .None() then self.lookup_receiver_method(inner_ref.val, method_name),
+                }
+            },
+            _ then Option[Symbol].None(),
+        }
+    }
+
+    enum_case_name_matches(self, pattern_case_name String, enum_case_name String) Bool = {
+        if enum_case_name == pattern_case_name then { return true }
+        if enum_case_name.ends_with("_" + pattern_case_name) then { return true }
+        let pattern_tail = when pattern_case_name.split_last_once(".") in {
+            .Some(parts) then parts.second,
+            .None() then pattern_case_name,
+        }
+        if enum_case_name == pattern_tail then { return true }
+        if enum_case_name.ends_with("_" + pattern_tail) then { return true }
+        let enum_tail = when enum_case_name.split_last_once("_") in {
+            .Some(parts) then parts.second,
+            .None() then enum_case_name,
+        }
+        return enum_tail == pattern_tail
     }
 
     def_ids_named(self, name String) List[DefId] = {
@@ -700,20 +972,13 @@ given CodeGen {
     }
 
     private concrete_struct_fields_from_program(self, def_id DefId) Option[List[TypedField]] = {
-        for node in self.program.semantic_global_nodes() then {
-            when node in {
-                .TypeStructDecl(_, _, fields, _, id) then {
-                    if id.def_id.id == def_id.id then {
-                        return Option[List[TypedField]].Some(fields)
-                    }
+        for global in self.program.globals then {
+            when global in {
+                .StructDeclaration(identifier, fields) then {
+                    if identifier.def_id.id == def_id.id then { return Option[List[TypedField]].Some(fields) }
                 },
-                .ForeignTypeDecl(_, _, typed_fields_opt, _, id) then {
-                    if id.def_id.id == def_id.id then {
-                        return when typed_fields_opt in {
-                            .Some(typed_fields) then Option[List[TypedField]].Some(typed_fields),
-                            .None() then Option[List[TypedField]].None(),
-                        }
-                    }
+                .ForeignStruct(identifier, fields) then {
+                    if identifier.def_id.id == def_id.id then { return Option[List[TypedField]].Some(fields) }
                 },
                 _ then {},
             }
@@ -722,12 +987,10 @@ given CodeGen {
     }
 
     private concrete_enum_cases_from_program(self, def_id DefId) Option[List[TypedEnumCase]] = {
-        for node in self.program.semantic_global_nodes() then {
-            when node in {
-                .TypeEnumDecl(_, _, cases, _, id) then {
-                    if id.def_id.id == def_id.id then {
-                        return Option[List[TypedEnumCase]].Some(cases)
-                    }
+        for global in self.program.globals then {
+            when global in {
+                .EnumDeclaration(identifier, cases) then {
+                    if identifier.def_id.id == def_id.id then { return Option[List[TypedEnumCase]].Some(cases) }
                 },
                 _ then {},
             }
@@ -788,10 +1051,6 @@ given CodeGen {
     /// - 全局符号优先使用 mono 产出的 codegen_view 中的映射
     /// - 局部变量使用 `{name}_{defId}` 格式
     public qualified_name_value(self, symbol Symbol) String = {
-        if self.captured_var_aliases.get(symbol.def_id.id) is .Some(alias) then {
-            return alias
-        }
-
         if self.is_foreign_function_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
@@ -871,31 +1130,6 @@ given CodeGen {
 
     public c_identifier_for_param(self, param TypedParam) String = {
         return self.sanitize_codegen_identifier(param.name)
-    }
-
-    public captured_name_alias_opt(self, c_name String) Option[String] = {
-        return when self.captured_name_aliases.get(c_name) in {
-            .Some(alias) then Option[String].Some(alias),
-            .None() then {
-                let base_name_opt = when c_name.split_last_once("_") in {
-                    .Some(parts) then {
-                        let maybe_suffix = parts.second
-                        let mut is_digits = not maybe_suffix.is_empty()
-                        if is_digits then {
-                            for ch in maybe_suffix.to_runes() then {
-                                if ch < '0' or ch > '9' then { is_digits = false }
-                            }
-                        }
-                        yield if is_digits then Option[String].Some(parts.first) else Option[String].None()
-                    },
-                    .None() then Option[String].None(),
-                }
-                yield when base_name_opt in {
-                    .Some(base_name) then self.captured_name_aliases.get(base_name),
-                    .None() then Option[String].None(),
-                }
-            },
-        }
     }
 
     // ── 类型名称映射 ──────────────────────────────────────────────────────────

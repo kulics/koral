@@ -1,0 +1,117 @@
+public let typed_pattern_binding_symbols(pattern ref TypedPattern) List[ref Symbol] = {
+    let mut symbols = List[ref Symbol].new()
+    let mut seen_def_ids = Set[UInt].new()
+    typed_pattern_collect_binding_symbols(pattern, symbols.ref, seen_def_ids.ref)
+    return symbols
+}
+
+private let typed_pattern_collect_binding_symbols(
+    pattern ref TypedPattern,
+    symbols mut ref List[ref Symbol],
+    seen_def_ids mut ref Set[UInt],
+) Void = {
+    when pattern in {
+        .Variable(symbol) then {
+            if not seen_def_ids.contains(symbol.def_id.id) then {
+                seen_def_ids.insert(symbol.def_id.id)
+                symbols.push(symbol)
+            }
+        },
+        .EnumCase(_, _, elements) then {
+            for element in elements then {
+                typed_pattern_collect_binding_symbols(element.pattern, symbols, seen_def_ids)
+            }
+        },
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                typed_pattern_collect_binding_symbols(element.pattern, symbols, seen_def_ids)
+            }
+        },
+        .AndPattern(left, right) then {
+            typed_pattern_collect_binding_symbols(left, symbols, seen_def_ids)
+            typed_pattern_collect_binding_symbols(right, symbols, seen_def_ids)
+        },
+        .OrPattern(left, right) then {
+            typed_pattern_collect_binding_symbols(left, symbols, seen_def_ids)
+            typed_pattern_collect_binding_symbols(right, symbols, seen_def_ids)
+        },
+        .NotPattern(inner) then typed_pattern_collect_binding_symbols(inner, symbols, seen_def_ids),
+        .Wildcard() then {},
+        .BoolLiteral(_) then {},
+        .IntegerLiteral(_) then {},
+        .NegativeIntegerLiteral(_) then {},
+        .StringLiteral(_) then {},
+        .RuneLiteral(_) then {},
+        .ComparisonPattern(_, _) then {},
+    }
+}
+
+public let typed_pattern_introduces_binding(pattern ref TypedPattern) Bool = {
+    return when pattern in {
+        .Variable(_) then true,
+        .EnumCase(_, _, elements) then {
+            for element in elements then {
+                if typed_pattern_introduces_binding(element.pattern) then { return true }
+            }
+            yield false
+        },
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                if typed_pattern_introduces_binding(element.pattern) then { return true }
+            }
+            yield false
+        },
+        .AndPattern(left, right) then typed_pattern_introduces_binding(left) or typed_pattern_introduces_binding(right),
+        .OrPattern(left, right) then typed_pattern_introduces_binding(left) or typed_pattern_introduces_binding(right),
+        .NotPattern(inner) then typed_pattern_introduces_binding(inner),
+        .Wildcard() then false,
+        .BoolLiteral(_) then false,
+        .IntegerLiteral(_) then false,
+        .NegativeIntegerLiteral(_) then false,
+        .StringLiteral(_) then false,
+        .RuneLiteral(_) then false,
+        .ComparisonPattern(_, _) then false,
+    }
+}
+
+public let typed_pattern_is_wildcard_only(pattern ref TypedPattern) Bool = {
+    return when pattern in {
+        .Wildcard() then true,
+        .EnumCase(_, _, elements) then {
+            for element in elements then {
+                if not typed_pattern_is_wildcard_only(element.pattern) then { return false }
+            }
+            yield true
+        },
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                if not typed_pattern_is_wildcard_only(element.pattern) then { return false }
+            }
+            yield true
+        },
+        .Variable(_) then false,
+        .BoolLiteral(_) then false,
+        .IntegerLiteral(_) then false,
+        .NegativeIntegerLiteral(_) then false,
+        .StringLiteral(_) then false,
+        .RuneLiteral(_) then false,
+        .ComparisonPattern(_, _) then false,
+        .AndPattern(_, _) then false,
+        .OrPattern(_, _) then false,
+        .NotPattern(_) then false,
+    }
+}
+
+public let typed_pattern_is_conditionless_payload(pattern ref TypedPattern) Bool = {
+    return when pattern in {
+        .Wildcard() then true,
+        .Variable(_) then true,
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                if not typed_pattern_is_conditionless_payload(element.pattern) then { return false }
+            }
+            yield true
+        },
+        _ then false,
+    }
+}

@@ -256,8 +256,10 @@ extension TypeChecker {
           }
         }
       }
-      
-      return (.orPattern(left: typedLeft, right: typedRight), leftBindings)
+
+      let canonicalSymbolsByName = patternSymbolsByName(in: typedLeft)
+      let canonicalRight = canonicalizePatternBindings(typedRight, canonicalSymbolsByName: canonicalSymbolsByName)
+      return (.orPattern(left: typedLeft, right: canonicalRight), leftBindings)
       
     case .notPattern(let innerPattern, let span):
       let (typedPattern, innerBindings) = try checkPattern(innerPattern, subjectType: subjectType)
@@ -381,29 +383,84 @@ extension TypeChecker {
 
   func extractPatternSymbols(from pattern: TypedPattern) -> [Symbol] {
     var symbols: [Symbol] = []
-    collectPatternSymbols(pattern, into: &symbols)
+    var seenDefIds: Set<UInt64> = []
+    collectPatternSymbols(pattern, into: &symbols, seenDefIds: &seenDefIds)
     return symbols
   }
 
-  private func collectPatternSymbols(_ pattern: TypedPattern, into symbols: inout [Symbol]) {
+  private func collectPatternSymbols(
+    _ pattern: TypedPattern,
+    into symbols: inout [Symbol],
+    seenDefIds: inout Set<UInt64>
+  ) {
     switch pattern {
     case .variable(let symbol):
-      symbols.append(symbol)
+      if seenDefIds.insert(symbol.defId.id).inserted {
+        symbols.append(symbol)
+      }
     case .enumCase(_, _, let elements):
       for element in elements {
-        collectPatternSymbols(element, into: &symbols)
+        collectPatternSymbols(element, into: &symbols, seenDefIds: &seenDefIds)
       }
     case .structPattern(_, let elements):
       for element in elements {
-        collectPatternSymbols(element, into: &symbols)
+        collectPatternSymbols(element, into: &symbols, seenDefIds: &seenDefIds)
       }
     case .andPattern(let left, let right), .orPattern(let left, let right):
-      collectPatternSymbols(left, into: &symbols)
-      collectPatternSymbols(right, into: &symbols)
+      collectPatternSymbols(left, into: &symbols, seenDefIds: &seenDefIds)
+      collectPatternSymbols(right, into: &symbols, seenDefIds: &seenDefIds)
     case .notPattern(let pattern):
-      collectPatternSymbols(pattern, into: &symbols)
+      collectPatternSymbols(pattern, into: &symbols, seenDefIds: &seenDefIds)
     case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
       break
+    }
+  }
+
+  private func patternSymbolsByName(in pattern: TypedPattern) -> [String: Symbol] {
+    var symbolsByName: [String: Symbol] = [:]
+    for symbol in extractPatternSymbols(from: pattern) {
+      guard let name = context.getName(symbol.defId) else { continue }
+      symbolsByName[name] = symbol
+    }
+    return symbolsByName
+  }
+
+  private func canonicalizePatternBindings(
+    _ pattern: TypedPattern,
+    canonicalSymbolsByName: [String: Symbol]
+  ) -> TypedPattern {
+    switch pattern {
+    case .variable(let symbol):
+      guard let name = context.getName(symbol.defId),
+            let canonical = canonicalSymbolsByName[name] else {
+        return pattern
+      }
+      return .variable(symbol: canonical)
+    case .enumCase(let caseName, let tagIndex, let elements):
+      return .enumCase(
+        caseName: caseName,
+        tagIndex: tagIndex,
+        elements: elements.map { canonicalizePatternBindings($0, canonicalSymbolsByName: canonicalSymbolsByName) }
+      )
+    case .structPattern(let typeName, let elements):
+      return .structPattern(
+        typeName: typeName,
+        elements: elements.map { canonicalizePatternBindings($0, canonicalSymbolsByName: canonicalSymbolsByName) }
+      )
+    case .andPattern(let left, let right):
+      return .andPattern(
+        left: canonicalizePatternBindings(left, canonicalSymbolsByName: canonicalSymbolsByName),
+        right: canonicalizePatternBindings(right, canonicalSymbolsByName: canonicalSymbolsByName)
+      )
+    case .orPattern(let left, let right):
+      return .orPattern(
+        left: canonicalizePatternBindings(left, canonicalSymbolsByName: canonicalSymbolsByName),
+        right: canonicalizePatternBindings(right, canonicalSymbolsByName: canonicalSymbolsByName)
+      )
+    case .notPattern(let inner):
+      return .notPattern(pattern: canonicalizePatternBindings(inner, canonicalSymbolsByName: canonicalSymbolsByName))
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
+      return pattern
     }
   }
 }

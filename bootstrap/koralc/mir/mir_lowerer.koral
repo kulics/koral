@@ -1,0 +1,303 @@
+public type MIRLowerer(
+    program ref MonomorphizedProgram,
+    context CompilerContext,
+)
+
+given MIRLowerer {
+    public new(program ref MonomorphizedProgram, context CompilerContext) MIRLowerer =
+        MIRLowerer(program, context)
+
+    public lower(self) MIRProgram = {
+        let mut globals = List[MIRGlobal].new()
+        let mut functions = List[MIRFunction].new()
+
+        for request in self.program.semantic_vtable_requests() then {
+            globals.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
+        }
+
+        for node in self.program.semantic_global_nodes() then {
+            when node in {
+                .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
+                    globals.push(MIRGlobal.ForeignFunction(identifier, params, return_type))
+                },
+                .ForeignLetDecl(_, _, mutable, decl_type, _, identifier) then {
+                    globals.push(MIRGlobal.ForeignGlobalVariable(identifier, mutable, decl_type))
+                },
+                .ForeignTypeDecl(_, _, fields, _, identifier) then {
+                    when fields in {
+                        .Some(f) then globals.push(MIRGlobal.ForeignStruct(identifier, f)),
+                        .None() then globals.push(MIRGlobal.ForeignType(identifier)),
+                    }
+                },
+                .LetDecl(_, _, mutable, decl_type, initializer, _, identifier) then {
+                    let init_function = self.make_global_initializer(identifier, initializer)
+                    globals.push(MIRGlobal.GlobalVariable(identifier, init_function.identifier, mutable, decl_type))
+                    functions.push(init_function)
+                },
+                .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
+                    let kind = MIRFunctionKind.Global()
+                    globals.push(MIRGlobal.Function(identifier, params, return_type, kind))
+                    if not self.context.contains_generic_parameter(return_type) then {
+                        functions.push(self.make_function(identifier, params, return_type, kind, body))
+                    }
+                },
+                .IntrinsicFunctionDecl(_, _, params, return_type, _, identifier) then {
+                    globals.push(MIRGlobal.Function(identifier, params, return_type, MIRFunctionKind.Global()))
+                },
+                .TypeStructDecl(_, _, fields, _, identifier) then {
+                    globals.push(MIRGlobal.StructDeclaration(identifier, fields))
+                },
+                .TypeEnumDecl(_, _, cases, _, identifier) then {
+                    globals.push(MIRGlobal.EnumDeclaration(identifier, cases))
+                },
+                .GivenDecl(target_type, members, _) then {
+                    let mut method_symbols = List[ref Symbol].new()
+                    for member in members then {
+                        let symbol = self.make_given_member_symbol(member)
+                        method_symbols.push(symbol)
+                        when member.body in {
+                            .Some(body) then {
+                                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
+                                functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
+                            },
+                            .None() then {},
+                        }
+                    }
+                    globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                },
+                .IntrinsicGivenDecl(target_type, members, _) then {
+                    let mut method_symbols = List[ref Symbol].new()
+                    for member in members then {
+                        let symbol = self.make_given_member_symbol(member)
+                        method_symbols.push(symbol)
+                    }
+                    globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                },
+                .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
+                    let mut copied_trait_args = List[Type].new()
+                    for arg in trait_args then { copied_trait_args.push(arg) }
+                    let mut method_symbols = List[ref Symbol].new()
+                    for member in members then {
+                        let symbol = self.make_given_member_symbol(member)
+                        method_symbols.push(symbol)
+                        when member.body in {
+                            .Some(body) then {
+                                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
+                                functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
+                            },
+                            .None() then {},
+                        }
+                    }
+                    globals.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols))
+                },
+                .GenericFunctionDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
+                .GenericTypeStructDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
+                .GenericTypeEnumDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
+                .TraitDecl(_, _, _, _) then {},
+                .TypeAliasDecl(_, _, _, _) then {},
+                .IntrinsicTypeDecl(_, _, _) then {},
+                .UsingDecl(_, _, _) then {},
+            }
+        }
+
+        return MIRProgram(
+            globals,
+            functions,
+            self.context,
+            self.program.static_method_by_key,
+            self.program.semantic_traits(),
+            self.program.semantic_receiver_method_dispatch(),
+            self.program.concrete_callables_by_def_id,
+            self.program.c_identifier_by_def_id,
+            self.program.def_ids_by_name,
+            self.program.type_def_ids_by_name,
+            self.program.type_by_c_type_name,
+            self.program.callable_by_def_id,
+            self.program.trait_method_by_key,
+            self.program.type_layout_by_key,
+            self.program.foreign_function_def_ids,
+            self.program.foreign_global_var_def_ids,
+            self.program.foreign_type_def_ids,
+        )
+    }
+
+    private make_function(
+        self,
+        identifier ref Symbol,
+        params List[TypedParam],
+        return_type Type,
+        kind MIRFunctionKind,
+        body ref TypedExpr,
+    ) MIRFunction = {
+        let mut builder = MIRFunctionBuilder.new(
+            self.program,
+            identifier,
+            params,
+            List[ref Symbol].new(),
+            return_type,
+            kind,
+            body,
+            self.context,
+        )
+        return builder.lower()
+    }
+
+    private make_global_initializer(self, identifier ref Symbol, value ref TypedExpr) MIRFunction = {
+        let function_type = Type.FunctionType(List[ref FunctionParamEntry].new(), box(identifier.symbol_type))
+        let mut context = self.context
+        let symbol = box(context.create_symbol(
+            "__mir_global_init_\(identifier.def_id.id)",
+            self.context.get_module_path(identifier.def_id) or else List[String].new(),
+            self.context.get_source_file(identifier.def_id) or else "<mir_global_init>",
+            function_type,
+            SymbolKind.Function(),
+            MethodKind.Normal(),
+            AccessModifier.Private(),
+            unknown_span(),
+            false,
+        ))
+        return self.make_function(symbol, List[TypedParam].new(), identifier.symbol_type, MIRFunctionKind.Global(), value)
+    }
+
+    private make_given_member_symbol(self, member TypedGivenMember) ref Symbol = {
+        let function_type = when self.context.get_function_type(member.def_id) in {
+            .Some(t) then t,
+            .None() then member.return_type,
+        }
+        return box(Symbol(member.def_id, function_type, SymbolKind.Function()))
+    }
+
+    private make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
+        return MIRTraitVTable(
+            request.concrete_type,
+            request.trait_name,
+            self.copy_type_ref_list(request.trait_type_args),
+            self.make_trait_vtable_methods(request),
+        )
+    }
+
+    private copy_type_ref_list(self, values List[ref Type]) List[Type] = {
+        let mut out = List[Type].new()
+        for value in values then { out.push(value.val) }
+        return out
+    }
+
+    private make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
+        let mut ordered_members = List[TypedTraitMember].new()
+        let mut visited_traits = Set[String].new()
+        let mut seen_methods = Set[String].new()
+        self.collect_ordered_trait_members(request.trait_name, ordered_members.ref, visited_traits.ref, seen_methods.ref)
+
+        let bindings = self.trait_member_type_bindings(request)
+        let mut methods = List[MIRTraitVTableMethod].new()
+        for member in ordered_members then {
+            methods.push(self.make_trait_vtable_method(self.apply_type_bindings_to_trait_member(member, bindings)))
+        }
+        return methods
+    }
+
+    private collect_ordered_trait_members(
+        self,
+        trait_name String,
+        ordered mut ref List[TypedTraitMember],
+        visited_traits mut ref Set[String],
+        seen_methods mut ref Set[String],
+    ) Void = {
+        if visited_traits.contains(trait_name) then { return }
+        visited_traits.insert(trait_name)
+        when self.program.semantic_traits().get(trait_name) in {
+            .Some(trait_info) then {
+                for parent in trait_info.parent_traits then {
+                    self.collect_ordered_trait_members(parent.name, ordered, visited_traits, seen_methods)
+                }
+                for member in trait_info.members then {
+                    if not seen_methods.contains(member.name) then {
+                        seen_methods.insert(member.name)
+                        ordered.push(member)
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
+        let mut bindings = Dict[String, Type].new()
+        bindings.insert("Self", request.concrete_type)
+        when self.program.semantic_traits().get(request.trait_name) in {
+            .Some(trait_info) then {
+                let mut index UInt = 0
+                while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {
+                    bindings.insert(trait_info.type_params[index].name, request.trait_type_args[index].val)
+                    index += 1
+                }
+            },
+            .None() then {},
+        }
+        return bindings
+    }
+
+    private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+        let _ = self
+        if bindings.is_empty() then { return t }
+        return when t in {
+            .GenericParameter(name) then when bindings.get(name) in { .Some(bound) then bound, .None() then t },
+            .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
+            .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(inner.val, bindings))),
+            .MutablePointerType(inner) then Type.MutablePointerType(box(self.apply_type_bindings(inner.val, bindings))),
+            .FunctionType(params, return_type) then {
+                let mut bound_params = List[ref Type].new()
+                for param in params then {
+                    bound_params.push(box(self.apply_type_bindings(param.param_type, bindings)))
+                }
+                yield make_function_type(bound_params, self.apply_type_bindings(return_type.val, bindings))
+            },
+            .GenericStruct(template, args) then {
+                let mut bound_args = List[ref Type].new()
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(arg.val, bindings))) }
+                yield Type.GenericStruct(template, bound_args)
+            },
+            .GenericEnum(template, args) then {
+                let mut bound_args = List[ref Type].new()
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(arg.val, bindings))) }
+                yield Type.GenericEnum(template, bound_args)
+            },
+            .TraitObject(trait_name, args) then {
+                let mut bound_args = List[ref Type].new()
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(arg.val, bindings))) }
+                yield Type.TraitObject(trait_name, bound_args)
+            },
+            _ then t,
+        }
+    }
+
+    private apply_type_bindings_to_trait_member(self, member TypedTraitMember, bindings Dict[String, Type]) TypedTraitMember = {
+        let mut params = List[TypedParam].new()
+        for param in member.params then {
+            params.push(TypedParam(param.name, param.mutable, self.apply_type_bindings(param.param_type, bindings), param.named))
+        }
+        return TypedTraitMember(member.name, params, self.apply_type_bindings(member.return_type, bindings))
+    }
+
+    private make_trait_vtable_method(self, member TypedTraitMember) MIRTraitVTableMethod = {
+        let mut params = List[MIRTraitVTableParameter].new()
+        let mut first = true
+        let mut self_by_value = false
+        for param in member.params then {
+            let is_self = param.name == "self"
+            if first and is_self then {
+                self_by_value = when param.param_type in {
+                    .ReferenceType(_) then false,
+                    .MutableReferenceType(_) then false,
+                    _ then true,
+                }
+            }
+            params.push(MIRTraitVTableParameter(param.name, Option[Type].Some(param.param_type), is_self))
+            first = false
+        }
+        return MIRTraitVTableMethod(member.name, Option[Type].Some(member.return_type), params, self_by_value)
+    }
+}

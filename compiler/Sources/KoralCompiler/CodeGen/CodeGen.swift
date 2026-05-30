@@ -6,16 +6,13 @@ import Foundation
 // 这确保了 CodeGen 和 DefId 系统使用一致的标识符生成逻辑。
 
 public class CodeGen {
-  let ast: MonomorphizedProgram
   internal let context: CompilerContext
   var indent: String = ""
   var buffer: String = ""
   var tempVarCounter = 0
-  private var globalInitializations: [(String, TypedExpressionNode)] = []
-  var lifetimeScopeStack: [[(name: String, type: Type)]] = []
-  var deferScopeStack: [[TypedExpressionNode]] = []
-  var userDefinedDrops: [String: String] = [:] // TypeName -> specialized drop function symbol
+  private var globalInitializations: [(name: String, initializer: Symbol)] = []
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
+  let mirProgram: MIRProgram
   private var foreignFunctionDefIds: Set<UInt64> = []
   private var foreignGlobalVarDefIds: Set<UInt64> = []
   
@@ -29,36 +26,6 @@ public class CodeGen {
   private var userMainFunctionName: String? = nil
   /// 用户 main 函数的返回类型（用于决定 C main 的返回值）
   private var userMainReturnType: Type? = nil
-
-  // MARK: - Lambda Code Generation
-  /// Counter for generating unique Lambda function names
-  var lambdaCounter = 0
-  /// Buffer for Lambda function definitions (generated at the end)
-  var lambdaFunctions: String = ""
-  /// Buffer for Lambda environment struct definitions
-  var lambdaEnvStructs: String = ""
-  
-  // MARK: - Escape Analysis
-  /// 逃逸分析上下文，用于追踪变量作用域和逃逸状态
-  var escapeContext: EscapeContext
-  
-  /// Pattern binding aliases: maps a pattern-bound variable's C identifier
-  /// to the subject's field path expression. Used for borrow semantics in
-  /// match/when, if-is, and while-is pattern matching — bindings are aliases
-  /// into the subject rather than copies, analogous to Rust/Swift match semantics.
-  var patternBindingAliases: [String: String] = [:]
-  
-  /// Lambda capture aliases: maps a captured variable's DefId to the expression
-  /// used to access it inside the lambda body (e.g., `(*__captured->names_42)`).
-  /// This enables by-reference capture semantics — the lambda accesses the
-  /// caller's original variable through a pointer stored in the env struct.
-  var capturedVarAliases: [UInt64: String] = [:]
-  
-  /// 是否启用逃逸分析报告
-  private let escapeAnalysisReportEnabled: Bool
-  
-  /// 全局逃逸分析结果
-  private var globalEscapeResult: GlobalEscapeResult?
 
   // Lightweight type declaration wrapper used for dependency ordering before emission
   private enum TypeDeclaration {
@@ -78,38 +45,19 @@ public class CodeGen {
     }
   }
 
-  struct LoopContext {
-    let startLabel: String
-    let endLabel: String
-    let scopeIndex: Int
-  }
-  var loopStack: [LoopContext] = []
-
-  struct CodegenYieldTarget {
-    let id: YieldTargetId
-    let resultVar: String
-    let resultType: Type
-    let endLabel: String
-    let baseScopeIndex: Int
-  }
-  var yieldTargetStack: [CodegenYieldTarget] = []
-
-  public init(
-    ast: MonomorphizedProgram,
-    context: CompilerContext,
-    escapeAnalysisReportEnabled: Bool = false
+  init(
+    mirProgram: MIRProgram,
+    context: CompilerContext
   ) {
-    self.ast = ast
+    self.mirProgram = mirProgram
     self.context = context
-    self.escapeAnalysisReportEnabled = escapeAnalysisReportEnabled
-    self.escapeContext = EscapeContext(reportingEnabled: escapeAnalysisReportEnabled, context: context)
-    self.foreignFunctionDefIds = Set(ast.globalNodes.compactMap { node in
+    self.foreignFunctionDefIds = Set(mirProgram.globals.compactMap { node in
       if case .foreignFunction(let identifier, _) = node {
         return identifier.defId.id
       }
       return nil
     })
-    self.foreignGlobalVarDefIds = Set(ast.globalNodes.compactMap { node in
+    self.foreignGlobalVarDefIds = Set(mirProgram.globals.compactMap { node in
       if case .foreignGlobalVariable(let identifier, _) = node {
         return identifier.defId.id
       }
@@ -142,11 +90,6 @@ public class CodeGen {
   }
 
   func qualifiedName(for symbol: Symbol) -> String {
-    // Check lambda capture aliases first — captured variables are accessed
-    // through pointers in the env struct for by-reference capture semantics.
-    if let alias = capturedVarAliases[symbol.defId.id] {
-      return alias
-    }
     if foreignFunctionDefIds.contains(symbol.defId.id) {
       let name = context.getName(symbol.defId) ?? "<unknown>"
       return context.getCname(symbol.defId) ?? name
@@ -184,7 +127,7 @@ public class CodeGen {
       }
     }
 
-    for node in ast.globalNodes {
+    for node in mirProgram.globals {
       switch node {
       case .foreignType(let identifier):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
@@ -206,23 +149,23 @@ public class CodeGen {
       case .foreignGlobalVariable(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         foreignDefIds.insert(defIdKey(identifier.defId))
-      case .globalStructDeclaration(let identifier, _):
+      case .structDeclaration(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         if case .structure(let defId) = identifier.type {
           let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         }
-      case .globalEnumDeclaration(let identifier, _):
+      case .enumDeclaration(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
         if case .`enum`(let defId) = identifier.type {
           let access = context.getAccess(defId) ?? .protected
           register(defId: defId, access: access)
         }
-      case .globalFunction(let identifier, _, _):
+      case .function(let identifier, _, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
       case .globalVariable(let identifier, _, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
-      case .givenDeclaration(let type, _, let methods):
+      case .given(let type, _, let methods):
         switch type {
         case .structure(let defId):
           let access = context.getAccess(defId) ?? .protected
@@ -234,9 +177,9 @@ public class CodeGen {
           break
         }
         for method in methods {
-          register(defId: method.identifier.defId, access: context.getAccess(method.identifier.defId) ?? .protected)
+          register(defId: method.defId, access: context.getAccess(method.defId) ?? .protected)
         }
-      case .genericTypeTemplate, .genericFunctionTemplate:
+      case .traitVTable, .templatePlaceholder:
         break
       }
     }
@@ -283,6 +226,13 @@ public class CodeGen {
         let name = context.getName(symbol.defId) ?? "<unknown>"
         return context.getCname(symbol.defId) ?? sanitizeCIdentifier(name)
       }
+      if isGlobalSymbol {
+        if let cName = cIdentifierByDefId[defIdKey(symbol.defId)] {
+          return cName
+        }
+        let name = context.getName(symbol.defId) ?? "<unknown>"
+        return context.getCIdentifier(symbol.defId) ?? sanitizeCIdentifier(name)
+      }
       let base = sanitizeCIdentifier(context.getName(symbol.defId) ?? "<unknown>")
       return "\(base)_\(symbol.defId.id)"
     }
@@ -320,7 +270,7 @@ public class CodeGen {
   ///   - methodName: 方法名（如 "empty", "from_utf8_ptr_unchecked"）
   /// - Returns: 完整的 C 标识符
   func lookupStaticMethod(typeName: String, methodName: String) -> String {
-    if let defId = ast.lookupStaticMethod(typeName: typeName, methodName: methodName) {
+    if let defId = mirProgram.lookupStaticMethod(typeName: typeName, methodName: methodName) {
       if let cName = cIdentifierByDefId[defIdKey(defId)] {
         return cName
       }
@@ -328,294 +278,15 @@ public class CodeGen {
     }
     return "std_\(typeName)_\(methodName)"
   }
-
-  private func lookupReceiverMethodDefId(receiverType: Type, methodName: String) -> DefId? {
-    for node in ast.globalNodes {
-      guard case .givenDeclaration(let candidateType, _, let methods) = node else { continue }
-      guard candidateType == receiverType else { continue }
-      for method in methods {
-        if ast.receiverMethodDispatch[method.identifier.defId]?.methodName == methodName {
-          return method.identifier.defId
-        }
-        if context.getName(method.identifier.defId) == methodName {
-          return method.identifier.defId
-        }
-      }
-    }
-    return nil
-  }
-
-  private func lookupStaticMethodCIdentifier(receiverType: Type, methodName: String) -> String? {
-    if let methodDefId = lookupReceiverMethodDefId(receiverType: receiverType, methodName: methodName) {
-      return cIdentifierByDefId[defIdKey(methodDefId)] ?? context.getCIdentifier(methodDefId)
-    }
-
-    let lookupTypeNames: [String] = {
-      switch receiverType {
-      case .structure(let defId), .`enum`(let defId):
-        let qualified = context.getQualifiedName(defId)
-        let plain = context.getName(defId)
-        return [qualified, plain].compactMap { $0 }
-      default:
-        return []
-      }
-    }()
-
-    for typeName in lookupTypeNames {
-      if let methodDefId = ast.lookupStaticMethod(typeName: typeName, methodName: methodName) {
-        return cIdentifierByDefId[defIdKey(methodDefId)] ?? context.getCIdentifier(methodDefId)
-      }
-    }
-
-    return nil
-  }
   
-  func pushScope() {
-    lifetimeScopeStack.append([])
-    deferScopeStack.append([])
-    escapeContext.enterScope()
-  }
-
-  func popScopeWithoutCleanup() {
-    _ = lifetimeScopeStack.popLast()
-    _ = deferScopeStack.popLast()
-    escapeContext.leaveScope()
-  }
-
-  func popScope() {
-    // 1. Execute finally expressions in LIFO order (last declared runs first)
-    let defers = deferScopeStack.removeLast()
-    for deferExpr in defers.reversed() {
-      let result = generateExpressionSSA(deferExpr)
-      // Discard the return value, but if it's an rvalue that needs drop, clean it up
-      if deferExpr.valueCategory == .rvalue && needsDrop(deferExpr.type) && !result.isEmpty {
-        appendDropStatement(for: deferExpr.type, value: result, indent: indent)
-      }
-    }
-    // 2. Then execute variable drop cleanup (reverse declaration order)
-    let vars = lifetimeScopeStack.removeLast()
-    for (name, type) in vars.reversed() {
-      addIndent()
-      appendDropStatement(for: type, value: name, indent: "")
-    }
-    escapeContext.leaveScope()
-  }
-
-  func emitCleanup(fromScopeIndex startIndex: Int) {
-    guard !lifetimeScopeStack.isEmpty else { return }
-    let clampedStart = max(0, min(startIndex, lifetimeScopeStack.count - 1))
-
-    for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: clampedStart, by: -1) {
-      // First execute finally expressions for this scope (LIFO order)
-      let defers = deferScopeStack[scopeIndex]
-      for deferExpr in defers.reversed() {
-        let result = generateExpressionSSA(deferExpr)
-        if deferExpr.valueCategory == .rvalue && needsDrop(deferExpr.type) && !result.isEmpty {
-          appendDropStatement(for: deferExpr.type, value: result, indent: indent)
-        }
-      }
-      // Then execute variable drop cleanup
-      let vars = lifetimeScopeStack[scopeIndex]
-      for (name, type) in vars.reversed() {
-        addIndent()
-        appendDropStatement(for: type, value: name, indent: "")
-      }
-    }
-  }
-
-  func emitCleanupForScope(at scopeIndex: Int) {
-    guard scopeIndex >= 0 && scopeIndex < lifetimeScopeStack.count else { return }
-    // First execute finally expressions for this scope (LIFO order)
-    let defers = deferScopeStack[scopeIndex]
-    for deferExpr in defers.reversed() {
-      let result = generateExpressionSSA(deferExpr)
-      if deferExpr.valueCategory == .rvalue && needsDrop(deferExpr.type) && !result.isEmpty {
-        appendDropStatement(for: deferExpr.type, value: result, indent: indent)
-      }
-    }
-    // Then execute variable drop cleanup
-    let vars = lifetimeScopeStack[scopeIndex]
-    for (name, type) in vars.reversed() {
-      addIndent()
-      appendDropStatement(for: type, value: name, indent: "")
-    }
-  }
-
-  func registerVariable(_ name: String, _ type: Type) {
-    lifetimeScopeStack[lifetimeScopeStack.count - 1].append((name: name, type: type))
-    escapeContext.registerVariable(name)
-  }
-
-  func unregisterVariable(_ name: String) {
-    for scopeIndex in stride(from: lifetimeScopeStack.count - 1, through: 0, by: -1) {
-      lifetimeScopeStack[scopeIndex].removeAll { $0.name == name }
-    }
-  }
-
-  func isCleanupRegisteredValue(_ name: String) -> Bool {
-    for scope in lifetimeScopeStack.reversed() {
-      if scope.contains(where: { $0.name == name }) {
-        return true
-      }
-    }
-    return false
-  }
-
-  // MARK: - Full-Expression Temporary Cleanup (C++ RAII Semantics)
-
-  /// Returns the current number of registered variables in the innermost scope.
-  /// Used as a marker to identify temporaries created during a full expression.
-  func currentScopeTempMarker() -> Int {
-    guard let last = lifetimeScopeStack.last else { return 0 }
-    return last.count
-  }
-
-  /// Cleans up temporaries registered in the current scope after the given marker.
-  /// This implements C++ RAII semantics: temporaries created during a full expression
-  /// (statement) are released at the end of that expression, not at scope exit.
-  func cleanupTemporariesInCurrentScope(marker: Int) {
-    guard !lifetimeScopeStack.isEmpty else { return }
-    let scopeIndex = lifetimeScopeStack.count - 1
-    let clampedMarker = min(marker, lifetimeScopeStack[scopeIndex].count)
-    while lifetimeScopeStack[scopeIndex].count > clampedMarker {
-      let lastIndex = lifetimeScopeStack[scopeIndex].count - 1
-      let (name, type) = lifetimeScopeStack[scopeIndex][lastIndex]
-      addIndent()
-      appendDropStatement(for: type, value: name, indent: "")
-      lifetimeScopeStack[scopeIndex].remove(at: lastIndex)
-    }
-  }
-
-  func cleanupTrackingName(for expr: TypedExpressionNode, fallback: String) -> String {
-    switch expr {
-    case .variable(let identifier):
-      return cIdentifier(for: identifier)
-    case .castExpression(let inner, _),
-         .referenceExpression(let inner, _):
-      return cleanupTrackingName(for: inner, fallback: fallback)
-    default:
-      return fallback
-    }
-  }
-
-  func escapingOwnedLocalName(for expr: TypedExpressionNode) -> String? {
-    switch expr {
-    case .variable(let identifier):
-      return context.getName(identifier.defId)
-    case .castExpression(let inner, _):
-      return escapingOwnedLocalName(for: inner)
-    default:
-      return nil
-    }
-  }
-
-  func shouldCopyValue(type: Type, source: String, isLvalue: Bool) -> Bool {
-    guard isLvalue && needsDrop(type) else {
-      return false
-    }
-    // C++ RAII semantics: lvalue arguments are always copied.
-    // The cleanup-registered check is not relevant for lvalues — a variable's
-    // scope-managed lifetime is orthogonal to copy-on-pass semantics.
-    return true
-  }
-
-  func consumeCleanupRegisteredValueIfMoved(type: Type, source: String, isLvalue: Bool) {
-    guard needsDrop(type) else {
-      return
-    }
-    // Only consume (unregister) rvalue temporaries that are being moved.
-    // Lvalue variables must never be consumed — their lifetime is managed by scope exit.
-    if !isLvalue && isCleanupRegisteredValue(source) {
-      unregisterVariable(source)
-    }
-  }
-
   func needsDrop(_ type: Type) -> Bool {
     switch type {
-    case .structure, .`enum`, .reference, .mutableReference, .function, .weakReference, .mutableWeakReference:
+    case .structure, .`enum`, .reference, .mutableReference, .function, .weakReference, .mutableWeakReference, .traitObject:
       return true
     default:
       return false
     }
   }
-
-  func generateOwnedHeapReference(from inner: TypedExpressionNode, as type: Type) -> String {
-    let innerType: Type
-    switch type {
-    case .reference(let resolvedInner), .mutableReference(let resolvedInner):
-      innerType = resolvedInner
-    default:
-      fatalError("owned heap reference requires reference result type")
-    }
-
-    let innerResult = generateExpressionSSA(inner)
-    let innerCType = cTypeName(innerType)
-    let refCType = cTypeName(type)
-    let result = nextTempWithDecl(cType: refCType)
-    let cleanupSource = cleanupTrackingName(for: inner, fallback: innerResult)
-    let shouldTransferEscapingOwnedLocal: Bool = {
-      guard inner.valueCategory == .lvalue,
-            isCleanupRegisteredValue(cleanupSource),
-            let localName = escapingOwnedLocalName(for: inner),
-            escapeContext.inReturnContext || escapeContext.inFieldAssignmentContext,
-            let escapeReason = escapeContext.getEscapeReason(localName)
-      else {
-        return false
-      }
-      switch escapeReason {
-      case .escapeToReturn, .escapeToField:
-        break
-      case .escapeToParameter, .unknown, .noEscape:
-        return false
-      }
-      switch inner {
-      case .variable, .castExpression:
-        return true
-      default:
-        return false
-      }
-    }()
-
-    addIndent()
-    buffer += "\(result).ptr = malloc(sizeof(\(innerCType)));\n"
-    emitCopyOrMove(
-      type: innerType,
-      source: innerResult,
-      dest: "*(\(innerCType)*)\(result).ptr",
-      isLvalue: inner.valueCategory == .lvalue && !shouldTransferEscapingOwnedLocal)
-    if shouldTransferEscapingOwnedLocal {
-      unregisterVariable(cleanupSource)
-    }
-
-    addIndent()
-    buffer += "\(result).control = malloc(sizeof(struct __koral_Control));\n"
-    addIndent()
-    buffer += "((struct __koral_Control*)\(result).control)->strong_count = 1;\n"
-    addIndent()
-    buffer += "((struct __koral_Control*)\(result).control)->weak_count = 1;\n"
-    addIndent()
-    buffer += "((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n"
-
-    if case .structure(let defId) = innerType {
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-      addIndent()
-      buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
-    } else if case .`enum`(let defId) = innerType {
-      let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-      addIndent()
-      buffer += "((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n"
-    } else {
-      addIndent()
-      buffer += "((struct __koral_Control*)\(result).control)->dtor = NULL;\n"
-    }
-
-    if needsDrop(innerType) && inner.valueCategory != .lvalue {
-      unregisterVariable(innerResult)
-    }
-
-    return result
-  }
-
 
   public func generate() -> String {
     buffer = """
@@ -625,30 +296,16 @@ public class CodeGen {
 
       """
 
-    // 生成程序体
-    generateProgram(ast)
+    generateProgram()
     
     return buffer
   }
 
-  /// 获取逃逸分析诊断报告
-  /// 
-  /// 返回所有在代码生成过程中收集的逃逸分析诊断信息。
-  /// 只有在启用逃逸分析报告时才会有内容。
-  public func getEscapeAnalysisDiagnostics() -> String {
-    return escapeContext.getFormattedDiagnostics()
-  }
-  
-  /// 获取逃逸分析诊断列表
-  public func getEscapeDiagnostics() -> [EscapeDiagnostic] {
-    return escapeContext.diagnostics
-  }
-
-  private func collectTypeDeclarations(_ nodes: [TypedGlobalNode]) -> [TypeDeclaration] {
+  private func collectTypeDeclarations(_ nodes: [MIRGlobal]) -> [TypeDeclaration] {
     var resultByName: [String: TypeDeclaration] = [:]
     for node in nodes {
       switch node {
-      case .globalStructDeclaration(let identifier, let parameters):
+      case .structDeclaration(let identifier, let parameters):
         if case .structure(let defId) = identifier.type {
           let name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
           let candidate: TypeDeclaration = .structure(identifier, parameters, name)
@@ -670,7 +327,7 @@ public class CodeGen {
           }
           resultByName[name] = candidate
         }
-      case .globalEnumDeclaration(let identifier, let cases):
+      case .enumDeclaration(let identifier, let cases):
         if case .`enum`(let defId) = identifier.type {
           let name = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
           let candidate: TypeDeclaration = .`enum`(identifier, cases, name)
@@ -815,199 +472,96 @@ public class CodeGen {
     return ordered
   }
 
-  private func generateProgram(_ program: MonomorphizedProgram) {
-    let nodes = program.globalNodes
+  private func generateProgram() {
+    let globals = mirProgram.globals
 
-      func isStdDropTraitConformance(_ trait: TypedTraitConformance?) -> Bool {
-        guard let trait, trait.traitName == "Drop" else { return false }
-        guard let traitInfo = ast.traits[trait.traitName] else { return false }
-        return traitInfo.modulePath == ["Std"]
-      }
-
-      func isStdDropTraitName(_ traitName: String?) -> Bool {
-        guard let traitName, traitName == "Drop" else { return false }
-        guard let traitInfo = ast.traits[traitName] else { return false }
-        return traitInfo.modulePath == ["Std"]
-      }
-    
-      // Pass 0: Scan for user-defined drops and main function
-      for node in nodes {
-        if case .givenDeclaration(let type, let trait, let methods) = node {
-             guard isStdDropTraitConformance(trait) else {
-               continue
-             }
-
-             var typeName: String?
-             if case .structure(let defId) = type {
-               typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-             }
-             if case .`enum`(let defId) = type {
-               typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-             }
-             if case .genericStruct(let template, let args) = type {
-               typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
-             }
-             if case .genericEnum(let template, let args) = type {
-               typeName = SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
-             }
-
-             if let name = typeName {
-                 for method in methods {
-                   let logicalName = ast.receiverMethodDispatch[method.identifier.defId]?.methodName
-                     ?? context.getName(method.identifier.defId)
-                   if logicalName == "drop" {
-                         userDefinedDrops[name] = cIdentifier(for: method.identifier)
-                     }
-                 }
-             }
-        }
-        if case .globalFunction(let identifier, _, _) = node {
-          if let dispatch = ast.receiverMethodDispatch[identifier.defId],
-             dispatch.methodName == "drop",
-             isStdDropTraitName(dispatch.conformanceTraitName),
-             case .concreteType(let ownerTypeName) = dispatch.owner {
-            let access = context.getAccess(identifier.defId) ?? .protected
-            let sourceFile = context.getSourceFile(identifier.defId)
-            let ownerDefId = context.lookupDefId(
-              modulePath: [],
-              name: ownerTypeName,
-              sourceFile: access == .private ? sourceFile : nil
-            )
-            let cTypeName = ownerDefId.flatMap { defId in
-              cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId)
-            } ?? sanitizeCIdentifier(ownerTypeName)
-            userDefinedDrops[cTypeName] = cIdentifier(for: identifier)
-          }
-
-          // 检测用户定义的 main 函数
-          if (context.getName(identifier.defId) ?? "") == "main" {
-            userMainFunctionName = cIdentifier(for: identifier)
-            if case .function(_, let retType) = identifier.type {
-              userMainReturnType = retType
-            }
-          }
+    for global in globals {
+      if case .function(let identifier, _, .global) = global,
+         (context.getName(identifier.defId) ?? "") == "main" {
+        userMainFunctionName = cIdentifier(for: identifier)
+        if case .function(_, let retType) = identifier.type {
+          userMainReturnType = retType
         }
       }
+    }
 
-      let foreignTypes: [Symbol] = nodes.compactMap {
-        if case .foreignType(let identifier) = $0 { return identifier }
-        return nil
+    let foreignTypes: [Symbol] = globals.compactMap {
+      if case .foreignType(let identifier) = $0 { return identifier }
+      return nil
+    }
+    let foreignFunctions: [(Symbol, [Symbol])] = globals.compactMap {
+      if case .foreignFunction(let identifier, let params) = $0 {
+        return (identifier, params)
       }
-      let foreignFunctions: [(Symbol, [Symbol])] = nodes.compactMap {
-        if case .foreignFunction(let identifier, let params) = $0 {
-          return (identifier, params)
-        }
-        return nil
+      return nil
+    }
+    let foreignGlobals: [(Symbol, Bool)] = globals.compactMap {
+      if case .foreignGlobalVariable(let identifier, let mutable) = $0 {
+        return (identifier, mutable)
       }
-      let foreignGlobals: [(Symbol, Bool)] = nodes.compactMap {
-        if case .foreignGlobalVariable(let identifier, let mutable) = $0 {
-          return (identifier, mutable)
-        }
-        return nil
-      }
+      return nil
+    }
 
-      if !foreignTypes.isEmpty {
-        for typeSymbol in foreignTypes {
-          generateForeignTypeDeclaration(typeSymbol)
-        }
-        buffer += "\n"
-      }
-      
-      // 先生成所有类型声明，按依赖顺序排序以确保字段类型已定义
-      let typeDeclarations = collectTypeDeclarations(nodes)
-      
-      for decl in sortTypeDeclarations(typeDeclarations) {
-        switch decl {
-        case .structure(let identifier, let parameters, _):
-          generateTypeDeclaration(identifier, parameters)
-        case .`enum`(let identifier, let cases, _):
-          generateEnumDeclaration(identifier, cases)
-        case .foreignStructure(let identifier, let fields, _):
-          generateForeignStructDeclaration(identifier, fields)
-        }
-      }
-
-      if !foreignFunctions.isEmpty {
-        for (identifier, params) in foreignFunctions {
-          generateForeignFunctionDeclaration(identifier, params)
-        }
-        buffer += "\n"
-      }
-
-      // 然后生成所有函数声明
-      for node in nodes {
-        if case .globalFunction(let identifier, let params, _) = node {
-          if context.containsGenericParameter(identifier.type) { continue }
-          generateFunctionDeclaration(identifier, params)
-        }
-        if case .givenDeclaration(let type, _, let methods) = node {
-          if context.containsGenericParameter(type) { continue }
-          for method in methods {
-            if context.containsGenericParameter(method.identifier.type) { continue }
-            generateFunctionDeclaration(method.identifier, method.parameters)
-          }
-        }
+    if !foreignTypes.isEmpty {
+      for typeSymbol in foreignTypes {
+        generateForeignTypeDeclaration(typeSymbol)
       }
       buffer += "\n"
+    }
 
-      // 生成全局变量声明
-      if !foreignGlobals.isEmpty {
-        for (identifier, mutable) in foreignGlobals {
-          let cType = cTypeName(identifier.type)
-          let cName = cIdentifier(for: identifier)
-          if mutable {
-            buffer += "extern \(cType) \(cName);\n"
-          } else {
-            buffer += "extern const \(cType) \(cName);\n"
-          }
-        }
+    for decl in sortTypeDeclarations(collectTypeDeclarations(globals)) {
+      switch decl {
+      case .structure(let identifier, let parameters, _):
+        generateTypeDeclaration(identifier, parameters)
+      case .`enum`(let identifier, let cases, _):
+        generateEnumDeclaration(identifier, cases)
+      case .foreignStructure(let identifier, let fields, _):
+        generateForeignStructDeclaration(identifier, fields)
       }
-      for node in nodes {
-        if case .globalVariable(let identifier, let value, _) = node {
-          let cType = cTypeName(identifier.type)
-          let cName = cIdentifier(for: identifier)
-          switch value {
-          case .integerLiteral(_, _), .floatLiteral(_, _),
-            .stringLiteral(_, _), .booleanLiteral(_, _):
-            buffer += "\(cType) \(cName) = "
-            buffer += generateExpressionSSA(value)
-            buffer += ";\n"
-          default:
-            // 复杂表达式延迟到 main 函数中初始化
-            buffer += "\(cType) \(cName);\n"
-            globalInitializations.append((cName, value))
-          }
-        }
+    }
+
+    if !foreignFunctions.isEmpty {
+      for (identifier, params) in foreignFunctions {
+        generateForeignFunctionDeclaration(identifier, params)
       }
       buffer += "\n"
+    }
 
-      // 生成 vtable 结构体、wrapper 函数和 vtable 实例
-      processVtableRequests()
+    for function in mirProgram.functions {
+      generateFunctionDeclaration(function.identifier, function.parameters)
+    }
+    buffer += "\n"
 
-      // 全局逃逸分析：在生成函数实现之前，按调用图逆拓扑序分析所有函数
-      let globalAnalyzer = GlobalEscapeAnalyzer(context: context, program: program)
-      globalEscapeResult = globalAnalyzer.analyze()
-
-      // 生成函数实现
-      for node in nodes {
-        if case .globalFunction(let identifier, let params, let body) = node {
-          if context.containsGenericParameter(identifier.type) { continue }
-          generateGlobalFunction(identifier, params, body)
-        }
-        if case .givenDeclaration(let type, _, let methods) = node {
-          if context.containsGenericParameter(type) { continue }
-          for method in methods {
-            if context.containsGenericParameter(method.identifier.type) { continue }
-            generateGlobalFunction(method.identifier, method.parameters, method.body)
-          }
+    if !foreignGlobals.isEmpty {
+      for (identifier, mutable) in foreignGlobals {
+        let cType = cTypeName(identifier.type)
+        let cName = cIdentifier(for: identifier)
+        if mutable {
+          buffer += "extern \(cType) \(cName);\n"
+        } else {
+          buffer += "extern const \(cType) \(cName);\n"
         }
       }
-
-      // 生成 C 的 main 函数
-      // 如果有全局变量初始化或用户定义了 main 函数，都需要生成
-      if !globalInitializations.isEmpty || userMainFunctionName != nil {
-        generateCMainFunction()
+    }
+    for global in globals {
+      if case .globalVariable(let identifier, let initializerFunction, _) = global {
+        let cType = cTypeName(identifier.type)
+        let cName = cIdentifier(for: identifier)
+        buffer += "\(cType) \(cName);\n"
+        globalInitializations.append((cName, initializerFunction))
       }
+    }
+    buffer += "\n"
+
+    processVtableRequests()
+
+    for function in mirProgram.functions {
+      generateMIRGlobalFunction(function.identifier, function.parameters, function)
+    }
+
+    if !globalInitializations.isEmpty || userMainFunctionName != nil {
+      generateCMainFunction()
+    }
   }
 
   /// 生成 C 的 main 函数入口
@@ -1020,13 +574,11 @@ public class CodeGen {
 
       // 生成全局变量初始化
       if !globalInitializations.isEmpty {
-        pushScope()
-        for (name, value) in globalInitializations {
-          let resultVar = generateExpressionSSA(value)
+        for (name, initializer) in globalInitializations {
+          let resultVar = "\(cIdentifier(for: initializer))()"
           addIndent()
           buffer += "\(name) = \(resultVar);\n"
         }
-        popScope()
       }
       
       // 调用用户定义的 main 函数
@@ -1084,1173 +636,10 @@ public class CodeGen {
     buffer += "\(returnType) \(cName)(\(paramList));\n"
   }
 
-  private func generateGlobalFunction(
-    _ identifier: Symbol,
-    _ params: [Symbol],
-    _ body: TypedExpressionNode
-  ) {
-    let cName = cIdentifier(for: identifier)
-    
-    // 重置逃逸分析上下文，设置当前函数的返回类型和函数名
-    let funcReturnType = getFunctionReturnTypeAsType(identifier.type)
-    escapeContext.reset(returnType: funcReturnType, functionName: cName)
-    
-    // 使用全局逃逸分析结果（如果可用），否则回退到 per-function 分析
-    if let result = globalEscapeResult,
-       let escaped = result.escapedVariablesPerFunction[identifier.defId.id] {
-        escapeContext.escapedVariables = escaped
-        if escapeAnalysisReportEnabled {
-          for (name, reason) in escaped {
-            escapeContext.markEscaped(name, reason: reason)
-          }
-        }
-    } else {
-      // 使用原有的 per-function 分析作为保守路径
-        escapeContext.preAnalyze(body: body, params: params)
-        escapeContext.variableScopes = [:]
-        escapeContext.currentScopeLevel = 0
-    }
-    
-    // Save Lambda state before generating function body
-    let savedLambdaFunctions = lambdaFunctions
-    lambdaFunctions = ""
-    let savedLambdaEnvStructs = lambdaEnvStructs
-    lambdaEnvStructs = ""
-    
-    let returnType = getFunctionReturnType(identifier.type)
-    let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
-    
-    // Generate function body to a temporary buffer to collect Lambda functions
-    let savedBuffer = buffer
-    buffer = ""
-    buffer += "\(returnType) \(cName)(\(paramList)) {\n"
-
-    withIndent {
-      generateFunctionBody(body, params)
-    }
-    buffer += "}\n"
-    
-    let functionCode = buffer
-    buffer = savedBuffer
-    
-    let envStructs = lambdaEnvStructs
-
-    // Insert Lambda functions before this function, then the function itself
-    if !envStructs.isEmpty {
-      buffer += envStructs
-    }
-    if !lambdaFunctions.isEmpty {
-      buffer += lambdaFunctions
-    }
-    buffer += functionCode
-    
-    // Restore Lambda state
-    lambdaFunctions = savedLambdaFunctions
-    lambdaEnvStructs = savedLambdaEnvStructs
-  }
-
   // 生成参数的 C 声明：类型若为 reference(T) 则 getCType 返回 T*
-  private func getParamCDecl(_ param: Symbol) -> String {
+  func getParamCDecl(_ param: Symbol) -> String {
     return "\(cTypeName(param.type)) \(cIdentifier(for: param))"
   }
-
-  func generateFunctionBody(_ body: TypedExpressionNode, _ params: [Symbol]) {
-    pushScope()
-    for param in params {
-      registerVariable(cIdentifier(for: param), param.type)
-    }
-    let resultVar = generateExpressionSSA(body)
-
-    // `Never` 表达式不返回；不要生成返回临时变量或 return 语句。
-    if body.type == .never {
-      popScope()
-      return
-    }
-
-    let result = nextTemp()
-    if body.type != .void {
-      // For implicit returns, cleanup-registered variables can be moved (not copied)
-      // since they won't be used after the return. This avoids unnecessary
-      // copy+drop for patterns like `let f(x T) T = x`.
-      let isReturnableLvalue = needsDrop(body.type) && isCleanupRegisteredValue(resultVar)
-      if isReturnableLvalue {
-        // Move: plain struct assignment, unregister from cleanup
-        unregisterVariable(resultVar)
-        emitDeclareAndCopyOrMove(
-          type: body.type,
-          source: resultVar,
-          dest: result,
-          isLvalue: false
-        )
-      } else {
-        let shouldCopyResult = shouldCopyValue(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
-        if !shouldCopyResult {
-          consumeCleanupRegisteredValueIfMoved(type: body.type, source: resultVar, isLvalue: body.valueCategory == .lvalue)
-        }
-        emitDeclareAndCopyOrMove(
-          type: body.type,
-          source: resultVar,
-          dest: result,
-          isLvalue: shouldCopyResult
-        )
-      }
-    }
-    popScope()
-
-    if body.type != .void {
-      addIndent()
-      buffer += "return \(result);\n"
-    }
-  }
-
-  func generateExpressionSSA(_ expr: TypedExpressionNode) -> String {
-    switch expr {
-    case .integerLiteral(let value, _):
-      return String(value)
-
-    case .floatLiteral(let value, _):
-      return String(value)
-
-    case .stringLiteral(let value, let type):
-      let bytesVar = nextTemp() + "_bytes"
-      let storageVar = nextTemp() + "_storage"
-      let utf8Bytes = Array(value.utf8)
-      var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
-      if !byteLiterals.isEmpty {
-        byteLiterals += ", "
-      }
-      byteLiterals += "0x00"
-      addIndent()
-      buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-
-      guard case .structure(let stringDefId) = type,
-            let stringMembers = context.getStructMembers(stringDefId),
-            let storageMember = stringMembers.first(where: { $0.name == "storage" }) else {
-        fatalError("String literal requires String.storage: ref StringStorage")
-      }
-      let storageType: Type
-      switch storageMember.type {
-      case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType):
-        storageType = resolvedStorageType
-      default:
-        fatalError("String literal requires String.storage: ref StringStorage")
-      }
-      let storageCType = cTypeName(storageType)
-      addIndent()
-      buffer += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
-
-      let cType = cTypeName(type)
-      let result = nextTempWithInit(cType: cType, initExpr: "(\(cType)){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } }")
-      return result
-
-    case .interpolatedString:
-      fatalError("Interpolated strings must be lowered before code generation")
-
-    case .booleanLiteral(let value, _):
-      return value ? "1" : "0"
-
-    case .variable(let identifier):
-      if identifier.type == .void {
-        return "0"
-      }
-      // Lambda capture aliases — captured variables accessed through env pointer
-      if let alias = capturedVarAliases[identifier.defId.id] {
-        return alias
-      }
-      let cName = cIdentifier(for: identifier)
-      // Pattern-bound variables are aliases into the subject — return the path directly
-      if let alias = patternBindingAliases[cName] {
-        return alias
-      }
-      return cName
-
-    case .castExpression(let inner, let type):
-      // Cast is only used for scalar and pointer conversions (Sema enforces legality).
-      let innerResult = generateExpressionSSA(inner)
-      let targetCType = cTypeName(type)
-
-      if inner.type == type {
-        return innerResult
-      }
-
-      func isFloat(_ t: Type) -> Bool {
-        switch t {
-        case .float32, .float64: return true
-        default: return false
-        }
-      }
-
-      func isSignedInt(_ t: Type) -> Bool {
-        switch t {
-        case .int, .int8, .int16, .int32, .int64: return true
-        default: return false
-        }
-      }
-
-      func isUnsignedInt(_ t: Type) -> Bool {
-        switch t {
-        case .uint, .uint8, .uint16, .uint32, .uint64: return true
-        default: return false
-        }
-      }
-
-      func minMaxMacros(for t: Type) -> (min: String, max: String)? {
-        switch t {
-        case .int8: return ("INT8_MIN", "INT8_MAX")
-        case .int16: return ("INT16_MIN", "INT16_MAX")
-        case .int32: return ("INT32_MIN", "INT32_MAX")
-        case .int64: return ("INT64_MIN", "INT64_MAX")
-        case .int: return ("INTPTR_MIN", "INTPTR_MAX")
-        case .uint8: return ("0", "UINT8_MAX")
-        case .uint16: return ("0", "UINT16_MAX")
-        case .uint32: return ("0", "UINT32_MAX")
-        case .uint64: return ("0", "UINT64_MAX")
-        case .uint: return ("0", "UINTPTR_MAX")
-        default: return nil
-        }
-      }
-
-      // float -> int/uint: runtime range check, overflow panics.
-      if isFloat(inner.type) && (isSignedInt(type) || isUnsignedInt(type)) {
-        guard let (minMacro, maxMacro) = minMaxMacros(for: type) else {
-          fatalError("Unsupported float->int cast target: \(type)")
-        }
-
-        let fVar = nextTempWithInit(cType: "double", initExpr: "(double)\(innerResult)")
-
-        addIndent()
-        buffer += "if (!(\(fVar) >= (double)\(minMacro) && \(fVar) <= (double)\(maxMacro))) {\n"
-        withIndent {
-          addIndent()
-          buffer += "__koral_panic_float_cast_overflow();\n"
-        }
-        addIndent()
-        buffer += "}\n"
-
-        let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(fVar)")
-        return result
-      }
-
-      // Pointer <-> Int/UInt casts: prefer uintptr_t/intptr_t intermediates.
-      if case .pointer = type {
-        if inner.type == .uint {
-          let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))(uintptr_t)\(innerResult)")
-          return result
-        } else if inner.type == .int {
-          let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))(intptr_t)\(innerResult)")
-          return result
-        } else {
-          let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
-          return result
-        }
-      }
-
-      if case .pointer = inner.type {
-        let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
-        return result
-      }
-
-      // Default scalar cast.
-      let result = nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(innerResult)")
-      return result
-
-    case .blockExpression(let statements, let type):
-      return generateBlockScope(statements, type: type)
-
-    case .arithmeticExpression(let left, let op, let right, let type):
-      let leftResult = generateExpressionSSA(left)
-      let rightResult = generateExpressionSSA(right)
-      let cType = cTypeName(type)
-      if type.isIntegerType {
-        let funcName = checkedArithmeticFuncName(op: op, type: type)
-        let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
-        return result
-      } else {
-        let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(arithmeticOpToC(op)) \(rightResult)")
-        return result
-      }
-
-    case .wrappingArithmeticExpression(let left, let op, let right, let type):
-      let leftResult = generateExpressionSSA(left)
-      let rightResult = generateExpressionSSA(right)
-      let cType = cTypeName(type)
-      let funcName = wrappingArithmeticFuncName(op: op, type: type)
-      let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
-      return result
-
-    case .wrappingShiftExpression(let left, let op, let right, let type):
-      let leftResult = generateExpressionSSA(left)
-      let rightResult = generateExpressionSSA(right)
-      let cType = cTypeName(type)
-      let funcName = wrappingShiftFuncName(op: op, type: type)
-      let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
-      return result
-
-    case .comparisonExpression(let left, let op, let right, let type):
-      let leftResult = generateExpressionSSA(left)
-      let rightResult = generateExpressionSSA(right)
-      let cType = cTypeName(type)
-      let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(comparisonOpToC(op)) \(rightResult)")
-      return result
-
-    case .ifExpression(let condition, let thenBranch, let elseBranch, let type):
-      let conditionVar = generateExpressionSSA(condition)
-
-      if type == .void || type == .never {
-        addIndent()
-        buffer += "if (\(conditionVar)) {\n"
-        withIndent {
-          pushScope()
-          _ = generateExpressionSSA(thenBranch)
-          popScope()
-        }
-        if let elseBranch = elseBranch {
-          addIndent()
-          buffer += "} else {\n"
-          withIndent {
-            pushScope()
-            _ = generateExpressionSSA(elseBranch)
-            popScope()
-          }
-        }
-
-        addIndent()
-        buffer += "}\n"
-        return ""
-      } else {
-        guard let elseBranch = elseBranch else {
-          fatalError("Non-void if expression must have else branch (Sema should catch this)")
-        }
-        let resultVar = nextTemp()
-        if type != .never {
-            addIndent()
-            buffer += "\(cTypeName(type)) \(resultVar);\n"
-        }
-
-        addIndent()
-        buffer += "if (\(conditionVar)) {\n"
-        let targetLabel = "\(nextTemp())_yield_end"
-        let target = CodegenYieldTarget(
-          id: YieldTargetId(rawValue: -1),
-          resultVar: resultVar,
-          resultType: type,
-          endLabel: targetLabel,
-          baseScopeIndex: max(0, lifetimeScopeStack.count - 1)
-        )
-        withIndent {
-          pushScope()
-          yieldTargetStack.append(target)
-          let thenResult = generateExpressionSSA(thenBranch)
-          if type != .never && thenBranch.type != .never && thenBranch.type != .void {
-              emitCopyOrMove(type: type, source: thenResult, dest: resultVar, isLvalue: thenBranch.valueCategory == .lvalue)
-          }
-          _ = yieldTargetStack.popLast()
-          popScope()
-        }
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          pushScope()
-          yieldTargetStack.append(target)
-          let elseResult = generateExpressionSSA(elseBranch)
-          if type != .never && elseBranch.type != .never && elseBranch.type != .void {
-              emitCopyOrMove(type: type, source: elseResult, dest: resultVar, isLvalue: elseBranch.valueCategory == .lvalue)
-          }
-          _ = yieldTargetStack.popLast()
-          popScope()
-        }
-
-        addIndent()
-        buffer += "}\n"
-        addIndent()
-        buffer += "\(targetLabel):;\n"
-        return resultVar
-      }
-
-    case .call(let callee, let arguments, let type):
-      return generateCall(callee, arguments, type)
-    case .genericCall:
-      fatalError("Generic call should have been resolved by monomorphizer before code generation")
-    case .methodReference:
-      fatalError("Method reference not in call position is not supported yet")
-    case .traitMethodPlaceholder(let traitName, let methodName, let base, _, _):
-      fatalError("Unresolved trait method placeholder: \(traitName).\(methodName) on \(base.type)")
-    case .traitObjectConversion(let inner, let traitName, let traitTypeArgs, let concreteType, let type):
-      return generateTraitObjectConversion(inner: inner, traitName: traitName, traitTypeArgs: traitTypeArgs, concreteType: concreteType, type: type)
-    case .traitMethodCall(let receiver, let traitName, let methodName, let methodIndex, let arguments, let type):
-      return generateTraitMethodCall(receiver: receiver, traitName: traitName, methodName: methodName, methodIndex: methodIndex, arguments: arguments, type: type)
-    case .staticMethodCall:
-      fatalError("Static method call should have been resolved by monomorphizer before code generation")
-      
-    case .enumConstruction(let type, let caseName, let args):
-      return generateEnumConstructor(type: type, caseName: caseName, args: args)
-
-    case .derefExpression(let inner, let type):
-      if expr.valueCategory == .lvalue {
-        let cType = cTypeName(type)
-        return nextTempWithInit(cType: cType, initExpr: buildRefComponents(expr).path)
-      }
-      let innerResult = generateExpressionSSA(inner)
-      let cType = cTypeName(type)
-      let result = nextTempWithDecl(cType: cType)
-      // Always deep copy from the pointee for reference/pointer dereference.
-      if case .reference = inner.type {
-        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
-      } else if case .mutableReference = inner.type {
-        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult).ptr", dest: result, indent: indent)
-      } else if case .pointer = inner.type {
-        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult)", dest: result, indent: indent)
-      } else if case .mutablePointer = inner.type {
-        appendCopyAssignment(for: type, source: "*(\(cType)*)\(innerResult)", dest: result, indent: indent)
-      } else {
-        fatalError("deref requires reference or pointer type")
-      }
-      // Release the consumed rvalue ref/pointer container after copying the value out.
-      // This implements C++ RAII semantics: the temporary ref is destroyed at the
-      // end of the full expression that created it, not at scope exit.
-      if inner.valueCategory != .lvalue && needsDrop(inner.type) && !innerResult.isEmpty {
-        if isCleanupRegisteredValue(innerResult) {
-          unregisterVariable(innerResult)
-        }
-        appendDropStatement(for: inner.type, value: innerResult, indent: indent)
-      }
-      return result
-
-    case .ptrExpression(let inner, let type):
-      let (lvaluePath, _) = buildRefComponents(inner)
-      let cType = cTypeName(type)
-      let result = nextTempWithInit(cType: cType, initExpr: "&\(lvaluePath)")
-      return result
-
-    case .referenceExpression(let inner, let type):
-      // 使用逃逸分析决定分配策略。
-      // Pattern 绑定别名（match/if-is/while-is）没有独立可寻址栈槽；
-      // 对它们走栈借用路径会构造出错误的 lvalue/control 组件。
-      // 因此别名变量的 ref 一律堆分配并按值复制，避免悬垂/非法地址。
-      let isPatternAliasRef: Bool = {
-        if case .variable(let identifier) = inner {
-          let cName = cIdentifier(for: identifier)
-          return patternBindingAliases[cName] != nil
-        }
-        return false
-      }()
-      // Lambda-captured variables are accessed through stable pointers in the env struct,
-      // so they are always addressable and should use stack allocation (take address).
-      let isCapturedVar: Bool = {
-        if case .variable(let identifier) = inner {
-          return capturedVarAliases[identifier.defId.id] != nil
-        }
-        return false
-      }()
-      let isAddressableDeref: Bool = {
-        if case .derefExpression = inner {
-          return true
-        }
-        return false
-      }()
-      let shouldHeapAllocate = isPatternAliasRef
-        || (!isCapturedVar && !isAddressableDeref && escapeContext.shouldUseHeapAllocation(inner))
-      
-      if inner.valueCategory == .lvalue && !shouldHeapAllocate {
-        // 不逃逸的 lvalue：栈分配（取地址）
-        let (lvaluePath, controlPath) = buildRefComponents(inner)
-        let cType = cTypeName(type)
-        let result = nextTempWithDecl(cType: cType)
-        addIndent()
-        buffer += "\(result).ptr = &\(lvaluePath);\n"
-        addIndent()
-        buffer += "\(result).control = \(controlPath);\n"
-        addIndent()
-        buffer += "__koral_retain(\(result).control);\n"
-        return result
-      } else {
-        // 逃逸的 lvalue 或 rvalue：堆分配
-        return generateOwnedHeapReference(from: inner, as: type)
-      }
-
-    case .whenExpression(let subject, let cases, let type):
-      return generateWhenExpression(subject, cases, type)
-
-    case .ifPatternExpression(let subject, let pattern, _, let thenBranch, let elseBranch, let type):
-      // Push a dedicated scope for the subject so its lifetime is self-contained.
-      // return/break/continue will clean it up via emitCleanup since it's on the stack.
-      pushScope()
-      
-      let subjectVarSSA = generateExpressionSSA(subject)
-      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-        registerVariable(subjectVarSSA, subject.type)
-      }
-      var subjectVar = subjectVarSSA
-      var subjectType = subject.type
-      switch subject.type {
-      case .reference(let inner),
-           .mutableReference(let inner),
-           .weakReference(let inner),
-           .mutableWeakReference(let inner):
-        let innerCType = cTypeName(inner)
-        let derefPtr = nextTemp() + "_deref"
-        addIndent()
-        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
-        subjectVar = "(*\(derefPtr))"
-        subjectType = inner
-      default:
-        break
-      }
-      
-      let savedAliases = patternBindingAliases
-      
-      // Generate pattern matching condition and bindings
-      let (prelude, preludeVars, condition, bindingCode, vars) = 
-          generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
-      
-      // Output prelude
-      for p in prelude {
-        addIndent()
-        buffer += p
-      }
-      for (name, varType) in preludeVars {
-        registerVariable(name, varType)
-      }
-      
-      if type == .void || type == .never {
-        addIndent()
-        buffer += "if (\(condition)) {\n"
-        withIndent {
-          pushScope()
-          for b in bindingCode {
-            addIndent()
-            buffer += b
-          }
-          for (name, varType) in vars {
-            registerVariable(name, varType)
-          }
-          _ = generateExpressionSSA(thenBranch)
-          popScope()
-        }
-        if let elseBranch = elseBranch {
-          addIndent()
-          buffer += "} else {\n"
-          withIndent {
-            pushScope()
-            _ = generateExpressionSSA(elseBranch)
-            popScope()
-          }
-        }
-
-        addIndent()
-        buffer += "}\n"
-        patternBindingAliases = savedAliases
-        // Pop the subject scope — drops the subject right after the if-pattern.
-        popScope()
-        return ""
-      } else {
-        guard let elseBranch = elseBranch else {
-          fatalError("Non-void if pattern expression must have else branch")
-        }
-        let resultVar = nextTemp()
-        if type != .never {
-          addIndent()
-          buffer += "\(cTypeName(type)) \(resultVar);\n"
-        }
-        let targetLabel = "\(nextTemp())_yield_end"
-        let yieldTarget = CodegenYieldTarget(
-          id: YieldTargetId(rawValue: -1),
-          resultVar: resultVar,
-          resultType: type,
-          endLabel: targetLabel,
-          baseScopeIndex: max(0, lifetimeScopeStack.count - 1)
-        )
-
-        addIndent()
-        buffer += "if (\(condition)) {\n"
-        withIndent {
-          pushScope()
-          yieldTargetStack.append(yieldTarget)
-          for b in bindingCode {
-            addIndent()
-            buffer += b
-          }
-          for (name, varType) in vars {
-            registerVariable(name, varType)
-          }
-          let thenResult = generateExpressionSSA(thenBranch)
-          if type != .never && thenBranch.type != .never && thenBranch.type != .void {
-            emitCopyOrMove(type: type, source: thenResult, dest: resultVar, isLvalue: thenBranch.valueCategory == .lvalue)
-          }
-          _ = yieldTargetStack.popLast()
-          popScope()
-        }
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          pushScope()
-          yieldTargetStack.append(yieldTarget)
-          let elseResult = generateExpressionSSA(elseBranch)
-          if type != .never && elseBranch.type != .never && elseBranch.type != .void {
-            emitCopyOrMove(type: type, source: elseResult, dest: resultVar, isLvalue: elseBranch.valueCategory == .lvalue)
-          }
-          _ = yieldTargetStack.popLast()
-          popScope()
-        }
-
-        addIndent()
-        buffer += "}\n"
-        addIndent()
-        buffer += "\(targetLabel):;\n"
-        patternBindingAliases = savedAliases
-        // Pop the subject scope — drops the subject right after the if-pattern.
-        popScope()
-        return resultVar
-      }
-      
-    case .andExpression(let left, let right, _):
-      let result = nextTempWithDecl(cType: "_Bool")
-      let leftResult = generateExpressionSSA(left)
-      let endLabel = nextTemp()
-      addIndent()
-      buffer += "if (!\(leftResult)) {\n"
-      withIndent {
-        addIndent()
-        buffer += "\(result) = 0;\n"
-        addIndent()
-        buffer += "goto \(endLabel);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-      // 单独处理短路时的临时对象
-      pushScope()
-      let rightResult = generateExpressionSSA(right)
-      addIndent()
-      buffer += "\(result) = \(rightResult);\n"
-      popScope()
-      addIndent()
-      buffer += "\(endLabel): {\n"
-      addIndent()
-      buffer += "}\n"
-      return result
-
-    case .orExpression(let left, let right, _):
-      let result = nextTempWithDecl(cType: "_Bool")
-      let leftResult = generateExpressionSSA(left)
-      let endLabel = nextTemp()
-      addIndent()
-      buffer += "if (\(leftResult)) {\n"
-      withIndent {
-        addIndent()
-        buffer += "\(result) = 1;\n"
-        addIndent()
-        buffer += "goto \(endLabel);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-      // 单独处理短路时的临时对象
-      pushScope()
-      let rightResult = generateExpressionSSA(right)
-      addIndent()
-      buffer += "\(result) = \(rightResult);\n"
-      popScope()
-      addIndent()
-      buffer += "\(endLabel): {\n"
-      addIndent()
-      buffer += "}\n"
-      return result
-
-    case .notExpression(let expr, _):
-      let exprResult = generateExpressionSSA(expr)
-      let result = nextTempWithInit(cType: "_Bool", initExpr: "!\(exprResult)")
-      return result
-
-    case .isExpression(let subject, let pattern, _):
-      pushScope()
-      let subjectVarSSA = generateExpressionSSA(subject)
-      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-        registerVariable(subjectVarSSA, subject.type)
-      }
-      var subjectVar = subjectVarSSA
-      var subjectType = subject.type
-      switch subject.type {
-      case .reference(let inner),
-           .mutableReference(let inner),
-           .weakReference(let inner),
-           .mutableWeakReference(let inner):
-        let innerCType = cTypeName(inner)
-        let derefPtr = nextTemp() + "_deref"
-        addIndent()
-        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
-        subjectVar = "(*\(derefPtr))"
-        subjectType = inner
-      default:
-        break
-      }
-      let (prelude, preludeVars, condition, _, _) =
-          generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
-      for p in prelude {
-        addIndent()
-        buffer += p
-      }
-      for (name, varType) in preludeVars {
-        registerVariable(name, varType)
-      }
-      let result_is = nextTempWithInit(cType: "_Bool", initExpr: condition)
-      popScope()
-      return result_is
-
-    case .isNotExpression(let subject, let pattern, _):
-      pushScope()
-      let subjectVarSSA = generateExpressionSSA(subject)
-      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-        registerVariable(subjectVarSSA, subject.type)
-      }
-      var subjectVar = subjectVarSSA
-      var subjectType = subject.type
-      switch subject.type {
-      case .reference(let inner),
-           .mutableReference(let inner),
-           .weakReference(let inner),
-           .mutableWeakReference(let inner):
-        let innerCType = cTypeName(inner)
-        let derefPtr = nextTemp() + "_deref"
-        addIndent()
-        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
-        subjectVar = "(*\(derefPtr))"
-        subjectType = inner
-      default:
-        break
-      }
-      let (prelude, preludeVars, condition, _, _) =
-          generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
-      for p in prelude {
-        addIndent()
-        buffer += p
-      }
-      for (name, varType) in preludeVars {
-        registerVariable(name, varType)
-      }
-      let result_isNot = nextTempWithInit(cType: "_Bool", initExpr: "!(\(condition))")
-      popScope()
-      return result_isNot
-
-    case .bitwiseExpression(let left, let op, let right, let type):
-      let leftResult = generateExpressionSSA(left)
-      let rightResult = generateExpressionSSA(right)
-      let cType = cTypeName(type)
-      if (op == .shiftLeft || op == .shiftRight) && type.isIntegerType {
-        let funcName = checkedShiftFuncName(op: op, type: type)
-        let result = nextTempWithInit(cType: cType, initExpr: "\(funcName)(\(leftResult), \(rightResult))")
-        return result
-      } else {
-        let result = nextTempWithInit(cType: cType, initExpr: "\(leftResult) \(bitwiseOpToC(op)) \(rightResult)")
-        return result
-      }
-
-    case .bitwiseNotExpression(let expr, let type):
-      let exprResult = generateExpressionSSA(expr)
-      let cType = cTypeName(type)
-      let result = nextTempWithInit(cType: cType, initExpr: "~\(exprResult)")
-      return result
-
-    case .typeConstruction(let identifier, _, let arguments, _):
-      var argResults: [String] = []
-      
-      // Get canonical members to check for casts
-      let canonicalMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
-      if case .structure(let defId) = identifier.type.canonical {
-        canonicalMembers = context.getStructMembers(defId) ?? []
-      } else {
-        canonicalMembers = []
-      }
-      
-      for (index, arg) in arguments.enumerated() {
-        let argResult = generateExpressionSSA(arg)
-        var finalArg = argResult
-
-        if needsDrop(arg.type) {
-          let cleanupSource = cleanupTrackingName(for: arg, fallback: argResult)
-          let shouldCopyArg = shouldCopyValue(
-            type: arg.type,
-            source: cleanupSource,
-            isLvalue: arg.valueCategory == .lvalue
-          )
-          if !shouldCopyArg {
-            consumeCleanupRegisteredValueIfMoved(
-              type: arg.type,
-              source: cleanupSource,
-              isLvalue: arg.valueCategory == .lvalue
-            )
-          }
-          let sourceStillRegistered = isCleanupRegisteredValue(cleanupSource)
-          // Struct construction takes ownership of all droppable args.
-          // For struct/enum: create a temp with copy-or-move semantics.
-          // For reference: always retain (struct takes ownership).
-          // For function/weakReference: retain only if lvalue.
-          switch arg.type {
-          case .reference, .mutableReference:
-            // Reference args: copy only when the source must remain valid after construction.
-            if shouldCopyArg || sourceStillRegistered {
-              addIndent()
-              buffer += "__koral_retain(\(argResult).control);\n"
-            }
-            finalArg = argResult
-          default:
-            let argCopy = emitTempCopyOrMove(type: arg.type, source: argResult, isLvalue: shouldCopyArg)
-            finalArg = argCopy
-          }
-        }
-        
-        // Check for cast
-        if index < canonicalMembers.count {
-            let canonicalType = canonicalMembers[index].type
-            if canonicalType != arg.type {
-                let targetCType = cTypeName(canonicalType)
-                finalArg = "*(\(targetCType)*)&(\(finalArg))"
-            }
-        }
-        
-        argResults.append(finalArg)
-      }
-
-      let cType = cTypeName(identifier.type)
-      let result = nextTempWithInit(cType: cType, initExpr: "{\(argResults.joined(separator: ", "))}")
-      return result
-    case .memberPath(let source, let path):
-      return generateMemberPath(source, path)
-    case .intrinsicCall(let node):
-      return generateIntrinsicSSA(node)
-      
-    case .lambdaExpression(let parameters, let captures, let body, let type):
-      return generateLambdaExpression(parameters: parameters, captures: captures, body: body, type: type)
-    }
-  }
-  
-
-
-  func generateIntrinsicSSA(_ node: TypedIntrinsic) -> String {
-    switch node {
-    case .allocMemory(let count, let type):
-      // malloc
-      let element: Type
-      switch type {
-      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
-        element = resolvedElement
-      default:
-        fatalError("alloc_memory expects Pointer result")
-      }
-      let countVal = generateExpressionSSA(count)
-      let elemSize = "sizeof(\(cTypeName(element)))"
-      let cType = cTypeName(type)
-      let result = nextTempWithDecl(cType: cType)
-      addIndent()
-      buffer += "\(result) = malloc(\(countVal) * \(elemSize));\n"
-      return result
-
-    case .deallocMemory(let ptr):
-      let ptrVal = generateExpressionSSA(ptr)
-      addIndent()
-      buffer += "free(\(ptrVal));\n"
-      return ""
-
-    case .copyMemory(let dest, let src, let count):
-      // memcpy
-      let element: Type
-      switch dest.type {
-      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
-        element = resolvedElement
-      default:
-        fatalError()
-      }
-      let d = generateExpressionSSA(dest)
-      let s = generateExpressionSSA(src)
-      let c = generateExpressionSSA(count)
-      let elemSize = "sizeof(\(cTypeName(element)))"
-      addIndent()
-      buffer += "memcpy(\(d), \(s), \(c) * \(elemSize));\n"
-      return ""
-
-    case .moveMemory(let dest, let src, let count):
-      // memmove
-      let element: Type
-      switch dest.type {
-      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
-        element = resolvedElement
-      default:
-        fatalError()
-      }
-      let d = generateExpressionSSA(dest)
-      let s = generateExpressionSSA(src)
-      let c = generateExpressionSSA(count)
-      let elemSize = "sizeof(\(cTypeName(element)))"
-      addIndent()
-      buffer += "memmove(\(d), \(s), \(c) * \(elemSize));\n"
-      return ""
-
-    case .isUniqueMutable(let val):
-      let controlPath: String
-      switch val.type {
-      case .reference where isAddressableLValueExpr(val),
-           .mutableReference where isAddressableLValueExpr(val):
-        controlPath = buildRefComponents(val).control
-      default:
-        let valRes = generateExpressionSSA(val)
-        controlPath = "\(valRes).control"
-      }
-      let result = nextTempWithDecl(cType: "int")
-      addIndent()
-      buffer += "\(result) = 0;\n"
-      addIndent()
-      buffer += "if (\(controlPath)) {\n"
-      withIndent {
-        addIndent()
-        buffer += "\(result) = (atomic_load(&((struct __koral_Control*)\(controlPath))->strong_count) == 1);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-      return result
-
-    case .makeRef(let ptr, let owner, let resultType),
-         .makeMutRef(let ptr, let owner, let resultType):
-      let ptrVal = generateExpressionSSA(ptr)
-      let ownerVal: String
-      if isAddressableLValueExpr(owner) {
-        ownerVal = buildRefComponents(owner).path
-      } else {
-        ownerVal = generateExpressionSSA(owner)
-      }
-      let result = nextTempWithDecl(cType: cTypeName(resultType))
-      addIndent()
-      buffer += "\(result).ptr = (void*)\(ptrVal);\n"
-      addIndent()
-      buffer += "\(result).control = \(ownerVal).control;\n"
-      addIndent()
-      buffer += "if (\(result).control) { __koral_retain(\(result).control); }\n"
-      return result
-
-    case .downgradeRef(let val, _), .downgradeMutRef(let val, _):
-      let valRes = generateExpressionSSA(val)
-      // Check if this is a trait object downgrade (TraitRef → TraitWeakRef)
-      if case .reference(let inner) = val.type, case .traitObject = inner {
-        let result = nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
-        let tempWeak = nextTempWithDecl(cType: "struct __koral_WeakRef")
-        addIndent()
-        buffer += "\(tempWeak) = __koral_downgrade_ref((struct __koral_Ref){\(valRes).ptr, \(valRes).control});\n"
-        addIndent()
-        buffer += "\(result).control = \(tempWeak).control;\n"
-        addIndent()
-        buffer += "\(result).vtable = \(valRes).vtable;\n"
-        return result
-      } else if case .mutableReference(let inner) = val.type, case .traitObject = inner {
-        let result = nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
-        let tempWeak = nextTempWithDecl(cType: "struct __koral_WeakRef")
-        addIndent()
-        buffer += "\(tempWeak) = __koral_downgrade_ref((struct __koral_Ref){\(valRes).ptr, \(valRes).control});\n"
-        addIndent()
-        buffer += "\(result).control = \(tempWeak).control;\n"
-        addIndent()
-        buffer += "\(result).vtable = \(valRes).vtable;\n"
-        return result
-      } else {
-        let result = nextTempWithInit(cType: "struct __koral_WeakRef", initExpr: "__koral_downgrade_ref(\(valRes))")
-        return result
-      }
-
-    case .upgradeRef(let val, let resultType), .upgradeMutRef(let val, let resultType):
-      let valRes = generateExpressionSSA(val)
-      let successVar = nextTempWithDecl(cType: "int")
-      // Check if this is a trait object upgrade (TraitWeakRef → Option<TraitRef>)
-      if case .weakReference(let inner) = val.type, case .traitObject = inner {
-        let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref((struct __koral_WeakRef){\(valRes).control}, &\(successVar))")
-        // Generate Option type result
-        let cType = cTypeName(resultType)
-        let result = nextTempWithDecl(cType: cType)
-        addIndent()
-        buffer += "if (\(successVar)) {\n"
-        withIndent {
-          addIndent()
-          buffer += "\(result).tag = 1; // Some\n"
-          addIndent()
-          buffer += "\(result).data.Some.value.ptr = \(upgradedRefVar).ptr;\n"
-          addIndent()
-          buffer += "\(result).data.Some.value.control = \(upgradedRefVar).control;\n"
-          addIndent()
-          buffer += "\(result).data.Some.value.vtable = \(valRes).vtable;\n"
-        }
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          addIndent()
-          buffer += "\(result).tag = 0; // None\n"
-        }
-        addIndent()
-        buffer += "}\n"
-        return result
-      } else if case .mutableWeakReference(let inner) = val.type, case .traitObject = inner {
-        let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref((struct __koral_WeakRef){\(valRes).control}, &\(successVar))")
-        // Generate Option type result
-        let cType = cTypeName(resultType)
-        let result = nextTempWithDecl(cType: cType)
-        addIndent()
-        buffer += "if (\(successVar)) {\n"
-        withIndent {
-          addIndent()
-          buffer += "\(result).tag = 1; // Some\n"
-          addIndent()
-          buffer += "\(result).data.Some.value.ptr = \(upgradedRefVar).ptr;\n"
-          addIndent()
-          buffer += "\(result).data.Some.value.control = \(upgradedRefVar).control;\n"
-          addIndent()
-          buffer += "\(result).data.Some.value.vtable = \(valRes).vtable;\n"
-        }
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          addIndent()
-          buffer += "\(result).tag = 0; // None\n"
-        }
-        addIndent()
-        buffer += "}\n"
-        return result
-      } else {
-        let upgradedRefVar = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "__koral_upgrade_ref(\(valRes), &\(successVar))")
-        // Generate Option type result
-        let cType = cTypeName(resultType)
-        let result = nextTempWithDecl(cType: cType)
-        addIndent()
-        buffer += "if (\(successVar)) {\n"
-        withIndent {
-          addIndent()
-          buffer += "\(result).tag = 1; // Some\n"
-          addIndent()
-          buffer += "\(result).data.Some.value = \(upgradedRefVar);\n"
-        }
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          addIndent()
-          buffer += "\(result).tag = 0; // None\n"
-        }
-        addIndent()
-        buffer += "}\n"
-        return result
-      }
-
-    case .initMemory(let ptr, let val):
-      let element: Type
-      switch ptr.type {
-      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
-        element = resolvedElement
-      default:
-        fatalError()
-      }
-      let p = generateExpressionSSA(ptr)
-      let v = generateExpressionSSA(val)
-      let cType = cTypeName(element)
-      if case .reference(let inner) = element {
-        // Reference types need special handling for TraitObject vs regular Ref
-        addIndent()
-        if case .traitObject = inner {
-          buffer += "*(\(cType)*)\(p) = \(v);\n"
-          addIndent()
-          buffer += "__koral_retain(((\(cType)*)\(p))->control);\n"
-        } else {
-          buffer += "*(struct __koral_Ref*)\(p) = \(v);\n"
-          addIndent()
-          buffer += "__koral_retain(((struct __koral_Ref*)\(p))->control);\n"
-        }
-      } else if case .mutableReference(let inner) = element {
-        addIndent()
-        if case .traitObject = inner {
-          buffer += "*(\(cType)*)\(p) = \(v);\n"
-          addIndent()
-          buffer += "__koral_retain(((\(cType)*)\(p))->control);\n"
-        } else {
-          buffer += "*(struct __koral_Ref*)\(p) = \(v);\n"
-          addIndent()
-          buffer += "__koral_retain(((struct __koral_Ref*)\(p))->control);\n"
-        }
-      } else {
-        // For all other types, use appendCopyAssignment which handles
-        // struct (_copy), enum (_copy), function (closure_retain), weakReference (weak_retain), primitives (plain =)
-        appendCopyAssignment(for: element, source: v, dest: "*(\(cType)*)\(p)", indent: indent)
-      }
-      return ""
-
-    case .deinitMemory(let ptr):
-      let element: Type
-      switch ptr.type {
-      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
-        element = resolvedElement
-      default:
-        fatalError()
-      }
-      let p = generateExpressionSSA(ptr)
-      if case .reference(let inner) = element {
-        let cType = cTypeName(element)
-        if case .traitObject = inner {
-          addIndent()
-          buffer += "__koral_release(((\(cType)*)\(p))->control);\n"
-        } else {
-          addIndent()
-          buffer += "__koral_release(((struct __koral_Ref*)\(p))->control);\n"
-        }
-      } else if case .mutableReference(let inner) = element {
-        let cType = cTypeName(element)
-        if case .traitObject = inner {
-          addIndent()
-          buffer += "__koral_release(((\(cType)*)\(p))->control);\n"
-        } else {
-          addIndent()
-          buffer += "__koral_release(((struct __koral_Ref*)\(p))->control);\n"
-        }
-      } else if case .structure(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        addIndent()
-        buffer += "__koral_\(typeName)_drop((struct \(typeName)*)\(p));\n"
-      } else if case .`enum`(let defId) = element {
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        addIndent()
-        buffer += "__koral_\(typeName)_drop((struct \(typeName)*)\(p));\n"
-      } else if case .function = element {
-        addIndent()
-        buffer += "__koral_closure_release(*(struct __koral_Closure*)\(p));\n"
-      } else if case .weakReference(_) = element {
-        let cType = cTypeName(element)
-        addIndent()
-        buffer += "__koral_weak_release(((\(cType)*)\(p))->control);\n"
-      } else if case .mutableWeakReference(_) = element {
-        let cType = cTypeName(element)
-        addIndent()
-        buffer += "__koral_weak_release(((\(cType)*)\(p))->control);\n"
-      }
-      // int/float/bool/void -> noop
-      return ""
-
-    case .takeMemory(let ptr):
-      let element: Type
-      switch ptr.type {
-      case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
-        element = resolvedElement
-      default:
-        fatalError()
-      }
-      let p = generateExpressionSSA(ptr)
-      let cType = cTypeName(element)
-      let result = nextTempWithInit(cType: cType, initExpr: "*(\(cType)*)\(p)")
-      return result
-
-    case .nullPtr(let resultType):
-      let result = nextTempWithInit(cType: cTypeName(resultType), initExpr: "NULL")
-      return result
-
-    case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
-      let handleVal = generateExpressionSSA(outHandle)
-      let tidVal = generateExpressionSSA(outTid)
-      let closureVal = generateExpressionSSA(closure)
-      let stackSizeVal = generateExpressionSSA(stackSize)
-      let result = nextTempWithInit(cType: "int32_t", initExpr: "__koral_spawn_thread(\(handleVal), \(tidVal), \(closureVal), \(stackSizeVal))")
-      return result
-
-    }
-  }
-
 
   func nextTemp() -> String {
     tempVarCounter += 1
@@ -2278,308 +667,113 @@ public class CodeGen {
     return name
   }
 
-  func generateStatement(_ stmt: TypedStatementNode) {
-    switch stmt {
-    case .variableDeclaration(let identifier, let value, _):
-      let marker = currentScopeTempMarker()
-      let valueResult = generateExpressionSSA(value)
-      // void/never 类型的值不能赋给变量
-      if value.type != .void && value.type != .never {
-        let cIdent = cIdentifier(for: identifier)
-        emitDeclareAndCopyOrMove(type: identifier.type, source: valueResult, dest: cIdent, isLvalue: value.valueCategory == .lvalue)
-        registerVariable(cIdent, identifier.type)
-        // Clean up temporaries created during expression evaluation,
-        // preserving the user variable (which is the last entry).
-        let postMarker = currentScopeTempMarker()
-        if postMarker > marker + 1 {
-          let scopeIndex = lifetimeScopeStack.count - 1
-          let userEntry = lifetimeScopeStack[scopeIndex].removeLast()
-          cleanupTemporariesInCurrentScope(marker: marker)
-          lifetimeScopeStack[scopeIndex].append(userEntry)
-        }
-      } else {
-        cleanupTemporariesInCurrentScope(marker: marker)
-      }
+  func arithmeticOpToC(_ op: ArithmeticOperator) -> String {
+    switch op {
+    case .plus: return "+"
+    case .minus: return "-"
+    case .multiply: return "*"
+    case .divide: return "/"
+    case .remainder: return "%"
+    }
+  }
 
-    case .pairVariableDeclaration(let pairSymbol, let pairValue,
-                            let firstSymbol, let firstMember,  _,
-                            let secondSymbol, let secondMember, _):
-      // Optimized pair destructuring: move fields directly, avoid unnecessary copies.
-      //
-      // Strategy:
-      // 1. Evaluate pair expr into a temp (move if rvalue, copy if lvalue)
-      // 2. Move each field out of the temp into the binding variable (plain assign)
-      // 3. Drop discarded fields explicitly
-      // 4. Do NOT register the pair temp for scope drop — its contents are consumed
+  func comparisonOpToC(_ op: ComparisonOperator) -> String {
+    switch op {
+    case .equal: return "=="
+    case .notEqual: return "!="
+    case .greater: return ">"
+    case .less: return "<"
+    case .greaterEqual: return ">="
+    case .lessEqual: return "<="
+    }
+  }
 
-      let isLvalue = pairValue.valueCategory == .lvalue
-      let pairResult = generateExpressionSSA(pairValue)
-      let pairIdent = cIdentifier(for: pairSymbol)
+  func bitwiseOpToC(_ op: BitwiseOperator) -> String {
+    switch op {
+    case .and: return "&"
+    case .or: return "|"
+    case .xor: return "^"
+    case .shiftLeft: return "<<"
+    case .shiftRight: return ">>"
+    }
+  }
 
-      // Declare pair temp and copy/move the value in
-      emitDeclareAndCopyOrMove(type: pairSymbol.type, source: pairResult, dest: pairIdent, isLvalue: isLvalue)
-      // Intentionally NOT calling registerVariable for pairIdent — we consume its fields below.
+  func compoundOpToC(_ op: CompoundAssignmentOperator) -> String {
+    switch op {
+    case .plus: return "+="
+    case .minus: return "-="
+    case .multiply: return "*="
+    case .divide: return "/="
+    case .remainder: return "%="
+    case .bitwiseAnd: return "&="
+    case .bitwiseOr: return "|="
+    case .bitwiseXor: return "^="
+    case .shiftLeft: return "<<="
+    case .shiftRight: return ">>="
+    }
+  }
 
-      // Helper: generate the C field access path via memberPath
-      func fieldAccess(_ member: Symbol) -> String {
-        let pairVar: TypedExpressionNode = .variable(identifier: pairSymbol)
-        let access: TypedExpressionNode = .memberPath(source: pairVar, path: [member])
-        return generateExpressionSSA(access)
-      }
+  func checkedArithmeticFuncName(op: ArithmeticOperator, type: Type) -> String {
+    let opName: String
+    switch op {
+    case .plus: opName = "add"
+    case .minus: opName = "sub"
+    case .multiply: opName = "mul"
+    case .divide: opName = "div"
+    case .remainder: opName = "mod"
+    }
+    return "koral_checked_\(opName)_\(integerRuntimeTypeSuffix(type))"
+  }
 
-      // Extract .first
-      if let firstSym = firstSymbol {
-        let firstIdent = cIdentifier(for: firstSym)
-        let firstResult = fieldAccess(firstMember)
-        // Move (plain assign) — the pair temp owns the value, we're transferring ownership
-        addIndent()
-        buffer += "\(cTypeName(firstSym.type)) \(firstIdent) = \(firstResult);\n"
-        registerVariable(firstIdent, firstSym.type)
-      } else {
-        // Discarded: drop the field if it needs dropping
-        if needsDrop(firstMember.type) {
-          let firstResult = fieldAccess(firstMember)
-          appendDropStatement(for: firstMember.type, value: firstResult, indent: indent)
-        }
-      }
+  func wrappingArithmeticFuncName(op: ArithmeticOperator, type: Type) -> String {
+    let opName: String
+    switch op {
+    case .plus: opName = "add"
+    case .minus: opName = "sub"
+    case .multiply: opName = "mul"
+    case .divide: opName = "div"
+    case .remainder: opName = "rem"
+    }
+    return "koral_wrapping_\(opName)_\(integerRuntimeTypeSuffix(type))"
+  }
 
-      // Extract .second
-      if let secondSym = secondSymbol {
-        let secondIdent = cIdentifier(for: secondSym)
-        let secondResult = fieldAccess(secondMember)
-        addIndent()
-        buffer += "\(cTypeName(secondSym.type)) \(secondIdent) = \(secondResult);\n"
-        registerVariable(secondIdent, secondSym.type)
-      } else {
-        if needsDrop(secondMember.type) {
-          let secondResult = fieldAccess(secondMember)
-          appendDropStatement(for: secondMember.type, value: secondResult, indent: indent)
-        }
-      }
-    case .assignment(let target, let op, let value):
-      let marker = currentScopeTempMarker()
-      if let op {
-        let (lhsPath, _) = buildRefComponents(target)
-        let valueResult = generateExpressionSSA(value)
+  func checkedShiftFuncName(op: BitwiseOperator, type: Type) -> String {
+    let opName = op == .shiftRight ? "shr" : "shl"
+    return "koral_checked_\(opName)_\(integerRuntimeTypeSuffix(type))"
+  }
 
-        // For shift compound assignments on integer types, use checked shift functions
-        if (op == .shiftLeft || op == .shiftRight) && target.type.isIntegerType {
-          let bitwiseOp: BitwiseOperator = op == .shiftLeft ? .shiftLeft : .shiftRight
-          let funcName = checkedShiftFuncName(op: bitwiseOp, type: target.type)
-          addIndent()
-          buffer += "\(lhsPath) = \(funcName)(\(lhsPath), \(valueResult));\n"
-        } else {
-          let opStr = compoundOpToC(op)
-          addIndent()
-          buffer += "\(lhsPath) \(opStr) \(valueResult);\n"
-        }
-      } else {
-        // 检测是否是结构体字段赋值（用于逃逸分析）
-        let isFieldAssignment = isStructFieldAssignment(target)
-        if isFieldAssignment && isReferenceType(value.type) {
-          escapeContext.inFieldAssignmentContext = true
-        }
-        
-        // Use buildRefComponents to get the C LValue path
-        let (lhsPath, _) = buildRefComponents(target)
-        let valueResult = generateExpressionSSA(value)
-        
-        escapeContext.inFieldAssignmentContext = false
-        
-        if value.type == .void || value.type == .never { return }
+  func wrappingShiftFuncName(op: BitwiseOperator, type: Type) -> String {
+    let opName = op == .shiftRight ? "shr" : "shl"
+    return "koral_wrapping_\(opName)_\(integerRuntimeTypeSuffix(type))"
+  }
 
-        // Drop-requiring overwrite assignments must destroy the old value first.
-        // Materialize RHS first to preserve alias safety (e.g. self-assignment patterns).
-        if needsDrop(target.type) {
-          let preparedValue = emitTempCopyOrMove(
-            type: target.type,
-            source: valueResult,
-            isLvalue: value.valueCategory == .lvalue
-          )
-          appendDropStatement(for: target.type, value: lhsPath)
-          emitCopyOrMove(type: target.type, source: preparedValue, dest: lhsPath, isLvalue: false)
-        } else {
-          emitCopyOrMove(type: target.type, source: valueResult, dest: lhsPath, isLvalue: value.valueCategory == .lvalue)
-        }
-      }
-      cleanupTemporariesInCurrentScope(marker: marker)
-
-    case .expression(let expr):
-      let marker = currentScopeTempMarker()
-      let result = generateExpressionSSA(expr)
-      if expr.valueCategory == .rvalue && needsDrop(expr.type) && !result.isEmpty {
-        appendDropStatement(for: expr.type, value: result, indent: indent)
-      }
-      cleanupTemporariesInCurrentScope(marker: marker)
-
-    case .ifStatement(let condition, let thenBranch, let elseBranch):
-      let conditionVar = generateExpressionSSA(condition)
-      addIndent()
-      buffer += "if (\(conditionVar)) {\n"
-      withIndent {
-        pushScope()
-        _ = generateExpressionSSA(thenBranch)
-        popScope()
-      }
-      if let elseBranch {
-        addIndent()
-        buffer += "} else {\n"
-        withIndent {
-          pushScope()
-          _ = generateExpressionSSA(elseBranch)
-          popScope()
-        }
-      }
-      addIndent()
-      buffer += "}\n"
-
-    case .ifPatternStatement(let subject, let pattern, let bindings, let thenBranch, let elseBranch):
-      let lowered = TypedExpressionNode.ifPatternExpression(
-        subject: subject,
-        pattern: pattern,
-        bindings: bindings,
-        thenBranch: thenBranch,
-        elseBranch: elseBranch,
-        type: thenBranch.type == .never && elseBranch?.type == .never ? .never : .void
-      )
-      let marker = currentScopeTempMarker()
-      _ = generateExpressionSSA(lowered)
-      cleanupTemporariesInCurrentScope(marker: marker)
-
-    case .whileStatement(let condition, let body):
-      let labelPrefix = nextTemp()
-      let startLabel = "\(labelPrefix)_start"
-      let endLabel = "\(labelPrefix)_end"
-      addIndent()
-      buffer += "\(startLabel): {\n"
-      withIndent {
-        let conditionVar = generateExpressionSSA(condition)
-        addIndent()
-        buffer += "if (!\(conditionVar)) { goto \(endLabel); }\n"
-        pushScope()
-        loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: lifetimeScopeStack.count - 1))
-        _ = generateExpressionSSA(body)
-        loopStack.removeLast()
-        popScope()
-        addIndent()
-        buffer += "goto \(startLabel);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-      addIndent()
-      buffer += "\(endLabel): {\n"
-      addIndent()
-      buffer += "}\n"
-
-    case .whilePatternStatement(let subject, let pattern, _, let body):
-      emitWhilePatternLoop(subject: subject, pattern: pattern, body: body)
-
-    case .whenStatement(let subject, let cases):
-      let lowered = TypedExpressionNode.whenExpression(
-        subject: subject,
-        cases: cases.map { TypedMatchCase(pattern: $0.pattern, body: $0.body) },
-        type: .void
-      )
-      let marker = currentScopeTempMarker()
-      _ = generateExpressionSSA(lowered)
-      cleanupTemporariesInCurrentScope(marker: marker)
-
-    case .return(let value):
-      if let value = value {
-        if value.type == .never {
-          _ = generateExpressionSSA(value)
-          return
-        }
-        
-        // 设置返回上下文标志，用于逃逸分析
-        escapeContext.inReturnContext = true
-        let valueResult = generateExpressionSSA(value)
-        escapeContext.inReturnContext = false
-        
-        let retVar = nextTemp()
-                // For return statements, cleanup-registered variables can be moved (not copied)
-                // since they won't be used after the return. This avoids unnecessary
-                // copy+drop for patterns like `return x` where x is a parameter.
-                let isReturnableLvalue = needsDrop(value.type) && isCleanupRegisteredValue(valueResult)
-                let shouldCopyReturnValue: Bool
-                if isReturnableLvalue {
-                  shouldCopyReturnValue = false
-                  unregisterVariable(valueResult)
-                } else {
-                  shouldCopyReturnValue = shouldCopyValue(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
-                  if !shouldCopyReturnValue {
-                    consumeCleanupRegisteredValueIfMoved(type: value.type, source: valueResult, isLvalue: value.valueCategory == .lvalue)
-                  }
-                }
-
-        emitDeclareAndCopyOrMove(
-          type: value.type,
-          source: valueResult,
-          dest: retVar,
-                  isLvalue: shouldCopyReturnValue
-        )
-
-        emitCleanup(fromScopeIndex: 0)
-        addIndent()
-        buffer += "return \(retVar);\n"
-      } else {
-        emitCleanup(fromScopeIndex: 0)
-        addIndent()
-        buffer += "return;\n"
-      }
-
-    case .break:
-      guard let ctx = loopStack.last else {
-        fatalError("break used outside of loop codegen")
-      }
-      emitCleanup(fromScopeIndex: ctx.scopeIndex)
-      addIndent()
-      buffer += "goto \(ctx.endLabel);\n"
-
-    case .continue:
-      guard let ctx = loopStack.last else {
-        fatalError("continue used outside of loop codegen")
-      }
-      emitCleanup(fromScopeIndex: ctx.scopeIndex)
-      addIndent()
-      buffer += "goto \(ctx.startLabel);\n"
-
-    case .finally(let expression):
-      // Don't generate code immediately; push the expression onto the current scope's finally list.
-      // Code generation is deferred to scope exit points (popScope, emitCleanup, etc.).
-      deferScopeStack[deferScopeStack.count - 1].append(expression)
-
-    case .yield(_, let value):
-      guard let targetCtx = yieldTargetStack.last else {
-        fatalError("yield used without an active codegen target")
-      }
-      let valueResult = generateExpressionSSA(value)
-      let cleanupStart = min(targetCtx.baseScopeIndex + 1, max(0, lifetimeScopeStack.count - 1))
-      if needsDrop(value.type) && isCleanupRegisteredValue(valueResult) {
-        unregisterVariable(valueResult)
-      }
-      emitCopyOrMove(
-        type: targetCtx.resultType,
-        source: valueResult,
-        dest: targetCtx.resultVar,
-        isLvalue: value.valueCategory == .lvalue
-      )
-      if lifetimeScopeStack.count - 1 >= cleanupStart {
-        emitCleanup(fromScopeIndex: cleanupStart)
-      }
-      addIndent()
-      buffer += "goto \(targetCtx.endLabel);\n"
+  private func integerRuntimeTypeSuffix(_ type: Type) -> String {
+    switch type {
+    case .int: return "isize"
+    case .int8: return "i8"
+    case .int16: return "i16"
+    case .int32: return "i32"
+    case .int64: return "i64"
+    case .uint: return "usize"
+    case .uint8: return "u8"
+    case .uint16: return "u16"
+    case .uint32: return "u32"
+    case .uint64: return "u64"
+    default: return "isize"
     }
   }
 
   func cTypeName(_ type: Type) -> String {
+    if case .traitObject = type {
+      return "struct __koral_TraitRef"
+    }
+
     switch type {
     case .genericParameter,
          .genericStruct,
          .genericEnum,
          .typeVariable,
-         .module,
-         .traitObject:
+         .module:
       fatalError("Unresolved type \(type) during codegen")
     default:
       break
@@ -2619,6 +813,38 @@ public class CodeGen {
         appendIndentedCode(copyCode, indent: indent)
       }
     }
+  }
+
+  func generateStringLiteral(_ value: String, type: Type) -> String {
+    let bytesVar = nextTemp() + "_bytes"
+    let storageVar = nextTemp() + "_storage"
+    let utf8Bytes = Array(value.utf8)
+    var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+    if !byteLiterals.isEmpty {
+      byteLiterals += ", "
+    }
+    byteLiterals += "0x00"
+    addIndent()
+    buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
+
+    guard case .structure(let stringDefId) = type,
+          let stringMembers = context.getStructMembers(stringDefId),
+          let storageMember = stringMembers.first(where: { $0.name == "storage" }) else {
+      fatalError("String literal requires String.storage: ref StringStorage")
+    }
+    let storageType: Type
+    switch storageMember.type {
+    case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType):
+      storageType = resolvedStorageType
+    default:
+      fatalError("String literal requires String.storage: ref StringStorage")
+    }
+    let storageCType = cTypeName(storageType)
+    addIndent()
+    buffer += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
+
+    let cType = cTypeName(type)
+    return nextTempWithInit(cType: cType, initExpr: "(\(cType)){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } }")
   }
 
   // MARK: - Unified Copy/Move Helpers
@@ -2734,34 +960,6 @@ public class CodeGen {
     }
   }
   
-  // MARK: - 逃逸分析辅助函数
-  
-  /// 检查表达式是否是结构体字段赋值
-  func isStructFieldAssignment(_ target: TypedExpressionNode) -> Bool {
-    switch target {
-    case .memberPath(let source, let path):
-      // 如果路径长度 > 0，说明是字段访问
-      if !path.isEmpty {
-        let typeToCheck: Type
-        switch source.type {
-        case .reference(let inner), .mutableReference(let inner), .pointer(let inner), .mutablePointer(let inner):
-          typeToCheck = inner
-        default:
-          typeToCheck = source.type
-        }
-        switch typeToCheck {
-        case .structure(_), .`enum`(_):
-          return true
-        default:
-          return false
-        }
-      }
-      return false
-    default:
-      return false
-    }
-  }
-  
   /// 检查类型是否是引用类型
   func isReferenceType(_ type: Type) -> Bool {
     switch type {
@@ -2790,678 +988,66 @@ public class CodeGen {
   
   /// Get user defined drop function for a type
   func getUserDefinedDrop(for typeName: String) -> String? {
-    return userDefinedDrops[typeName]
-  }
-
-  private struct WhenSwitchBranchPlan {
-    let matchCase: TypedMatchCase
-    let labels: [String]
-    let isDefault: Bool
-  }
-
-  private struct WhenSwitchPlan {
-    let switchExpr: String
-    let branches: [WhenSwitchBranchPlan]
-  }
-
-  private func scalarWhenSwitchExpression(path: String, type: Type) -> String? {
-    switch type {
-    case .bool,
-         .int,
-         .int8,
-         .int16,
-         .int32,
-         .int64,
-         .uint,
-         .uint8,
-         .uint16,
-         .uint32,
-         .uint64:
-      return path
-    case .structure(let defId):
-      guard context.getName(defId) == "Rune",
-            let members = context.getStructMembers(defId),
-            let valueField = members.first(where: { $0.name == "value" }) else {
-        return nil
-      }
-      return "\(path).\(sanitizeCIdentifier(valueField.name))"
-    default:
-      return nil
+    func isStdDropTraitConformance(_ trait: TypedTraitConformance?) -> Bool {
+      guard let trait, trait.traitName == "Drop" else { return false }
+      guard let traitInfo = mirProgram.traits[trait.traitName] else { return false }
+      return traitInfo.modulePath == ["Std"]
     }
-  }
 
-  private func isSimpleScalarWhenPattern(_ pattern: TypedPattern) -> Bool {
-    switch pattern {
-    case .integerLiteral, .booleanLiteral, .wildcard, .variable:
-      return true
-    default:
-      return false
+    func isStdDropTraitName(_ traitName: String?) -> Bool {
+      guard let traitName, traitName == "Drop" else { return false }
+      guard let traitInfo = mirProgram.traits[traitName] else { return false }
+      return traitInfo.modulePath == ["Std"]
     }
-  }
 
-  private func isSimpleEnumWhenPattern(_ pattern: TypedPattern) -> Bool {
-    switch pattern {
-    case .wildcard, .variable:
-      return true
-    case .enumCase(_, _, let elements):
-      return elements.allSatisfy { element in
-        switch element {
-        case .wildcard, .variable:
-          return true
-        default:
-          return false
-        }
-      }
-    default:
-      return false
-    }
-  }
-
-  private func buildScalarWhenSwitchPlan(
-    cases: [TypedMatchCase],
-    switchExpr: String
-  ) -> WhenSwitchPlan? {
-    var branches: [WhenSwitchBranchPlan] = []
-    var seenLiterals = Set<String>()
-    var hasCatchAll = false
-
-    for matchCase in cases {
-      switch matchCase.pattern {
-      case .integerLiteral(let value):
-        guard !hasCatchAll, !seenLiterals.contains(value) else { continue }
-        seenLiterals.insert(value)
-        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: ["case \(value):"], isDefault: false))
-      case .booleanLiteral(let value):
-        let caseValue = value ? "1" : "0"
-        guard !hasCatchAll, !seenLiterals.contains(caseValue) else { continue }
-        seenLiterals.insert(caseValue)
-        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: ["case \(caseValue):"], isDefault: false))
-      case .wildcard, .variable:
-        guard !hasCatchAll else { continue }
-        hasCatchAll = true
-        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: [], isDefault: true))
+    func dropOwnerTypeName(_ type: Type) -> String? {
+      switch type {
+      case .structure(let defId):
+        return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
+      case .`enum`(let defId):
+        return cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
+      case .genericStruct(let template, let args), .genericEnum(let template, let args):
+        return SemaUtils.makeLayoutName(baseName: template, args: args, context: context)
       default:
         return nil
       }
     }
 
-    return branches.isEmpty ? nil : WhenSwitchPlan(switchExpr: switchExpr, branches: branches)
-  }
-
-  private func buildEnumWhenSwitchPlan(
-    cases: [TypedMatchCase],
-    subjectVar: String,
-    subjectType: Type
-  ) -> WhenSwitchPlan? {
-    guard case .`enum` = subjectType else { return nil }
-
-    var branches: [WhenSwitchBranchPlan] = []
-    var seenTags = Set<Int>()
-    var hasCatchAll = false
-
-    for matchCase in cases {
-      switch matchCase.pattern {
-      case .enumCase(_, let tagIndex, let elements):
-        guard elements.allSatisfy({ element in
-          switch element {
-          case .wildcard, .variable:
-            return true
-          default:
-            return false
+    for node in mirProgram.globals {
+      if case .given(let type, let trait, let methods) = node,
+         isStdDropTraitConformance(trait),
+         dropOwnerTypeName(type) == typeName {
+        for method in methods {
+          let logicalName = mirProgram.receiverMethodDispatch[method.defId]?.methodName
+            ?? context.getName(method.defId)
+          if logicalName == "drop" {
+            return cIdentifier(for: method)
           }
-        }) else {
-          return nil
         }
-        guard !hasCatchAll, !seenTags.contains(tagIndex) else { continue }
-        seenTags.insert(tagIndex)
-        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: ["case \(tagIndex):"], isDefault: false))
-      case .wildcard, .variable:
-        guard !hasCatchAll else { continue }
-        hasCatchAll = true
-        branches.append(WhenSwitchBranchPlan(matchCase: matchCase, labels: [], isDefault: true))
-      default:
-        return nil
       }
-    }
 
-    return branches.isEmpty ? nil : WhenSwitchPlan(switchExpr: "\(subjectVar).tag", branches: branches)
-  }
-
-  private func buildWhenSwitchPlan(
-    cases: [TypedMatchCase],
-    subjectVar: String,
-    subjectType: Type
-  ) -> WhenSwitchPlan? {
-    if let switchExpr = scalarWhenSwitchExpression(path: subjectVar, type: subjectType),
-       cases.allSatisfy({ isSimpleScalarWhenPattern($0.pattern) }) {
-      return buildScalarWhenSwitchPlan(cases: cases, switchExpr: switchExpr)
-    }
-
-    if cases.allSatisfy({ isSimpleEnumWhenPattern($0.pattern) }) {
-      return buildEnumWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType)
+      if case .function(let identifier, _, _) = node,
+         let dispatch = mirProgram.receiverMethodDispatch[identifier.defId],
+         dispatch.methodName == "drop",
+         isStdDropTraitName(dispatch.conformanceTraitName),
+         case .concreteType(let ownerTypeName) = dispatch.owner {
+        let access = context.getAccess(identifier.defId) ?? .protected
+        let sourceFile = context.getSourceFile(identifier.defId)
+        let ownerDefId = context.lookupDefId(
+          modulePath: [],
+          name: ownerTypeName,
+          sourceFile: access == .private ? sourceFile : nil
+        )
+        let cTypeName = ownerDefId.flatMap { defId in
+          cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId)
+        } ?? sanitizeCIdentifier(ownerTypeName)
+        if cTypeName == typeName {
+          return cIdentifier(for: identifier)
+        }
+      }
     }
 
     return nil
   }
-
-  private func emitWhenSwitchBranches(
-    _ plan: WhenSwitchPlan,
-    subjectVar: String,
-    subjectType: Type,
-    resultType: Type,
-    resultVar: String,
-    endLabel: String,
-    savedAliases: [String: String],
-    yieldTarget: CodegenYieldTarget?
-  ) {
-    addIndent()
-    buffer += "switch (\(plan.switchExpr)) {\n"
-    withIndent {
-      for branch in plan.branches {
-        patternBindingAliases = savedAliases
-
-        for label in branch.labels {
-          addIndent()
-          buffer += "\(label)\n"
-        }
-        if branch.isDefault {
-          addIndent()
-          buffer += "default:\n"
-        }
-
-        addIndent()
-        buffer += "{\n"
-        withIndent {
-          pushScope()
-          if let yieldTarget {
-            yieldTargetStack.append(yieldTarget)
-          }
-
-          let (prelude, preludeVars, _, bindings, vars) =
-            generatePatternConditionAndBindings(branch.matchCase.pattern, subjectVar, subjectType)
-          if !prelude.isEmpty || !preludeVars.isEmpty || !bindings.isEmpty || !vars.isEmpty {
-            fatalError("Simple when switch pattern unexpectedly required prelude or materialized bindings")
-          }
-
-          let bodyResult = generateExpressionSSA(branch.matchCase.body)
-          if resultType != .void && resultType != .never && branch.matchCase.body.type != .never {
-            emitCopyOrMove(
-              type: resultType,
-              source: bodyResult,
-              dest: resultVar,
-              isLvalue: branch.matchCase.body.valueCategory == .lvalue
-            )
-          }
-
-          if yieldTarget != nil {
-            _ = yieldTargetStack.popLast()
-          }
-          popScope()
-          addIndent()
-          buffer += "goto \(endLabel);\n"
-        }
-        addIndent()
-        buffer += "}\n"
-      }
-    }
-    addIndent()
-    buffer += "}\n"
-  }
-
-  private func emitWhilePatternLoop(
-    subject: TypedExpressionNode,
-    pattern: TypedPattern,
-    body: TypedExpressionNode
-  ) {
-    let labelPrefix = nextTemp()
-    let startLabel = "\(labelPrefix)_start"
-    let endLabel = "\(labelPrefix)_end"
-
-    addIndent()
-    buffer += "\(startLabel): {\n"
-    withIndent {
-      // Borrow semantics: subject is evaluated each iteration but not deep-copied.
-      // Pattern bindings are aliases into the subject's fields.
-      let subjectScopeIndex = lifetimeScopeStack.count
-      pushScope()
-
-      let subjectVarSSA = generateExpressionSSA(subject)
-
-      if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-        registerVariable(subjectVarSSA, subject.type)
-      }
-
-      var subjectVar = subjectVarSSA
-      var subjectType = subject.type
-      switch subject.type {
-      case .reference(let inner),
-           .mutableReference(let inner),
-           .weakReference(let inner),
-           .mutableWeakReference(let inner):
-        let innerCType = cTypeName(inner)
-        let derefPtr = nextTemp() + "_deref"
-        addIndent()
-        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
-        subjectVar = "(*\(derefPtr))"
-        subjectType = inner
-      default:
-        break
-      }
-
-      let savedAliases = patternBindingAliases
-      let (prelude, preludeVars, condition, bindingCode, vars) =
-        generatePatternConditionAndBindings(pattern, subjectVar, subjectType)
-
-      for p in prelude {
-        addIndent()
-        buffer += p
-      }
-      for (name, varType) in preludeVars {
-        registerVariable(name, varType)
-      }
-
-      addIndent()
-      buffer += "if (!(\(condition))) {\n"
-      withIndent {
-        emitCleanupForScope(at: subjectScopeIndex)
-        addIndent()
-        buffer += "goto \(endLabel);\n"
-      }
-      addIndent()
-      buffer += "}\n"
-
-      pushScope()
-      for b in bindingCode {
-        addIndent()
-        buffer += b
-      }
-      for (name, varType) in vars {
-        registerVariable(name, varType)
-      }
-
-      loopStack.append(LoopContext(startLabel: startLabel, endLabel: endLabel, scopeIndex: subjectScopeIndex))
-      _ = generateExpressionSSA(body)
-      loopStack.removeLast()
-      popScope()
-      emitCleanupForScope(at: subjectScopeIndex)
-      popScopeWithoutCleanup()
-      patternBindingAliases = savedAliases
-      addIndent()
-      buffer += "goto \(startLabel);\n"
-    }
-    addIndent()
-    buffer += "}\n"
-    addIndent()
-    buffer += "\(endLabel): {\n"
-    addIndent()
-    buffer += "}\n"
-  }
-
-  func generateWhenExpression(_ subject: TypedExpressionNode, _ cases: [TypedMatchCase], _ type: Type) -> String {
-    // Push a dedicated scope for the subject so its lifetime is self-contained.
-    // return/break/continue will clean it up via emitCleanup since it's on the stack.
-    pushScope()
-    
-    let subjectVarSSA = generateExpressionSSA(subject)
-    
-    if needsDrop(subject.type) && subject.valueCategory == .rvalue {
-      registerVariable(subjectVarSSA, subject.type)
-    }
-    
-    let resultVar = nextTemp()
-    
-    if type != .void && type != .never {
-        addIndent()
-        buffer += "\(cTypeName(type)) \(resultVar);\n"
-    }
-    
-    // Borrow semantics: the subject is not copied. Pattern bindings are aliases
-    // into the subject's fields. The subject must remain valid for the entire match.
-    var subjectVar = subjectVarSSA
-    var subjectType = subject.type
-    switch subject.type {
-    case .reference(let inner),
-         .mutableReference(let inner),
-         .weakReference(let inner),
-         .mutableWeakReference(let inner):
-        // Dereference: create a pointer to the inner value (no deep copy)
-        let innerCType = cTypeName(inner)
-        let derefPtr = nextTemp() + "_deref"
-        addIndent()
-        buffer += "const \(innerCType)* \(derefPtr) = (const \(innerCType)*)\(subjectVarSSA).ptr;\n"
-        subjectVar = "(*\(derefPtr))"
-        subjectType = inner
-    default:
-        break
-    }
-    
-    let endLabel = "match_end_\(nextTemp())"
-    let yieldTarget: CodegenYieldTarget? = (type != .void && type != .never)
-      ? CodegenYieldTarget(
-          id: YieldTargetId(rawValue: -1),
-          resultVar: resultVar,
-          resultType: type,
-          endLabel: endLabel,
-          baseScopeIndex: max(0, lifetimeScopeStack.count - 1)
-        )
-      : nil
-    let savedAliases = patternBindingAliases
-
-    if let switchPlan = buildWhenSwitchPlan(cases: cases, subjectVar: subjectVar, subjectType: subjectType) {
-      emitWhenSwitchBranches(
-        switchPlan,
-        subjectVar: subjectVar,
-        subjectType: subjectType,
-        resultType: type,
-        resultVar: resultVar,
-        endLabel: endLabel,
-        savedAliases: savedAliases,
-        yieldTarget: yieldTarget
-      )
-
-      patternBindingAliases = savedAliases
-
-      addIndent()
-      buffer += "\(endLabel):;\n"
-      popScope()
-      return (type == .void || type == .never) ? "" : resultVar
-    }
-    
-    for c in cases {
-         patternBindingAliases = savedAliases
-
-         addIndent()
-         buffer += "{\n"
-         withIndent {
-         let caseScopeIndex = lifetimeScopeStack.count
-         pushScope()
-         if let yieldTarget {
-           yieldTargetStack.append(yieldTarget)
-         }
-
-         let (prelude, preludeVars, condition, bindings, vars) = generatePatternConditionAndBindings(c.pattern, subjectVar, subjectType)
-
-         // Prelude runs regardless of match success (temps used in the condition)
-         for p in prelude {
-           addIndent()
-           buffer += p
-         }
-         for (name, varType) in preludeVars {
-           registerVariable(name, varType)
-         }
-
-         addIndent()
-         buffer += "if (\(condition)) {\n"
-         withIndent {
-           // Bindings should only exist on the matched path
-           pushScope()
-
-           for b in bindings {
-             addIndent()
-             buffer += b
-           }
-           for (name, varType) in vars {
-             registerVariable(name, varType)
-           }
-                 
-           let bodyResult = generateExpressionSSA(c.body)
-           if type != .void && type != .never && c.body.type != .never && c.body.type != .void {
-             emitCopyOrMove(type: type, source: bodyResult, dest: resultVar, isLvalue: c.body.valueCategory == .lvalue)
-           }
-
-           // Cleanup bindings, then cleanup prelude temps (outer case scope), then jump out.
-           if yieldTarget != nil {
-             _ = yieldTargetStack.popLast()
-           }
-           popScope()
-           emitCleanupForScope(at: caseScopeIndex)
-           addIndent()
-           buffer += "goto \(endLabel);\n"
-         }
-         addIndent()
-         buffer += "}\n"
-
-         // Mismatch path: cleanup prelude temps, then discard the prelude scope.
-         emitCleanupForScope(at: caseScopeIndex)
-         popScopeWithoutCleanup()
-         }
-         addIndent()
-         buffer += "}\n"
-    }
-    
-    patternBindingAliases = savedAliases
-
-    addIndent()
-    buffer += "\(endLabel):;\n"
-    // Pop the subject scope — drops the subject right after the match expression.
-    popScope()
-    return (type == .void || type == .never) ? "" : resultVar
-  }
-
-    /// 生成模式匹配的条件和绑定代码（使用拷贝语义）
-    func generatePatternConditionAndBindings(
-    _ pattern: TypedPattern,
-    _ path: String,
-    _ type: Type
-    ) -> (prelude: [String], preludeVars: [(String, Type)], condition: String, bindings: [String], vars: [(String, Type)]) {
-      switch pattern {
-      case .integerLiteral(let val):
-        // Rune literals are represented as integer literal patterns in Sema.
-        // Compare against Rune.value instead of the whole struct to avoid
-        // invalid C code like `struct Rune == int`.
-        if case .structure(let defId) = type,
-           context.getName(defId) == "Rune",
-           let members = context.getStructMembers(defId),
-           let valueField = members.first(where: { $0.name == "value" }) {
-          let fieldName = sanitizeCIdentifier(valueField.name)
-          return ([], [], "\(path).\(fieldName) == \(val)", [], [])
-        }
-        return ([], [], "\(path) == \(val)", [], [])
-      case .booleanLiteral(let val):
-        return ([], [], "\(path) == \(val ? 1 : 0)", [], [])
-      case .stringLiteral(let value):
-        let bytesVar = nextTemp() + "_pat_bytes"
-        let storageVar = nextTemp() + "_pat_storage"
-        let utf8Bytes = Array(value.utf8)
-        var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
-        if !byteLiterals.isEmpty {
-          byteLiterals += ", "
-        }
-        byteLiterals += "0x00"
-        let literalVar = nextTemp() + "_pat_str"
-        var prelude = ""
-        prelude += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-        guard case .structure(let stringDefId) = type,
-              let stringMembers = context.getStructMembers(stringDefId),
-              let storageMember = stringMembers.first(where: { $0.name == "storage" }) else {
-          fatalError("String literal pattern requires String.storage: ref StringStorage")
-        }
-        let storageType: Type
-        switch storageMember.type {
-        case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType):
-          storageType = resolvedStorageType
-        default:
-          fatalError("String literal pattern requires String.storage: ref StringStorage")
-        }
-        let storageCType = cTypeName(storageType)
-        prelude += "static const \(storageCType) \(storageVar) = { (uint8_t*)\(bytesVar), \(utf8Bytes.count), \(utf8Bytes.count + 1) };\n"
-        prelude += "\(cTypeName(type)) \(literalVar) = (\(cTypeName(type))){ (struct __koral_Ref){ (void*)&\(storageVar), NULL } };\n"
-        // Compare via `String.equals(self, other String) Bool`.
-        // Value-passing semantics: equals consumes arguments, so copy both sides
-        // to preserve ownership and avoid double-free.
-        guard case .structure(let defId) = type else { fatalError("String literal pattern requires String type") }
-        guard let equalsMethod = lookupStaticMethodCIdentifier(receiverType: type, methodName: "equals") else {
-          fatalError("String.equals method not found for receiver type \(type)")
-        }
-        let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        return ([prelude], [(literalVar, type)], "\(equalsMethod)(__koral_\(typeName)_copy(&\(path)), __koral_\(typeName)_copy(&\(literalVar)))", [], [])
-      case .wildcard:
-        return ([], [], "1", [], [])
-      case .variable(let symbol):
-        let name = cIdentifier(for: symbol)
-        let varType = symbol.type
-        if varType == .void {
-          return ([], [], "1", [], [])
-        }
-        // Borrow semantics: register an alias from the bound variable name
-        // to the subject's field path. No copy, no local variable declaration.
-        // The alias is resolved in generateExpressionSSA(.variable).
-        patternBindingAliases[name] = path
-        return ([], [], "1", [], [])
-          
-      case .enumCase(let caseName, let expectedTagIndex, let args):
-        guard case .`enum`(let defId) = type else { fatalError("Enum pattern on non-enum type") }
-        let cases = context.getEnumCases(defId) ?? []
-          
-        var prelude: [String] = []
-        var preludeVars: [(String, Type)] = []
-        var condition = "(\(path).tag == \(expectedTagIndex))"
-        var bindings: [String] = []
-        var vars: [(String, Type)] = []
-          
-        let caseDef = cases[expectedTagIndex]
-        let escapedCaseName = sanitizeCIdentifier(caseName)
-          
-        for (i, subInd) in args.enumerated() {
-           let paramName = sanitizeCIdentifier(caseDef.parameters[i].name)
-           let paramType = caseDef.parameters[i].type
-           let subPath = "\(path).data.\(escapedCaseName).\(paramName)"
-               
-           let (subPre, subPreVars, subCond, subBind, subVars) = generatePatternConditionAndBindings(subInd, subPath, paramType)
-               
-           if subCond != "1" {
-             condition += " && (\(subCond))"
-           }
-           prelude.append(contentsOf: subPre)
-           preludeVars.append(contentsOf: subPreVars)
-           bindings.append(contentsOf: subBind)
-           vars.append(contentsOf: subVars)
-        }
-        return (prelude, preludeVars, condition, bindings, vars)
-        
-      case .comparisonPattern(let op, let value):
-        // Comparison pattern generates a simple comparison
-        let opStr: String
-        switch op {
-        case .greater: opStr = ">"
-        case .less: opStr = "<"
-        case .greaterEqual: opStr = ">="
-        case .lessEqual: opStr = "<="
-        }
-        
-        let condition = "(\(path) \(opStr) \(value))"
-        return ([], [], condition, [], [])
-        
-      case .andPattern(let left, let right):
-        // And pattern: both sub-patterns must match
-        let (leftPre, leftPreVars, leftCond, leftBind, leftVars) = 
-            generatePatternConditionAndBindings(left, path, type)
-        let (rightPre, rightPreVars, rightCond, rightBind, rightVars) = 
-            generatePatternConditionAndBindings(right, path, type)
-        
-        let condition = "(\(leftCond)) && (\(rightCond))"
-        return (
-            leftPre + rightPre,
-            leftPreVars + rightPreVars,
-            condition,
-            leftBind + rightBind,
-            leftVars + rightVars
-        )
-        
-      case .orPattern(let left, let right):
-        // Or pattern: either sub-pattern must match
-        // For bindings, we need to handle them specially since both branches bind the same variables
-        let (leftPre, leftPreVars, leftCond, leftBind, leftVars) = 
-            generatePatternConditionAndBindings(left, path, type)
-        let (rightPre, rightPreVars, rightCond, rightBind, rightVars) = 
-            generatePatternConditionAndBindings(right, path, type)
-        
-        let condition = "(\(leftCond)) || (\(rightCond))"
-        
-        // For or patterns with bindings, we need to generate conditional bindings
-        // The bindings should be the same in both branches (enforced by type checker)
-        // We use the left branch bindings but they will be set by whichever branch matches
-        // Since both branches bind the same variables, we can use either set
-        // The actual binding code will be generated based on which branch matched
-        
-        // If there are bindings, we need to generate conditional binding code
-        var combinedBind: [String] = []
-        if !leftVars.isEmpty {
-            // Generate conditional bindings using ternary operator
-            // First, we need to evaluate which branch matched
-            let matchLeftVar = nextTemp() + "_match_left"
-            combinedBind.append("int \(matchLeftVar) = \(leftCond);\n")
-            
-            // For each variable, generate conditional assignment
-            for (i, (name, varType)) in leftVars.enumerated() {
-                let cType = cTypeName(varType)
-                combinedBind.append("\(cType) \(name);\n")
-                
-                // Get the binding expressions from left and right
-                // This is simplified - in practice we'd need to extract the actual binding expressions
-                // For now, we assume the binding is just the path (for simple variable patterns)
-                if i < rightVars.count {
-                    // Both branches have this variable - use conditional
-                    combinedBind.append("if (\(matchLeftVar)) {\n")
-                    combinedBind.append(contentsOf: leftBind.filter { $0.contains(name) })
-                    combinedBind.append("} else {\n")
-                    combinedBind.append(contentsOf: rightBind.filter { $0.contains(name) })
-                    combinedBind.append("}\n")
-                }
-            }
-        }
-        
-        // If no bindings, just use empty bindings
-        let finalBind = leftVars.isEmpty ? [] : combinedBind
-        
-        return (
-            leftPre + rightPre,
-            leftPreVars + rightPreVars,
-            condition,
-            finalBind,
-            leftVars
-        )
-        
-      case .notPattern(let pattern):
-        // Not pattern: negate the sub-pattern condition
-        let (pre, preVars, cond, _, _) = 
-            generatePatternConditionAndBindings(pattern, path, type)
-        
-        let condition = "!(\(cond))"
-        // Not patterns cannot have bindings (enforced by type checker)
-        return (pre, preVars, condition, [], [])
-        
-      case .structPattern(_, let elements):
-        // Struct pattern: direct field access, no tag check needed
-        guard case .structure(let defId) = type else { fatalError("Struct pattern on non-struct type: \(type)") }
-        let structMembers = context.getStructMembers(defId) ?? []
-        
-        var prelude: [String] = []
-        var preludeVars: [(String, Type)] = []
-        var condition = "1"
-        var bindings: [String] = []
-        var vars: [(String, Type)] = []
-        
-        for (i, subPattern) in elements.enumerated() {
-          let fieldName = sanitizeCIdentifier(structMembers[i].name)
-          let fieldType = structMembers[i].type
-          let subPath = "\(path).\(fieldName)"
-          
-          let (subPre, subPreVars, subCond, subBind, subVars) =
-              generatePatternConditionAndBindings(subPattern, subPath, fieldType)
-          
-          if subCond != "1" {
-            condition += " && (\(subCond))"
-          }
-          prelude.append(contentsOf: subPre)
-          preludeVars.append(contentsOf: subPreVars)
-          bindings.append(contentsOf: subBind)
-          vars.append(contentsOf: subVars)
-        }
-        
-        return (prelude, preludeVars, condition, bindings, vars)
-      }
-    }
-
 
 }

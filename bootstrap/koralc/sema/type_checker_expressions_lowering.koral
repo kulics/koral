@@ -214,7 +214,25 @@ given TypeChecker {
 
     private lower_enum_constructor_expr(self, enum_type Type, case_name String, args List[ref TypedExpr]) TypedExpr = {
         let method_symbol = self.make_method_symbol(case_name, enum_type)
-        return make_typed_expr(TypedExprKind.StaticMethodCall(enum_type, case_name, box(method_symbol), List[Type].new(), List[Type].new(), args), enum_type)
+        let _ = method_symbol
+        return make_typed_expr(TypedExprKind.EnumConstruction(enum_type, case_name, args), enum_type)
+    }
+
+    private type_construction_symbol_for_type(self, source_type Type, constructed_type Type) ref Symbol = {
+        return when source_type in {
+            .StructureType(def_id) then box(Symbol(def_id, constructed_type, SymbolKind.TypeSymbol())),
+            .EnumType(def_id) then box(Symbol(def_id, constructed_type, SymbolKind.TypeSymbol())),
+            .OpaqueType(def_id) then box(Symbol(def_id, constructed_type, SymbolKind.TypeSymbol())),
+            .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(template) then box(Symbol(template.def_id, constructed_type, SymbolKind.TypeSymbol())),
+                .None() then box(Symbol(self.allocate_unindexed_def_id(template_name, DefKind.TypeDef(TypeDefKind.Structure())), constructed_type, SymbolKind.TypeSymbol())),
+            },
+            .GenericEnum(template_name, _) then when self.storage.generic_templates.lookup_enum(template_name) in {
+                .Some(template) then box(Symbol(template.def_id, constructed_type, SymbolKind.TypeSymbol())),
+                .None() then box(Symbol(self.allocate_unindexed_def_id(template_name, DefKind.TypeDef(TypeDefKind.Enum())), constructed_type, SymbolKind.TypeSymbol())),
+            },
+            _ then box(Symbol(self.allocate_unindexed_def_id(self.context().type_display_name(constructed_type), DefKind.TypeDef(TypeDefKind.Structure())), constructed_type, SymbolKind.TypeSymbol())),
+        }
     }
 
     private lower_receiver_method_call_expr(self, receiver TypedExpr, method_name String, args List[ref TypedExpr]) TypedExpr = {

@@ -1,0 +1,131 @@
+public type TypedYieldSummary(
+    contains_yield Bool,
+)
+
+public let typed_yield_summary_empty() TypedYieldSummary = TypedYieldSummary(false)
+
+public let typed_yield_summary_union(left TypedYieldSummary, right TypedYieldSummary) TypedYieldSummary =
+    TypedYieldSummary(left.contains_yield or right.contains_yield)
+
+private let typed_expr_list_contains_yield(exprs List[ref TypedExpr]) Bool = {
+    for expr in exprs then {
+        if typed_expr_contains_yield(expr) then { return true }
+    }
+    return false
+}
+
+private let typed_when_arms_contain_yield(arms List[TypedWhenArm]) Bool = {
+    for arm in arms then {
+        if typed_expr_contains_yield(arm.body) then { return true }
+    }
+    return false
+}
+
+public let typed_statement_yield_summary(statement TypedStatement) TypedYieldSummary = {
+    let contains_yield = when statement in {
+        .LetStmt(_, value, _) then typed_expr_contains_yield(value),
+        .PairLetStmt(_, _, value, _) then typed_expr_contains_yield(value),
+        .AssignmentStmt(target, value, _) then typed_expr_contains_yield(target) or typed_expr_contains_yield(value),
+        .ExprStmt(expr, _) then typed_expr_contains_yield(expr),
+        .IfStmt(condition, then_branch, else_branch, _) then {
+            yield typed_expr_contains_yield(condition)
+                or typed_expr_contains_yield(then_branch)
+                or when else_branch in { .Some(expr) then typed_expr_contains_yield(expr), .None() then false }
+        },
+        .WhileStmt(condition, body, _) then typed_expr_contains_yield(condition) or typed_expr_contains_yield(body),
+        .WhenStmt(subject, arms, _) then typed_expr_contains_yield(subject) or typed_when_arms_contain_yield(arms),
+        .ReturnStmt(value, _) then when value in { .Some(expr) then typed_expr_contains_yield(expr), .None() then false },
+        .BreakStmt(_) then false,
+        .ContinueStmt(_) then false,
+        .FinallyStmt(expr, _) then typed_expr_contains_yield(expr),
+        .YieldStmt(expr, _) then true or typed_expr_contains_yield(expr),
+    }
+    return TypedYieldSummary(contains_yield)
+}
+
+public let typed_statement_contains_yield(statement TypedStatement) Bool =
+    typed_statement_yield_summary(statement).contains_yield
+
+private let typed_statement_list_contains_yield(statements List[TypedStatement]) Bool = {
+    for statement in statements then {
+        if typed_statement_contains_yield(statement) then { return true }
+    }
+    return false
+}
+
+public let typed_intrinsic_yield_summary(node TypedIntrinsic) TypedYieldSummary = {
+    let contains_yield = when node in {
+        .IsUniqueMutable(ref_expr) then typed_expr_contains_yield(ref_expr),
+        .MakeRef(pointer_expr, owner_expr, _) then typed_expr_contains_yield(pointer_expr) or typed_expr_contains_yield(owner_expr),
+        .MakeMutRef(pointer_expr, owner_expr, _) then typed_expr_contains_yield(pointer_expr) or typed_expr_contains_yield(owner_expr),
+        .DowngradeRef(ref_expr, _) then typed_expr_contains_yield(ref_expr),
+        .DowngradeMutRef(ref_expr, _) then typed_expr_contains_yield(ref_expr),
+        .UpgradeRef(weak_expr, _) then typed_expr_contains_yield(weak_expr),
+        .UpgradeMutRef(weak_expr, _) then typed_expr_contains_yield(weak_expr),
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            yield typed_expr_contains_yield(out_handle)
+                or typed_expr_contains_yield(out_tid)
+                or typed_expr_contains_yield(closure)
+                or typed_expr_contains_yield(stack_size)
+        },
+        .AllocMemory(count, _) then typed_expr_contains_yield(count),
+        .DeallocMemory(pointer_expr) then typed_expr_contains_yield(pointer_expr),
+        .CopyMemory(dest, source, count) then typed_expr_contains_yield(dest) or typed_expr_contains_yield(source) or typed_expr_contains_yield(count),
+        .MoveMemory(dest, source, count) then typed_expr_contains_yield(dest) or typed_expr_contains_yield(source) or typed_expr_contains_yield(count),
+        .InitMemory(pointer_expr, value_expr) then typed_expr_contains_yield(pointer_expr) or typed_expr_contains_yield(value_expr),
+        .DeinitMemory(pointer_expr) then typed_expr_contains_yield(pointer_expr),
+        .TakeMemory(pointer_expr, _) then typed_expr_contains_yield(pointer_expr),
+        .NullPtr(_) then false,
+    }
+    return TypedYieldSummary(contains_yield)
+}
+
+public let typed_intrinsic_contains_yield(node TypedIntrinsic) Bool =
+    typed_intrinsic_yield_summary(node).contains_yield
+
+public let typed_expr_yield_summary(expr ref TypedExpr) TypedYieldSummary = {
+    let contains_yield = when expr.expr_kind in {
+        .Variable(_) then false,
+        .IntegerLiteral(_) then false,
+        .FloatLiteral(_) then false,
+        .StringLiteral(_) then false,
+        .BoolLiteral(_) then false,
+        .CastExpr(_, inner) then typed_expr_contains_yield(inner),
+        .Unary(_, inner) then typed_expr_contains_yield(inner),
+        .RefExpr(inner) then typed_expr_contains_yield(inner),
+        .PtrExpr(inner) then typed_expr_contains_yield(inner),
+        .DerefExpr(inner) then typed_expr_contains_yield(inner),
+        .ArithmeticExpr(left, _, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .WrappingArithmeticExpr(left, _, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .WrappingShiftExpr(left, _, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .ComparisonExpr(left, _, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .BitwiseExpr(left, _, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .AndExpr(left, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .OrExpr(left, right) then typed_expr_contains_yield(left) or typed_expr_contains_yield(right),
+        .IsExpr(subject, _, _) then typed_expr_contains_yield(subject),
+        .Call(callee, args) then typed_expr_contains_yield(callee) or typed_expr_list_contains_yield(args),
+        .GenericCall(_, _, args) then typed_expr_list_contains_yield(args),
+        .IntrinsicCall(node) then typed_intrinsic_contains_yield(node),
+        .MemberPath(base, _) then typed_expr_contains_yield(base),
+        .MethodReference(base, _, _, _, _, _) then typed_expr_contains_yield(base),
+        .Block(statements) then typed_statement_list_contains_yield(statements),
+        .IfExpr(condition, then_branch, else_branch) then {
+            yield typed_expr_contains_yield(condition)
+                or typed_expr_contains_yield(then_branch)
+                or when else_branch in { .Some(inner) then typed_expr_contains_yield(inner), .None() then false }
+        },
+        .WhenExpr(subject, arms) then typed_expr_contains_yield(subject) or typed_when_arms_contain_yield(arms),
+        .LambdaExpr(_, _, body) then typed_expr_contains_yield(body),
+        .StaticMethodCall(_, _, _, _, _, args) then typed_expr_list_contains_yield(args),
+        .TypeConstruction(_, _, args) then typed_expr_list_contains_yield(args),
+        .EnumConstruction(_, _, args) then typed_expr_list_contains_yield(args),
+        .TraitMethodPlaceholder(base, _, _, _, _) then typed_expr_contains_yield(base),
+        .TraitObjectConversion(inner, _, _) then typed_expr_contains_yield(inner),
+        .TraitMethodCall(receiver, _, _, _, args) then typed_expr_contains_yield(receiver) or typed_expr_list_contains_yield(args),
+        .GenericInstantiation(_, _) then false,
+    }
+    return TypedYieldSummary(contains_yield)
+}
+
+public let typed_expr_contains_yield(expr ref TypedExpr) Bool =
+    typed_expr_yield_summary(expr).contains_yield

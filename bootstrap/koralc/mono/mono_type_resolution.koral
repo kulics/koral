@@ -3811,6 +3811,25 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
         .StaticMethodCall(receiver_type, method_name, method, type_args, method_type_args, args) then {
             yield box(resolve_static_method_call_to_call(mono, expr, receiver_type, method_name, method, type_args, method_type_args, args))
         },
+        .TypeConstruction(identifier, type_args, args) then {
+            let resolved_identifier = resolve_symbol_type(mono, identifier)
+            let mut new_type_args = List[Type].new()
+            for type_arg in type_args then {
+                new_type_args.push(resolve_parameterized_type(mono, type_arg))
+            }
+            let mut new_args = List[ref TypedExpr].new()
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            yield box(TypedExprKind.TypeConstruction(box(resolved_identifier), new_type_args, new_args))
+        },
+        .EnumConstruction(enum_type, case_name, args) then {
+            let mut new_args = List[ref TypedExpr].new()
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg))
+            }
+            yield box(TypedExprKind.EnumConstruction(resolve_parameterized_type(mono, enum_type), case_name, new_args))
+        },
         .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
             let new_base = resolve_types_in_expression(mono, base)
             let new_trait_type = resolve_parameterized_type(mono, trait_type)
@@ -4031,7 +4050,7 @@ private let infer_extension_method_type_args(
         },
         .None() then {
             for method_param in ext.method.params then {
-                pattern_param_types.push(box(resolve_parameterized_type(mono, substitute_type(mono, method_param.param_type, substitution))))
+                pattern_param_types.push(box(resolve_parameterized_type(mono, mono.resolve_type_node_impl(method_param.param_type, substitution))))
             }
         },
     }

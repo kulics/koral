@@ -6,12 +6,12 @@
 // - emit_foreign_types: 生成 foreign 类型声明
 // - emit_type_declarations: 收集、拓扑排序、生成类型定义
 // - emit_foreign_functions: 生成 extern 函数声明
-// - emit_function_declarations: 生成函数前向声明
-// - emit_global_variables: 生成全局变量声明
+// - emit_mir_function_declarations: 生成函数前向声明
+// - emit_mir_global_variables: 生成全局变量声明
 // - emit_vtable_definitions: 调用 process_vtable_requests
-// - emit_function_implementations: 逐函数生成实现
+// - emit_mir_function_implementations: 逐函数生成实现
 // - emit_c_main: 生成 C main 函数
-// - scan_user_defined_drops_and_main: Pass 0 扫描
+// - scan_program_codegen_inputs: 从 MIR globals 扫描外部声明、drop 与 main
 //
 // 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift generateProgram 方法
 //
@@ -19,15 +19,6 @@
 
 using std::os { .. }
 using std::proc { .. }
-
-type EmittableFunction(
-    def_id DefId,
-    c_name String,
-    declaration_params String,
-    params List[TypedParam],
-    return_type Type,
-    body ref TypedExpr,
-)
 
 type ForeignFunctionPrototype(
     name String,
@@ -38,26 +29,6 @@ type ForeignFunctionPrototype(
 type ForeignDeclarations(
     empty_types List[String],
     functions List[ForeignFunctionPrototype],
-)
-
-type ForeignGlobalVariable(
-    name String,
-    mutable Bool,
-    decl_type Type,
-)
-
-type EmittableGlobalVariable(
-    c_name String,
-    decl_type Type,
-    initializer ref TypedExpr,
-    simple_literal Option[String],
-)
-
-type ProgramCodegenScan(
-    foreign_declarations ForeignDeclarations,
-    emittable_functions List[EmittableFunction],
-    foreign_globals List[ForeignGlobalVariable],
-    globals List[EmittableGlobalVariable],
 )
 
 given CodeGen {
@@ -74,118 +45,6 @@ given CodeGen {
         return when self.program.codegen_callable(method_def_id) in {
             .Some(info) then info.emitted_c_name,
             .None() then self.user_defined_drop_method_name(receiver_type),
-        }
-    }
-
-    collect_current_function_type_bindings(self mut ref, template_type Type, concrete_type Type) Void = {
-        when template_type in {
-            .GenericParameter(name) then {
-                self.current_generic_bindings.insert(name, concrete_type)
-            },
-            .ReferenceType(template_inner_ref) then {
-                when concrete_type in {
-                    .ReferenceType(concrete_inner_ref) then {
-                        self.collect_current_function_type_bindings(template_inner_ref.val, concrete_inner_ref.val)
-                    },
-                    _ then {},
-                }
-            },
-            .PointerType(template_inner_ref) then {
-                when concrete_type in {
-                    .PointerType(concrete_inner_ref) then {
-                        self.collect_current_function_type_bindings(template_inner_ref.val, concrete_inner_ref.val)
-                    },
-                    _ then {},
-                }
-            },
-            .WeakReferenceType(template_inner_ref) then {
-                when concrete_type in {
-                    .WeakReferenceType(concrete_inner_ref) then {
-                        self.collect_current_function_type_bindings(template_inner_ref.val, concrete_inner_ref.val)
-                    },
-                    _ then {},
-                }
-            },
-            .GenericStruct(template_name, template_args) then {
-                when concrete_type in {
-                    .GenericStruct(concrete_name, concrete_args) then {
-                        if template_name == concrete_name and template_args.count() == concrete_args.count() then {
-                            let mut i UInt = 0
-                            while i < template_args.count() then {
-                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i].val)
-                                i += 1
-                            }
-                        }
-                    },
-                    .StructureType(def_id) then {
-                        when self.context.get_template_name(def_id) in {
-                            .Some(concrete_name) then {
-                                if concrete_name == template_name then {
-                                    when self.context.get_type_arguments(def_id) in {
-                                        .Some(concrete_args) then {
-                                            let mut i UInt = 0
-                                            while i < template_args.count() and i < concrete_args.count() then {
-                                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i])
-                                                i += 1
-                                            }
-                                        },
-                                        .None() then {},
-                                    }
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    _ then {},
-                }
-            },
-            .GenericEnum(template_name, template_args) then {
-                when concrete_type in {
-                    .GenericEnum(concrete_name, concrete_args) then {
-                        if template_name == concrete_name and template_args.count() == concrete_args.count() then {
-                            let mut i UInt = 0
-                            while i < template_args.count() then {
-                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i].val)
-                                i += 1
-                            }
-                        }
-                    },
-                    .EnumType(def_id) then {
-                        when self.context.get_template_name(def_id) in {
-                            .Some(concrete_name) then {
-                                if concrete_name == template_name then {
-                                    when self.context.get_type_arguments(def_id) in {
-                                        .Some(concrete_args) then {
-                                            let mut i UInt = 0
-                                            while i < template_args.count() and i < concrete_args.count() then {
-                                                self.collect_current_function_type_bindings(template_args[i].val, concrete_args[i])
-                                                i += 1
-                                            }
-                                        },
-                                        .None() then {},
-                                    }
-                                }
-                            },
-                            .None() then {},
-                        }
-                    },
-                    _ then {},
-                }
-            },
-            .FunctionType(template_params, template_return_ref) then {
-                when concrete_type in {
-                    .FunctionType(concrete_params, concrete_return_ref) then {
-                        let mut i UInt = 0
-                        while i < template_params.count() and i < concrete_params.count() then {
-                            self.collect_current_function_type_bindings(template_params[i].val.param_type, concrete_params[i].val.param_type)
-                            i += 1
-                        }
-                        self.collect_current_function_type_bindings(template_return_ref.val, concrete_return_ref.val)
-                    },
-                    _ then {},
-                }
-            },
-            _ then {},
         }
     }
 
@@ -257,245 +116,19 @@ given CodeGen {
         return trait_name == "Drop"
     }
 
-    private register_user_defined_drop_method(self mut ref, receiver_type Type, method_def_id DefId) Void = {
-        if not self.is_concrete_nominal_instance(receiver_type) then {
-            return
-        }
-
-        let method_c_name = self.emitted_user_defined_drop_method_name(receiver_type, method_def_id)
-        self.user_defined_drops.insert(self.user_defined_drop_type_key(receiver_type), method_c_name)
-    }
-
-
-    // ── 主入口 ────────────────────────────────────────────────────────────────
-
-    /// 生成完整的 C 源代码
-    ///
-    /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
-    public generate_into_buffer(self mut ref) Void = {
-        self.buffer = box(String.new())
-        self.emit_includes()
-        self.emit_foreign_types(self.program_scan.foreign_declarations)
-        self.emit_type_declarations()
-        self.emit_foreign_functions(self.program_scan.foreign_declarations)
-        self.emit_function_declarations(self.program_scan.emittable_functions)
-        self.emit_global_variables(self.program_scan.foreign_globals, self.program_scan.globals)
-        self.emit_vtable_definitions()
-        self.emit_function_implementations(self.program_scan.emittable_functions)
-        self.emit_c_main()
-    }
-
-    public generated_buffer(self ref) ref String = self.buffer
-
-    public generate(self mut ref) String = {
-        self.generate_into_buffer()
-        return self.buffer.to_string()
-    }
-
-    private scan_program_codegen_inputs(self mut ref) ProgramCodegenScan = {
-        let mut empty_types = List[String].new()
-        let mut foreign_functions = List[ForeignFunctionPrototype].new()
-        let stdlib_functions = ["exit", "abort"]
-        let mut functions = List[EmittableFunction].new()
-        let mut foreign_globals = List[ForeignGlobalVariable].new()
-        let mut globals = List[EmittableGlobalVariable].new()
-
-        let mut node_index UInt = 0
-        let program_nodes = self.program.semantic_global_nodes()
-        while node_index < program_nodes.count() then {
-            let current_node_index = node_index
-            let node = program_nodes[node_index]
-            node_index += 1
-            when node in {
-                .ForeignTypeDecl(_, name, fields, _, _) then {
-                    let should_emit_typedef = when fields in {
-                        .Some(f) then f.is_empty(),
-                        .None() then true,
+    user_defined_drop_for_type_name(self, type_name String) Option[String] = {
+        for global in self.program.globals then {
+            when global in {
+                .Given(target_type, trait_name, _, methods) then {
+                    let is_drop_trait = when trait_name in {
+                        .Some(name) then self.is_std_drop_trait(name),
+                        .None() then false,
                     }
-                    if should_emit_typedef then {
-                        empty_types.push(name)
-                    }
-                },
-                .ForeignFunctionDecl(_, name, params, return_type, _, _) then {
-                    let mut is_stdlib = false
-                    for sf in stdlib_functions then {
-                        if sf == name then { is_stdlib = true }
-                    }
-                    if not is_stdlib then {
-                        foreign_functions.push(ForeignFunctionPrototype(name, params, return_type))
-                    }
-                },
-                .ForeignLetDecl(_, name, mutable, decl_type, _, _) then {
-                    foreign_globals.push(ForeignGlobalVariable(name, mutable, decl_type))
-                },
-                .LetDecl(_, name, _, decl_type, initializer_ref, _, let_id) then {
-                    let c_name = when self.c_identifier_opt(let_id.def_id) in {
-                        .Some(cn) then cn,
-                        .None() then self.sanitize_codegen_identifier(name),
-                    }
-                    let is_simple_literal = when initializer_ref.expr_kind in {
-                        .IntegerLiteral(_) then true,
-                        .FloatLiteral(_) then true,
-                        .BoolLiteral(_) then true,
-                        _ then false,
-                    }
-                    let simple_literal = if is_simple_literal then {
-                        let lit_val = when initializer_ref.expr_kind in {
-                            .IntegerLiteral(v) then v,
-                            .FloatLiteral(v) then v,
-                            .BoolLiteral(v) then if v then "1" else "0",
-                            _ then "0",
-                        }
-                        yield Option[String].Some(lit_val)
-                    } else {
-                        yield Option[String].None()
-                    }
-                    globals.push(EmittableGlobalVariable(c_name, decl_type, initializer_ref, simple_literal))
-                },
-                .GivenTraitDecl(target_type, trait_name, _, members, _) then {
-                    if not self.is_concrete_nominal_instance(target_type) then {
-                    } else if self.is_std_drop_trait(trait_name) then {
-                        let type_c_name = self.user_defined_drop_type_key(target_type)
-                        for m in members then {
-                            if m.name == "drop" then {
-                                let method_c_name = self.emitted_user_defined_drop_method_name(target_type, m.def_id)
-                                when m.body in {
-                                    .Some(_) then { self.user_defined_drops.insert(type_c_name, method_c_name) },
-                                    .None() then {},
-                                }
+                    if is_drop_trait and self.is_concrete_nominal_instance(target_type) and self.user_defined_drop_type_key(target_type) == type_name then {
+                        for method in methods then {
+                            if self.context.symbol_name(method) == "drop" then {
+                                return Option[String].Some(self.emitted_user_defined_drop_method_name(target_type, method.def_id))
                             }
-                        }
-                    }
-                    if self.type_contains_generic(target_type) then { continue }
-                    if not self.is_concrete_nominal_instance(target_type) then { continue }
-
-                    let type_c_name = self.emitted_type_c_name_fallback(target_type)
-                    for m in members then {
-                        when m.body in {
-                            .Some(body_ref) then {
-                                let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
-                                let function_type_opt = when self.context.get_function_type(m.def_id) in {
-                                    .Some(function_type) then Option[Type].Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
-                                    .None() then Option[Type].None(),
-                                }
-                                let effective_return_type = when function_type_opt in {
-                                    .Some(function_type) then self.function_type_return_type(function_type),
-                                    .None() then when m.return_type in {
-                                        .Unknown() then target_type,
-                                        _ then m.return_type,
-                                    },
-                                }
-                                if self.type_contains_generic(effective_return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                let declaration_params = when function_type_opt in {
-                                    .Some(function_type) then self.build_method_param_type_list_from_function_type(m.params, target_type, function_type),
-                                    .None() then self.build_method_param_type_list(m.params, target_type),
-                                }
-                                functions.push(EmittableFunction(m.def_id, c_name, declaration_params, m.params, effective_return_type, body_ref))
-                            },
-                            .None() then {},
-                        }
-                    }
-                },
-                .FunctionDecl(_, name, _, return_type, _, _, fn_id) then {
-                    // Use the identifier embedded in the node (like Swift's identifier.defId)
-                    let node_def_id = Option[DefId].Some(fn_id.def_id)
-                    if name == "main" then {
-                        when node_def_id in {
-                            .Some(def_id) then {
-                                let c_name = when self.c_identifier_opt(def_id) in {
-                                    .Some(cn) then cn,
-                                    .None() then self.sanitize_codegen_identifier(name),
-                                }
-                                self.user_main_function_name = Option[String].Some(c_name)
-                                self.user_main_return_type = Option[Type].Some(return_type)
-                            },
-                            .None() then {},
-                        }
-                    }
-                    if self.type_contains_generic(return_type) then { continue }
-                    let params = when node in {
-                        .FunctionDecl(_, _, params_val, _, _, _, _) then params_val,
-                        _ then List[TypedParam].new(),
-                    }
-                    let body_ref = when node in {
-                        .FunctionDecl(_, _, _, _, body_val, _, _) then body_val,
-                        _ then { continue },
-                    }
-                    if self.params_contain_generic(params) then { continue }
-                    if not self.should_emit_trait_tool_function(name, params, return_type) then { continue }
-
-                    let function_type_opt = when node_def_id in {
-                        .Some(def_id) then {
-                            yield self.context.get_function_type(def_id)
-                        },
-                        .None() then Option[Type].None(),
-                    }
-                    let effective_return_type = when function_type_opt in {
-                        .Some(function_type) then self.function_type_return_type(function_type),
-                        .None() then when node_def_id in {
-                            .Some(def_id) then {
-                                yield when return_type in {
-                                    .Unknown() then {
-                                        yield when self.context.get_function_return_type(def_id) in {
-                                            .Some(resolved_return_type) then resolved_return_type,
-                                            .None() then return_type,
-                                        }
-                                    },
-                                    _ then return_type,
-                                }
-                            },
-                            .None() then return_type,
-                        },
-                    }
-                    let c_name = when node_def_id in {
-                        .Some(def_id) then {
-                            yield when self.c_identifier_opt(def_id) in {
-                                .Some(cn) then cn,
-                                .None() then self.sanitize_codegen_identifier(name),
-                            }
-                        },
-                        .None() then self.sanitize_codegen_identifier(name),
-                    }
-                    let declaration_params = when function_type_opt in {
-                        .Some(function_type) then self.build_param_type_list_from_function_type(params, function_type),
-                        .None() then self.build_param_type_list(params),
-                    }
-                    functions.push(EmittableFunction(node_def_id or else DefId(0(UInt)), c_name, declaration_params, params, effective_return_type, body_ref))
-                },
-                .GivenDecl(target_type, members, _) then {
-                    if self.type_contains_generic(target_type) then { continue }
-                    if not self.is_concrete_nominal_instance(target_type) then { continue }
-                    if not self.should_emit_given_decl_methods(target_type) then { continue }
-
-                    let type_c_name = self.emitted_type_c_name_fallback(target_type)
-                    for m in members then {
-                        if not self.should_emit_given_decl_member(target_type, m) then { continue }
-                        when m.body in {
-                            .Some(body_ref) then {
-                                let c_name = "\(type_c_name)_\(self.sanitize_codegen_identifier(m.name))"
-                                let function_type_opt = when self.context.get_function_type(m.def_id) in {
-                                    .Some(function_type) then Option[Type].Some(self.bind_method_function_type(m.def_id, target_type, function_type)),
-                                    .None() then Option[Type].None(),
-                                }
-                                let effective_return_type = when function_type_opt in {
-                                    .Some(function_type) then self.function_type_return_type(function_type),
-                                    .None() then when m.return_type in {
-                                        .Unknown() then target_type,
-                                        _ then m.return_type,
-                                    },
-                                }
-                                if self.type_contains_generic(effective_return_type) then { continue }
-                                if self.params_contain_generic(m.params) then { continue }
-
-                                let declaration_params = when function_type_opt in {
-                                    .Some(function_type) then self.build_method_param_type_list_from_function_type(m.params, target_type, function_type),
-                                    .None() then self.build_method_param_type_list(m.params, target_type),
-                                }
-                                functions.push(EmittableFunction(m.def_id, c_name, declaration_params, m.params, effective_return_type, body_ref))
-                            },
-                            .None() then {},
                         }
                     }
                 },
@@ -511,7 +144,11 @@ given CodeGen {
                     .Some(trait_name) then {
                         if self.is_std_drop_trait(trait_name) then {
                             when concrete.owner_type in {
-                                .Some(owner_type) then self.register_user_defined_drop_method(owner_type, def_id),
+                                .Some(owner_type) then {
+                                    if self.is_concrete_nominal_instance(owner_type) and self.user_defined_drop_type_key(owner_type) == type_name then {
+                                        return Option[String].Some(self.emitted_user_defined_drop_method_name(owner_type, def_id))
+                                    }
+                                },
                                 .None() then {},
                             }
                         }
@@ -521,12 +158,79 @@ given CodeGen {
             }
         }
 
-        return ProgramCodegenScan(
-            ForeignDeclarations(empty_types, foreign_functions),
-            functions,
-            foreign_globals,
-            globals,
-        )
+        return Option[String].None()
+    }
+
+
+    // ── 主入口 ────────────────────────────────────────────────────────────────
+
+    /// 生成完整的 C 源代码
+    ///
+    /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
+    public generate_into_buffer(self mut ref) Void = {
+        self.buffer = box(String.new())
+        let foreign_declarations = self.scan_program_codegen_inputs()
+        self.emit_includes()
+        self.emit_foreign_types(foreign_declarations)
+        self.emit_type_declarations()
+        self.emit_foreign_functions(foreign_declarations)
+        self.emit_mir_function_declarations()
+        self.emit_mir_global_variables()
+        self.emit_vtable_definitions()
+        self.emit_mir_function_implementations()
+        self.emit_c_main()
+    }
+
+    public generated_buffer(self ref) ref String = self.buffer
+
+    public generate(self mut ref) String = {
+        self.generate_into_buffer()
+        return self.buffer.to_string()
+    }
+
+    private scan_program_codegen_inputs(self mut ref) ForeignDeclarations = {
+        let mut empty_types = List[String].new()
+        let mut foreign_functions = List[ForeignFunctionPrototype].new()
+        let stdlib_functions = ["exit", "abort"]
+
+        for global in self.program.globals then {
+            when global in {
+                .ForeignType(identifier) then {
+                    empty_types.push(self.c_identifier_for_symbol(identifier))
+                },
+                .ForeignStruct(identifier, fields) then {
+                    if fields.is_empty() then {
+                        empty_types.push(self.c_identifier_for_symbol(identifier))
+                    }
+                },
+                .ForeignFunction(identifier, params, return_type) then {
+                    let name = self.c_identifier_for_symbol(identifier)
+                    let mut is_stdlib = false
+                    for sf in stdlib_functions then {
+                        if sf == name then { is_stdlib = true }
+                    }
+                    if not is_stdlib then {
+                        foreign_functions.push(ForeignFunctionPrototype(name, params, return_type))
+                    }
+                },
+                .ForeignGlobalVariable(_, _, _) then {},
+                .Function(identifier, _, return_type, kind) then {
+                    when kind in {
+                        .Global() then {
+                            if self.context.symbol_name(identifier) == "main" then {
+                                self.user_main_function_name = Option[String].Some(self.c_identifier_for_symbol(identifier))
+                                self.user_main_return_type = Option[Type].Some(return_type)
+                            }
+                        },
+                        _ then {},
+                    }
+                },
+                .Given(_, _, _, _) then {},
+                _ then {},
+            }
+        }
+
+        return ForeignDeclarations(empty_types, foreign_functions)
     }
 
     // ── emit_includes ─────────────────────────────────────────────────────────
@@ -614,164 +318,47 @@ given CodeGen {
         self.buffer.push_string("\n")
     }
 
-    // ── emit_function_declarations ────────────────────────────────────────────
+    // ── emit_mir_function_declarations ───────────────────────────────────────
 
-    private is_trait_object_surface_type(self, t Type) Bool = {
-        return when t in {
-            .TraitObject(_, _) then true,
-            .ReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(_, _) then true,
-                .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
-                    .Some(mapped_type) then when mapped_type in {
-                        .TraitObject(_, _) then true,
-                        _ then false,
-                    },
-                    .None() then false,
-                },
-                _ then false,
-            },
-            .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                .TraitObject(_, _) then true,
-                .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
-                    .Some(mapped_type) then when mapped_type in {
-                        .TraitObject(_, _) then true,
-                        _ then false,
-                    },
-                    .None() then false,
-                },
-                _ then false,
-            },
-            .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
-                .Some(mapped_type) then when mapped_type in {
-                    .TraitObject(_, _) then true,
-                    .ReferenceType(inner_ref) then when inner_ref.val in {
-                        .TraitObject(_, _) then true,
-                        _ then false,
-                    },
-                    .WeakReferenceType(inner_ref) then when inner_ref.val in {
-                        .TraitObject(_, _) then true,
-                        _ then false,
-                    },
-                    _ then false,
-                },
-                .None() then false,
-            },
-            _ then false,
-        }
-    }
-
-    private is_object_safe_trait_callable(self, params List[TypedParam], return_type Type) Bool = {
-        if not params.is_empty() then {
-            let receiver = params[0(UInt)]
-            if receiver.name == "self" and not self.is_object_safe_trait_receiver(receiver.param_type) then {
-                return false
-            }
-        }
-        let mut is_first = true
-        for p in params then {
-            if not is_first and self.is_trait_object_surface_type(p.param_type) then {
-                return false
-            }
-            is_first = false
-        }
-        return not self.is_trait_object_surface_type(return_type)
-    }
-
-    private is_object_safe_trait_receiver(self, t Type) Bool = {
-        return when t in {
-            .ReferenceType(inner) then inner.val is .TraitObject(_, _),
-            .MutableReferenceType(inner) then inner.val is .TraitObject(_, _),
-            _ then false,
-        }
-    }
-
-    private should_emit_given_decl_methods(self, target_type Type) Bool = {
-        return when target_type in {
-            .TraitObject(_, _) then true,
-            _ then true,
-        }
-    }
-
-    private should_emit_given_decl_member(self, target_type Type, member TypedGivenMember) Bool = {
-        return when target_type in {
-            .TraitObject(_, _) then self.is_object_safe_trait_callable(member.params, member.return_type),
-            _ then true,
-        }
-    }
-
-    private should_emit_trait_tool_function(self, name String, params List[TypedParam], return_type Type) Bool = {
-        if params.is_empty() then {
-            return true
-        }
-        let first_param = params[0(UInt)]
-        return when first_param.param_type in {
-            .TraitObject(_, _) then self.is_object_safe_trait_callable(params, return_type),
-            _ then true,
-        }
-    }
-
-    /// 生成函数前向声明（跳过含泛型参数的函数）
-    ///
-    /// Requirements: 4.1, 4.2, 13.2
-    emit_function_declarations(self ref, functions List[EmittableFunction]) Void = {
-        for function in functions then {
+    emit_mir_function_declarations(self ref) Void = {
+        let mut emitted = Set[String].new()
+        for function in self.program.functions then {
+            let c_name = self.callable_c_name(function.identifier)
+            if emitted.contains(c_name) then { continue }
+            emitted.insert(c_name)
             if self.type_is_never(function.return_type) then {
                 self.buffer.push_string("_Noreturn ")
             }
             let return_c_type = self.c_type_name(function.return_type)
-            let declaration_params = when self.context.get_function_type(function.def_id) in {
-                .Some(function_type) then {
-                    yield when self.method_owner_type(function.def_id) in {
-                        .Some(owner_type) then self.build_method_param_type_list_from_function_type(function.params, owner_type, function_type),
-                        .None() then self.build_param_type_list_from_function_type(function.params, function_type),
-                    }
-                },
-                .None() then function.declaration_params,
+            let declaration_params = when self.context.get_function_type(function.identifier.def_id) in {
+                .Some(function_type) then self.build_param_type_list_from_function_type(function.params, function_type),
+                .None() then self.build_param_type_list(function.params),
             }
-            self.buffer.push_string("\(return_c_type) \(function.c_name)(\(declaration_params));\n")
-            when self.method_owner_type(function.def_id) in {
-                .Some(owner_type) then {
-                    let raw_method_name = self.context.get_name(function.def_id) or else ""
-                    let escaped_method_name = self.sanitize_codegen_identifier(raw_method_name)
-                    if raw_method_name <> "" and escaped_method_name <> raw_method_name then {
-                        let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                        let raw_c_name = self.normalize_codegen_lookup_name("\(owner_c_name)_\(raw_method_name)")
-                        if raw_c_name <> function.c_name then {
-                            self.buffer.push_string("#define \(raw_c_name) \(function.c_name)\n")
-                        }
-                    }
-                },
-                .None() then {},
-            }
+            self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n")
         }
         self.buffer.push_string("\n")
     }
 
-    // ── emit_global_variables ─────────────────────────────────────────────────
+    // ── emit_mir_global_variables ────────────────────────────────────────────
 
-    /// 生成全局变量声明
-    ///
-    /// Requirements: 12.3, 12.4, 12.5
-    emit_global_variables(self mut ref, foreign_globals List[ForeignGlobalVariable], globals List[EmittableGlobalVariable]) Void = {
-        for global in foreign_globals then {
-            let c_type = self.c_type_name(global.decl_type)
-            if global.mutable then {
-                self.buffer.push_string("extern \(c_type) \(global.name);\n")
-            } else {
-                self.buffer.push_string("extern const \(c_type) \(global.name);\n")
-            }
-        }
-
-        for global in globals then {
-            let c_type = self.c_type_name(global.decl_type)
-            when global.simple_literal in {
-                .Some(lit_val) then {
-                    self.buffer.push_string("\(c_type) \(global.c_name) = \(lit_val);\n")
+    emit_mir_global_variables(self mut ref) Void = {
+        for global in self.program.globals then {
+            when global in {
+                .ForeignGlobalVariable(identifier, mutable, decl_type) then {
+                    let c_type = self.c_type_name(decl_type)
+                    let name = self.context.symbol_name(identifier)
+                    if mutable then {
+                        self.buffer.push_string("extern \(c_type) \(name);\n")
+                    } else {
+                        self.buffer.push_string("extern const \(c_type) \(name);\n")
+                    }
                 },
-                .None() then {
-                    self.buffer.push_string("\(c_type) \(global.c_name);\n")
-                    self.global_initializations.push(Pair[String, ref TypedExpr](global.c_name, global.initializer))
+                .GlobalVariable(identifier, _, _, decl_type) then {
+                    let c_type = self.c_type_name(decl_type)
+                    let c_name = self.c_identifier_for_symbol(identifier)
+                    self.buffer.push_string("\(c_type) \(c_name);\n")
                 },
+                _ then {},
             }
         }
         self.buffer.push_string("\n")
@@ -786,179 +373,13 @@ given CodeGen {
         self.process_vtable_requests()
     }
 
-    // ── emit_function_implementations ────────────────────────────────────────
+    // ── emit_mir_function_implementations ────────────────────────────────────
 
-    /// 逐函数生成实现，含逃逸分析预分析
-    ///
-    /// Requirements: 4.3, 4.4, 4.5, 13.3
-    emit_function_implementations(self mut ref, functions List[EmittableFunction]) Void = {
-        let global_escape_result = analyze_global_escape_summaries(self.program, self.context)
-        self.escape_context.set_global_analysis(self.program, global_escape_result.summaries, self.context)
-
-        for function in functions then {
-            let escaped_variables = when global_escape_result.escaped_variables_per_function.get(function.def_id.id) in {
-                .Some(ev) then {
-                    let mut copied = Dict[String, EscapeResult].new()
-                    for entry in ev.iterator() then {
-                        copied.insert(entry.first, entry.second)
-                    }
-                    yield copied
-                },
-                .None() then {
-                    let concrete_return_type = self.concretize_codegen_type(function.return_type)
-                    let return_type_opt = if self.type_is_void_or_never(concrete_return_type) then {
-                        yield Option[Type].None()
-                    } else {
-                        yield Option[Type].Some(concrete_return_type)
-                    }
-                    let mut fallback_ctx = EscapeContext.new()
-                    fallback_ctx.set_global_analysis(self.program, global_escape_result.summaries, self.context)
-                    fallback_ctx.reset(return_type_opt)
-                    fallback_ctx.pre_analyze(function.body, function.params)
-                    yield fallback_ctx.escaped_variables
-                },
-            }
-            self.emit_single_function(function.def_id, function.c_name, function.params, function.return_type, function.body, escaped_variables)
+    emit_mir_function_implementations(self mut ref) Void = {
+        for function in self.program.functions then {
+            let function_ref = box(function)
+            self.generate_mir_global_function(function_ref)
         }
-    }
-
-    /// 生成单个函数实现（含逃逸分析预分析和 Lambda 环境结构体插入）
-    ///
-    /// Requirements: 4.3, 11.1, 13.3
-    emit_single_function(
-        self mut ref,
-        def_id DefId,
-        c_name String,
-        params List[TypedParam],
-        return_type Type,
-        body ref TypedExpr,
-        escaped_variables Dict[String, EscapeResult],
-    ) Void = {
-        if self.emitted_function_names.contains(c_name) then {
-            return
-        }
-        let mut emitted_function_names = self.emitted_function_names
-        emitted_function_names.insert(c_name)
-        self.emitted_function_names = emitted_function_names
-
-        // 逃逸分析预分析
-        let concrete_return_type = self.concretize_codegen_type(return_type)
-        let return_type_opt = if self.type_is_void_or_never(concrete_return_type) then {
-            yield Option[Type].None()
-        } else {
-            yield Option[Type].Some(concrete_return_type)
-        }
-        self.escape_context.reset(return_type_opt)
-        self.escape_context.program = Option[ref MonomorphizedProgram].Some(self.program)
-        self.escape_context.compiler_context = Option[CompilerContext].Some(self.context)
-        self.escape_context.escaped_variables = escaped_variables
-        self.escape_context.variable_scopes.clear()
-        self.escape_context.current_scope_level = 0(UInt)
-        self.escape_context.reference_origins.clear()
-        self.escape_context.scope_stack.clear()
-
-        // 保存函数上下文状态（轻量字段）
-        let saved_type_prefix = self.current_function_type_prefix
-        let saved_function_c_name = self.current_function_c_name
-        let saved_function_return_type = self.current_function_return_type
-        let new_prefix = when self.method_owner_type(def_id) in {
-            .Some(owner_type) then Option[String].Some(self.emitted_type_c_name_fallback(owner_type)),
-            .None() then self.extract_type_prefix_from_c_name(c_name),
-        }
-        self.current_function_type_prefix = new_prefix
-        self.current_function_c_name = Option[String].Some(c_name)
-        self.current_function_return_type = Option[Type].Some(concrete_return_type)
-        self.escape_context.return_type = Option[Type].Some(concrete_return_type)
-        self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
-        self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
-        self.loop_stack = List[LoopContext].new()
-        self.yield_target_stack = List[CodegenYieldTarget].new()
-        self.pattern_binding_aliases = Dict[String, String].new()
-        self.captured_var_aliases = Dict[UInt, String].new()
-        self.captured_name_aliases = Dict[String, String].new()
-        self.local_c_identifier_overrides = Dict[UInt, String].new()
-        self.type_by_c_type_name_cache = Dict[String, Type].new()
-
-        // 保存并重置 Lambda 状态与主输出 buffer。
-        let saved_lambda_functions = self.lambda_functions
-        let saved_lambda_env_structs = self.lambda_env_structs
-        let mut saved_buffer = self.buffer
-        self.lambda_functions = box(String.new())
-        self.lambda_env_structs = box(String.new())
-        self.buffer = box(String.new())
-
-        // 函数体写入独立临时 buffer，避免把所有函数实现再复制到额外 parts 列表中。
-        let return_c_type = self.c_type_name(concrete_return_type)
-        let function_type_opt = self.context.get_function_type(def_id)
-        let body_param_count = when function_type_opt in {
-            .Some(function_type) then self.function_type_param_count(function_type),
-            .None() then 0(UInt),
-        }
-        let body_params = when function_type_opt in {
-            .Some(function_type) then {
-                let mut adjusted = List[TypedParam].new()
-                let mut i UInt = 0
-                for p in params then {
-                    let concrete_type = if i < body_param_count then self.function_type_param_type(function_type, i) or else p.param_type else p.param_type
-                    adjusted.push(TypedParam(p.name, p.mutable, concrete_type, p.named))
-                    i += 1
-                }
-                yield adjusted
-            },
-            .None() then params,
-        }
-        self.current_generic_bindings = Dict[String, Type].new()
-        let mut binding_i UInt = 0
-        while binding_i < params.count() and binding_i < body_params.count() then {
-            let original_param = params[binding_i]
-            let concrete_param = body_params[binding_i]
-            self.collect_current_function_type_bindings(original_param.param_type, concrete_param.param_type)
-            binding_i += 1
-        }
-
-        let params_str = self.build_param_list(body_params)
-
-        self.buffer.push_string("\(return_c_type) \(c_name)(\(params_str)) {\n")
-        self.indent = "    "
-        self.generate_lambda_body(body_params, body)
-        self.indent = ""
-        self.buffer.push_string("}\n")
-
-        // 按 Swift 侧顺序直接追加回主 buffer：lambda env structs → lambda funcs → 函数体。
-        let mut additional_capacity = self.buffer.count()
-        if not self.lambda_env_structs.is_empty() then {
-            additional_capacity += self.lambda_env_structs.count()
-        }
-        if not self.lambda_functions.is_empty() then {
-            additional_capacity += self.lambda_functions.count()
-        }
-        saved_buffer.reserve(saved_buffer.count() + additional_capacity)
-        if not self.lambda_env_structs.is_empty() then {
-            saved_buffer.push_string(self.lambda_env_structs)
-        }
-        if not self.lambda_functions.is_empty() then {
-            saved_buffer.push_string(self.lambda_functions)
-        }
-        saved_buffer.push_string(self.buffer)
-        self.buffer = saved_buffer
-
-        // 恢复 Lambda 状态
-        self.lambda_functions = saved_lambda_functions
-        self.lambda_env_structs = saved_lambda_env_structs
-        // 恢复函数上下文
-        self.current_function_type_prefix = saved_type_prefix
-        self.current_function_c_name = saved_function_c_name
-        self.current_function_return_type = saved_function_return_type
-        self.lifetime_scope_stack = List[mut ref List[Pair[String, Type]]].new()
-        self.defer_scope_stack = List[mut ref List[DeferredExpr]].new()
-        self.loop_stack = List[LoopContext].new()
-        self.yield_target_stack = List[CodegenYieldTarget].new()
-        self.pattern_binding_aliases = Dict[String, String].new()
-        self.captured_var_aliases = Dict[UInt, String].new()
-        self.captured_name_aliases = Dict[String, String].new()
-        self.current_generic_bindings = Dict[String, Type].new()
-        self.local_c_identifier_overrides = Dict[UInt, String].new()
-        self.type_by_c_type_name_cache = Dict[String, Type].new()
     }
 
     // ── emit_c_main ───────────────────────────────────────────────────────────
@@ -967,7 +388,7 @@ given CodeGen {
     ///
     /// Requirements: 12.6, 12.7, 12.8
     emit_c_main(self mut ref) Void = {
-        let has_global_inits = not self.global_initializations.is_empty()
+        let has_global_inits = self.has_mir_global_initializers()
         let has_user_main = when self.user_main_function_name in {
             .Some(_) then true,
             .None() then false,
@@ -983,15 +404,7 @@ given CodeGen {
 
         // 生成全局变量初始化
         if has_global_inits then {
-            self.push_scope()
-            for pair in self.global_initializations then {
-                let var_name = pair.first
-                let init_expr_ref = pair.second
-                let result_var = self.generate_expression_ssa(init_expr_ref)
-                self.add_indent()
-                self.buffer.push_string("\(var_name) = \(result_var);\n")
-            }
-            self.pop_scope()
+            self.emit_mir_global_initializers()
         }
 
         // 调用用户定义的 main 函数
@@ -1034,6 +447,30 @@ given CodeGen {
         self.buffer.push_string("return 0;\n")
         self.indent = ""
         self.buffer.push_string("}\n")
+    }
+
+    private has_mir_global_initializers(self ref) Bool = {
+        for global in self.program.globals then {
+            when global in {
+                .GlobalVariable(_, _, _, _) then { return true },
+                _ then {},
+            }
+        }
+        return false
+    }
+
+    private emit_mir_global_initializers(self mut ref) Void = {
+        for global in self.program.globals then {
+            when global in {
+                .GlobalVariable(identifier, initializer_function, _, _) then {
+                    let var_name = self.c_identifier_for_symbol(identifier)
+                    let initializer_name = self.callable_c_name(initializer_function)
+                    self.add_indent()
+                    self.buffer.push_string("\(var_name) = \(initializer_name)();\n")
+                },
+                _ then {},
+            }
+        }
     }
 
     // ── 辅助：构建参数列表字符串 ──────────────────────────────────────────────
@@ -1079,48 +516,6 @@ given CodeGen {
         if params.is_empty() then { return "void" }
         if self.function_type_param_count(function_type) <> params.count() then {
             return self.build_param_type_list(params)
-        }
-
-        let mut result = String.new()
-        let mut index = 0(UInt)
-        while index < self.function_type_param_count(function_type) then {
-            if index > 0(UInt) then {
-                result.push_string(", ")
-            }
-            let param_type = self.function_type_param_type(function_type, index) or else params[index].param_type
-            result.push_string(self.c_type_name(param_type))
-            index += 1(UInt)
-        }
-        return result
-    }
-
-    // 生成方法参数类型列表，self 参数使用 target_type
-    public build_method_param_type_list(self, params List[TypedParam], target_type Type) String = {
-        if params.is_empty() then { return "void" }
-
-        let mut result = String.new()
-        let mut first = true
-        for p in params then {
-            if not first then {
-                result.push_string(", ")
-            }
-            if first and p.name == "self" then {
-                // self 参数使用 target_type
-                let c_type = self.c_type_name(target_type)
-                result.push_string(c_type)
-            } else {
-                let c_type = self.c_type_name(p.param_type)
-                result.push_string(c_type)
-            }
-            first = false
-        }
-        return result
-    }
-
-    public build_method_param_type_list_from_function_type(self, params List[TypedParam], target_type Type, function_type Type) String = {
-        if params.is_empty() then { return "void" }
-        if self.function_type_param_count(function_type) <> params.count() then {
-            return self.build_method_param_type_list(params, target_type)
         }
 
         let mut result = String.new()

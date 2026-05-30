@@ -10,6 +10,12 @@
 
 // MARK: - Vtable Request Processing
 
+struct CodeGenTraitCallArgument {
+  let value: String
+  let type: Type
+  let ownership: MIROwnershipUse
+}
+
 extension CodeGen {
 
   private func sanitizeTraitMangleToken(_ raw: String) -> String {
@@ -34,8 +40,8 @@ extension CodeGen {
   
   /// Resolves the actual C function name for a concrete type's trait method implementation.
   ///
-  /// Searches through the monomorphized global nodes for matching method declarations
-  /// in `givenDeclaration` blocks, or falls back to the `staticMethodLookup` table.
+  /// Searches through MIR given globals for matching method declarations,
+  /// or falls back to the MIR static method lookup table.
   ///
   /// - Parameters:
   ///   - concreteType: The concrete type (e.g., `.structure(defId)`)
@@ -64,9 +70,9 @@ extension CodeGen {
       "\(qualifiedTypeName)_trait_\(compositeTraitTag)_\(methodName)"
     }
 
-    // Strategy 1: Search through givenDeclaration nodes for a matching method
-    for node in ast.globalNodes {
-      guard case .givenDeclaration(let type, let trait, let methods) = node else { continue }
+    // Strategy 1: Search through MIR given globals for a matching method.
+    for node in mirProgram.globals {
+      guard case .given(let type, let trait, let methods) = node else { continue }
       guard type == concreteType else { continue }
 
       if let trait {
@@ -79,15 +85,22 @@ extension CodeGen {
       }
       
       for method in methods {
-        let emittedMethodSymbolName = context.getName(method.identifier.defId) ?? ""
+        let logicalMethodName = mirProgram.receiverMethodDispatch[method.defId]?.methodName
+          ?? context.getName(method.defId)
+          ?? ""
+        if logicalMethodName == methodName {
+          return cIdentifier(for: method)
+        }
+
+        let emittedMethodSymbolName = context.getName(method.defId) ?? ""
         if let compositeTraitMethodName, emittedMethodSymbolName == compositeTraitMethodName {
-          return cIdentifier(for: method.identifier)
+          return cIdentifier(for: method)
         }
         if emittedMethodSymbolName == methodName {
-          return cIdentifier(for: method.identifier)
+          return cIdentifier(for: method)
         }
         if emittedMethodSymbolName.hasSuffix("_\(methodName)") {
-          return cIdentifier(for: method.identifier)
+          return cIdentifier(for: method)
         }
       }
     }
@@ -112,7 +125,7 @@ extension CodeGen {
 
   /// Processes all vtable requests collected during monomorphization.
   ///
-  /// For each (concreteType, trait) combination in `ast.vtableRequests`:
+  /// For each (concreteType, trait) combination in MIR trait-vtable globals:
   /// 1. Generates the vtable struct definition (once per trait)
   /// 2. For each self-by-value method, generates a wrapper function
   /// 3. Generates the vtable instance (static const global)
@@ -121,7 +134,13 @@ extension CodeGen {
   /// but before function implementations, so that wrapper functions and vtable instances
   /// are available when function bodies reference them.
   func processVtableRequests() {
-    let requests = ast.vtableRequests
+    var requestByKey: [MIRTraitVTableKey: MIRTraitVTable] = [:]
+    for global in mirProgram.globals {
+      if case .traitVTable(let request) = global {
+        requestByKey[request.key] = request
+      }
+    }
+    let requests = Array(requestByKey.values)
     guard !requests.isEmpty else { return }
     
     // Track which trait vtable struct definitions have been generated
@@ -130,6 +149,9 @@ extension CodeGen {
     // Sort requests for deterministic output
     let sortedRequests = requests.sorted { a, b in
       if a.traitName != b.traitName { return a.traitName < b.traitName }
+      let aArgs = a.traitTypeArguments.map(\.stableKey).joined(separator: ",")
+      let bArgs = b.traitTypeArguments.map(\.stableKey).joined(separator: ",")
+      if aArgs != bArgs { return aArgs < bArgs }
       return a.concreteType.stableKey < b.concreteType.stableKey
     }
     
@@ -143,35 +165,17 @@ extension CodeGen {
         continue
       }
       
-      // Get ordered trait methods
-      guard let orderedMethods = try? SemaUtils.orderedTraitMethods(
-        traitName,
-        traits: ast.traits,
-        currentLine: nil
-      ) else {
-        continue
-      }
-      
-      // Build trait type parameter substitution for generic traits
-      var traitTypeParamSubstitution: [String: Type] = [:]
-      if let traitInfo = ast.traits[traitName], !traitInfo.typeParameters.isEmpty {
-        for (i, param) in traitInfo.typeParameters.enumerated() {
-          if i < request.traitTypeArgs.count {
-            traitTypeParamSubstitution[param.name] = request.traitTypeArgs[i]
-          }
-        }
-      }
+      let orderedMethods = request.methods
       
       // For generic traits, the vtable struct key includes type args
-      let vtableStructKey = vtableStructKeyName(traitName: traitName, traitTypeArgs: request.traitTypeArgs)
-      let vtableStructCName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: request.traitTypeArgs)
+      let vtableStructKey = vtableStructKeyName(traitName: traitName, traitTypeArgs: request.traitTypeArguments)
+      let vtableStructCName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: request.traitTypeArguments)
       
       // Step 1: Generate vtable struct definition (once per trait specialization)
       if !generatedVtableStructs.contains(vtableStructKey) {
         generatedVtableStructs.insert(vtableStructKey)
         if let structDef = generateVtableStructDefinition(
-          traitName: traitName,
-          traitTypeParamSubstitution: traitTypeParamSubstitution,
+          methods: orderedMethods,
           vtableStructName: vtableStructCName
         ) {
           buffer += structDef
@@ -182,12 +186,13 @@ extension CodeGen {
       // Step 2: Resolve actual method C names and generate wrappers
       var actualMethodCNames: [String: String] = [:]
       
-      for (methodName, signature) in orderedMethods {
+      for method in orderedMethods {
+        let methodName = method.name
         // Resolve the actual method C name for this concrete type
         guard let actualCName = resolveMethodCName(
           concreteType: request.concreteType,
           traitName: traitName,
-          traitTypeArgs: request.traitTypeArgs,
+          traitTypeArgs: request.traitTypeArguments,
           methodName: methodName
         ) else {
           continue
@@ -201,9 +206,8 @@ extension CodeGen {
           concreteTypeCName: concreteTypeCName,
           traitName: traitName,
           methodName: methodName,
-          signature: signature,
-          actualMethodCName: actualCName,
-          traitTypeParamSubstitution: traitTypeParamSubstitution
+          method: method,
+          actualMethodCName: actualCName
         ) {
           buffer += wrapperCode
           buffer += "\n"
@@ -214,7 +218,8 @@ extension CodeGen {
       if let instanceCode = generateVtableInstance(
         concreteTypeCName: concreteTypeCName,
         traitName: traitName,
-        traitTypeArgs: request.traitTypeArgs,
+        traitTypeArgs: request.traitTypeArguments,
+        methods: orderedMethods,
         actualMethodCNames: actualMethodCNames
       ) {
         buffer += instanceCode
@@ -227,110 +232,7 @@ extension CodeGen {
 // MARK: - Vtable Struct Generation
 
 extension CodeGen {
-  
-  /// Resolves a TypeNode from a trait method signature to a semantic Type for vtable generation.
-  /// This handles the common cases that appear in object-safe trait methods.
-  /// For generic traits, traitTypeParamSubstitution maps type parameter names to concrete types.
-  func resolveTypeNodeForVtable(_ node: TypeNode, traitTypeParamSubstitution: [String: Type] = [:]) -> Type? {
-    switch node {
-    case .identifier(let name):
-      // Check trait type parameter substitution first (for generic traits)
-      if let substituted = traitTypeParamSubstitution[name] {
-        return substituted
-      }
-      // Try builtin types first
-      if let builtinType = SemaUtils.resolveBuiltinType(name) {
-        return builtinType
-      }
-      // Try looking up as a struct or enum type in the context (unqualified)
-      if let defId = context.lookupDefId(modulePath: [], name: name, sourceFile: nil) {
-        if let kind = context.getKind(defId) {
-          switch kind {
-          case .type(.structure):
-            // Verify this defId has a valid C identifier mapping
-            if cIdentifierByDefId[defIdKey(defId)] != nil {
-              return .structure(defId: defId)
-            }
-          case .type(.`enum`):
-            if cIdentifierByDefId[defIdKey(defId)] != nil {
-              return .`enum`(defId: defId)
-            }
-          default:
-            break
-          }
-        }
-      }
-      // Secondary lookup: search through cIdentifierByDefId for a matching type
-      // This handles cases where the type is in a different module (e.g., std.String)
-      for (defIdKey, _) in cIdentifierByDefId {
-        let defId = DefId(id: defIdKey)
-        guard let kind = context.getKind(defId) else { continue }
-        let defName = context.getName(defId) ?? ""
-        // Match by simple name (last component)
-        let simpleName = defName.components(separatedBy: ".").last ?? defName
-        guard simpleName == name else { continue }
-        switch kind {
-        case .type(.structure):
-          return .structure(defId: defId)
-        case .type(.`enum`):
-          return .`enum`(defId: defId)
-        default:
-          break
-        }
-      }
-      return nil
-      
-    case .reference(let inner, mutable: let mutable):
-      if let resolved = resolveTypeNodeForVtable(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
-      }
-      return nil
-      
-    case .weakReference(let inner, let mutable):
-      if let resolved = resolveTypeNodeForVtable(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        return mutable ? .mutableWeakReference(inner: resolved) : .weakReference(inner: resolved)
-      }
-      return nil
-      
-    case .pointer(let inner, mutable: let mutable):
-      if let resolved = resolveTypeNodeForVtable(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
-      }
-      return nil
-      
-    case .generic(let base, let args):
-      // Resolve generic type arguments
-      let resolvedArgs = args.compactMap { resolveTypeNodeForVtable($0, traitTypeParamSubstitution: traitTypeParamSubstitution) }
-      guard resolvedArgs.count == args.count else { return nil }
-      // Look up the base type as a generic struct/enum
-      if let defId = context.lookupDefId(modulePath: [], name: base, sourceFile: nil) {
-        if let kind = context.getKind(defId) {
-          switch kind {
-          case .type(.structure), .genericTemplate(.structure):
-            return .genericStruct(template: base, args: resolvedArgs)
-          case .type(.`enum`), .genericTemplate(.`enum`):
-            return .genericEnum(template: base, args: resolvedArgs)
-          default:
-            break
-          }
-        }
-      }
-      return nil
-      
-    case .functionType(let paramTypes, let returnType):
-      let resolvedParams = paramTypes.compactMap { resolveTypeNodeForVtable($0, traitTypeParamSubstitution: traitTypeParamSubstitution) }
-      guard resolvedParams.count == paramTypes.count else { return nil }
-      guard let resolvedReturn = resolveTypeNodeForVtable(returnType, traitTypeParamSubstitution: traitTypeParamSubstitution) else { return nil }
-      let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
-      return .function(parameters: params, returns: resolvedReturn)
-      
-    case .inferredSelf:
-      // Self should not appear in non-receiver positions for object-safe traits
-      return nil
-      
-    }
-  }
-  
+
   /// Generates the vtable struct type definition for a trait.
   ///
   /// For example, for `trait Error { message(self) String }`, generates:
@@ -344,50 +246,28 @@ extension CodeGen {
   /// Methods are ordered by declaration order, with parent trait methods first.
   ///
   /// - Parameters:
-  ///   - traitName: The name of the trait to generate a vtable struct for
-  ///   - traitTypeParamSubstitution: Substitution map for generic trait type parameters
-  ///   - vtableStructName: The C name for the vtable struct (allows customization for generic traits)
-  /// - Returns: The generated C code for the vtable struct definition, or nil if the trait is not found
-  func generateVtableStructDefinition(traitName: String, traitTypeParamSubstitution: [String: Type] = [:], vtableStructName: String? = nil) -> String? {
-    let traits = ast.traits
-    
-    // Get ordered methods (parent methods first, then own methods)
-    guard let orderedMethods = try? SemaUtils.orderedTraitMethods(
-      traitName,
-      traits: traits,
-      currentLine: nil
-    ) else {
-      return nil
-    }
-    
+  ///   - methods: Ordered vtable methods lowered into MIR
+  ///   - vtableStructName: The C name for the vtable struct
+  /// - Returns: The generated C code for the vtable struct definition
+  func generateVtableStructDefinition(methods: [MIRTraitVTableMethod], vtableStructName: String) -> String? {
     // Build the vtable struct
-    let structName = vtableStructName ?? "__koral_vtable_\(sanitizeCIdentifier(traitName))"
-    var code = "struct \(structName) {\n"
+    var code = "struct \(vtableStructName) {\n"
     
-    for (methodName, signature) in orderedMethods {
-      // Resolve return type to C type name
-      let returnCType: String
-      if let resolvedReturn = resolveTypeNodeForVtable(signature.returnType, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        returnCType = cTypeName(resolvedReturn)
-      } else {
-        returnCType = "void"
-      }
+    for method in methods {
+      let returnCType = method.returnType.map { cTypeName($0) } ?? "void"
       
       // Build parameter list: first param is always struct Ref (the receiver)
       var paramTypes = ["struct __koral_Ref"]
       
       // Add non-self parameters
-      for (i, param) in signature.parameters.enumerated() {
-        // Skip the self parameter (first parameter named "self")
-        if i == 0 && param.name == "self" { continue }
-        
-        if let resolvedType = resolveTypeNodeForVtable(param.type, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-          paramTypes.append(cTypeName(resolvedType))
+      for param in method.parameters where !param.isSelf {
+        if let type = param.type {
+          paramTypes.append(cTypeName(type))
         }
       }
       
       let paramsStr = paramTypes.joined(separator: ", ")
-      let sanitizedMethodName = sanitizeCIdentifier(methodName)
+      let sanitizedMethodName = sanitizeCIdentifier(method.name)
       code += "    \(returnCType) (*\(sanitizedMethodName))(\(paramsStr));\n"
     }
     
@@ -399,24 +279,6 @@ extension CodeGen {
 // MARK: - Wrapper Function Generation
 
 extension CodeGen {
-  
-  /// Checks whether a trait method is `self` by value (needs a wrapper) or `self ref` (no wrapper needed).
-  ///
-  /// - Parameter signature: The trait method signature
-  /// - Returns: `true` if the method takes `self` by value, `false` if `self ref`
-  func isSelfByValue(_ signature: TraitMethodSignature) -> Bool {
-    guard let firstParam = signature.parameters.first,
-          firstParam.name == "self" else {
-      return false
-    }
-    // Reference receivers (`self ref` / `self mut ref`) are object-safe dispatch targets.
-    switch firstParam.type {
-    case .reference:
-      return false
-    default:
-      return true
-    }
-  }
   
   /// Returns the C identifier for a concrete type, used in function names like `std_String`.
   ///
@@ -466,12 +328,11 @@ extension CodeGen {
     concreteTypeCName: String,
     traitName: String,
     methodName: String,
-    signature: TraitMethodSignature,
-    actualMethodCName: String,
-    traitTypeParamSubstitution: [String: Type] = [:]
+    method: MIRTraitVTableMethod,
+    actualMethodCName: String
   ) -> String? {
     // self ref methods don't need a wrapper
-    guard isSelfByValue(signature) else {
+    guard method.selfByValue else {
       return nil
     }
     
@@ -480,24 +341,17 @@ extension CodeGen {
     let sanitizedConcreteTypeCName = sanitizeCIdentifier(concreteTypeCName)
     let wrapperName = "__koral_wrapper_\(sanitizedConcreteTypeCName)_\(sanitizedTraitName)_\(sanitizedMethodName)"
     
-    // Resolve return type
-    let returnCType: String
-    if let resolvedReturn = resolveTypeNodeForVtable(signature.returnType, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-      returnCType = cTypeName(resolvedReturn)
-    } else {
-      returnCType = "void"
-    }
+    let returnCType = method.returnType.map { cTypeName($0) } ?? "void"
     
     // Build parameter list: first is always `struct Ref self_ref`
     var paramDecls = ["struct __koral_Ref self_ref"]
     var paramNames: [String] = []
     
     // Add non-self parameters
-    for (i, param) in signature.parameters.enumerated() {
-      if i == 0 && param.name == "self" { continue }
+    for param in method.parameters where !param.isSelf {
       let paramCName = sanitizeCIdentifier(param.name)
-      if let resolvedType = resolveTypeNodeForVtable(param.type, traitTypeParamSubstitution: traitTypeParamSubstitution) {
-        paramDecls.append("\(cTypeName(resolvedType)) \(paramCName)")
+      if let type = param.type {
+        paramDecls.append("\(cTypeName(type)) \(paramCName)")
         paramNames.append(paramCName)
       }
     }
@@ -608,6 +462,7 @@ extension CodeGen {
     concreteTypeCName: String,
     traitName: String,
     traitTypeArgs: [Type] = [],
+    methods: [MIRTraitVTableMethod],
     actualMethodCNames: [String: String]
   ) -> String? {
     let instanceName = vtableInstanceName(
@@ -622,26 +477,16 @@ extension CodeGen {
     }
     generatedVtableInstances.insert(instanceName)
     
-    let traits = ast.traits
-    
-    // Get ordered methods (parent methods first, then own methods)
-    guard let orderedMethods = try? SemaUtils.orderedTraitMethods(
-      traitName,
-      traits: traits,
-      currentLine: nil
-    ) else {
-      return nil
-    }
-    
     let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
     
     var code = "static const struct \(vtableStructName) \(instanceName) = {\n"
     
-    for (methodName, signature) in orderedMethods {
+    for method in methods {
+      let methodName = method.name
       let sanitizedMethodName = sanitizeCIdentifier(methodName)
       
       let functionRef: String
-      if isSelfByValue(signature) {
+      if method.selfByValue {
         // self by value: vtable entry points to the wrapper function
         functionRef = wrapperFunctionName(
           concreteTypeCName: concreteTypeCName,
@@ -668,48 +513,36 @@ extension CodeGen {
 
 extension CodeGen {
 
-  /// Generates C code for converting a concrete type reference into a trait object reference (TraitRef).
-  ///
-  /// Trait object conversion: from T ref → TraitName ref (zero allocation).
-  /// Copies the Ref into TraitRef and sets the vtable pointer.
-  /// Only reference types can be converted to trait objects.
-  func generateTraitObjectConversion(
-    inner: TypedExpressionNode,
+  func generateTraitObjectConversionABI(
+    innerResult: String,
+    innerType: Type,
+    sourceOwnership: MIROwnershipUse,
     traitName: String,
     traitTypeArgs: [Type] = [],
-    concreteType: Type,
-    type: Type
+    concreteType: Type
   ) -> String {
-    let innerResult = generateExpressionSSA(inner)
     let result = nextTempWithDecl(cType: "struct __koral_TraitRef")
-
-    // Get the C identifier for the concrete type (needed for vtable instance name)
     let concreteTypeCName = concreteTypeCIdentifier(concreteType) ?? cTypeName(concreteType)
-
-    // Get the vtable instance name
     let vtableName = vtableInstanceName(
       concreteTypeCName: concreteTypeCName,
       traitName: traitName,
       traitTypeArgs: traitTypeArgs
     )
 
-    switch inner.type {
+    switch innerType {
     case .reference, .mutableReference:
       break
     default:
-      fatalError("Trait object conversion requires a reference type source, got \(inner.type)")
+      fatalError("Trait object conversion requires a reference type source, got \(innerType)")
     }
 
-    // From T ref → trait object ref (zero allocation)
-    // Copy fields from Ref, set vtable.
-    // Retain only for lvalue source (copy semantics); rvalue transfers ownership.
     addIndent()
     appendToBuffer("\(result).ptr = \(innerResult).ptr;\n")
     addIndent()
     appendToBuffer("\(result).control = \(innerResult).control;\n")
     addIndent()
     appendToBuffer("\(result).vtable = &\(vtableName);\n")
-    if inner.valueCategory == .lvalue {
+    if sourceOwnership == .copy {
       addIndent()
       appendToBuffer("__koral_retain(\(result).control);\n")
     }
@@ -722,45 +555,15 @@ extension CodeGen {
 
 extension CodeGen {
 
-  /// Generates C code for a dynamic dispatch call through a trait object's vtable.
-  ///
-  /// The generated code:
-  /// 1. Evaluates the receiver expression (a `struct TraitRef`)
-  /// 2. Evaluates all argument expressions
-  /// 3. Casts the vtable pointer to the correct vtable struct type
-  /// 4. Calls the method through the function pointer, passing `receiver.ref` as the first argument
-  func generateTraitMethodCall(
-    receiver: TypedExpressionNode,
+  func generateTraitMethodCallABI(
+    receiverResult: String,
+    receiverOwnership: MIROwnershipUse,
     traitName: String,
+    traitTypeArgs: [Type] = [],
     methodName: String,
-    methodIndex: Int,
-    arguments: [TypedExpressionNode],
+    arguments: [CodeGenTraitCallArgument],
     type: Type
   ) -> String {
-    // 1. Evaluate receiver (produces a struct TraitRef)
-    let receiverResult = generateExpressionSSA(receiver)
-
-    // 2. Evaluate all arguments, copying lvalues as needed
-    var argResults: [String] = []
-    for arg in arguments {
-      let result = generateExpressionSSA(arg)
-      if arg.valueCategory == .lvalue {
-        let copyResult = nextTempWithDecl(cType: cTypeName(arg.type))
-        appendCopyAssignment(for: arg.type, source: result, dest: copyResult, indent: indent)
-        argResults.append(copyResult)
-      } else {
-        argResults.append(result)
-      }
-    }
-
-    // 3. Extract trait type args from receiver type for generic traits
-    var traitTypeArgs: [Type] = []
-    if case .reference(let inner) = receiver.type,
-       case .traitObject(_, let typeArgs) = inner {
-      traitTypeArgs = typeArgs
-    }
-    
-    // 4. Cast vtable pointer to the correct vtable struct type
     let vtableStructName = vtableStructCIdentifier(traitName: traitName, traitTypeArgs: traitTypeArgs)
     let vtVar = nextTempWithInit(cType: "const struct \(vtableStructName)*", initExpr: "(const struct \(vtableStructName)*)\(receiverResult).vtable")
 
@@ -770,12 +573,20 @@ extension CodeGen {
     // - rvalue receiver: move ownership directly
     let sanitizedMethodName = sanitizeCIdentifier(methodName)
     let selfArg = nextTempWithInit(cType: "struct __koral_Ref", initExpr: "(struct __koral_Ref){\(receiverResult).ptr, \(receiverResult).control}")
-    if receiver.valueCategory == .lvalue {
+    if receiverOwnership == .copy {
       addIndent()
       appendToBuffer("__koral_retain(\(selfArg).control);\n")
     }
     var allArgs = [selfArg]
-    allArgs.append(contentsOf: argResults)
+    for argument in arguments {
+      if argument.ownership == .copy {
+        let copyResult = nextTempWithDecl(cType: cTypeName(argument.type))
+        appendCopyAssignment(for: argument.type, source: argument.value, dest: copyResult, indent: indent)
+        allArgs.append(copyResult)
+      } else {
+        allArgs.append(argument.value)
+      }
+    }
     let argsStr = allArgs.joined(separator: ", ")
 
     // 6. Generate the function pointer call

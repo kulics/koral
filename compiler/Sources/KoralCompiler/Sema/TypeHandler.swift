@@ -928,12 +928,12 @@ public class ReferenceHandler: TypeHandler {
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         return """
         \(dest) = \(source);
-        __koral_retain(\(dest).control);
+        __koral_retain((\(dest)).control);
         """
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
-        return "__koral_release(\(value).control);"
+        return "__koral_release((\(value)).control);"
     }
     
     public func getQualifiedName(_ type: Type) -> String {
@@ -1100,12 +1100,12 @@ public class WeakReferenceHandler: TypeHandler {
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
         return """
         \(dest) = \(source);
-        __koral_weak_retain(\(dest).control);
+        __koral_weak_retain((\(dest)).control);
         """
     }
     
     public func generateDropCode(_ type: Type, value: String) -> String {
-        return "__koral_weak_release(\(value).control);"
+        return "__koral_weak_release((\(value)).control);"
     }
     
     public func getQualifiedName(_ type: Type) -> String {

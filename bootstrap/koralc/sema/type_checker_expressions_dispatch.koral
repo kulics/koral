@@ -279,16 +279,13 @@ given TypeChecker {
                     _ then typed_subj.expr_type,
                 }
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
-                let mut checked_arms = List[WhenArm].new()
-                for arm in arms then {
-                    let arm_body = arm.body
-                    checked_arms.push(WhenArm(arm.pattern, arm_body))
-                }
                 let mut typed_arms = List[TypedWhenArm].new()
+                let mut patterns = List[ref TypedPattern].new()
                 let mut result_type = Type.Unknown()
                 self.push_yield_target(span)
                 let mut running_expected = expected
-                for arm in checked_arms then {
+                let mut arm_index UInt = 0
+                for arm in arms then {
                     let mut arm_scope = Scope.new_child(scope)
                     let arm_pattern_ref = box(arm.pattern)
                     self.bind_pattern_vars(arm_pattern_ref, pattern_subject_type, arm_scope)
@@ -355,9 +352,9 @@ given TypeChecker {
                                             result_type = common_t
                                         },
                                         .None() then {
-                                            self.push_expr_diagnostic(
-                                                box(Expr.WhenExpr(subject, checked_arms, span)),
-                                                "Type mismatch: expected \(self.display_type_name(result_type)), got \(self.display_type_name(typed_arm_type))"
+                                            self.push_diagnostic_at_span(
+                                                "Type mismatch: expected \(self.display_type_name(result_type)), got \(self.display_type_name(typed_arm_type))",
+                                                span
                                             )
                                         },
                                     }
@@ -365,13 +362,12 @@ given TypeChecker {
                             }
                         },
                     }
-                    typed_arms.push(TypedWhenArm(box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope)), box(typed_body), typed_arm_type))
+                    let lowered_pattern_ref = box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope))
+                    patterns.push(lowered_pattern_ref)
+                    typed_arms.push(TypedWhenArm(lowered_pattern_ref, box(typed_body), typed_arm_type))
+                    arm_index += 1
                 }
                 let _ = self.pop_yield_target()
-                let mut patterns = List[ref TypedPattern].new()
-                for typed_arm in typed_arms then {
-                    patterns.push(typed_arm.pattern)
-                }
                 let ex_checker = ExhaustivenessChecker.new(
                     exhaustiveness_subject_type,
                     patterns,
@@ -381,7 +377,7 @@ given TypeChecker {
                 )
                 when ex_checker.check() in {
                     .Error(e) then {
-                        self.push_expr_diagnostic(box(Expr.WhenExpr(subject, checked_arms, span)), e.message())
+                        self.push_diagnostic_at_span(e.message(), span)
                     },
                     .Ok(_) then {},
                 }
@@ -901,9 +897,9 @@ given TypeChecker {
                 for seg in copied_path then {
                     current_type = when current_type in {
                         .PointerType(inner) then {
-                            let pointee = inner.val
-                            let segment_type = self.resolve_member_type(pointee, seg)
+                            let segment_type = self.resolve_member_type_ref(inner, seg)
                             if segment_type is .Unknown() then {
+                                let pointee = inner.val
                                 let raw_method = self.resolve_method_signature(pointee, seg)
                                 let visible_method = self.resolve_source_method_signature(pointee, seg)
                                 let inaccessible_method = when raw_method in {
@@ -938,6 +934,81 @@ given TypeChecker {
                                         },
                                     }
                                 }
+                            }
+                            yield segment_type
+                        },
+                        .MutablePointerType(inner) then {
+                            let segment_type = self.resolve_member_type_ref(inner, seg)
+                            if segment_type is .Unknown() then {
+                                let pointee = inner.val
+                                let raw_method = self.resolve_method_signature(pointee, seg)
+                                let visible_method = self.resolve_source_method_signature(pointee, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
+                                if not inaccessible_method then {
+                                    let has_pointer_method = self.resolve_source_method_signature(current_type, seg) is .Some(_)
+                                    self.report_pointer_member_access_issue_if_needed(segment_type, has_pointer_method, pointee, seg)
+                                }
+                            }
+                            yield segment_type
+                        },
+                        .MutableReferenceType(inner) then {
+                            let segment_type = self.resolve_member_type_ref(inner, seg)
+                            if segment_type is .Unknown() then {
+                                let raw_method = self.resolve_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
+                            }
+                            yield segment_type
+                        },
+                        .ReferenceType(inner) then {
+                            let segment_type = self.resolve_member_type_ref(inner, seg)
+                            if segment_type is .Unknown() then {
+                                let raw_method = self.resolve_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
+                            }
+                            yield segment_type
+                        },
+                        .WeakReferenceType(inner) then {
+                            let segment_type = self.resolve_member_type_ref(inner, seg)
+                            if segment_type is .Unknown() then {
+                                let raw_method = self.resolve_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
+                            }
+                            yield segment_type
+                        },
+                        .MutableWeakReferenceType(inner) then {
+                            let segment_type = self.resolve_member_type_ref(inner, seg)
+                            if segment_type is .Unknown() then {
+                                let raw_method = self.resolve_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let inaccessible_method = when raw_method in {
+                                    .Some(method) then visible_method is .None()
+                                        and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
+                                    .None() then false,
+                                }
+                                inaccessible_method_member = inaccessible_method
                             }
                             yield segment_type
                         },

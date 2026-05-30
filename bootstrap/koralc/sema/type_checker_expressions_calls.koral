@@ -1,4 +1,3 @@
-using std::os { .. }
 
 given TypeChecker {
     private generic_function_template_for_callee(self, callee ref TypedExpr) Option[GenericFunctionTemplate] = {
@@ -256,38 +255,43 @@ given TypeChecker {
     }
 
     private validate_generic_function_call_constraints(self, callee ref Expr, typed_callee ref TypedExpr, typed_args List[ref TypedExpr], scope Scope) Void = {
-        let template = self.generic_function_template_for_callee(typed_callee) or else {
-            return
-        }
-        if template.type_parameters.is_empty() then {
-            return
-        }
-        let bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
-            return
-        }
-
-        for tp in template.type_parameters then {
-            if bindings.get(tp.name) is .Some(bound_type) then {
-                for constraint in tp.constraints then {
-                    if not (constraint == "Any") then {
-                        when self.storage.trait_registry.get(constraint) in {
-                            .Some(info) then {
-                                if self.make_visibility_checker() is .Some(checker) then {
-                                    when checker.check_symbol(info.module_path, constraint, false) in {
-                                        .Ok(_) then {},
-                                        .Error(message) then {
-                                            self.push_typed_expr_diagnostic(typed_callee, message.message())
-                                            return
-                                        },
+        when self.generic_function_template_for_callee(typed_callee) in {
+            .Some(template) then {
+                if template.type_parameters.is_empty() then {
+                } else {
+                    when self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) in {
+                        .Some(bindings) then {
+                            for tp in template.type_parameters then {
+                                if bindings.get(tp.name) is .Some(bound_type) then {
+                                    for constraint in tp.constraints then {
+                                        if not (constraint == "Any") then {
+                                            when self.storage.trait_registry.get(constraint) in {
+                                                .Some(info) then {
+                                                    if self.make_visibility_checker() is .Some(checker) then {
+                                                        when checker.check_symbol(info.module_path, constraint, false) in {
+                                                            .Ok(_) then {},
+                                                            .Error(message) then {
+                                                                self.push_typed_expr_diagnostic(typed_callee, message.message())
+                                                                return
+                                                            },
+                                                        }
+                                                    }
+                                                },
+                                                .None() then {},
+                                            }
+                                            let _ = self.enforce_explicit_trait_requirement_with_context(bound_type, constraint, tp.name)
+                                        }
                                     }
                                 }
-                            },
-                            .None() then {},
-                        }
-                        let _ = self.enforce_explicit_trait_requirement_with_context(bound_type, constraint, tp.name)
+                            }
+                        },
+                        .None() then {
+                        },
                     }
                 }
-            }
+            },
+            .None() then {
+            },
         }
     }
 

@@ -586,7 +586,7 @@ private let run_check(options InvocationOptions) Int = {
         eprintln(it.message())
         return 1
     }
-    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
+    let result = check_resolved_graph(prepared.graph, prepared.display_name)
     profile_phase("check: type check", type_check_start)
 
     if result.diagnostics.has_errors() then {
@@ -766,7 +766,14 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
     )
     let mut mono_program = mono.monomorphize()
     profile_phase("\(phase_prefix): monomorphize", mono_start)
-    let mono_output = Pair[CompilerContext, MonomorphizedProgram](context, mono_program)
+
+    debug_phase("\(phase_prefix): mir lower")
+    let mir_start = MonoTime.now()
+    let mir_program = MIRLowerer.new(mono_program.ref, context).lower()
+    let _ = mir_program.functions.count()
+    profile_phase("\(phase_prefix): mir lower", mir_start)
+
+    let codegen_output = Pair[CompilerContext, MIRProgram](context, mir_program)
 
     let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir)
 
@@ -779,11 +786,11 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
     }
 
     {
-        let context = mono_output.first
-        let mut mono_program = mono_output.second
+        let context = codegen_output.first
+        let mut mir_program = codegen_output.second
         debug_phase("\(phase_prefix): codegen")
         let codegen_start = MonoTime.now()
-        let mut cg = CodeGen.new(mono_program.ref, context)
+        let mut cg = CodeGen.new(mir_program.ref, context)
         let generated_c = cg.generate()
         profile_phase("\(phase_prefix): codegen", codegen_start)
 
