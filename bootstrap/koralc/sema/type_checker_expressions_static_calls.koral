@@ -564,30 +564,29 @@ given TypeChecker {
         let mut cached_adapted_base_type = Type.Unknown()
         when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
-                let method_name = self.context().symbol_name(method)
+                let method_val = method.val
+                let method_name = self.context().symbol_name(method_val)
+                // The MethodReference now carries the full FunctionType symbol
+                let method_symbol_type = method_val.symbol_type
                 let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
                 let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
                 let adapted = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 let receiver_type = adapted.expr_type
                 cached_adapted_base_type = receiver_type
-                when self.resolve_source_method_signature(receiver_type, method_name) in {
-                    .Some(sig) then {
-                        cached_method_sig = Option[Symbol].Some(sig)
-                        method_param_types_for_inference = List[Type].new()
-                        let param_types = when sig.symbol_type in {
-                            .FunctionType(params, _) then param_entry_types(params),
-                            _ then List[ref Type].new(),
-                        }
-                        let mut param_i UInt = 1
-                        while param_i < param_types.count() then {
-                            method_param_types_for_inference.push(param_types[param_i].val)
-                            param_i += 1
-                        }
-                        method_call_bindings = self.resolve_signature_method_type_bindings(receiver_type, sig, List[Type].new())
-                        has_method_call_bindings = true
-                    },
-                    .None() then {},
+                // Use the method symbol directly — it already has the full FunctionType
+                cached_method_sig = Option[Symbol].Some(method_val)
+                method_param_types_for_inference = List[Type].new()
+                let param_types = when method_symbol_type in {
+                    .FunctionType(params, _) then param_entry_types(params),
+                    _ then List[ref Type].new(),
                 }
+                let mut param_i UInt = 1
+                while param_i < param_types.count() then {
+                    method_param_types_for_inference.push(param_types[param_i].val)
+                    param_i += 1
+                }
+                method_call_bindings = self.resolve_signature_method_type_bindings(receiver_type, method_val, List[Type].new())
+                has_method_call_bindings = true
             },
             .MemberPath(base_ref, path) then if not path.is_empty() and not (typed_callee.expr_type is .FunctionType(_, _)) then {
                 let method_name = path[path.count() - 1]

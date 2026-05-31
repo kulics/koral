@@ -690,9 +690,15 @@ given TypeChecker {
                         return self.empty_typed_block(Type.Unknown())
                     }
                     if has_method then {
-                        let member_type = self.resolve_method_return_type(typed_receiver.expr_type, parts.second)
-                        let method_symbol = self.make_method_symbol(parts.second, member_type)
-                        yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None()), member_type)
+                        // Use the full method symbol with FunctionType (matching Swift compiler behavior)
+                        let method_symbol = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                        when method_symbol in {
+                            .Some(sym) then {
+                                let sym_type = sym.symbol_type
+                                yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type)
+                            },
+                            .None() then {},
+                        }
                     }
                     let member_field_type = when typed_receiver.expr_type in {
                         .PointerType(inner) then self.resolve_member_type(inner.val, parts.second),
