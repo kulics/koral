@@ -315,6 +315,7 @@ indirect enum MIRIntrinsic {
   case isUniqueMutable(value: MIRValue)
   case makeRef(ptr: MIRValue, owner: MIRValue, resultType: Type)
   case makeMutRef(ptr: MIRValue, owner: MIRValue, resultType: Type)
+  case refCount(ref: MIRValue)
   case downgradeRef(value: MIRValue, resultType: Type)
   case downgradeMutRef(value: MIRValue, resultType: Type)
   case upgradeRef(value: MIRValue, resultType: Type)

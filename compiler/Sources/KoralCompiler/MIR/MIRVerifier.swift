@@ -278,6 +278,7 @@ final class MIRVerifier {
       try verifyValue(source, in: function, localIDs: localIDs)
       try verifyValue(count, in: function, localIDs: localIDs)
     case .isUniqueMutable(let value),
+          .refCount(let value),
          .downgradeRef(let value, _),
          .downgradeMutRef(let value, _),
          .upgradeRef(let value, _),

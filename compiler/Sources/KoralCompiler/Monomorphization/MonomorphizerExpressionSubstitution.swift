@@ -1088,6 +1088,9 @@ extension Monomorphizer {
                 owner: substituteTypesInExpression(owner, substitution: substitution),
                 resultType: substituteType(resultType, substitution: substitution)
             )
+
+        case .refCount(let ref):
+            return .refCount(ref: substituteTypesInExpression(ref, substitution: substitution))
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(

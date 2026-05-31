@@ -1609,6 +1609,9 @@ extension Monomorphizer {
                 owner: resolveTypesInExpression(owner),
                 resultType: resolveParameterizedType(resultType)
             )
+
+        case .refCount(let ref):
+            return .refCount(ref: resolveTypesInExpression(ref))
             
         case .downgradeRef(let val, let resultType):
             return .downgradeRef(

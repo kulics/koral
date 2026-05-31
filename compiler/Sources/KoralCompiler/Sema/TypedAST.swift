@@ -337,6 +337,7 @@ public indirect enum TypedIntrinsic {
   case isUniqueMutable(val: TypedExpressionNode)
   case makeRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
   case makeMutRef(ptr: TypedExpressionNode, owner: TypedExpressionNode, resultType: Type)
+  case refCount(ref: TypedExpressionNode)
 
   // Weak Reference Operations
   case downgradeRef(val: TypedExpressionNode, resultType: Type)
@@ -364,6 +365,7 @@ public indirect enum TypedIntrinsic {
     case .isUniqueMutable: return .bool
     case .makeRef(_, _, let resultType): return resultType
     case .makeMutRef(_, _, let resultType): return resultType
+    case .refCount: return .uint
     case .downgradeRef(_, let resultType): return resultType
     case .downgradeMutRef(_, let resultType): return resultType
     case .upgradeRef(_, let resultType): return resultType

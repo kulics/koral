@@ -164,6 +164,8 @@ struct MIRTypeResolver {
       return resultType
     case .isUniqueMutable:
       return .bool
+    case .refCount:
+      return .uint
     case .spawnThread:
       return .int32
     case .deallocMemory,

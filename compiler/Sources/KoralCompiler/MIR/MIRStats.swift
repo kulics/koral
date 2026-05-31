@@ -214,6 +214,7 @@ private final class MIRStatsCounter {
       self.count(source)
       self.count(count)
     case .isUniqueMutable(let value),
+          .refCount(let value),
          .downgradeRef(let value, _),
          .downgradeMutRef(let value, _),
          .upgradeRef(let value, _),

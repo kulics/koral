@@ -117,6 +117,7 @@ final class MIRFunctionCodeEmitter {
            .deinitMemory(let ptr),
            .takeMemory(let ptr, _),
            .isUniqueMutable(let ptr),
+         .refCount(let ptr),
            .downgradeRef(let ptr, _),
            .downgradeMutRef(let ptr, _),
            .upgradeRef(let ptr, _),
@@ -1185,6 +1186,23 @@ final class MIRFunctionCodeEmitter {
       codeGen.appendToBuffer("if (\(result).control) { __koral_retain(\(result).control); }\n")
       emitCleanups(ptrEmission.cleanups + ownerEmission.cleanups)
       return MIRValueEmission(expression: result, cleanups: cleanupForTemporaryResult(expression: result, type: resultType))
+
+    case .refCount(let ref):
+      let refEmission = emitValue(ref, sourceMode: true)
+      let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(.uint))
+      let control = controlExpression(for: resolver.type(of: ref) ?? .void, value: refEmission.expression)
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(result) = 0;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("if (\(control)) {\n")
+      codeGen.withIndent {
+        codeGen.addIndent()
+        codeGen.appendToBuffer("\(result) = (\(codeGen.cTypeName(.uint)))atomic_load(&((struct __koral_Control*)\(control))->strong_count);\n")
+      }
+      codeGen.addIndent()
+      codeGen.appendToBuffer("}\n")
+      emitCleanups(refEmission.cleanups)
+      return MIRValueEmission(expression: result, cleanups: [])
 
     case .downgradeRef(let value, let resultType),
          .downgradeMutRef(let value, let resultType):

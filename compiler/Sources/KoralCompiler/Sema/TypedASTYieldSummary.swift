@@ -207,6 +207,7 @@ extension TypedIntrinsic {
          .moveMemory(let dest, let source, let count):
       expressions = [dest, source, count]
     case .isUniqueMutable(let value),
+          .refCount(let value),
          .downgradeRef(let value, _),
          .downgradeMutRef(let value, _),
          .upgradeRef(let value, _),

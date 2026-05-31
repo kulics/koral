@@ -2349,6 +2349,8 @@ private final class MIRFunctionBuilder {
       return .makeRef(ptr: lowerValue(ptr), owner: lowerValue(owner), resultType: resultType)
     case .makeMutRef(let ptr, let owner, let resultType):
       return .makeMutRef(ptr: lowerValue(ptr), owner: lowerValue(owner), resultType: resultType)
+    case .refCount(let ref):
+      return .refCount(ref: lowerValue(ref))
     case .downgradeRef(let value, let resultType):
       return .downgradeRef(value: lowerValue(value), resultType: resultType)
     case .downgradeMutRef(let value, let resultType):

@@ -4037,6 +4037,23 @@ extension TypeChecker {
         return .intrinsicCall(.isUniqueMutable(val: val))
       }
 
+      if base == "ref_count" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let refArg = try inferArgumentExpression(
+          arguments[0],
+          expectedType: .reference(inner: resolvedArgs[0])
+        )
+        return .intrinsicCall(.refCount(ref: refArg))
+      }
+
       if base == "make_ref" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 2 else {
@@ -4323,6 +4340,10 @@ extension TypeChecker {
     }
     if templateName == "is_unique_mutable" {
       return .intrinsicCall(.isUniqueMutable(val: typedArguments[0]))
+    }
+
+    if templateName == "ref_count" {
+      return .intrinsicCall(.refCount(ref: typedArguments[0]))
     }
 
     if templateName == "make_ref" {

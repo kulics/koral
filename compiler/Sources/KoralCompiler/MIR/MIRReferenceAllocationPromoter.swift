@@ -238,6 +238,7 @@ private final class MIRReferenceEscapeAnalyzer {
          .copyMemory,
          .moveMemory,
          .isUniqueMutable,
+          .refCount,
          .makeRef,
          .makeMutRef,
          .downgradeRef,
@@ -359,6 +360,8 @@ private final class MIRReferenceEscapeAnalyzer {
     case .copyMemory(let dest, let source, let count), .moveMemory(let dest, let source, let count):
       return [dest, source, count]
     case .isUniqueMutable(let value):
+      return [value]
+    case .refCount(let value):
       return [value]
     case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _):
       return [ptr, owner]
