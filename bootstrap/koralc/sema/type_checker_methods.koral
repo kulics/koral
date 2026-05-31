@@ -838,7 +838,15 @@ given TypeChecker {
     ) Void = {
         when template.conformance_trait_name in {
             .Some(trait_name) then {
-                for conformance in self.storage.generic_trait_conformance_templates then {
+                // Use the type-keyed index for O(1) lookup instead of O(N) scan
+                let key = self.conformance_template_key(receiver_type)
+                let conformances = when self.storage.conformance_index.get(key) in {
+                    .Some(list) then list,
+                    .None() then {
+                        return
+                    },
+                }
+                for conformance in conformances then {
                     if conformance.trait_name <> trait_name then {
                         continue
                     }
@@ -959,7 +967,16 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
         }
-        for template in self.storage.generic_trait_conformance_templates then {
+        // Use the type-keyed index for O(1) lookup instead of O(N) scan
+        let key = self.conformance_template_key(normalized_receiver)
+        let templates = when self.storage.conformance_index.get(key) in {
+            .Some(list) then list,
+            .None() then {
+                // No conformance templates for this type key — skip the scan
+                return Option[Symbol].None()
+            },
+        }
+        for template in templates then {
             let mut bindings = Dict[String, Type].new()
             if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
                 continue
@@ -1032,7 +1049,15 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
         }
-        for template in self.storage.generic_trait_conformance_templates then {
+        // Use the type-keyed index for O(1) lookup instead of O(N) scan
+        let key = self.conformance_template_key(normalized_receiver)
+        let templates = when self.storage.conformance_index.get(key) in {
+            .Some(list) then list,
+            .None() then {
+                return Option[Symbol].None()
+            },
+        }
+        for template in templates then {
             if template.trait_name <> trait_name then {
                 continue
             }

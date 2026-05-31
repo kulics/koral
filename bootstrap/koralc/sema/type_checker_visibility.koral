@@ -407,7 +407,15 @@ given TypeChecker {
         // extends trait_name, then target_type also satisfies trait_name.
         // For example, if Int conforms to Integer and Integer extends Div[Self],
         // then Int satisfies Div.
-        for template in self.storage.generic_trait_conformance_templates then {
+        // Use the type-keyed index for O(1) lookup instead of O(N) scan
+        let key = self.conformance_template_key(target_type)
+        let templates = when self.storage.conformance_index.get(key) in {
+            .Some(list) then list,
+            .None() then {
+                return false
+            },
+        }
+        for template in templates then {
             if template.trait_name == trait_name then {
                 continue
             }
@@ -436,14 +444,52 @@ given TypeChecker {
     }
 
     private record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_type TypeNode, trait_name String) Void = {
-        self.storage.generic_trait_conformance_templates.push(
-            GenericTraitConformanceTemplate(
-                target_type,
-                self.to_template_type_params(owner_type_params),
-                trait_name,
-                self.trait_type_args(trait_type),
-            )
+        let template = GenericTraitConformanceTemplate(
+            target_type,
+            self.to_template_type_params(owner_type_params),
+            trait_name,
+            self.trait_type_args(trait_type),
         )
+        self.storage.generic_trait_conformance_templates.push(template)
+        // Also insert into the type-keyed index for O(1) lookup
+        let key = self.conformance_template_key(target_type)
+        when self.storage.conformance_index.take(key) in {
+            .Some(mut list) then {
+                list.push(template)
+                self.storage.conformance_index.insert(key, list)
+            },
+            .None() then {
+                let mut list = List[GenericTraitConformanceTemplate].new()
+                list.push(template)
+                self.storage.conformance_index.insert(key, list)
+            },
+        }
+    }
+
+    // Returns the canonical key for conformance template indexing.
+    // Mirrors extension_template_key from type_checker_templates.koral.
+    private conformance_template_key(self, target_type Type) String = {
+        return when target_type in {
+            .ReferenceType(_) then "Ref",
+            .MutableReferenceType(_) then "MutRef",
+            .PointerType(_) then "Ptr",
+            .MutablePointerType(_) then "MutPtr",
+            .WeakReferenceType(_) then "WeakRef",
+            .MutableWeakReferenceType(_) then "MutWeakRef",
+            .GenericStruct(template, _) then template,
+            .GenericEnum(template, _) then template,
+            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
+                .Some(template_name) then template_name,
+                .None() then self.context().get_name(def_id) or else "struct#\(def_id.id)",
+            },
+            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
+                .Some(template_name) then template_name,
+                .None() then self.context().get_name(def_id) or else "enum#\(def_id.id)",
+            },
+            .GenericParameter(name) then "GenericParam:\(name)",
+            .TraitObject(name, _) then "TraitObject:\(name)",
+            _ then self.context().type_display_name(target_type),
+        }
     }
 
     private conformance_type_key_matches(self, pattern Type, actual Type, bindings mut ref Dict[String, Type]) Bool = {
@@ -561,7 +607,15 @@ given TypeChecker {
     private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
         let mut matched_template = false
         let mut result = GenericTraitConformanceStatus.MissingConformance()
-        for template in self.storage.generic_trait_conformance_templates then {
+        // Use the type-keyed index for O(1) lookup instead of O(N) scan
+        let key = self.conformance_template_key(target_type)
+        let templates = when self.storage.conformance_index.get(key) in {
+            .Some(list) then list,
+            .None() then {
+                return GenericTraitConformanceStatus.MissingConformance()
+            },
+        }
+        for template in templates then {
             if not (template.trait_name == trait_name) then {
                 continue
             }
