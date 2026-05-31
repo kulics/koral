@@ -1195,7 +1195,9 @@ given CodeGen {
                 if base == "_" then {
                     return "_\(symbol.def_id.id)"
                 }
-                return base
+                // Append def_id to make local variable names unique across scopes.
+                // This matches Swift's cIdentifier(for:) behavior.
+                return "\(base)_\(symbol.def_id.id)"
             },
             _ then {},
         }
@@ -1438,7 +1440,10 @@ given CodeGen {
             .Some(name) then { return name },
             .None() then {},
         }
-        return "void*"
+        // Unresolved generic types reaching codegen indicate a monomorphization bug.
+        // Match Swift's fatalError("Unresolved type during codegen") behavior.
+        let display = self.context.type_display_name(t)
+        panic("Unresolved type \(display) during codegen")
     }
 
     private nominal_type_from_c_type_name(self, c_type String) Option[Type] = {

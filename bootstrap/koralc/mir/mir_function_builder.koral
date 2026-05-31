@@ -278,7 +278,9 @@ given MIRFunctionBuilder {
         self.append_statement(MIRStatement.ScopeEnter(scope))
         let has_result = not self.type_is_void_or_never(block_type)
         let mut result_local = Option[MIRLocalID].None()
+        let block_body = self.current_block_id()
         let join_block = self.make_block()
+        self.set_current_block(block_body)
         if has_result then {
             let local = self.make_temporary(block_type, "block_result")
             self.append_statement(MIRStatement.Declare(local.id))
@@ -530,9 +532,11 @@ given MIRFunctionBuilder {
     }
 
     private lower_while(self mut ref, condition ref TypedExpr, body ref TypedExpr) Void = {
+        let predecessor_block = self.current_block_id()
         let condition_block = self.make_block()
         let body_block = self.make_block()
         let exit_block = self.make_block()
+        self.set_current_block(predecessor_block)
         self.terminate(MIRTerminator.Goto(condition_block))
         self.set_current_block(condition_block)
         let condition_operand = self.lower_operand(condition)
@@ -958,6 +962,7 @@ given MIRFunctionBuilder {
             .CopyMemory(dest, source, count) then MIRIntrinsic.CopyMemory(box(self.lower_value(dest)), box(self.lower_value(source)), box(self.lower_value(count))),
             .MoveMemory(dest, source, count) then MIRIntrinsic.MoveMemory(box(self.lower_value(dest)), box(self.lower_value(source)), box(self.lower_value(count))),
             .IsUniqueMutable(value) then MIRIntrinsic.IsUniqueMutable(box(self.lower_uniqueness_probe_value(value))),
+            .RefCount(value) then MIRIntrinsic.RefCount(box(self.lower_value(value))),
             .MakeRef(pointer_expr, owner_expr, result_type) then MIRIntrinsic.MakeRef(box(self.lower_value(pointer_expr)), box(self.lower_value(owner_expr)), result_type),
             .MakeMutRef(pointer_expr, owner_expr, result_type) then MIRIntrinsic.MakeMutRef(box(self.lower_value(pointer_expr)), box(self.lower_value(owner_expr)), result_type),
             .DowngradeRef(value, result_type) then MIRIntrinsic.DowngradeRef(box(self.lower_value(value)), result_type),
@@ -976,6 +981,7 @@ given MIRFunctionBuilder {
         return when intrinsic_node in {
             .AllocMemory(_, result_type) then result_type,
             .IsUniqueMutable(_) then Type.BoolType(),
+            .RefCount(_) then Type.UIntType(),
             .MakeRef(_, _, result_type) then result_type,
             .MakeMutRef(_, _, result_type) then result_type,
             .DowngradeRef(_, result_type) then result_type,
@@ -1038,7 +1044,21 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_uniqueness_probe_value(self mut ref, expression ref TypedExpr) MIRValue = self.lower_value(expression)
+    private lower_uniqueness_probe_value(self mut ref, expression ref TypedExpr) MIRValue = {
+        return when self.lower_expression(expression) in {
+            .Some(result) then when result.place in {
+                .Some(place) then MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                .None() then when result.operand in {
+                    .Some(operand) then when operand in {
+                        .Local(local_id) then MIRValue.PlaceRead(MIRPlace.Local(local_id), MIROwnershipUse.Borrow()),
+                        _ then MIRValue.Operand(operand),
+                    },
+                    .None() then MIRValue.Operand(MIROperand.Constant(MIRConstant.Void())),
+                },
+            },
+            .None() then MIRValue.Operand(MIROperand.Constant(MIRConstant.Void())),
+        }
+    }
 
     private lower_operand(self mut ref, expression ref TypedExpr) MIROperand = {
         return when self.lower_expression(expression) in {

@@ -167,14 +167,92 @@ given TypeChecker {
         return false
     }
 
+    protected skip_given_body_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_GIVEN_BODY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_decl_check_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_function_decl_check_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_FUNCTION_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_let_decl_check_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_LET_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_given_decl_check_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_GIVEN_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected reset_constraint_solver_each_decl_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_RESET_CONSTRAINT_SOLVER_EACH_DECL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_call_family_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_CALL_FAMILY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_member_path_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_MEMBER_PATH") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
     private log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
         let pending_constraints = self.storage.constraint_solver.constraints.count()
         let pending_default_constraints = self.storage.constraint_solver.default_constraints.count()
+        let next_def_id = self.context().next_def_id()
+        let type_binding_snapshot_count = self.storage.type_binding_snapshots.count()
+        let instantiation_request_count = self.storage.instantiation_requests.count()
+        let generic_param_constraint_name_count = self.storage.generic_param_constraints.count()
+        let extension_key_count = self.storage.generic_templates.extension_methods.count()
+        let mut extension_template_count = 0(UInt)
+        for entry in self.storage.generic_templates.extension_methods then {
+            extension_template_count += entry.second.val.count()
+        }
+        let method_type_key_count = self.storage.method_table.methods.count()
+        let global_scope_entry_count = self.storage.global_scope.entry_count()
+        let global_scope_local_entry_count = self.storage.global_scope.local_entry_count()
+        let global_scope_type_count = self.storage.global_scope.type_entry_count()
+        let global_scope_generic_param_count = self.storage.global_scope.generic_param_count()
         let mut binding_count = 0(UInt)
         for _entry in self.storage.constraint_solver.unifier.current_bindings() then {
             binding_count += 1
         }
-        println("[sema-progress] checked=\(checked_decl_count)/\(total_nodes) file=\(self.storage.file_path) generic_conformance_templates=\(self.storage.generic_trait_conformance_templates.count()) constraints=\(pending_constraints) default_constraints=\(pending_default_constraints) bindings=\(binding_count) diagnostics=\(self.storage.diagnostics.count())")
+        println("[sema-progress] checked=\(checked_decl_count)/\(total_nodes) file=\(self.storage.file_path) constraints=\(pending_constraints) bindings=\(binding_count) diagnostics=\(self.storage.diagnostics.count()) next_def_id=\(next_def_id) extension_keys=\(extension_key_count) extension_templates=\(extension_template_count) method_type_keys=\(method_type_key_count) instantiation_requests=\(instantiation_request_count) global_scope_entries=\(global_scope_entry_count) global_scope_types=\(global_scope_type_count)")
     }
 
     private decl_debug_label(self, decl Decl) String = {
@@ -467,7 +545,7 @@ given TypeChecker {
                 let param_types = param_entry_types(fn_params)
                 let mut resolved_params = List[ref Type].new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.canonicalize_alias_type(pt.val)))
+                    resolved_params.push(intern_type(self.canonicalize_alias_type(pt.val)))
                 }
                 let resolved_ret = self.canonicalize_alias_type(return_type.val)
                 yield make_function_type(resolved_params, resolved_ret)
@@ -760,8 +838,10 @@ given TypeChecker {
                 },
                 _ then {
                     let td = self.check_decl(decl, retain_checked_template_bodies)
-                    if retain_checked_template_bodies then {
-                        typed_decls.push(td)
+                    let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
+                    if retain_checked_template_bodies then when finalized_decl in {
+                        .Some(resolved) then typed_decls.push(resolved),
+                        .None() then {},
                     }
                 },
             }
@@ -769,13 +849,16 @@ given TypeChecker {
         if self.has_errors() then {
             return TypedProgram(typed_decls, self.context().get_names())
         }
-        return self.finalize_typed_decls(typed_decls)
+        return TypedProgram(typed_decls, self.context().get_names())
     }
 
     // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
     // Each node carries its own source_file for accurate diagnostics.
     public check_loaded_nodes(self mut ref, nodes List[Pair[LoadedNode, List[String]]], retain_checked_template_bodies Bool) TypedProgram = {
         let debug_progress = self.sema_progress_debug_enabled()
+        if debug_progress then {
+            println("[sema-phase] pass2: collect signatures begin nodes=\(nodes.count())")
+        }
 
         // Pass 2: collect signatures (with per-node file_path context)
         // Match the Swift pipeline and the single-program path by registering
@@ -804,14 +887,26 @@ given TypeChecker {
                 },
             }
         }
+        if debug_progress then {
+            println("[sema-phase] pass2: collect signatures done next_def_id=\(self.context().next_def_id())")
+            println("[sema-phase] pass3: check decl begin")
+        }
         // Pass 3: check bodies
         let mut typed_decls = List[TypedDecl].new()
         let total_nodes = nodes.count()
         let mut checked_decl_count = 0(UInt)
+        let skip_decl_check = self.skip_decl_check_debug_enabled()
+        let skip_function_decl_check = self.skip_function_decl_check_debug_enabled()
+        let skip_let_decl_check = self.skip_let_decl_check_debug_enabled()
+        let skip_given_decl_check = self.skip_given_decl_check_debug_enabled()
+        let reset_constraint_solver_each_decl = self.reset_constraint_solver_each_decl_debug_enabled()
+        let skip_call_family = self.skip_call_family_debug_enabled()
+        let skip_member_path = self.skip_member_path_debug_enabled()
         for pair in nodes then {
             self.storage.file_path = pair.first.source_file
             self.storage.module_path = pair.second
             self.storage.package_id = pair.first.package_id
+            let decl_start_def_id = self.context().next_def_id()
             if debug_progress then {
                 println("[sema-decl] next=\(checked_decl_count + 1(UInt))/\(total_nodes) file=\(self.storage.file_path) label=\(self.decl_debug_label(pair.first.decl))")
             }
@@ -821,12 +916,33 @@ given TypeChecker {
                     checked_decl_count += 1
                 },
                 _ then {
-                    let td = self.check_decl(pair.first.decl, retain_checked_template_bodies)
-                    if retain_checked_template_bodies then {
-                        typed_decls.push(td)
+                    let skip_this_decl = if skip_decl_check then true else when pair.first.decl in {
+                        .FunctionDecl(_, _, _, _, _, _, _) then skip_function_decl_check,
+                        .LetDecl(_, _, _, _, _, _) then skip_let_decl_check,
+                        .GivenDecl(_, _, _, _) then skip_given_decl_check,
+                        .GivenTraitDecl(_, _, _, _, _) then skip_given_decl_check,
+                        .GivenNotTraitDecl(_, _, _, _) then skip_given_decl_check,
+                        .IntrinsicGivenDecl(_, _, _, _) then skip_given_decl_check,
+                        _ then false,
+                    }
+                    if not skip_this_decl then {
+                        let td = self.check_decl(pair.first.decl, retain_checked_template_bodies)
+                        let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
+                        if retain_checked_template_bodies then when finalized_decl in {
+                            .Some(resolved) then typed_decls.push(resolved),
+                            .None() then {},
+                        }
                     }
                     checked_decl_count += 1
                 },
+            }
+            if reset_constraint_solver_each_decl then {
+                self.storage.constraint_solver.clear_debug_state()
+            }
+            if not retain_checked_template_bodies then {
+                let decl_end_def_id = self.context().next_def_id()
+                let mut context = self.context()
+                context.clear_variable_symbol_types_in_range(decl_start_def_id, decl_end_def_id)
             }
             if debug_progress and checked_decl_count % 8(UInt) == 0(UInt) then {
                 self.log_sema_progress(checked_decl_count, total_nodes)
@@ -835,23 +951,22 @@ given TypeChecker {
         if self.has_errors() then {
             return TypedProgram(typed_decls, self.context().get_names())
         }
-        // Pass 4: constraint solving + type substitution
-        let final_program = self.finalize_typed_decls(typed_decls)
-        return final_program
+        if debug_progress then {
+            println("[sema-phase] pass3: check decl done next_def_id=\(self.context().next_def_id())")
+        }
+        return TypedProgram(typed_decls, self.context().get_names())
     }
 
-    private finalize_typed_decls(self, typed_decls List[TypedDecl]) TypedProgram = {
+    private finalize_checked_decl_constraints(self mut ref, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
         let subst_result = self.storage.constraint_solver.solve()
         return when subst_result in {
             .Ok(subst) then {
-                let mut final_decls = List[TypedDecl].new()
-                let mut index UInt = 0
-                while index < typed_decls.count() then {
-                    let resolved = self.apply_subst_to_decl(subst, typed_decls[index])
-                    final_decls.push(resolved)
-                    index += 1
+                let resolved_decl = when typed_decl in {
+                    .Some(td) then Option[TypedDecl].Some(self.apply_subst_to_decl(subst, td)),
+                    .None() then Option[TypedDecl].None(),
                 }
-                yield TypedProgram(final_decls, self.context().get_names())
+                self.storage.constraint_solver.clear_debug_state()
+                yield resolved_decl
             },
             .Error(e) then {
                 let partial_bindings = self.storage.constraint_solver.unifier.current_bindings()
@@ -860,15 +975,13 @@ given TypeChecker {
                     resolved_bindings.insert(entry.first, self.storage.constraint_solver.unifier.resolve_deep(entry.second))
                 }
                 let partial_subst = TypeSubstitution(resolved_bindings)
-                let mut final_decls = List[TypedDecl].new()
-                let mut index UInt = 0
-                while index < typed_decls.count() then {
-                    let resolved = self.apply_subst_to_decl(partial_subst, typed_decls[index])
-                    final_decls.push(resolved)
-                    index += 1
+                let resolved_decl = when typed_decl in {
+                    .Some(td) then Option[TypedDecl].Some(self.apply_subst_to_decl(partial_subst, td)),
+                    .None() then Option[TypedDecl].None(),
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
-                yield TypedProgram(final_decls, self.context().get_names())
+                self.storage.constraint_solver.clear_debug_state()
+                yield resolved_decl
             },
         }
     }

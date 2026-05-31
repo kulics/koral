@@ -536,6 +536,30 @@ given DefIdMap {
         return self.symbol_mutables.get(id.id)
     }
 
+    // Check-only memory relief: local variable symbol types are only needed
+    // during declaration checking and can be dropped afterward.
+    // Note: only symbol_types is cleared; symbol_kinds/symbol_method_kinds/
+    // symbol_mutables must remain because monomorphization may still query
+    // variable kind metadata from retained typed AST references.
+    public clear_variable_symbol_types_in_range(self mut ref, start_id UInt, end_exclusive UInt) Void = {
+        if end_exclusive <= start_id then {
+            return
+        }
+        let mut id = start_id
+        while id < end_exclusive then {
+            when self.kinds.get(id) in {
+                .Some(kind) then when kind in {
+                    .Variable() then {
+                        self.symbol_types.remove(id)
+                    },
+                    _ then {},
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+    }
+
     // ── 结构体/枚举类型详细信息 ─────────────────────────────────────────────
 
     public set_struct_info(self mut ref, id DefId, info StructTypeInfo) Void = {
@@ -1091,4 +1115,45 @@ given Type as Eq {
 given Type as Hash {
 
     public hash(self) UInt = stable_type_hash(self)
+}
+
+// ── Type Interning ──────────────────────────────────────────────────────────
+// Global type cache to deduplicate identical compound types.
+// This eliminates redundant box() allocations when the same type is
+// constructed multiple times (e.g., during type resolution, substitution).
+// The cache key is the stable_type_key of the type.
+
+public type TypeInterner(
+    mut cache Dict[String, ref Type],
+)
+
+given TypeInterner {
+    public new() TypeInterner = {
+        return TypeInterner(Dict[String, ref Type].new())
+    }
+
+    // Intern a type: return a cached ref if identical type exists,
+    // otherwise box it and cache. This eliminates duplicate heap allocations.
+    public intern(self mut ref, t Type) ref Type = {
+        let key = stable_type_key(t)
+        when self.cache.get(key) in {
+            .Some(existing) then {
+                return existing
+            },
+            .None() then {
+                let ref_t = box(t)
+                self.cache.insert(key, ref_t)
+                return ref_t
+            },
+        }
+    }
+}
+
+// Type interner stored in CompilerContext to avoid module-level mut.
+// Access via context.type_interner.intern(t).
+
+public let intern_type(t Type) ref Type = {
+    // Fallback: use plain box if no interner is available.
+    // The TypeChecker should set up the interner on CompilerContext.
+    return box(t)
 }

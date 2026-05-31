@@ -9,6 +9,24 @@ given TypeChecker {
     }
 
     private check_expr_scoped_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
+        let skip_call_family_expr = if self.skip_call_family_debug_enabled() then when expr in {
+            .Call(_, _, _) then true,
+            .GenericMethodCall(_, _, _, _, _) then true,
+            .QualifiedMethodCall(_, _, _, _, _) then true,
+            .QualifiedGenericMethodCall(_, _, _, _, _, _) then true,
+            .StaticMethodCall(_, _, _, _, _) then true,
+            _ then false,
+        } else false
+        if skip_call_family_expr then {
+            return self.empty_typed_block(Type.Unknown())
+        }
+        let skip_member_path_expr = if self.skip_member_path_debug_enabled() then when expr in {
+            .MemberPath(_, _, _) then true,
+            _ then false,
+        } else false
+        if skip_member_path_expr then {
+            return self.empty_typed_block(Type.Unknown())
+        }
         // Use bidirectional inference for literals, lambdas, and collection expressions
         // when an expected type is available, to improve type inference.
         if expected is .Some(et) then {

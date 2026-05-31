@@ -4030,10 +4030,8 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(
             function: base, expected: 1, got: arguments.count)
         }
-        let val = try inferArgumentExpression(
-          arguments[0],
-          expectedType: .reference(inner: resolvedArgs[0])
-        )
+        // Signature is ptr mut ref T — accept any ref/ptr type, infer freely
+        let val = try inferTypedExpression(arguments[0])
         return .intrinsicCall(.isUniqueMutable(val: val))
       }
 

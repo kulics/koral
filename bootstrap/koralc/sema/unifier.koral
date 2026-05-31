@@ -378,6 +378,8 @@ given Unifier {
 
     // 解析类型：将类型变量替换为已绑定的类型。
     // 递归解析复合类型中的类型变量（与 Swift 版本一致）。
+    // Optimization: for non-TypeVar compound types, only allocate new boxes
+    // if the inner type actually changed. This eliminates most allocations.
     public resolve(self mut ref, t Type) Type = {
         return when t in {
             .TypeVar(tv_ref) then {
@@ -393,32 +395,65 @@ given Unifier {
                 }
             },
             .FunctionType(params, ret) then {
+                let mut changed = false
                 let mut new_params = List[ref Type].new()
                 for entry in params then {
-                    new_params.push(box(self.resolve(entry.param_type)))
+                    let original = entry.param_type
+                    let resolved = self.resolve(original)
+                    if original <> resolved then { changed = true }
+                    new_params.push(box(resolved))
                 }
-                yield Type.FunctionType(types_to_param_entries(new_params), box(self.resolve(ret.val)))
+                let original_ret = ret.val
+                let resolved_ret = self.resolve(original_ret)
+                if original_ret <> resolved_ret then { changed = true }
+                yield if changed then Type.FunctionType(types_to_param_entries(new_params), box(resolved_ret)) else t
             },
             .GenericStruct(template, args) then {
+                let mut changed = false
                 let mut new_args = List[ref Type].new()
                 for a in args then {
-                    new_args.push(box(self.resolve(a.val)))
+                    let original = a.val
+                    let resolved = self.resolve(original)
+                    if original <> resolved then { changed = true }
+                    new_args.push(box(resolved))
                 }
-                yield Type.GenericStruct(template, new_args)
+                yield if changed then Type.GenericStruct(template, new_args) else t
             },
             .GenericEnum(template, args) then {
+                let mut changed = false
                 let mut new_args = List[ref Type].new()
                 for a in args then {
-                    new_args.push(box(self.resolve(a.val)))
+                    let original = a.val
+                    let resolved = self.resolve(original)
+                    if original <> resolved then { changed = true }
+                    new_args.push(box(resolved))
                 }
-                yield Type.GenericEnum(template, new_args)
+                yield if changed then Type.GenericEnum(template, new_args) else t
             },
-            .ReferenceType(inner) then Type.ReferenceType(box(self.resolve(inner.val))),
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.resolve(inner.val))),
-            .PointerType(inner) then Type.PointerType(box(self.resolve(inner.val))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.resolve(inner.val))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.resolve(inner.val))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.resolve(inner.val))),
+            .ReferenceType(inner) then {
+                let resolved = self.resolve(inner.val)
+                yield if inner.val == resolved then t else Type.ReferenceType(box(resolved))
+            },
+            .MutableReferenceType(inner) then {
+                let resolved = self.resolve(inner.val)
+                yield if inner.val == resolved then t else Type.MutableReferenceType(box(resolved))
+            },
+            .PointerType(inner) then {
+                let resolved = self.resolve(inner.val)
+                yield if inner.val == resolved then t else Type.PointerType(box(resolved))
+            },
+            .MutablePointerType(inner) then {
+                let resolved = self.resolve(inner.val)
+                yield if inner.val == resolved then t else Type.MutablePointerType(box(resolved))
+            },
+            .WeakReferenceType(inner) then {
+                let resolved = self.resolve(inner.val)
+                yield if inner.val == resolved then t else Type.WeakReferenceType(box(resolved))
+            },
+            .MutableWeakReferenceType(inner) then {
+                let resolved = self.resolve(inner.val)
+                yield if inner.val == resolved then t else Type.MutableWeakReferenceType(box(resolved))
+            },
             _ then t,
         }
     }
@@ -444,31 +479,64 @@ given Unifier {
                 }
             },
             .FunctionType(params, ret) then {
+                let mut changed = false
                 let mut new_params = List[ref Type].new()
                 for entry in params then {
-                    new_params.push(box(self.resolve_deep(entry.param_type)))
+                    let original = entry.param_type
+                    let resolved = self.resolve_deep(original)
+                    if original <> resolved then { changed = true }
+                    new_params.push(box(resolved))
                 }
-                yield Type.FunctionType(types_to_param_entries(new_params), box(self.resolve_deep(ret.val)))
+                let original_ret = ret.val
+                let resolved_ret = self.resolve_deep(original_ret)
+                if original_ret <> resolved_ret then { changed = true }
+                yield if changed then Type.FunctionType(types_to_param_entries(new_params), box(resolved_ret)) else t
             },
-            .ReferenceType(inner) then Type.ReferenceType(box(self.resolve_deep(inner.val))),
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.resolve_deep(inner.val))),
-            .PointerType(inner) then Type.PointerType(box(self.resolve_deep(inner.val))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.resolve_deep(inner.val))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.resolve_deep(inner.val))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.resolve_deep(inner.val))),
+            .ReferenceType(inner) then {
+                let resolved = self.resolve_deep(inner.val)
+                yield if inner.val == resolved then t else Type.ReferenceType(box(resolved))
+            },
+            .MutableReferenceType(inner) then {
+                let resolved = self.resolve_deep(inner.val)
+                yield if inner.val == resolved then t else Type.MutableReferenceType(box(resolved))
+            },
+            .PointerType(inner) then {
+                let resolved = self.resolve_deep(inner.val)
+                yield if inner.val == resolved then t else Type.PointerType(box(resolved))
+            },
+            .MutablePointerType(inner) then {
+                let resolved = self.resolve_deep(inner.val)
+                yield if inner.val == resolved then t else Type.MutablePointerType(box(resolved))
+            },
+            .WeakReferenceType(inner) then {
+                let resolved = self.resolve_deep(inner.val)
+                yield if inner.val == resolved then t else Type.WeakReferenceType(box(resolved))
+            },
+            .MutableWeakReferenceType(inner) then {
+                let resolved = self.resolve_deep(inner.val)
+                yield if inner.val == resolved then t else Type.MutableWeakReferenceType(box(resolved))
+            },
             .GenericStruct(template, args) then {
+                let mut changed = false
                 let mut new_args = List[ref Type].new()
                 for a in args then {
-                    new_args.push(box(self.resolve_deep(a.val)))
+                    let original = a.val
+                    let resolved = self.resolve_deep(original)
+                    if original <> resolved then { changed = true }
+                    new_args.push(box(resolved))
                 }
-                yield Type.GenericStruct(template, new_args)
+                yield if changed then Type.GenericStruct(template, new_args) else t
             },
             .GenericEnum(template, args) then {
+                let mut changed = false
                 let mut new_args = List[ref Type].new()
                 for a in args then {
-                    new_args.push(box(self.resolve_deep(a.val)))
+                    let original = a.val
+                    let resolved = self.resolve_deep(original)
+                    if original <> resolved then { changed = true }
+                    new_args.push(box(resolved))
                 }
-                yield Type.GenericEnum(template, new_args)
+                yield if changed then Type.GenericEnum(template, new_args) else t
             },
             _ then t,
         }

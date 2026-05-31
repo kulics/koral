@@ -1159,7 +1159,16 @@ final class MIRFunctionCodeEmitter {
     case .isUniqueMutable(let value):
       let valueEmission = emitValue(value, sourceMode: true)
       let result = codeGen.nextTempWithDecl(cType: "int")
-      let control = controlExpression(for: resolver.type(of: value) ?? .void, value: valueEmission.expression)
+      // The value is ptr mut ref T — a raw pointer to the ref struct.
+      // Dereference to access the control block: ((struct __koral_Ref*)ptr)->control
+      let valueType = resolver.type(of: value) ?? .void
+      let control: String
+      switch valueType {
+      case .mutablePointer, .pointer:
+        control = "((struct __koral_Ref*)\(valueEmission.expression))->control"
+      default:
+        control = controlExpression(for: valueType, value: valueEmission.expression)
+      }
       codeGen.addIndent()
       codeGen.appendToBuffer("\(result) = 0;\n")
       codeGen.addIndent()
@@ -1190,7 +1199,14 @@ final class MIRFunctionCodeEmitter {
     case .refCount(let ref):
       let refEmission = emitValue(ref, sourceMode: true)
       let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(.uint))
-      let control = controlExpression(for: resolver.type(of: ref) ?? .void, value: refEmission.expression)
+      let refType = resolver.type(of: ref) ?? .void
+      let control: String
+      switch refType {
+      case .mutablePointer, .pointer:
+        control = "((struct __koral_Ref*)\(refEmission.expression))->control"
+      default:
+        control = controlExpression(for: refType, value: refEmission.expression)
+      }
       codeGen.addIndent()
       codeGen.appendToBuffer("\(result) = 0;\n")
       codeGen.addIndent()
@@ -1686,6 +1702,9 @@ final class MIRFunctionCodeEmitter {
     switch type {
     case .reference, .mutableReference, .weakReference, .mutableWeakReference, .traitObject:
       return "\(value).control"
+    case .pointer, .mutablePointer:
+      // ptr mut ref T — the value is a pointer to a ref struct, use -> for member access
+      return "((struct __koral_Ref*)\(value))->control"
     default:
       return "NULL"
     }

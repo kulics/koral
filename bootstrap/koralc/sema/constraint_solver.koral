@@ -37,59 +37,92 @@ given TypeSubstitution {
     }
 
     // 将替换应用到类型 t，递归替换所有已知的类型变量。
+    // Fast path: if mapping is empty, return t unchanged (no allocation).
     public apply(self, t Type) Type = {
+        if self.mapping.is_empty() then {
+            return t
+        }
+        return self.apply_impl(t)
+    }
+
+    private apply_impl(self, t Type) Type = {
         return when t in {
             .TypeVar(tv_ref) then {
                 let tv = tv_ref.val
                 yield when self.mapping.get(tv.id) in {
-                    .Some(resolved) then self.apply(resolved),
+                    .Some(resolved) then self.apply_impl(resolved),
                     .None() then t,
                 }
             },
             .FunctionType(params, ret) then {
+                let mut changed = false
                 let mut new_params = List[ref Type].new()
                 let mut i = 0(UInt)
                 while i < params.count() then {
-                    new_params.push(box(self.apply(params[i].val.param_type)))
+                    let original = params[i].val.param_type
+                    let substituted = self.apply_impl(original)
+                    if original <> substituted then { changed = true }
+                    new_params.push(box(substituted))
                     i += 1(UInt)
                 }
-                yield Type.FunctionType(types_to_param_entries(new_params), box(self.apply(ret.val)))
+                let original_ret = ret.val
+                let substituted_ret = self.apply_impl(original_ret)
+                if original_ret <> substituted_ret then { changed = true }
+                if changed then {
+                    yield Type.FunctionType(types_to_param_entries(new_params), box(substituted_ret))
+                } else {
+                    yield t
+                }
             },
             .MutableReferenceType(inner) then {
-                yield Type.MutableReferenceType(box(self.apply(inner.val)))
+                let substituted = self.apply_impl(inner.val)
+                yield if inner.val == substituted then t else Type.MutableReferenceType(box(substituted))
             },
             .ReferenceType(inner) then {
-                yield Type.ReferenceType(box(self.apply(inner.val)))
+                let substituted = self.apply_impl(inner.val)
+                yield if inner.val == substituted then t else Type.ReferenceType(box(substituted))
             },
             .MutablePointerType(inner) then {
-                yield Type.MutablePointerType(box(self.apply(inner.val)))
+                let substituted = self.apply_impl(inner.val)
+                yield if inner.val == substituted then t else Type.MutablePointerType(box(substituted))
             },
             .PointerType(inner) then {
-                yield Type.PointerType(box(self.apply(inner.val)))
+                let substituted = self.apply_impl(inner.val)
+                yield if inner.val == substituted then t else Type.PointerType(box(substituted))
             },
             .WeakReferenceType(inner) then {
-                yield Type.WeakReferenceType(box(self.apply(inner.val)))
+                let substituted = self.apply_impl(inner.val)
+                yield if inner.val == substituted then t else Type.WeakReferenceType(box(substituted))
             },
             .MutableWeakReferenceType(inner) then {
-                yield Type.MutableWeakReferenceType(box(self.apply(inner.val)))
+                let substituted = self.apply_impl(inner.val)
+                yield if inner.val == substituted then t else Type.MutableWeakReferenceType(box(substituted))
             },
             .GenericStruct(template, args) then {
+                let mut changed = false
                 let mut new_args = List[ref Type].new()
                 let mut i = 0(UInt)
                 while i < args.count() then {
-                    new_args.push(box(self.apply(args[i].val)))
+                    let original = args[i].val
+                    let substituted = self.apply_impl(original)
+                    if original <> substituted then { changed = true }
+                    new_args.push(box(substituted))
                     i += 1(UInt)
                 }
-                yield Type.GenericStruct(template, new_args)
+                yield if changed then Type.GenericStruct(template, new_args) else t
             },
             .GenericEnum(template, args) then {
+                let mut changed = false
                 let mut new_args = List[ref Type].new()
                 let mut i = 0(UInt)
                 while i < args.count() then {
-                    new_args.push(box(self.apply(args[i].val)))
+                    let original = args[i].val
+                    let substituted = self.apply_impl(original)
+                    if original <> substituted then { changed = true }
+                    new_args.push(box(substituted))
                     i += 1(UInt)
                 }
-                yield Type.GenericEnum(template, new_args)
+                yield if changed then Type.GenericEnum(template, new_args) else t
             },
             _ then t,
         }
@@ -136,6 +169,15 @@ given ConstraintSolver {
     // 注册一个 enum 类型名称，用于 Instantiate 约束判断。
     public register_enum_type(self mut ref, name String) Void = {
         self.enum_type_names.insert(name)
+    }
+
+    // Debug helper: clear in-flight solver state between declarations.
+    // Keeps enum type registry intact for Instantiate classification.
+    public clear_debug_state(self mut ref) Void = {
+        self.unifier = Unifier.new()
+        self.constraints = List[Constraint].new()
+        self.default_constraints = List[Constraint].new()
+        self.errors = List[ConstraintSolverError].new()
     }
 
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。

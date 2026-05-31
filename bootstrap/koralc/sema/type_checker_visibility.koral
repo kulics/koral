@@ -399,7 +399,27 @@ given TypeChecker {
             },
             _ then {},
         }
-        return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name, trait_arg_types))
+        // Check direct explicit conformance
+        if self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name, trait_arg_types)) then {
+            return true
+        }
+        // Check trait hierarchy: if target_type conforms to a child trait that
+        // extends trait_name, then target_type also satisfies trait_name.
+        // For example, if Int conforms to Integer and Integer extends Div[Self],
+        // then Int satisfies Div.
+        for template in self.storage.generic_trait_conformance_templates then {
+            if template.trait_name == trait_name then {
+                continue
+            }
+            if not self.storage.trait_registry.has_inheritance(template.trait_name, trait_name) then {
+                continue
+            }
+            let mut bindings = Dict[String, Type].new()
+            if self.conformance_type_key_matches(template.target_type, target_type, bindings) then {
+                return true
+            }
+        }
+        return false
     }
 
     private trait_type_args(self, trait_type TypeNode) List[Type] = {

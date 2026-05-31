@@ -1362,12 +1362,7 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
       let refValue = try inferTypedExpression(arguments[0])
-      switch refValue.type {
-      case .reference, .mutableReference:
-        return .intrinsicCall(.refCount(ref: refValue))
-      default:
-        throw SemanticError.typeMismatch(expected: "ref T", got: refValue.type.description)
-      }
+      return .intrinsicCall(.refCount(ref: refValue))
 
     default: return nil
     }

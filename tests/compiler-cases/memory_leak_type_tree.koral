@@ -1,0 +1,293 @@
+// Memory leak test: simulates bootstrap compiler's Type enum tree and TypedAST patterns.
+// Uses box_ref() to create heap-allocated enum tree structures.
+
+// Local box function (same as std/primitives.koral)
+let box_ref[T Any](mut v T) mut ref T = {
+    let r mut ref T = v.ref
+    return r
+}
+
+// ── Simulated Type enum (matches bootstrap's Type structure) ──────────────
+
+type SimType {
+    IntType(),
+    UIntType(),
+    ReferenceType(inner ref SimType),
+    MutableReferenceType(inner ref SimType),
+    GenericStruct(template String, args List[ref SimType]),
+    GenericEnum(template String, args List[ref SimType]),
+    FunctionType(params List[ref SimType], return_type ref SimType),
+}
+
+// ── Simulated TypedExprKind (matches bootstrap's TypedExprKind) ───────────
+
+type SimTypedExprKind {
+    IntegerLiteral(value Int),
+    Variable(name String),
+    Call(callee ref SimTypedExpr, args List[ref SimTypedExpr]),
+    IfExpr(condition ref SimTypedExpr, then_branch ref SimTypedExpr, else_branch Option[ref SimTypedExpr]),
+    Block(statements List[ref SimTypedExpr]),
+}
+
+type SimTypedExpr(
+    kind SimTypedExprKind,
+    expr_type SimType,
+)
+
+// ── Helper functions ──────────────────────────────────────────────────────
+
+let make_int_type() ref SimType = {
+    return box_ref(SimType.IntType())
+}
+
+let make_uint_type() ref SimType = {
+    return box_ref(SimType.UIntType())
+}
+
+let make_ref_type(inner ref SimType) ref SimType = {
+    return box_ref(SimType.ReferenceType(inner))
+}
+
+let make_mut_ref_type(inner ref SimType) ref SimType = {
+    return box_ref(SimType.MutableReferenceType(inner))
+}
+
+let make_generic_struct(args List[ref SimType]) ref SimType = {
+    return box_ref(SimType.GenericStruct("List", args))
+}
+
+let make_function_type(params List[ref SimType], ret ref SimType) ref SimType = {
+    return box_ref(SimType.FunctionType(params, ret))
+}
+
+// ── Test 1: Simple Type node allocation/release ───────────────────────────
+
+let test_simple_type_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        let _t ref SimType = make_int_type()
+        i += 1
+    }
+}
+
+// ── Test 2: ReferenceType(IntType) allocation/release ─────────────────────
+
+let test_ref_type_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        let inner ref SimType = make_int_type()
+        let _outer ref SimType = make_ref_type(inner)
+        i += 1
+    }
+}
+
+// ── Test 3: List[ref SimType] allocation/release (simulates type arg lists) ──
+
+let test_type_list_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        let mut args = List[ref SimType].new()
+        args.push(make_int_type())
+        args.push(make_uint_type())
+        args.push(make_ref_type(make_int_type()))
+        // list and all elements should be released
+        i += 1
+    }
+}
+
+// ── Test 4: GenericStruct with type args (simulates List[Int]) ────────────
+
+let test_generic_struct_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        let mut args = List[ref SimType].new()
+        args.push(make_int_type())
+        let _t ref SimType = make_generic_struct(args)
+        i += 1
+    }
+}
+
+// ── Test 5: FunctionType with nested refs ─────────────────────────────────
+
+let test_function_type_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        let mut params = List[ref SimType].new()
+        params.push(make_int_type())
+        params.push(make_ref_type(make_int_type()))
+        let ret ref SimType = make_int_type()
+        let _ft ref SimType = make_function_type(params, ret)
+        i += 1
+    }
+}
+
+// ── Test 6: Deep tree nesting (simulates ref List[Int]) ───────────────────
+
+let test_deep_tree_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        // Build: ReferenceType(GenericStruct("List", [IntType()]))
+        let mut inner_args = List[ref SimType].new()
+        inner_args.push(make_int_type())
+        let inner ref SimType = make_generic_struct(inner_args)
+        let _outer ref SimType = make_ref_type(inner)
+        i += 1
+    }
+}
+
+// ── Test 7: MutableReferenceType + GenericEnum ────────────────────────────
+
+let test_mut_ref_enum_alloc(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        let mut args = List[ref SimType].new()
+        args.push(make_int_type())
+        args.push(make_uint_type())
+        let enum_type ref SimType = box_ref(SimType.GenericEnum("Option", args))
+        let _mut_ref ref SimType = make_mut_ref_type(enum_type)
+        i += 1
+    }
+}
+
+// ── Test 8: TypedExpr tree allocation/release ─────────────────────────────
+
+let test_typed_expr_tree(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        // Build: Call(Variable("f"), [IntegerLiteral(42)])
+        let callee ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Variable("f"),
+            SimType.IntType(),
+        ))
+        let arg ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.IntegerLiteral(42),
+            SimType.IntType(),
+        ))
+        let mut call_args = List[ref SimTypedExpr].new()
+        call_args.push(arg)
+        let _call ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Call(callee, call_args),
+            SimType.IntType(),
+        ))
+        i += 1
+    }
+}
+
+// ── Test 9: Nested TypedExpr tree (simulates if expression) ───────────────
+
+let test_nested_typed_expr(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        // Build: IfExpr(Variable("cond"), IntegerLiteral(1), Some(IntegerLiteral(2)))
+        let cond ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Variable("cond"),
+            SimType.IntType(),
+        ))
+        let then_branch ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.IntegerLiteral(1),
+            SimType.IntType(),
+        ))
+        let else_branch ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.IntegerLiteral(2),
+            SimType.IntType(),
+        ))
+        let _if_expr ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.IfExpr(cond, then_branch, Option[ref SimTypedExpr].Some(else_branch)),
+            SimType.IntType(),
+        ))
+        i += 1
+    }
+}
+
+// ── Test 10: Block expression with multiple statements ────────────────────
+
+let test_block_typed_expr(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        // Build: Block([IntegerLiteral(1), IntegerLiteral(2), IntegerLiteral(3)])
+        let mut stmts = List[ref SimTypedExpr].new()
+        stmts.push(box_ref(SimTypedExpr(SimTypedExprKind.IntegerLiteral(1), SimType.IntType())))
+        stmts.push(box_ref(SimTypedExpr(SimTypedExprKind.IntegerLiteral(2), SimType.IntType())))
+        stmts.push(box_ref(SimTypedExpr(SimTypedExprKind.IntegerLiteral(3), SimType.IntType())))
+        let _block ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Block(stmts),
+            SimType.IntType(),
+        ))
+        i += 1
+    }
+}
+
+// ── Test 11: Call with nested GenericStruct args ──────────────────────────
+
+let test_call_with_generic_args(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        // Build callee type args (simulates resolve_type creating GenericStruct)
+        let mut callee_type_args = List[ref SimType].new()
+        let mut inner_args = List[ref SimType].new()
+        inner_args.push(make_int_type())
+        callee_type_args.push(make_generic_struct(inner_args))
+        // Build callee
+        let callee ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Variable("process"),
+            SimType.FunctionType(callee_type_args, make_int_type()),
+        ))
+        // Build arg with GenericStruct type
+        let mut arg_args = List[ref SimType].new()
+        arg_args.push(make_int_type())
+        let arg ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Variable("x"),
+            SimType.GenericStruct("List", arg_args),
+        ))
+        let mut call_args = List[ref SimTypedExpr].new()
+        call_args.push(arg)
+        let _call ref SimTypedExpr = box_ref(SimTypedExpr(
+            SimTypedExprKind.Call(callee, call_args),
+            SimType.IntType(),
+        ))
+        i += 1
+    }
+}
+
+// ── Test 12: Mixed pattern (simulates type_checker resolve_type flow) ─────
+
+let test_mixed_resolve_pattern(count Int) Void = {
+    let mut i = 0
+    while i < count then {
+        // Simulate resolving GenericStruct("List", [Int]) -> ReferenceType(GenericStruct("List", [Int]))
+        let mut args = List[ref SimType].new()
+        args.push(make_int_type())
+        let resolved ref SimType = make_generic_struct(args)
+
+        // Simulate wrapping in ReferenceType
+        let wrapped ref SimType = make_ref_type(resolved)
+
+        // Simulate storing in type list (like to_type_ref_list)
+        let mut type_list = List[ref SimType].new()
+        type_list.push(wrapped)
+        type_list.push(make_int_type())
+        type_list.push(make_ref_type(make_int_type()))
+
+        // Simulate creating a FunctionType with these args
+        let _ft ref SimType = make_function_type(type_list, make_int_type())
+
+        i += 1
+    }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────
+
+let main() Void = {
+    test_simple_type_alloc(100000)
+    test_ref_type_alloc(100000)
+    test_type_list_alloc(100000)
+    test_generic_struct_alloc(100000)
+    test_function_type_alloc(100000)
+    test_deep_tree_alloc(100000)
+    test_mut_ref_enum_alloc(100000)
+    test_typed_expr_tree(100000)
+    test_nested_typed_expr(100000)
+    test_block_typed_expr(100000)
+    test_call_with_generic_args(100000)
+    test_mixed_resolve_pattern(100000)
+}

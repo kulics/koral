@@ -370,6 +370,9 @@ given TypeChecker {
             let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             let typed_body = when m.body in {
                 .Some(b) then {
+                    if self.skip_given_body_debug_enabled() then {
+                        yield Option[ref TypedExpr].None()
+                    }
                     let prev_function_return_context = self.storage.function_return_context
                     let prev_in_loop = self.storage.in_loop
                     let prev_in_finally = self.storage.in_finally
@@ -401,7 +404,7 @@ given TypeChecker {
             else Option[ref TypedExpr].None()
             let method_name = "\(m.name)"
             let template_ret = if should_retain_template_body
-            then self.resolve_type_in_scope(m.return_type, member_type_scope)
+            then ret
             else Type.Unknown()
             if should_retain_template_body then {
                 self.update_extension_method_checked_template(
@@ -416,20 +419,18 @@ given TypeChecker {
             }
             if is_generic_given_target then {
                 let generic_method_def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
-                let generic_typed_params = self.check_params_in_scope(m.params, member_type_scope)
-                let generic_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
                 let mut generic_param_types = List[Type].new()
-                for p in generic_typed_params then {
+                for p in typed_params then {
                     generic_param_types.push(p.param_type)
                 }
                 let mut context = self.context()
-                context.set_symbol_info(generic_method_def_id, SymbolInfo(make_function_type(self.to_type_ref_list(generic_param_types), generic_ret), SymbolKind.Function(), MethodKind.Normal(), false))
-                context.set_param_specs(generic_method_def_id, self.function_param_specs_from_typed_params(generic_typed_params))
+                context.set_symbol_info(generic_method_def_id, SymbolInfo(make_function_type(self.to_type_ref_list(generic_param_types), ret), SymbolKind.Function(), MethodKind.Normal(), false))
+                context.set_param_specs(generic_method_def_id, self.function_param_specs_from_typed_params(typed_params))
                 out.push(TypedGivenMember(
                     generic_method_def_id,
                     method_name,
-                    generic_typed_params,
-                    generic_ret,
+                    typed_params,
+                    ret,
                     Option[ref TypedExpr].None(),
                 ))
                 self.restore_type_bindings(type_binding_snapshot)
@@ -437,24 +438,22 @@ given TypeChecker {
             }
             let mut context = self.context()
             let method_def_id = context.allocate(method_name, DefKind.Function())
-            let stored_typed_params = self.check_params_in_scope(m.params, member_type_scope)
-            let stored_ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
             // Register method signature so mono can look it up by DefId
             let mut param_types = List[Type].new()
-            for p in stored_typed_params then {
+            for p in typed_params then {
                 param_types.push(p.param_type)
             }
-            let stable_stored_ret = stored_ret
+            let stable_stored_ret = ret
             let method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret)
             context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false))
-            context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(stored_typed_params))
-            let should_retain_program_body = not should_retain_template_body
+            context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params))
+            let should_retain_program_body = retain_checked_template_bodies and not should_retain_template_body
             let program_body = if should_retain_program_body then typed_body else Option[ref TypedExpr].None()
             out.push(TypedGivenMember(
                 method_def_id,
                 method_name,
-                stored_typed_params,
-                stored_ret,
+                typed_params,
+                ret,
                 program_body,
             ))
             self.restore_type_bindings(type_binding_snapshot)

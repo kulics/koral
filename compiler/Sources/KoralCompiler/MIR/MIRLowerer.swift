@@ -2434,6 +2434,17 @@ private final class MIRFunctionBuilder {
     return .operand(.constant(.void))
   }
 
+  /// Returns true for types that have move-only (unique) semantics:
+  /// mutable references, mutable pointers, and mutable weak references.
+  private func isMoveOnlyType(_ type: Type) -> Bool {
+    switch type {
+    case .mutableReference, .mutablePointer, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
+
   private func isOwnershipPreservingProbeCast(sourceType: Type, targetType: Type) -> Bool {
     switch (sourceType, targetType) {
     case (.reference, .reference),

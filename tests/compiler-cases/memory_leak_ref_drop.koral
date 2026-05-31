@@ -1,0 +1,273 @@
+// Memory leak test: ref drop correctness for all scope-creating syntax.
+// Uses unique variable names per test to avoid codegen naming conflicts.
+
+// ── Test 1: Block expression scope ────────────────────────────────────────
+
+let test_block_scope() Void = {
+    let mut i1 = 0
+    while i1 < 100000 then {
+        let result1 = {
+            let mut v1 = i1
+            let r1 ref Int = v1.ref
+            r1.val + 1
+        }
+        let _ = result1
+        i1 += 1
+    }
+}
+
+// ── Test 2: If/else expression scope ──────────────────────────────────────
+
+let test_if_else_scope() Void = {
+    let mut i2 = 0
+    while i2 < 100000 then {
+        let result2 = if i2 % 2 == 0 then {
+            let mut v2a = i2 * 2
+            let r2a ref Int = v2a.ref
+            r2a.val
+        } else {
+            let mut v2b = i2 * 3
+            let r2b ref Int = v2b.ref
+            r2b.val
+        }
+        let _ = result2
+        i2 += 1
+    }
+}
+
+// ── Test 3: Nested if expressions ─────────────────────────────────────────
+
+let test_nested_if_scope() Void = {
+    let mut i3 = 0
+    while i3 < 100000 then {
+        let result3 = if i3 % 3 == 0 then {
+            let mut v3a = i3
+            let r3a ref Int = v3a.ref
+            if r3a.val > 50 then {
+                let mut v3b = r3a.val * 2
+                let r3b ref Int = v3b.ref
+                r3b.val
+            } else {
+                r3a.val
+            }
+        } else if i3 % 3 == 1 then {
+            let mut v3c = i3 + 100
+            let r3c ref Int = v3c.ref
+            r3c.val
+        } else {
+            let mut v3d = i3 + 200
+            let r3d ref Int = v3d.ref
+            r3d.val
+        }
+        let _ = result3
+        i3 += 1
+    }
+}
+
+// ── Test 4: While loop with early break ───────────────────────────────────
+
+let test_while_break_scope() Void = {
+    let mut i4 = 0
+    while i4 < 100000 then {
+        let mut j4 = 0
+        while j4 < 10 then {
+            let mut v4 = i4 + j4
+            let r4 ref Int = v4.ref
+            if r4.val > 5 then {
+                break
+            }
+            j4 += 1
+        }
+        i4 += 1
+    }
+}
+
+// ── Test 5: Nested while loops ────────────────────────────────────────────
+
+let test_nested_while_scope() Void = {
+    let mut i5 = 0
+    while i5 < 1000 then {
+        let mut j5 = 0
+        while j5 < 100 then {
+            let mut v5 = i5 * 100 + j5
+            let r5 ref Int = v5.ref
+            j5 += 1
+        }
+        i5 += 1
+    }
+}
+
+// ── Test 6: Ref in conditional assignment ─────────────────────────────────
+
+let test_conditional_ref_scope() Void = {
+    let mut i6 = 0
+    while i6 < 100000 then {
+        let mut v6 = i6
+        let r6 ref Int = v6.ref
+        let result6 = if r6.val > 50000 then r6.val * 2 else r6.val
+        let _ = result6
+        i6 += 1
+    }
+}
+
+// ── Test 7: Ref passed to function ────────────────────────────────────────
+
+let consume_ref_7(r7 ref Int) Int = {
+    return r7.val
+}
+
+let test_ref_param_scope() Void = {
+    let mut i7 = 0
+    while i7 < 100000 then {
+        let mut v7 = i7
+        let r7 ref Int = v7.ref
+        let result7 = consume_ref_7(r7)
+        let _ = result7
+        i7 += 1
+    }
+}
+
+// ── Test 8: Multiple refs in same scope ───────────────────────────────────
+
+let test_multi_ref_scope() Void = {
+    let mut i8 = 0
+    while i8 < 100000 then {
+        let mut v8a = i8
+        let r8a ref Int = v8a.ref
+        let mut v8b = i8 + 1
+        let r8b ref Int = v8b.ref
+        let mut v8c = i8 + 2
+        let r8c ref Int = v8c.ref
+        let _ = r8a.val + r8b.val + r8c.val
+        i8 += 1
+    }
+}
+
+// ── Test 9: Ref in loop with continue ────────────────────────────────────
+
+let test_continue_scope() Void = {
+    let mut i9 = 0
+    while i9 < 100000 then {
+        let mut v9 = i9
+        let r9 ref Int = v9.ref
+        if r9.val % 3 == 0 then {
+            i9 += 1
+            continue
+        }
+        let _ = r9.val
+        i9 += 1
+    }
+}
+
+// ── Test 10: Deeply nested scopes ─────────────────────────────────────────
+
+let test_deep_nesting_scope() Void = {
+    let mut i10 = 0
+    while i10 < 100000 then {
+        let result10 = {
+            let mut v10a = i10
+            let r10a ref Int = v10a.ref
+            {
+                let mut v10b = r10a.val + 1
+                let r10b ref Int = v10b.ref
+                {
+                    let mut v10c = r10b.val + 2
+                    let r10c ref Int = v10c.ref
+                    r10c.val
+                }
+            }
+        }
+        let _ = result10
+        i10 += 1
+    }
+}
+
+// ── Test 11: Ref with arithmetic operations ───────────────────────────────
+
+let test_arithmetic_ref_scope() Void = {
+    let mut i11 = 0
+    while i11 < 100000 then {
+        let mut v11 = i11
+        let r11 ref Int = v11.ref
+        let result11 = r11.val + r11.val * 2 - r11.val / 2
+        let _ = result11
+        i11 += 1
+    }
+}
+
+// ── Test 12: Ref comparison ───────────────────────────────────────────────
+
+let test_comparison_ref_scope() Void = {
+    let mut i12 = 0
+    while i12 < 100000 then {
+        let mut v12a = i12
+        let r12a ref Int = v12a.ref
+        let mut v12b = i12 + 1
+        let r12b ref Int = v12b.ref
+        let result12 = r12a.val < r12b.val
+        let _ = result12
+        i12 += 1
+    }
+}
+
+// ── Test 13: Tree-like ref nesting ────────────────────────────────────────
+
+let test_tree_ref_scope() Void = {
+    let mut i13 = 0
+    while i13 < 100000 then {
+        let mut inner13 = i13
+        let inner_ref13 ref Int = inner13.ref
+        let mut outer13 = inner_ref13.val * 2
+        let outer_ref13 ref Int = outer13.ref
+        let _ = outer_ref13.val
+        i13 += 1
+    }
+}
+
+// ── Test 14: Ref in boolean expressions ───────────────────────────────────
+
+let test_bool_ref_scope() Void = {
+    let mut i14 = 0
+    while i14 < 100000 then {
+        let mut v14a = i14
+        let r14a ref Int = v14a.ref
+        let mut v14b = i14 + 1
+        let r14b ref Int = v14b.ref
+        let result14 = r14a.val > 0 and r14b.val > 0 or r14a.val == 0
+        let _ = result14
+        i14 += 1
+    }
+}
+
+// ── Test 15: Ref with negation ────────────────────────────────────────────
+
+let test_negation_ref_scope() Void = {
+    let mut i15 = 0
+    while i15 < 100000 then {
+        let mut v15 = i15
+        let r15 ref Int = v15.ref
+        let result15 = -r15.val
+        let _ = result15
+        i15 += 1
+    }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────
+
+let main() Void = {
+    test_block_scope()
+    test_if_else_scope()
+    test_nested_if_scope()
+    test_while_break_scope()
+    test_nested_while_scope()
+    test_conditional_ref_scope()
+    test_ref_param_scope()
+    test_multi_ref_scope()
+    test_continue_scope()
+    test_deep_nesting_scope()
+    test_arithmetic_ref_scope()
+    test_comparison_ref_scope()
+    test_tree_ref_scope()
+    test_bool_ref_scope()
+    test_negation_ref_scope()
+}

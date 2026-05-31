@@ -736,6 +736,7 @@ given MIRFunctionCodeEmitter {
             .CopyMemory(dest, source, count) then self.emit_memory_transfer("memcpy", dest.val, source.val, count.val),
             .MoveMemory(dest, source, count) then self.emit_memory_transfer("memmove", dest.val, source.val, count.val),
             .IsUniqueMutable(value) then self.emit_is_unique(value.val),
+            .RefCount(value) then self.emit_ref_count(value.val),
             .MakeRef(pointer, owner, result_type) then self.emit_make_ref(pointer.val, owner.val, result_type),
             .MakeMutRef(pointer, owner, result_type) then self.emit_make_ref(pointer.val, owner.val, result_type),
             .DowngradeRef(value, result_type) then self.emit_runtime_unary_ref("__koral_downgrade_ref", value.val, result_type),
@@ -875,6 +876,7 @@ given MIRFunctionCodeEmitter {
         return when node in {
             .AllocMemory(_, result_type) then result_type,
             .IsUniqueMutable(_) then Type.BoolType(),
+            .RefCount(_) then Type.UIntType(),
             .MakeRef(_, _, result_type) then result_type,
             .MakeMutRef(_, _, result_type) then result_type,
             .DowngradeRef(_, result_type) then result_type,
@@ -978,11 +980,33 @@ given MIRFunctionCodeEmitter {
     private emit_is_unique(self mut ref, value MIRValue) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let result = self.codegen.next_temp_with_decl("int")
-        let control = self.control_expression(self.type_of_value(value), emission.expression)
+        // The value is ptr mut ref T — a raw pointer to the ref struct.
+        // Dereference to access the control block: ((struct __koral_Ref*)ptr)->control
+        let value_type = self.type_of_value(value)
+        let control = when value_type in {
+            .MutablePointerType(_) or .PointerType(_) then "((struct __koral_Ref*)\(emission.expression)).control",
+            _ then self.control_expression(value_type, emission.expression),
+        }
         self.codegen.add_indent()
         self.codegen.buffer.push_string("\(result) = 0;\n")
         self.codegen.add_indent()
         self.codegen.buffer.push_string("if (\(control)) { \(result) = (atomic_load(&((struct __koral_Control*)\(control))->strong_count) == 1); }\n")
+        self.emit_cleanups(emission.cleanups)
+        return MIRValueEmission(result, List[MIRValueCleanup].new())
+    }
+
+    private emit_ref_count(self mut ref, value MIRValue) MIRValueEmission = {
+        let emission = self.emit_value_source(value)
+        let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(Type.UIntType()))
+        let value_type = self.type_of_value(value)
+        let control = when value_type in {
+            .MutablePointerType(_) or .PointerType(_) then "((struct __koral_Ref*)\(emission.expression)).control",
+            _ then self.control_expression(value_type, emission.expression),
+        }
+        self.codegen.add_indent()
+        self.codegen.buffer.push_string("\(result) = 0;\n")
+        self.codegen.add_indent()
+        self.codegen.buffer.push_string("if (\(control)) { \(result) = (\(self.codegen.c_type_name(Type.UIntType())))atomic_load(&((struct __koral_Control*)\(control))->strong_count); }\n")
         self.emit_cleanups(emission.cleanups)
         return MIRValueEmission(result, List[MIRValueCleanup].new())
     }

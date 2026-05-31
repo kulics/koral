@@ -838,3 +838,52 @@ Conclusion from Stage 3:
 - Retained output volume in check-only mode is not the primary driver of the
   runaway memory growth; root cause remains inside sema checking traversal/
   resolution behavior before check completion.
+
+**Retrospective (2026-05-31 Stage 6):** The Stage 1-3 memory analysis was chasing
+symptoms. The actual root cause was `is_unique_mutable`/`ref_count` intrinsic
+signatures using `ref T` instead of `ptr ref T`, which caused COW containers to
+always copy. Fixed in Stage 6. Bootstrap hello.koral RSS: 16 GB → 1.9 MB.
+
+### 2026-05-31 Stage 4 (trait hierarchy + memory reduction pass)
+
+Completed in bootstrap sema alignment work:
+
+- Fixed trait hierarchy traversal in `has_explicit_trait_conformance_with_args`
+  (`type_checker_visibility.koral`): when checking if a type satisfies a trait,
+  the function now also checks if the type conforms to a child trait that extends
+  the target. This resolves "Type does not explicitly implement trait" errors for
+  `Div`, `Mul`, `Rem` on integer types caused by `Integer extends Div[Self] and
+  Rem[Self]` not being traversed.
+- Reduced extension method list initial capacity from 64 to 4 in
+  `type_checker_templates.koral` (`upsert_extension_template`).
+
+Validation notes:
+
+- Bootstrap rebuild from source remains successful.
+- Div/Mul/Rem trait conformance errors fully resolved.
+- Remaining errors (json, time, io, rand, list) are pre-existing and unrelated.
+- Memory measurements at this stage were misleading due to the COW bug
+  (root cause found in Stage 6).
+
+### 2026-05-31 Stage 6 (memory root cause fix)
+
+Root cause: `is_unique_mutable` / `ref_count` intrinsic signatures used `ref T`,
+causing argument passing to retain the ref. This inflated strong_count, making
+`is_unique_mutable` always return false. Every Dict/List/Deque/Set/String COW
+operation triggered a full copy.
+
+Fix: changed signatures to `ptr ref T`, updated all call sites to use `.ptr`.
+Bootstrap hello.koral RSS: 16 GB → 1.9 MB. Dict 100k inserts: 3.6 GB → 13 MB.
+
+Additional fixes:
+- Trait hierarchy traversal for conformance checking (Div/Mul/Rem via Integer)
+- MIR basic block ordering (lower_while/lower_block predecessor save)
+- Variable naming uniqueness (DefId suffix for locals)
+- TypeVar/TraitObject drop completeness
+- Deque ensure_capacity uniqueness check ordering
+
+Remaining work:
+- Bootstrap `--emit-c` generates `void` for generic types (check path works)
+- MIR `read[copy]` for mut ref field access through mut ref parameter
+- Unifier dictionary reuse
+- Runtime alloc tracking code removed from koral_runtime.c (was debug-only)
