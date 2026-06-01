@@ -927,7 +927,6 @@ given TypeChecker {
         }
         let mut bindings = Dict[String, Type].new()
         let self_param_type = self.method_param_type(method, 0(UInt)) or else Type.Unknown()
-        self.infer_type_bindings(self_param_type, receiver_type, bindings)
         let concrete_self_type = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
@@ -935,10 +934,34 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
         }
+        // Only infer type bindings from self if parameter 0 is actually a self parameter
+        // (i.e., its type matches the receiver type pattern). For static methods like
+        // constructors (e.g., Random[DefaultRandomSource].new(rng)), parameter 0 is NOT self.
+        let is_self_param = when self_param_type in {
+            .GenericParameter(_) then true,
+            .ReferenceType(inner) then when inner.val in {
+                .GenericParameter(_) then true,
+                _ then self.same_expr_type(inner.val, concrete_self_type)
+                    or self.type_matches_expected_pattern(concrete_self_type, inner.val),
+            },
+            .MutableReferenceType(inner) then when inner.val in {
+                .GenericParameter(_) then true,
+                _ then self.same_expr_type(inner.val, concrete_self_type)
+                    or self.type_matches_expected_pattern(concrete_self_type, inner.val),
+            },
+            _ then self.same_expr_type(self_param_type, concrete_self_type)
+                or self.type_matches_expected_pattern(concrete_self_type, self_param_type),
+        }
+        if is_self_param then {
+            self.infer_type_bindings(self_param_type, receiver_type, bindings)
+        }
         bindings.insert("Self", concrete_self_type)
         let bound_self_type = self.apply_type_bindings(self_param_type, bindings)
         let bound_return_type = self.apply_type_bindings(self.method_return_type(method), bindings)
-        return self.replace_type_occurrence(bound_return_type, bound_self_type, concrete_self_type)
+        if is_self_param then {
+            return self.replace_type_occurrence(bound_return_type, bound_self_type, concrete_self_type)
+        }
+        return bound_return_type
     }
 
     private resolve_method_template_key(self, inner_type Type) Option[String] = {
