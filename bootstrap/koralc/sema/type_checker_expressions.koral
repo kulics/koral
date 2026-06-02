@@ -602,16 +602,28 @@ given TypeChecker {
     }
 
     private check_call_callee_expr_ref(self, callee ref Expr, scope Scope) TypedExpr = {
+        let trace_lerp = self.lerp_trace_debug_enabled()
+            and self.storage.file_path.ends_with("\\std\\math\\float.koral")
+            and expr_span(callee).start.line == 287
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .MemberPath(_, _, _) then {
                 yield when self.split_member_path_call_callee(callee) in {
                     .Some(parts) then {
+                        if trace_lerp then {
+                            println("[lerp-trace] callee-member split method=\(parts.second)")
+                        }
                         let raw_typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
+                        if trace_lerp then {
+                            println("[lerp-trace] callee-receiver raw=\(self.display_type_name(raw_typed_receiver.expr_type))")
+                        }
                     let normalized_receiver_type = self.canonicalize_alias_type(self.concretize_default_literal_type(raw_typed_receiver.expr_type))
                     let typed_receiver = if self.same_expr_type(raw_typed_receiver.expr_type, normalized_receiver_type)
                         then raw_typed_receiver
                         else make_typed_expr_ref(raw_typed_receiver.expr_kind, normalized_receiver_type)
+                    if trace_lerp then {
+                        println("[lerp-trace] callee-receiver normalized=\(self.display_type_name(typed_receiver.expr_type))")
+                    }
                     let mut has_method = false
                     let mut inaccessible_method = false
                     when typed_receiver.expr_type in {
@@ -689,12 +701,21 @@ given TypeChecker {
                     if inaccessible_method then {
                         return self.empty_typed_block(Type.Unknown())
                     }
+                    if trace_lerp then {
+                        println("[lerp-trace] callee-method has_method=\(if has_method then "true" else "false")")
+                    }
                     if has_method then {
                         // Use the full method symbol with FunctionType (matching Swift compiler behavior)
                         let method_symbol = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                        if trace_lerp then {
+                            println("[lerp-trace] callee-method resolving-full-symbol")
+                        }
                         when method_symbol in {
                             .Some(sym) then {
                                 let sym_type = sym.symbol_type
+                                if trace_lerp then {
+                                    println("[lerp-trace] callee-method symbol-type=\(self.display_type_name(sym_type))")
+                                }
                                 yield make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type)
                             },
                             .None() then {},

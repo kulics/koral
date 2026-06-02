@@ -1324,10 +1324,7 @@ extension Monomorphizer {
                 name: methodName,
                 methodTypeArgs: resolvedMethodTypeArgs
             ) {
-                let functionType = Type.function(
-                    parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: resolvedReturnType
-                )
+                let functionType = resolveParameterizedType(concreteMethod.type)
                 let callee: TypedExpressionNode = .variable(
                     identifier: copySymbolPreservingDefId(
                         concreteMethod,

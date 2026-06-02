@@ -54,7 +54,9 @@ given MIRLowerer {
                     let mut method_symbols = List[ref Symbol].new()
                     for member in members then {
                         let symbol = self.make_given_member_symbol(member)
-                        method_symbols.push(symbol)
+                        if not self.context.contains_generic_parameter(symbol.symbol_type) then {
+                            method_symbols.push(symbol)
+                        }
                         when member.body in {
                             .Some(body) then {
                                 let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
@@ -65,15 +67,21 @@ given MIRLowerer {
                             .None() then {},
                         }
                     }
-                    globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                    if not self.context.contains_generic_parameter(target_type) then {
+                        globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                    }
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
                     let mut method_symbols = List[ref Symbol].new()
                     for member in members then {
                         let symbol = self.make_given_member_symbol(member)
-                        method_symbols.push(symbol)
+                        if not self.context.contains_generic_parameter(symbol.symbol_type) then {
+                            method_symbols.push(symbol)
+                        }
                     }
-                    globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                    if not self.context.contains_generic_parameter(target_type) then {
+                        globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                    }
                 },
                 .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
                     let mut copied_trait_args = List[Type].new()
@@ -81,7 +89,9 @@ given MIRLowerer {
                     let mut method_symbols = List[ref Symbol].new()
                     for member in members then {
                         let symbol = self.make_given_member_symbol(member)
-                        method_symbols.push(symbol)
+                        if not self.context.contains_generic_parameter(symbol.symbol_type) then {
+                            method_symbols.push(symbol)
+                        }
                         when member.body in {
                             .Some(body) then {
                                 let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
@@ -92,7 +102,15 @@ given MIRLowerer {
                             .None() then {},
                         }
                     }
-                    globals.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols))
+                    let mut trait_args_concrete = true
+                    for arg in copied_trait_args then {
+                        if self.context.contains_generic_parameter(arg) then {
+                            trait_args_concrete = false
+                        }
+                    }
+                    if not self.context.contains_generic_parameter(target_type) and trait_args_concrete then {
+                        globals.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols))
+                    }
                 },
                 .GenericFunctionDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
                 .GenericTypeStructDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
@@ -210,7 +228,7 @@ given MIRLowerer {
                     self.collect_ordered_trait_members(parent.name, ordered, visited_traits, seen_methods)
                 }
                 for member in trait_info.members then {
-                    if not seen_methods.contains(member.name) then {
+                    if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
                         seen_methods.insert(member.name)
                         ordered.push(member)
                     }
@@ -218,6 +236,13 @@ given MIRLowerer {
             },
             .None() then {},
         }
+    }
+
+    private trait_member_has_receiver(self, member TypedTraitMember) Bool = {
+        let _ = self
+        if member.params.is_empty() then { return false }
+        let first_param = member.params[0]
+        return first_param.name == "self"
     }
 
     private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {

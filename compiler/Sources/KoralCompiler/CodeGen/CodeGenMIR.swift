@@ -27,6 +27,7 @@ final class MIRFunctionCodeEmitter {
   private let resolver: MIRTypeResolver
   private let localByID: [MIRLocalID: MIRLocal]
   private let localNameByID: [MIRLocalID: String]
+  private let nonOwningLocalIDs: Set<MIRLocalID>
   private let initFlagByLocalID: [MIRLocalID: String]
   private let lifetimePlan: MIRLocalLifetimePlan
   private let blockLabelByID: [MIRBlockID: String]
@@ -56,8 +57,15 @@ final class MIRFunctionCodeEmitter {
     }
     self.localNameByID = names
 
+    self.nonOwningLocalIDs = Self.computeNonOwningLocals(function: function)
+
     var flags: [MIRLocalID: String] = [:]
-    for local in function.locals where local.storage != .capture && local.type != .void && local.type != .never && codeGen.needsDrop(local.type) {
+    for local in function.locals
+    where local.storage != .capture
+      && local.type != .void
+      && local.type != .never
+      && codeGen.needsDrop(local.type)
+      && !nonOwningLocalIDs.contains(local.id) {
       flags[local.id] = "__mir_init_\(local.id.rawValue)"
     }
     self.initFlagByLocalID = flags
@@ -271,6 +279,57 @@ final class MIRFunctionCodeEmitter {
     return MIRLocalLifetimePlan(rootLocals: rootLocals, localsByScope: localsByScope)
   }
 
+  private static func computeNonOwningLocals(function: MIRFunction) -> Set<MIRLocalID> {
+    var assignedValuesByLocal: [MIRLocalID: [MIRValue]] = [:]
+
+    for block in function.blocks {
+      for statement in block.statements {
+        guard case .assign(let place, let value) = statement,
+              case .local(let localID) = place else {
+          continue
+        }
+        assignedValuesByLocal[localID, default: []].append(value)
+      }
+    }
+
+    var nonOwning: Set<MIRLocalID> = []
+    for local in function.locals {
+      if local.storage == .parameter, Self.isBorrowedReferenceLikeType(local.type) {
+        nonOwning.insert(local.id)
+        continue
+      }
+
+      guard let assignedValues = assignedValuesByLocal[local.id], !assignedValues.isEmpty else {
+        continue
+      }
+      if assignedValues.allSatisfy({ Self.isNonOwningLocalValue($0, targetType: local.type) }) {
+        nonOwning.insert(local.id)
+      }
+    }
+
+    return nonOwning
+  }
+
+  private static func isBorrowedReferenceLikeType(_ type: Type) -> Bool {
+    switch type {
+    case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private static func isNonOwningLocalValue(_ value: MIRValue, targetType: Type) -> Bool {
+    switch value {
+    case .ref(_, _, let allocation):
+      return allocation == .stackBorrow
+    case .placeRead(_, let ownership):
+      return ownership == .borrow && isBorrowedReferenceLikeType(targetType)
+    default:
+      return false
+    }
+  }
+
   private func emitLocalDeclarations() {
     for local in function.locals where local.storage != .parameter && local.storage != .capture && local.type != .void && local.type != .never {
       guard let name = localNameByID[local.id] else { continue }
@@ -362,12 +421,23 @@ final class MIRFunctionCodeEmitter {
     let access = emitPlaceAccess(place)
     let valueEmission = emitValue(value)
     let destinationType = resolver.type(of: place) ?? function.returnType
+    let localID = localTargetID(for: place)
 
-    if let localID = localTargetID(for: place), let flag = initFlagByLocalID[localID] {
-      if localByID[localID]?.type == destinationType {
+    if let localID {
+      if let flag = initFlagByLocalID[localID], localByID[localID]?.type == destinationType {
         emitGuardedDrop(flag: flag, type: destinationType, expression: access.path)
       }
-    } else if codeGen.needsDrop(destinationType) {
+      codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: access.path, isLvalue: false)
+      consumeMovedSource(value)
+      emitCleanups(access.cleanups)
+      emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
+      if initFlagByLocalID[localID] != nil {
+        setInitFlag(localID, to: true)
+      }
+      return
+    }
+
+    if codeGen.needsDrop(destinationType) {
       let prepared = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(destinationType))
       codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: prepared, isLvalue: false)
       codeGen.appendDropStatement(for: destinationType, value: access.path, indent: codeGen.indent)
@@ -375,7 +445,6 @@ final class MIRFunctionCodeEmitter {
       consumeMovedSource(value)
       emitCleanups(access.cleanups)
       emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
-      setInitFlag(localTargetID(for: place), to: true)
       return
     }
 
@@ -383,7 +452,6 @@ final class MIRFunctionCodeEmitter {
     consumeMovedSource(value)
     emitCleanups(access.cleanups)
     emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
-    setInitFlag(localTargetID(for: place), to: true)
   }
 
   private func emitCompoundAssign(_ assignment: MIRCompoundAssignment) {
@@ -409,13 +477,17 @@ final class MIRFunctionCodeEmitter {
 
   private func emitDrop(_ place: MIRPlace) {
     let access = emitPlaceAccess(place)
-    if let localID = localTargetID(for: place), let flag = initFlagByLocalID[localID] {
-      emitGuardedDrop(flag: flag, type: resolver.type(of: place) ?? .void, expression: access.path)
-    } else {
-      codeGen.appendDropStatement(for: resolver.type(of: place) ?? .void, value: access.path, indent: codeGen.indent)
-      if let rootLocal = rootLocal(of: place), localTargetID(for: place) == nil {
-        setInitFlag(rootLocal, to: false)
+    if let localID = localTargetID(for: place) {
+      if let flag = initFlagByLocalID[localID] {
+        emitGuardedDrop(flag: flag, type: resolver.type(of: place) ?? .void, expression: access.path)
       }
+      emitCleanups(access.cleanups)
+      return
+    }
+
+    codeGen.appendDropStatement(for: resolver.type(of: place) ?? .void, value: access.path, indent: codeGen.indent)
+    if let rootLocal = rootLocal(of: place) {
+      setInitFlag(rootLocal, to: false)
     }
     emitCleanups(access.cleanups)
   }
@@ -452,8 +524,6 @@ final class MIRFunctionCodeEmitter {
       if case .operand(.local(let local)) = value {
         if let flag = initFlagByLocalID[local] {
           emitGuardedDrop(flag: flag, type: type, expression: emission.expression)
-        } else {
-          codeGen.appendDropStatement(for: type, value: emission.expression, indent: codeGen.indent)
         }
       } else {
         codeGen.appendDropStatement(for: type, value: emission.expression, indent: codeGen.indent)
@@ -486,16 +556,30 @@ final class MIRFunctionCodeEmitter {
       let emission = emitOperandValue(operand)
       let returnedLocal = preservedLocal ?? preservedReturnLocal(for: operand, emission: emission)
       setInitFlag(returnedLocal, to: false)
-      emitRootCleanup(excluding: returnedLocal)
+      emitReturnCleanup(excluding: returnedLocal)
       codeGen.addIndent()
       codeGen.appendToBuffer("return \(emission.expression);\n")
       emitCleanups(residualCleanups(for: emission, consumedExpression: true))
       return
     }
 
-    emitRootCleanup(excluding: nil)
+    emitReturnCleanup(excluding: nil)
     codeGen.addIndent()
     codeGen.appendToBuffer("return;\n")
+  }
+
+  private func emitReturnCleanup(excluding preservedLocal: MIRLocalID?) {
+    for local in function.locals.map(\.id).reversed() {
+      if local == preservedLocal {
+        continue
+      }
+      guard let flag = initFlagByLocalID[local],
+            let info = localByID[local],
+            let name = localNameByID[local] else {
+        continue
+      }
+      emitGuardedDrop(flag: flag, type: info.type, expression: name)
+    }
   }
 
   private func emitRootCleanup(excluding preservedLocal: MIRLocalID?) {
@@ -1024,10 +1108,8 @@ final class MIRFunctionCodeEmitter {
     codeGen.appendToBuffer("\(result).ptr = &\(access.path);\n")
     codeGen.addIndent()
     codeGen.appendToBuffer("\(result).control = \(access.control);\n")
-    codeGen.addIndent()
-    codeGen.appendToBuffer("if (\(result).control) { __koral_retain(\(result).control); }\n")
     emitCleanups(access.cleanups)
-    return MIRValueEmission(expression: result, cleanups: cleanupForTemporaryResult(expression: result, type: resultType))
+    return MIRValueEmission(expression: result, cleanups: [])
   }
 
   private func emitHeapReference(

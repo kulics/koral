@@ -1144,7 +1144,7 @@ private let collect_enum_constructor_vtable_requests(
 
     let mut idx UInt = 0
     while idx < args.count() and idx < case_params.count() then {
-        let expected_type = resolve_parameterized_type(mono, case_params[idx].param_type)
+        let expected_type = normalize_trait_object_expected_type(mono, case_params[idx].param_type)
         when expected_type in {
             .ReferenceType(expected_inner_ref) then {
                 when expected_inner_ref.val in {
@@ -1189,6 +1189,23 @@ private let collect_enum_constructor_vtable_requests(
             _ then {},
         }
         idx += 1
+    }
+}
+
+private let normalize_trait_object_expected_type(
+    mono ref Monomorphizer,
+    t Type,
+) Type = {
+    return when resolve_parameterized_type(mono, t) in {
+        .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
+            .Some(mapped) then normalize_trait_object_expected_type(mono, mapped),
+            .None() then resolve_parameterized_type(mono, t),
+        },
+        .ReferenceType(inner) then Type.ReferenceType(box(normalize_trait_object_expected_type(mono, inner.val))),
+        .MutableReferenceType(inner) then Type.MutableReferenceType(box(normalize_trait_object_expected_type(mono, inner.val))),
+        .WeakReferenceType(inner) then Type.WeakReferenceType(box(normalize_trait_object_expected_type(mono, inner.val))),
+        .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(normalize_trait_object_expected_type(mono, inner.val))),
+        other then other,
     }
 }
 
@@ -1336,6 +1353,214 @@ private let resolve_symbol_type(mono ref Monomorphizer, symbol ref Symbol) Symbo
         },
     }
     return Symbol(symbol.def_id, chosen, symbol.kind)
+}
+
+private let recover_type_construction_type(
+    mono ref Monomorphizer,
+    identifier_type Type,
+    identifier_def_id DefId,
+    type_args List[Type],
+    args List[ref TypedExpr],
+) Type = {
+    let resolved_identifier_type = resolve_parameterized_type(mono, identifier_type)
+    when resolved_identifier_type in {
+        .StructureType(_) then { return resolved_identifier_type },
+        .EnumType(_) then { return resolved_identifier_type },
+        .GenericStruct(_, _) then { return resolved_identifier_type },
+        .GenericEnum(_, _) then { return resolved_identifier_type },
+        _ then {},
+    }
+
+    if not type_args.is_empty() then {
+        let mut boxed_args = List[ref Type].new()
+        for type_arg in type_args then {
+            boxed_args.push(box(resolve_parameterized_type(mono, type_arg)))
+        }
+
+        let template_name = when mono.storage.context.get_template_name(identifier_def_id) in {
+            .Some(name) then name,
+            .None() then mono.storage.context.get_name(identifier_def_id) or else "",
+        }
+
+        if not template_name.is_empty() then {
+            when mono.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(template) then {
+                    return resolve_parameterized_type(mono, mono.instantiate_struct_impl(template, boxed_args))
+                },
+                .None() then {},
+            }
+            when mono.storage.generic_templates.lookup_enum(template_name) in {
+                .Some(template) then {
+                    return resolve_parameterized_type(mono, mono.instantiate_enum_impl(template, boxed_args))
+                },
+                .None() then {},
+            }
+        }
+    }
+
+    when infer_type_construction_type_from_args(mono, identifier_def_id, args) in {
+        .Some(inferred) then { return inferred },
+        .None() then {},
+    }
+
+    return resolved_identifier_type
+}
+
+private let resolve_type_construction_symbol(
+    mono ref Monomorphizer,
+    identifier ref Symbol,
+    type_args List[Type],
+    args List[ref TypedExpr],
+) Symbol = {
+    let resolved_type = recover_type_construction_type(mono, identifier.symbol_type, identifier.def_id, type_args, args)
+    return when resolved_type in {
+        .StructureType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
+        .EnumType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
+        _ then Symbol(identifier.def_id, resolved_type, identifier.kind),
+    }
+}
+
+private let infer_type_construction_type_from_args(
+    mono ref Monomorphizer,
+    identifier_def_id DefId,
+    args List[ref TypedExpr],
+) Option[Type] = {
+    let template_name = when mono.storage.context.get_template_name(identifier_def_id) in {
+        .Some(name) then name,
+        .None() then mono.storage.context.get_name(identifier_def_id) or else "",
+    }
+    if template_name.is_empty() then {
+        return Option[Type].None()
+    }
+
+    if args.count() == 2(UInt) and (template_name == "Pair" or template_name.ends_with(".Pair")) then {
+        let mut pair_args = List[ref Type].new()
+        pair_args.push(box(resolve_parameterized_type(mono, args[0(UInt)].val.expr_type)))
+        pair_args.push(box(resolve_parameterized_type(mono, args[1(UInt)].val.expr_type)))
+        return Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct("Pair", pair_args)))
+    }
+
+    let template_opt = when mono.storage.generic_templates.lookup_struct(template_name) in {
+        .Some(template) then Option[GenericStructTemplate].Some(template),
+        .None() then {
+            let mut matched = Option[GenericStructTemplate].None()
+            for entry in mono.storage.generic_templates.struct_templates.iterator() then {
+                let key = entry.first
+                if key == template_name
+                    or key.ends_with(".\(template_name)")
+                    or template_name.ends_with(".\(key)") then {
+                    matched = Option[GenericStructTemplate].Some(entry.second)
+                    break
+                }
+            }
+            yield matched
+        },
+    }
+
+    return when template_opt in {
+        .Some(template) then {
+            if template.fields.count() <> args.count() then {
+                return Option[Type].None()
+            }
+            let mut bindings = Dict[String, Type].new()
+            let empty_subst = Dict[String, Type].new()
+            let mut i UInt = 0
+            while i < args.count() then {
+                let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, empty_subst)
+                infer_type_bindings_from_constructor_pattern(mono, field_pattern, resolve_parameterized_type(mono, args[i].val.expr_type), bindings.ref)
+                i += 1
+            }
+
+            let mut inferred_args = List[ref Type].new()
+            for type_param in template.type_parameters then {
+                inferred_args.push(box(bindings.get(type_param.name) or else Type.GenericParameter(type_param.name)))
+            }
+            yield Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct(template.name, inferred_args)))
+        },
+        .None() then Option[Type].None(),
+    }
+}
+
+private let infer_type_bindings_from_constructor_pattern(
+    mono ref Monomorphizer,
+    pattern Type,
+    concrete Type,
+    bindings mut ref Dict[String, Type],
+) Void = {
+    let normalized_pattern = resolve_parameterized_type(mono, pattern)
+    let normalized_concrete = resolve_parameterized_type(mono, concrete)
+    when normalized_pattern in {
+        .GenericParameter(name) then {
+            if bindings.get(name) is .None() then {
+                bindings.insert(name, normalized_concrete)
+            }
+        },
+        .ReferenceType(inner) then when normalized_concrete in {
+            .ReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            _ then {},
+        },
+        .MutableReferenceType(inner) then when normalized_concrete in {
+            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            _ then {},
+        },
+        .PointerType(inner) then when normalized_concrete in {
+            .PointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            _ then {},
+        },
+        .MutablePointerType(inner) then when normalized_concrete in {
+            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            _ then {},
+        },
+        .WeakReferenceType(inner) then when normalized_concrete in {
+            .WeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            _ then {},
+        },
+        .MutableWeakReferenceType(inner) then when normalized_concrete in {
+            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(mono, inner.val, concrete_inner.val, bindings),
+            _ then {},
+        },
+        .FunctionType(pattern_params, pattern_return) then when normalized_concrete in {
+            .FunctionType(concrete_params, concrete_return) then {
+                if pattern_params.count() == concrete_params.count() then {
+                    let mut i UInt = 0
+                    while i < pattern_params.count() then {
+                        infer_type_bindings_from_constructor_pattern(mono, pattern_params[i].val.param_type, concrete_params[i].val.param_type, bindings)
+                        i += 1
+                    }
+                    infer_type_bindings_from_constructor_pattern(mono, pattern_return.val, concrete_return.val, bindings)
+                }
+            },
+            _ then {},
+        },
+        .GenericStruct(pattern_name, pattern_args) then when normalized_concrete in {
+            .GenericStruct(concrete_name, concrete_args) then {
+                if pattern_name == concrete_name and pattern_args.count() == concrete_args.count() then {
+                    let mut i UInt = 0
+                    while i < pattern_args.count() then {
+                        infer_type_bindings_from_constructor_pattern(mono, pattern_args[i].val, concrete_args[i].val, bindings)
+                        i += 1
+                    }
+                }
+            },
+            _ then {},
+        },
+        .GenericEnum(pattern_name, pattern_args) then when normalized_concrete in {
+            .GenericEnum(concrete_name, concrete_args) then {
+                if pattern_name == concrete_name and pattern_args.count() == concrete_args.count() then {
+                    let mut i UInt = 0
+                    while i < pattern_args.count() then {
+                        infer_type_bindings_from_constructor_pattern(mono, pattern_args[i].val, concrete_args[i].val, bindings)
+                        i += 1
+                    }
+                }
+            },
+            _ then {},
+        },
+        _ then {},
+    }
 }
 
 private let mono_is_unresolved_expr_type(mono ref Monomorphizer, t Type) Bool = {
@@ -2381,6 +2606,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
         .WrappingArithmeticExpr(_, _, _) then resolve_parameterized_type(mono, expr.expr_type),
         .WrappingShiftExpr(_, _, _) then resolve_parameterized_type(mono, expr.expr_type),
         .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
+        .TypeConstruction(identifier, type_args, args) then recover_type_construction_type(mono, identifier.symbol_type, identifier.def_id, type_args, args),
         _ then resolve_parameterized_type(mono, expr.expr_type),
     }
 
@@ -2684,7 +2910,10 @@ private let mono_register_pattern_binding_symbol_type(
     when bindings.get(symbol.def_id.id) in {
         .Some(bound_type) then {
             let current_type = resolve_symbol_type(mono, symbol).symbol_type
-            if mono_is_unresolved_expr_type(mono, current_type) and not mono_is_unresolved_expr_type(mono, bound_type) then {
+            if (mono_is_unresolved_expr_type(mono, current_type) or has_generic_parameter(current_type))
+                and not mono_is_unresolved_expr_type(mono, bound_type)
+                and not has_generic_parameter(bound_type)
+            then {
                 let symbol_kind = when mono.storage.context.get_symbol_kind(symbol.def_id) in {
                     .Some(kind) then kind,
                     .None() then symbol.kind,
@@ -3812,7 +4041,7 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
             yield box(resolve_static_method_call_to_call(mono, expr, receiver_type, method_name, method, type_args, method_type_args, args))
         },
         .TypeConstruction(identifier, type_args, args) then {
-            let resolved_identifier = resolve_symbol_type(mono, identifier)
+            let resolved_identifier = resolve_type_construction_symbol(mono, identifier, type_args, args)
             let mut new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(resolve_parameterized_type(mono, type_arg))
@@ -4885,6 +5114,7 @@ private let resolve_static_method_call_to_call(
         else get_semantic_method_name(mono, lookup_method)
 
     let mut resolved_return_type = resolve_parameterized_type(mono, expr.expr_type)
+    collect_enum_constructor_vtable_requests(mono, new_receiver_type, method_name, new_args)
 
     let mut remapped_method_match = Option[Symbol].None()
     if lookup_method.def_id.id > 0 and not is_placeholder_inferred_type(resolved_return_type) then {
@@ -5127,8 +5357,6 @@ private let resolve_static_method_call_to_call(
         param_types.push(box(a.val.expr_type))
     }
     let mut func_type = make_function_type(param_types, resolved_return_type)
-
-    // If we did not resolve a concrete symbol, keep StaticMethodCall unchanged.
     let callee_symbol = when concrete_sym in {
         .Some(sym) then {
             let resolved_symbol_type = resolve_parameterized_type(mono, sym.symbol_type)
@@ -5141,7 +5369,6 @@ private let resolve_static_method_call_to_call(
             yield Symbol(sym.def_id, func_type, SymbolKind.Function())
         },
         .None() then {
-            collect_enum_constructor_vtable_requests(mono, new_receiver_type, method_name, new_args)
             return TypedExprKind.StaticMethodCall(new_receiver_type, method_name, box(new_method), new_type_args, new_method_type_args, new_args)
         },
     }
@@ -5207,6 +5434,59 @@ private let resolve_static_call_template_name(mono ref Monomorphizer, t Type) St
         .BoolType() then "Bool",
         _ then type_to_string(t),
     }
+}
+
+private let resolve_static_call_emitted_scope_name(
+    mono ref Monomorphizer,
+    t Type,
+) String = {
+    let resolved = resolve_parameterized_type(mono, t)
+    return when resolved in {
+        .StructureType(def_id) then when mono.storage.context.get_qualified_name(def_id) in {
+            .Some(name) then name,
+            .None() then mono.storage.context.get_name(def_id) or else resolve_static_call_template_name(mono, resolved),
+        },
+        .EnumType(def_id) then when mono.storage.context.get_qualified_name(def_id) in {
+            .Some(name) then name,
+            .None() then mono.storage.context.get_name(def_id) or else resolve_static_call_template_name(mono, resolved),
+        },
+        .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
+            .Some(mapped_type) then resolve_static_call_emitted_scope_name(mono, mapped_type),
+            .None() then resolve_static_call_template_name(mono, resolved),
+        },
+        .GenericStruct(_, _) then layout_key(resolved),
+        .GenericEnum(_, _) then layout_key(resolved),
+        _ then resolve_static_call_template_name(mono, resolved),
+    }
+}
+
+private let specialized_static_method_symbol_name(
+    mono ref Monomorphizer,
+    receiver_type Type,
+    method_name String,
+    method_type_args List[Type],
+) String = {
+    let emitted_scope_name = resolve_static_call_emitted_scope_name(mono, receiver_type)
+    if method_type_args.is_empty() then {
+        return "\(emitted_scope_name)_\(method_name)"
+    }
+
+    let mut method_arg_keys = List[String].new()
+    for method_type_arg in method_type_args then {
+        method_arg_keys.push(layout_key(resolve_parameterized_type(mono, method_type_arg)))
+    }
+    return "\(emitted_scope_name)_\(method_name)_\(join_strings(method_arg_keys, "_"))"
+}
+
+private let join_strings(values List[String], separator String) String = {
+    let mut out = String.new()
+    let mut first = true
+    for value in values then {
+        if not first then { out.push_string(separator) }
+        out.push_string(value)
+        first = false
+    }
+    return out
 }
 
 private let instantiate_trait_target_static_method(

@@ -720,14 +720,19 @@ given CodeGen {
                             while param_index < param_count then {
                                 let param_type = self.function_type_param_type(function_type, param_index) or else Type.Unknown()
                                 let param_spec = if param_index < param_specs.count() then param_specs[param_index] else FunctionParamSpec("", false)
-                                let param_name = if param_spec.name.is_empty() then if param_index == 0 then {
-                                    yield "self"
-                                } else {
-                                    yield "arg\(param_index)"
-                                } else {
+                                let original_param = if param_index < member.parameters.count()
+                                    then Option[MIRTraitVTableParameter].Some(member.parameters[param_index])
+                                    else Option[MIRTraitVTableParameter].None()
+                                let param_name = if not param_spec.name.is_empty() then {
                                     yield param_spec.name
+                                } else when original_param in {
+                                    .Some(original) then if not original.name.is_empty() then original.name else "arg\(param_index)",
+                                    .None() then "arg\(param_index)",
                                 }
-                                let is_self = param_index == 0 and param_name == "self"
+                                let is_self = when original_param in {
+                                    .Some(original) then original.is_self,
+                                    .None() then false,
+                                }
                                 params.push(MIRTraitVTableParameter(param_name, Option[Type].Some(param_type), is_self))
                                 param_index += 1
                             }
@@ -771,6 +776,177 @@ given CodeGen {
         return out
     }
 
+    private trait_target_type_name(self, t Type) Option[String] = {
+        return when t in {
+            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+            .ReferenceType(inner) then self.trait_target_type_name(inner.val),
+            .MutableReferenceType(inner) then self.trait_target_type_name(inner.val),
+            _ then Option[String].None(),
+        }
+    }
+
+    private trait_target_type_args(self, t Type) List[ref Type] = {
+        return when t in {
+            .TraitObject(_, args) then args,
+            .ReferenceType(inner) then self.trait_target_type_args(inner.val),
+            .MutableReferenceType(inner) then self.trait_target_type_args(inner.val),
+            _ then List[ref Type].new(),
+        }
+    }
+
+    private trait_conversion_source_concrete_type(self, t Type) Option[Type] = {
+        let _ = self
+        return when t in {
+            .ReferenceType(inner) then if inner.val is .TraitObject(_, _)
+                then Option[Type].None()
+                else Option[Type].Some(inner.val),
+            .MutableReferenceType(inner) then if inner.val is .TraitObject(_, _)
+                then Option[Type].None()
+                else Option[Type].Some(inner.val),
+            _ then Option[Type].None(),
+        }
+    }
+
+    private mir_local_type_map(self, function MIRFunction) Dict[UInt, Type] = {
+        let _ = self
+        let mut local_types = Dict[UInt, Type].new()
+        for local in function.locals then {
+            local_types.insert(local.id.raw_value, local.local_type)
+        }
+        return local_types
+    }
+
+    private mir_place_type_for_vtable_scan(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
+        let _ = self
+        return when place in {
+            .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
+            .Field(_, field) then field.symbol_type,
+            .EnumPayload(_, _, _, _, field_type) then field_type,
+            .Deref(_, pointee) then pointee,
+            .PointerElement(_, element) then element,
+            .Global(_) then Type.Unknown(),
+        }
+    }
+
+    private mir_value_type_for_vtable_scan(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
+        return when value in {
+            .Operand(operand) then when operand in {
+                .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
+                .Function(symbol) then symbol.symbol_type,
+                .Constant(constant) then when constant in {
+                    .Integer(_, t) then t,
+                    .Float(_, t) then t,
+                    .StringLiteral(_, t) then t,
+                    .Boolean(_) then Type.BoolType(),
+                    .Void() then Type.VoidType(),
+                },
+            },
+            .PlaceRead(place, _) then self.mir_place_type_for_vtable_scan(place, local_types),
+            .Binary(operation) then operation.result_type,
+            .Unary(operation) then operation.result_type,
+            .Call(call) then call.result_type,
+            .Aggregate(aggregate) then aggregate.aggregate_type,
+            .EnumCase(construction) then construction.enum_type,
+            .EnumTag(_) then Type.IntType(),
+            .TraitObjectConversion(conversion) then conversion.result_type,
+            .TraitMethodCall(call) then call.result_type,
+            .Ref(place, kind, _) then {
+                let inner = self.mir_place_type_for_vtable_scan(place, local_types)
+                yield when kind in {
+                    .Shared() then Type.ReferenceType(box(inner)),
+                    .Mutable() then Type.MutableReferenceType(box(inner)),
+                    .Weak() then Type.WeakReferenceType(box(inner)),
+                    .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
+                }
+            },
+            .Pointer(place) then Type.PointerType(box(self.mir_place_type_for_vtable_scan(place, local_types))),
+            .Cast(_, target_type) then target_type,
+            .Intrinsic(_) then Type.Unknown(),
+            .Lambda(lambda) then lambda.lambda_type,
+        }
+    }
+
+    private append_implicit_trait_object_request(
+        self,
+        requests mut ref List[VtableCodegenRequest],
+        concrete_type Type,
+        trait_type Type,
+    ) Void = {
+        when self.trait_target_type_name(trait_type) in {
+            .Some(trait_name) then {
+                let trait_type_args = self.trait_target_type_args(trait_type)
+                requests.push(VtableCodegenRequest(
+                    concrete_type,
+                    trait_name,
+                    trait_type_args,
+                    self.get_ordered_trait_members_for_vtable(trait_name, concrete_type, trait_type_args),
+                ))
+            },
+            .None() then {},
+        }
+    }
+
+    private collect_implicit_enum_case_vtable_requests(
+        self,
+        construction MIREnumConstruction,
+        requests mut ref List[VtableCodegenRequest],
+        local_types Dict[UInt, Type],
+    ) Void = {
+        let mut case_params = List[EnumCaseParam].new()
+        when construction.enum_type in {
+            .EnumType(def_id) then {
+                when self.context.get_enum_cases(def_id) in {
+                    .Some(cases) then {
+                        for case_info in cases then {
+                            if case_info.name == construction.case_name or case_info.name.ends_with(".\(construction.case_name)") then {
+                                case_params = case_info.params
+                                break
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+
+        let mut idx UInt = 0
+        while idx < construction.arguments.count() and idx < case_params.count() then {
+            let target_type = case_params[idx].param_type
+            let source_type = self.mir_value_type_for_vtable_scan(construction.arguments[idx].val, local_types)
+            when self.trait_conversion_source_concrete_type(source_type) in {
+                .Some(concrete_type) then self.append_implicit_trait_object_request(requests, concrete_type, target_type),
+                .None() then {},
+            }
+            idx += 1
+        }
+    }
+
+    private collect_implicit_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
+        let mut requests = List[VtableCodegenRequest].new()
+        for function in self.program.functions then {
+            let local_types = self.mir_local_type_map(function)
+            for block in function.blocks then {
+                for statement in block.statements then {
+                    when statement in {
+                        .Assign(_, value) then when value in {
+                            .EnumCase(construction) then self.collect_implicit_enum_case_vtable_requests(construction, requests.ref, local_types),
+                            .TraitObjectConversion(conversion) then self.append_implicit_trait_object_request(requests.ref, conversion.concrete_type, conversion.result_type),
+                            _ then {},
+                        },
+                        .Evaluate(value) then when value in {
+                            .EnumCase(construction) then self.collect_implicit_enum_case_vtable_requests(construction, requests.ref, local_types),
+                            .TraitObjectConversion(conversion) then self.append_implicit_trait_object_request(requests.ref, conversion.concrete_type, conversion.result_type),
+                            _ then {},
+                        },
+                        _ then {},
+                    }
+                }
+            }
+        }
+        return requests
+    }
+
     private collect_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
         let mut requests = List[VtableCodegenRequest].new()
         for global in self.program.globals then {
@@ -785,6 +961,9 @@ given CodeGen {
                 },
                 _ then {},
             }
+        }
+        for request in self.collect_implicit_mir_vtable_codegen_requests() then {
+            requests.push(request)
         }
         return requests
     }

@@ -9,11 +9,66 @@ type MIRLocalLifetimePlan(
     locals_by_scope Dict[UInt, List[MIRLocalID]],
 )
 
+private let is_borrowed_reference_like_type(t Type) Bool = {
+    return when t in {
+        .ReferenceType(_) then true,
+        .MutableReferenceType(_) then true,
+        .WeakReferenceType(_) then true,
+        .MutableWeakReferenceType(_) then true,
+        _ then false,
+    }
+}
+
+private let is_non_owning_local_value(value MIRValue, target_type Type) Bool = {
+    return when value in {
+        .Ref(_, _, allocation) then allocation is .StackBorrow(),
+        .PlaceRead(_, ownership) then ownership is .Borrow() and is_borrowed_reference_like_type(target_type),
+        _ then false,
+    }
+}
+
+private let compute_non_owning_mir_locals(function ref MIRFunction) Dict[UInt, Bool] = {
+    let mut result = Dict[UInt, Bool].new()
+    for local in function.locals then {
+        if local.storage is .Parameter() and is_borrowed_reference_like_type(local.local_type) then {
+            result.insert(local.id.raw_value, true)
+            continue
+        }
+
+        let mut saw_assignment = false
+        let mut all_non_owning = true
+        for block in function.blocks then {
+            for statement in block.statements then {
+                when statement in {
+                    .Assign(place, value) then when place in {
+                        .Local(local_id) then {
+                            if local_id.raw_value == local.id.raw_value then {
+                                saw_assignment = true
+                                if not is_non_owning_local_value(value, local.local_type) then {
+                                    all_non_owning = false
+                                }
+                            }
+                        },
+                        _ then {},
+                    },
+                    _ then {},
+                }
+            }
+        }
+
+        if saw_assignment and all_non_owning then {
+            result.insert(local.id.raw_value, true)
+        }
+    }
+    return result
+}
+
 type MIRFunctionCodeEmitter(
     codegen mut ref CodeGen,
     function ref MIRFunction,
     mut local_by_id Dict[UInt, MIRLocal],
     mut local_name_by_id Dict[UInt, String],
+    mut non_owning_local_ids Dict[UInt, Bool],
     mut init_flag_by_local_id Dict[UInt, String],
     mut block_label_by_id Dict[UInt, String],
     mut lifetime_plan MIRLocalLifetimePlan,
@@ -24,23 +79,29 @@ given MIRFunctionCodeEmitter {
     public new(codegen mut ref CodeGen, function ref MIRFunction) MIRFunctionCodeEmitter = {
         let mut local_by_id = Dict[UInt, MIRLocal].new()
         let mut local_name_by_id = Dict[UInt, String].new()
+        let mut non_owning_local_ids = compute_non_owning_mir_locals(function)
         let mut init_flag_by_local_id = Dict[UInt, String].new()
         let mut block_label_by_id = Dict[UInt, String].new()
 
         for local in function.locals then {
             local_by_id.insert(local.id.raw_value, local)
-            let name = when local.symbol in {
-                .Some(symbol) then codegen.c_identifier_for_symbol(symbol),
-                .None() then {
-                    yield when local.storage in {
-                        .Parameter() then codegen.sanitize_codegen_identifier(local.name),
-                        .Capture() then codegen.sanitize_codegen_identifier(local.name),
-                        _ then "__mir_\(codegen.sanitize_codegen_identifier(local.name))_\(local.id.raw_value)",
-                    }
+            let name = when local.storage in {
+                .Parameter() then when local.symbol in {
+                    .Some(symbol) then codegen.c_identifier_for_symbol(symbol),
+                    .None() then codegen.sanitize_codegen_identifier(local.name),
                 },
+                .Capture() then when local.symbol in {
+                    .Some(symbol) then codegen.c_identifier_for_symbol(symbol),
+                    .None() then codegen.sanitize_codegen_identifier(local.name),
+                },
+                _ then "__mir_\(codegen.sanitize_codegen_identifier(local.name))_\(local.id.raw_value)",
             }
             local_name_by_id.insert(local.id.raw_value, name)
-            if local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
+            let is_non_owning = when non_owning_local_ids.get(local.id.raw_value) in {
+                .Some(_) then true,
+                .None() then false,
+            }
+            if local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) and not is_non_owning then {
                 init_flag_by_local_id.insert(local.id.raw_value, "__mir_init_\(local.id.raw_value)")
             }
         }
@@ -50,7 +111,7 @@ given MIRFunctionCodeEmitter {
         }
 
         let plan = build_mir_lifetime_plan(function, codegen)
-        return MIRFunctionCodeEmitter(codegen, function, local_by_id, local_name_by_id, init_flag_by_local_id, block_label_by_id, plan, String.new())
+        return MIRFunctionCodeEmitter(codegen, function, local_by_id, local_name_by_id, non_owning_local_ids, init_flag_by_local_id, block_label_by_id, plan, String.new())
     }
 
     public emit_body(self mut ref) Void = {
@@ -150,6 +211,7 @@ given MIRFunctionCodeEmitter {
         let access = self.emit_place_access(place)
         let emission = self.emit_value(value)
         let target_type = self.type_of_place(place)
+        let source_type = self.type_of_value(value)
         when self.local_target_id(place) in {
             .Some(local_id) then when self.init_flag_by_local_id.get(local_id.raw_value) in {
                 .Some(flag) then self.emit_guarded_drop(flag, target_type, access.path),
@@ -162,7 +224,8 @@ given MIRFunctionCodeEmitter {
                 }
             },
         }
-        self.codegen.append_copy_or_move_assignment(target_type, emission.expression, access.path, false)
+        let assigned_expression = self.adapt_expression_for_target_type(emission.expression, source_type, target_type, false)
+        self.codegen.append_copy_or_move_assignment(target_type, assigned_expression, access.path, false)
         self.emit_cleanups(access.cleanups)
         self.emit_cleanups(self.residual_cleanups(emission, true))
         when self.local_target_id(place) in {
@@ -203,10 +266,7 @@ given MIRFunctionCodeEmitter {
         when self.local_target_id(place) in {
             .Some(local_id) then when self.init_flag_by_local_id.get(local_id.raw_value) in {
                 .Some(flag) then self.emit_guarded_drop(flag, drop_type, access.path),
-                .None() then {
-                    self.codegen.add_indent()
-                    self.codegen.append_drop_statement(drop_type, access.path)
-                },
+                .None() then {},
             },
             .None() then {
                 self.codegen.add_indent()
@@ -248,8 +308,16 @@ given MIRFunctionCodeEmitter {
         let emission = self.emit_value(value)
         let value_type = self.type_of_value(value)
         if self.codegen.needs_drop(value_type) then {
-            self.codegen.add_indent()
-            self.codegen.append_drop_statement(value_type, emission.expression)
+            when value in {
+                .Operand(.Local(local_id)) then when self.init_flag_by_local_id.get(local_id.raw_value) in {
+                    .Some(flag) then self.emit_guarded_drop(flag, value_type, emission.expression),
+                    .None() then {},
+                },
+                _ then {
+                    self.codegen.add_indent()
+                    self.codegen.append_drop_statement(value_type, emission.expression)
+                },
+            }
             self.emit_cleanups(self.residual_cleanups(emission, true))
         } else {
             self.emit_cleanups(emission.cleanups)
@@ -535,8 +603,16 @@ given MIRFunctionCodeEmitter {
         let mut argument_index UInt = 0
         for field in case_info.second then {
             if not self.codegen.type_is_void(field.param_type) then {
-                let emission = self.emit_value(construction.arguments[argument_index].val)
-                self.codegen.append_copy_or_move_assignment(field.param_type, emission.expression, "\(expression).data.\(self.codegen.sanitize_codegen_identifier(construction.case_name)).\(self.codegen.sanitize_codegen_identifier(field.name))", false)
+                let arg_value = construction.arguments[argument_index].val
+                let emission = self.emit_value(arg_value)
+                let field_dest = "\(expression).data.\(self.codegen.sanitize_codegen_identifier(construction.case_name)).\(self.codegen.sanitize_codegen_identifier(field.name))"
+                let assigned_expression = self.adapt_expression_for_target_type(
+                    emission.expression,
+                    self.type_of_value(arg_value),
+                    field.param_type,
+                    false,
+                )
+                self.codegen.append_copy_or_move_assignment(field.param_type, assigned_expression, field_dest, false)
                 self.emit_cleanups(self.residual_cleanups(emission, true))
                 argument_index += 1
             }
@@ -546,7 +622,14 @@ given MIRFunctionCodeEmitter {
 
     private emit_enum_tag(self mut ref, tag MIREnumTag) MIRValueEmission = {
         let subject = self.emit_value_source(tag.subject.val)
-        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.IntType()), "\(subject.expression).tag")
+        let subject_expr = when self.type_of_value(tag.subject.val) in {
+            .ReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
+            .MutableReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
+            .WeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
+            .MutableWeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
+            _ then subject.expression,
+        }
+        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.IntType()), "\(subject_expr).tag")
         self.emit_cleanups(subject.cleanups)
         return MIRValueEmission(expression, List[MIRValueCleanup].new())
     }
@@ -557,6 +640,44 @@ given MIRFunctionCodeEmitter {
         let expression = self.codegen.generate_trait_object_conversion_from_ref_value(inner.expression, conversion.trait_name, conversion.concrete_type, should_retain)
         self.emit_cleanups(self.residual_cleanups(inner, conversion.source_ownership is .Move()))
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, conversion.result_type))
+    }
+
+    private trait_object_target_name(self ref, t Type) Option[String] = {
+        return when t in {
+            .TraitObject(trait_name, _) then Option[String].Some(trait_name),
+            .ReferenceType(inner) then self.trait_object_target_name(inner.val),
+            .MutableReferenceType(inner) then self.trait_object_target_name(inner.val),
+            _ then Option[String].None(),
+        }
+    }
+
+    private trait_object_source_concrete_type(self ref, t Type) Option[Type] = {
+        let _ = self
+        return when t in {
+            .ReferenceType(inner) then if inner.val is .TraitObject(_, _)
+                then Option[Type].None()
+                else Option[Type].Some(inner.val),
+            .MutableReferenceType(inner) then if inner.val is .TraitObject(_, _)
+                then Option[Type].None()
+                else Option[Type].Some(inner.val),
+            _ then Option[Type].None(),
+        }
+    }
+
+    private adapt_expression_for_target_type(
+        self mut ref,
+        expression String,
+        source_type Type,
+        target_type Type,
+        retain_source Bool,
+    ) String = {
+        return when self.trait_object_target_name(target_type) in {
+            .Some(trait_name) then when self.trait_object_source_concrete_type(source_type) in {
+                .Some(concrete_type) then self.codegen.generate_trait_object_conversion_from_ref_value(expression, trait_name, concrete_type, retain_source),
+                .None() then expression,
+            },
+            .None() then expression,
+        }
     }
 
     private emit_trait_method_call(self mut ref, call MIRTraitMethodCall) MIRValueEmission = {
@@ -672,10 +793,8 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string("\(result).ptr = &\(access.path);\n")
         self.codegen.add_indent()
         self.codegen.buffer.push_string("\(result).control = \(access.control);\n")
-        self.codegen.add_indent()
-        self.codegen.buffer.push_string("if (\(result).control) { __koral_retain(\(result).control); }\n")
         self.emit_cleanups(access.cleanups)
-        return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+        return MIRValueEmission(result, List[MIRValueCleanup].new())
     }
 
     private emit_heap_reference(self mut ref, place MIRPlace, result_type Type) MIRValueEmission = {
@@ -793,12 +912,25 @@ given MIRFunctionCodeEmitter {
             .Field(base, field) then {
                 let base_access = self.emit_place_access(base.val)
                 let field_name = self.codegen.sanitize_codegen_identifier(self.codegen.context.symbol_name(field))
-                let path = "\(base_access.path).\(field_name)"
+                let path = when self.type_of_place(base.val) in {
+                    .ReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr).\(field_name)",
+                    .MutableReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr).\(field_name)",
+                    .WeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr).\(field_name)",
+                    .MutableWeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr).\(field_name)",
+                    _ then "\(base_access.path).\(field_name)",
+                }
                 yield MIRPlaceAccess(path, base_access.control, base_access.cleanups)
             },
             .EnumPayload(base, case_name, field_name, _, _) then {
                 let base_access = self.emit_place_access(base.val)
-                yield MIRPlaceAccess("\(base_access.path).data.\(self.codegen.sanitize_codegen_identifier(case_name)).\(self.codegen.sanitize_codegen_identifier(field_name))", base_access.control, base_access.cleanups)
+                let payload_base = when self.type_of_place(base.val) in {
+                    .ReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr)",
+                    .MutableReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr)",
+                    .WeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr)",
+                    .MutableWeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(base_access.path).ptr)",
+                    _ then base_access.path,
+                }
+                yield MIRPlaceAccess("\(payload_base).data.\(self.codegen.sanitize_codegen_identifier(case_name)).\(self.codegen.sanitize_codegen_identifier(field_name))", base_access.control, base_access.cleanups)
             },
             .Deref(base, pointee) then {
                 let base_emission = self.emit_value_source(base.val)
@@ -1127,6 +1259,9 @@ given CodeGen {
         let mut emitted_function_names = self.emitted_function_names
         emitted_function_names.insert(c_name)
         self.emitted_function_names = emitted_function_names
+        if self.type_contains_generic(function.return_type) or self.params_contain_generic(function.params) then {
+            panic("Generic MIR function body reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+        }
 
         let saved_type_prefix = self.current_function_type_prefix
         let concrete_return_type = self.concretize_codegen_type(function.return_type)

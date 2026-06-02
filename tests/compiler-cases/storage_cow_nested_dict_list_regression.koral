@@ -1,0 +1,39 @@
+// EXPECT: true
+// EXPECT: true
+// EXPECT: 2
+// EXPECT: 1
+
+type NestedOwner(mut values Dict[Int, List[Int]])
+type NestedHolder(mut storage mut ref NestedOwner)
+
+given NestedHolder {
+    public new() Self = NestedHolder(box(NestedOwner(Dict[Int, List[Int]].with_capacity(8))))
+
+    public add(self mut ref, key Int, value Int) Bool = {
+        let before = self.storage.values.borrow_ptr()
+        when self.storage.values.get(key) in {
+            .Some(existing) then {
+                let mut updated = existing
+                updated.push(value)
+                self.storage.values.insert(key, updated)
+            },
+            .None() then {
+                let mut created = List[Int].new()
+                created.push(value)
+                self.storage.values.insert(key, created)
+            },
+        }
+        let after = self.storage.values.borrow_ptr()
+        return before == after
+    }
+}
+
+let main() Int = {
+    let mut holder = NestedHolder.new()
+    println(holder.add(1, 10))
+    println(holder.add(1, 20))
+    let values = holder.storage.values.get(1).unwrap()
+    println(values.count())
+    println(holder.storage.values.count())
+    return 0
+}

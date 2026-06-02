@@ -652,17 +652,36 @@ given TypeChecker {
         checked_return_type Option[Type],
     ) Void = {
         if self.storage.global_scope.lookup(name) is .Some(sym) then {
-            let template = GenericFunctionTemplate(
-                sym.def_id,
-                name,
-                self.to_template_type_params(type_params),
-                self.to_template_params(params),
-                self.copy_type_node(return_type),
-                checked_body,
-                Option[List[Symbol]].None(),
-                checked_return_type,
-            )
-            self.storage.generic_templates.function_templates.insert(name, template)
+            if self.template_retain_debug_enabled() then {
+                println("[template-retain] register-generic-function-template before-insert file=\(self.storage.file_path) name=\(name)")
+            }
+            when self.storage.generic_templates.lookup_function_ref(name) in {
+                .Some(existing) then {
+                    if checked_body is .Some(_) then {
+                        existing.checked_body = checked_body
+                    }
+                    existing.checked_parameters = Option[List[Symbol]].None()
+                    if checked_return_type is .Some(_) then {
+                        existing.checked_return_type = checked_return_type
+                    }
+                },
+                .None() then {
+                    let template = box(GenericFunctionTemplate(
+                        sym.def_id,
+                        name,
+                        self.to_template_type_params(type_params),
+                        self.to_template_params(params),
+                        self.copy_type_node(return_type),
+                        checked_body,
+                        Option[List[Symbol]].None(),
+                        checked_return_type,
+                    ))
+                    self.storage.generic_templates.function_templates.insert(name, template)
+                },
+            }
+            if self.template_retain_debug_enabled() then {
+                println("[template-retain] register-generic-function-template after-insert file=\(self.storage.file_path) name=\(name)")
+            }
         }
     }
 

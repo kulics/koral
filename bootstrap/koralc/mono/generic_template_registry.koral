@@ -116,9 +116,9 @@ public type GenericFunctionTemplate(
     type_parameters List[TypeParameterDecl],
     parameters List[TemplateParam],
     return_type TypeNode,
-    checked_body Option[ref TypedExpr],
-    checked_parameters Option[List[Symbol]],
-    checked_return_type Option[Type],
+    mut checked_body Option[ref TypedExpr],
+    mut checked_parameters Option[List[Symbol]],
+    mut checked_return_type Option[Type],
 )
 
 public type GenericExtensionMethodTemplate(
@@ -138,7 +138,7 @@ public type GenericExtensionMethodTemplate(
 public type GenericTemplateRegistry(
     mut struct_templates Dict[String, GenericStructTemplate],
     mut enum_templates Dict[String, GenericEnumTemplate],
-    mut function_templates Dict[String, GenericFunctionTemplate],
+    mut function_templates Dict[String, mut ref GenericFunctionTemplate],
     mut extension_methods Dict[String, mut ref List[mut ref GenericExtensionMethodTemplate]],
     mut intrinsic_extension_methods Dict[String, List[IntrinsicExtensionEntry]],
     mut traits Dict[String, TraitDeclInfo],
@@ -204,7 +204,7 @@ given GenericTemplateRegistry {
         return GenericTemplateRegistry(
             Dict[String, GenericStructTemplate].new(),
             Dict[String, GenericEnumTemplate].new(),
-            Dict[String, GenericFunctionTemplate].new(),
+            Dict[String, mut ref GenericFunctionTemplate].new(),
             Dict[String, mut ref List[mut ref GenericExtensionMethodTemplate]].new(),
             Dict[String, List[IntrinsicExtensionEntry]].new(),
             Dict[String, TraitDeclInfo].new(),
@@ -229,6 +229,13 @@ given GenericTemplateRegistry {
 
     // Look up a generic function template by name.
     public lookup_function(self, name String) Option[GenericFunctionTemplate] = {
+        return when self.function_templates.get(name) in {
+            .Some(template_ref) then Option[GenericFunctionTemplate].Some(template_ref.val),
+            .None() then Option[GenericFunctionTemplate].None(),
+        }
+    }
+
+    public lookup_function_ref(self, name String) Option[mut ref GenericFunctionTemplate] = {
         return self.function_templates.get(name)
     }
 
@@ -237,7 +244,7 @@ given GenericTemplateRegistry {
     // with the same textual name.
     public lookup_function_by_def_id(self, def_id DefId) Option[GenericFunctionTemplate] = {
         for entry in self.function_templates then {
-            let template = entry.second
+            let template = entry.second.val
             if template.def_id.id == def_id.id then {
                 return Option[GenericFunctionTemplate].Some(template)
             }

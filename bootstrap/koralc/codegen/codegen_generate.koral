@@ -32,6 +32,113 @@ type ForeignDeclarations(
 )
 
 given CodeGen {
+    private validate_codegen_inputs(self ref) Void = {
+        for function in self.program.functions then {
+            if self.type_contains_generic(function.identifier.symbol_type) then {
+                panic("Generic function symbol reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+            }
+            if self.type_contains_generic(function.return_type) or self.params_contain_generic(function.params) then {
+                panic("Generic function signature reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+            }
+            for local in function.locals then {
+                if self.type_contains_generic(local.local_type) then {
+                    panic("Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier)): \(local.name) :: \(self.context.type_display_name(local.local_type))")
+                }
+            }
+        }
+
+        for global in self.program.globals then {
+            when global in {
+                .ForeignFunction(identifier, params, return_type) then {
+                    if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(return_type) or self.params_contain_generic(params) then {
+                        panic("Generic foreign function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))")
+                    }
+                },
+                .ForeignGlobalVariable(identifier, _, decl_type) then {
+                    if self.type_contains_generic(decl_type) then {
+                        panic("Generic foreign global reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(decl_type))")
+                    }
+                },
+                .GlobalVariable(identifier, initializer_function, _, decl_type) then {
+                    if self.type_contains_generic(decl_type) then {
+                        panic("Generic global variable reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(decl_type))")
+                    }
+                    if self.type_contains_generic(initializer_function.symbol_type) then {
+                        panic("Generic global initializer reached codegen: \(self.context.symbol_name(initializer_function)) :: \(self.context.type_display_name(initializer_function.symbol_type))")
+                    }
+                },
+                .StructDeclaration(identifier, fields) then {
+                    for field in fields then {
+                        if self.type_contains_generic(field.field_type) then {
+                            panic("Generic struct field reached codegen: \(self.context.symbol_name(identifier)).\(field.name) :: \(self.context.type_display_name(field.field_type))")
+                        }
+                    }
+                },
+                .EnumDeclaration(identifier, cases) then {
+                    for case_info in cases then {
+                        for field in case_info.fields then {
+                            if self.type_contains_generic(field.field_type) then {
+                                panic("Generic enum field reached codegen: \(self.context.symbol_name(identifier)).\(case_info.name).\(field.name) :: \(self.context.type_display_name(field.field_type))")
+                            }
+                        }
+                    }
+                },
+                .Function(identifier, params, return_type, _) then {
+                    if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(return_type) or self.params_contain_generic(params) then {
+                        panic("Generic MIR global function reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))")
+                    }
+                },
+                .Given(target_type, trait_name, trait_type_args, methods) then {
+                    if self.type_contains_generic(target_type) then {
+                        let trait_label = when trait_name in { .Some(name) then name, .None() then "" }
+                        panic("Generic given target reached codegen: \(trait_label) on \(self.context.type_display_name(target_type))")
+                    }
+                    for trait_arg in trait_type_args then {
+                        if self.type_contains_generic(trait_arg) then {
+                            panic("Generic given trait arg reached codegen: \(self.context.type_display_name(trait_arg))")
+                        }
+                    }
+                    for method in methods then {
+                        if self.type_contains_generic(method.symbol_type) then {
+                            panic("Generic given method symbol reached codegen: \(self.context.symbol_name(method)) :: \(self.context.type_display_name(method.symbol_type))")
+                        }
+                    }
+                },
+                .TraitVTable(vtable) then {
+                    if self.type_contains_generic(vtable.concrete_type) then {
+                        panic("Generic trait vtable concrete type reached codegen: \(self.context.type_display_name(vtable.concrete_type))")
+                    }
+                    for trait_arg in vtable.trait_type_args then {
+                        if self.type_contains_generic(trait_arg) then {
+                            panic("Generic trait vtable arg reached codegen: \(self.context.type_display_name(trait_arg))")
+                        }
+                    }
+                    for method in vtable.methods then {
+                        when method.return_type in {
+                            .Some(return_type) then {
+                                if self.type_contains_generic(return_type) then {
+                                    panic("Generic trait vtable return reached codegen: \(method.name) :: \(self.context.type_display_name(return_type))")
+                                }
+                            },
+                            .None() then {},
+                        }
+                        for param in method.parameters then {
+                            when param.param_type in {
+                                .Some(param_type) then {
+                                    if self.type_contains_generic(param_type) then {
+                                        panic("Generic trait vtable param reached codegen: \(method.name).\(param.name) :: \(self.context.type_display_name(param_type))")
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+
     private user_defined_drop_type_key(self, receiver_type Type) String = {
         return self.emitted_type_c_name_fallback(receiver_type)
     }
@@ -169,6 +276,7 @@ given CodeGen {
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
     public generate_into_buffer(self mut ref) Void = {
         self.buffer = box(String.new())
+        self.validate_codegen_inputs()
         let foreign_declarations = self.scan_program_codegen_inputs()
         self.emit_includes()
         self.emit_foreign_types(foreign_declarations)
@@ -326,6 +434,9 @@ given CodeGen {
             let c_name = self.callable_c_name(function.identifier)
             if emitted.contains(c_name) then { continue }
             emitted.insert(c_name)
+            if self.type_contains_generic(function.return_type) or self.params_contain_generic(function.params) then {
+                panic("Generic MIR function declaration reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+            }
             if self.type_is_never(function.return_type) then {
                 self.buffer.push_string("_Noreturn ")
             }

@@ -22,7 +22,7 @@ protected type TypeCheckerStorage(
     mut constraint_solver ConstraintSolver,
     mut trait_registry TraitRegistry,
     mut generic_param_constraints Dict[String, List[String]],
-    mut generic_templates GenericTemplateRegistry,
+    mut generic_templates mut ref GenericTemplateRegistry,
     mut instantiation_requests Set[InstantiationRequest],
     mut import_graph Option[ImportGraph],
     mut explicit_trait_conformances Set[ExplicitTraitConformanceKey],
@@ -57,6 +57,10 @@ protected type TypeBindingRestoreEntry(
     old_type Option[Type],
     old_generic_param Bool,
     old_generic_param_constraints Option[List[String]],
+)
+
+protected type GenericConstraintSnapshot(
+    previous_constraints Dict[String, Option[List[String]]],
 )
 
 protected type GenericTraitConformanceTemplate(
@@ -113,7 +117,7 @@ given TypeChecker {
             ConstraintSolver.new(),
             TraitRegistry.new(),
             Dict[String, List[String]].new(),
-            GenericTemplateRegistry.new(),
+            box(GenericTemplateRegistry.new()),
             Set[InstantiationRequest].new(),
             Option[ImportGraph].None(),
             Set[ExplicitTraitConformanceKey].new(),
@@ -233,6 +237,22 @@ given TypeChecker {
         return false
     }
 
+    protected template_retain_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_TEMPLATE_RETAIN") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected lerp_trace_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_LERP_TRACE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
     private log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
         let pending_constraints = self.storage.constraint_solver.constraints.count()
         let pending_default_constraints = self.storage.constraint_solver.default_constraints.count()
@@ -250,11 +270,17 @@ given TypeChecker {
         let global_scope_local_entry_count = self.storage.global_scope.local_entry_count()
         let global_scope_type_count = self.storage.global_scope.type_entry_count()
         let global_scope_generic_param_count = self.storage.global_scope.generic_param_count()
+        let context = self.context()
+        let def_id_name_count = context.def_id_map.names.count()
+        let def_id_symbol_type_count = context.def_id_map.symbol_types.count()
+        let def_id_symbol_kind_count = context.def_id_map.symbol_kinds.count()
+        let def_id_param_spec_count = context.def_id_map.param_specs.count()
+        let def_id_module_path_count = context.def_id_map.module_paths.count()
         let mut binding_count = 0(UInt)
         for _entry in self.storage.constraint_solver.unifier.current_bindings() then {
             binding_count += 1
         }
-        println("[sema-progress] checked=\(checked_decl_count)/\(total_nodes) file=\(self.storage.file_path) constraints=\(pending_constraints) bindings=\(binding_count) diagnostics=\(self.storage.diagnostics.count()) next_def_id=\(next_def_id) extension_keys=\(extension_key_count) extension_templates=\(extension_template_count) method_type_keys=\(method_type_key_count) instantiation_requests=\(instantiation_request_count) global_scope_entries=\(global_scope_entry_count) global_scope_types=\(global_scope_type_count)")
+        println("[sema-progress] checked=\(checked_decl_count)/\(total_nodes) file=\(self.storage.file_path) constraints=\(pending_constraints) bindings=\(binding_count) diagnostics=\(self.storage.diagnostics.count()) next_def_id=\(next_def_id) extension_keys=\(extension_key_count) extension_templates=\(extension_template_count) method_type_keys=\(method_type_key_count) instantiation_requests=\(instantiation_request_count) global_scope_entries=\(global_scope_entry_count) global_scope_types=\(global_scope_type_count) def_names=\(def_id_name_count) def_symbol_types=\(def_id_symbol_type_count) def_symbol_kinds=\(def_id_symbol_kind_count) def_param_specs=\(def_id_param_spec_count) def_module_paths=\(def_id_module_path_count)")
     }
 
     private decl_debug_label(self, decl Decl) String = {
@@ -873,6 +899,9 @@ given TypeChecker {
                     self.storage.file_path = pair.first.source_file
                     self.storage.module_path = pair.second
                     self.storage.package_id = pair.first.package_id
+                    if debug_progress then {
+                        println("[sema-pass2] trait file=\(self.storage.file_path) label=\(self.decl_debug_label(pair.first.decl))")
+                    }
                     self.collect_decl_signature(pair.first.decl)
                 },
                 _ then {},
@@ -885,6 +914,9 @@ given TypeChecker {
                     self.storage.file_path = pair.first.source_file
                     self.storage.module_path = pair.second
                     self.storage.package_id = pair.first.package_id
+                    if debug_progress then {
+                        println("[sema-pass2] decl file=\(self.storage.file_path) label=\(self.decl_debug_label(pair.first.decl))")
+                    }
                     self.collect_decl_signature(pair.first.decl)
                 },
             }
@@ -1006,89 +1038,105 @@ given TypeChecker {
     private collect_decl_signature(self mut ref, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
+                let resolved_type = self.lookup_current_file_type_symbol(name)
+                    or else panic("TypeChecker pass2 error: missing struct symbol for \(name)")
+                if type_params.is_empty() then {
+                    self.storage.generic_templates.concrete_struct_types.insert(name, resolved_type)
+                } else when resolved_type in {
+                    .StructureType(def_id) then {
+                        let mut template_fields = List[TemplateField].new()
+                        for field in fields then {
+                            template_fields.push(TemplateField(field.access, field.name, field.mutable, self.copy_type_node(field.type_name), field.named))
+                        }
+                        self.storage.generic_templates.struct_templates.insert(
+                            name,
+                            GenericStructTemplate(def_id, name, self.to_template_type_params(type_params), template_fields)
+                        )
+                    },
+                    _ then panic("TypeChecker pass2 error: generic struct symbol for \(name) is not a structure"),
                 }
-                if self.lookup_current_file_type_symbol(name) is .Some(t) then {
-                    if type_params.is_empty() then {
-                        self.storage.generic_templates.concrete_struct_types.insert(name, t)
-                    } else when t in {
-                        .StructureType(def_id) then {
-                            let mut template_fields = List[TemplateField].new()
-                            for field in fields then {
-                                template_fields.push(TemplateField(field.access, field.name, field.mutable, self.copy_type_node(field.type_name), field.named))
-                            }
-                            self.storage.generic_templates.struct_templates.insert(
-                                name,
-                                GenericStructTemplate(def_id, name, self.to_template_type_params(type_params), template_fields)
-                            )
-                        },
-                        _ then {},
-                    }
-                }
-                if self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
+                if resolved_type is .StructureType(def_id) then {
                     let mut sf = List[StructField].new()
-                    for f in fields then {
-                        sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
+                    if type_params.is_empty() then {
+                        for f in fields then {
+                            sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
+                        }
+                    } else {
+                        let bindings = self.generic_type_param_bindings(type_params)
+                        for f in fields then {
+                            sf.push(StructField(f.name, self.resolve_type_with_bindings(f.type_name, bindings), f.mutable, f.access, f.named))
+                        }
                     }
                     let mut context = self.context()
                     context.set_struct_fields(def_id, sf)
+                } else {
+                    panic("TypeChecker pass2 error: struct declaration \(name) resolved to non-structure type")
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                if self.lookup_current_file_type_symbol(name) is .Some(t) then {
-                    if type_params.is_empty() then {
-                        self.storage.generic_templates.concrete_enum_types.insert(name, t)
-                    } else when t in {
-                        .EnumType(def_id) then {
-                            let mut template_cases = List[TemplateCase].new()
-                            for case_ in cases then {
-                                let mut template_params = List[TemplateParam].new()
-                                for field in case_.fields then {
-                                    template_params.push(TemplateParam(field.name, false, self.copy_type_node(field.type_name), field.named))
-                                }
-                                template_cases.push(TemplateCase(case_.name, template_params))
+                let resolved_type = self.lookup_current_file_type_symbol(name)
+                    or else panic("TypeChecker pass2 error: missing enum symbol for \(name)")
+                if type_params.is_empty() then {
+                    self.storage.generic_templates.concrete_enum_types.insert(name, resolved_type)
+                } else when resolved_type in {
+                    .EnumType(def_id) then {
+                        let mut template_cases = List[TemplateCase].new()
+                        for case_ in cases then {
+                            let mut template_params = List[TemplateParam].new()
+                            for field in case_.fields then {
+                                template_params.push(TemplateParam(field.name, false, self.copy_type_node(field.type_name), field.named))
                             }
-                            self.storage.generic_templates.enum_templates.insert(
-                                name,
-                                GenericEnumTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
-                            )
-                        },
-                        _ then {},
-                    }
-                }
-                if self.lookup_current_file_type_symbol(name) is .Some(t) and t is .EnumType(def_id) then {
-                    let mut uc = List[EnumCaseInfo].new()
-                    for c in cases then {
-                        let mut params = List[EnumCaseParam].new()
-                        for f in c.fields then {
-                            params.push(EnumCaseParam(f.name, self.resolve_type(f.type_name), f.named))
+                            template_cases.push(TemplateCase(case_.name, template_params))
                         }
-                        uc.push(EnumCaseInfo(c.name, params))
+                        self.storage.generic_templates.enum_templates.insert(
+                            name,
+                            GenericEnumTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
+                        )
+                    },
+                    _ then panic("TypeChecker pass2 error: generic enum symbol for \(name) is not an enum"),
+                }
+                if resolved_type is .EnumType(def_id) then {
+                    let mut uc = List[EnumCaseInfo].new()
+                    if type_params.is_empty() then {
+                        for c in cases then {
+                            let mut params = List[EnumCaseParam].new()
+                            for f in c.fields then {
+                                params.push(EnumCaseParam(f.name, self.resolve_type(f.type_name), f.named))
+                            }
+                            uc.push(EnumCaseInfo(c.name, params))
+                        }
+                    } else {
+                        let bindings = self.generic_type_param_bindings(type_params)
+                        for c in cases then {
+                            let mut params = List[EnumCaseParam].new()
+                            for f in c.fields then {
+                                params.push(EnumCaseParam(f.name, self.resolve_type_with_bindings(f.type_name, bindings), f.named))
+                            }
+                            uc.push(EnumCaseInfo(c.name, params))
+                        }
                     }
                     let mut context = self.context()
                     context.set_enum_cases(def_id, uc)
+                } else {
+                    panic("TypeChecker pass2 error: enum declaration \(name) resolved to non-enum type")
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 if not type_params.is_empty() then {
                     self.register_generic_function_template(name, type_params, params, return_type, Option[ref TypedExpr].None(), Option[Type].None())
                 }
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = List[Type].new()
-                for p in params then {
-                    param_types.push(self.resolve_type(p.type_name))
+                let resolved_ret = if type_params.is_empty() then {
+                    for p in params then {
+                        param_types.push(self.resolve_type(p.type_name))
+                    }
+                    yield self.resolve_type(return_type)
+                } else {
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    for p in params then {
+                        param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
+                    }
+                    yield self.resolve_type_with_bindings(return_type, bindings)
                 }
                 if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     let mut stable_param_types = List[Type].new()
@@ -1107,17 +1155,20 @@ given TypeChecker {
                     context.set_symbol_info(sym.def_id, SymbolInfo(fn_type, sym.kind, MethodKind.Normal(), false))
                     self.storage.global_scope.define(self.context(), updated)
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
-                let type_binding_snapshot = self.snapshot_type_bindings()
-                for tp in type_params then {
-                    self.bind_type_param(tp)
-                }
-                let resolved_ret = self.resolve_type(return_type)
                 let mut param_types = List[Type].new()
-                for p in params then {
-                    param_types.push(self.resolve_type(p.type_name))
+                let resolved_ret = if type_params.is_empty() then {
+                    for p in params then {
+                        param_types.push(self.resolve_type(p.type_name))
+                    }
+                    yield self.resolve_type(return_type)
+                } else {
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    for p in params then {
+                        param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
+                    }
+                    yield self.resolve_type_with_bindings(return_type, bindings)
                 }
                 if self.lookup_current_file_symbol(name) is .Some(sym) then {
                     let mut stable_param_types = List[Type].new()
@@ -1129,7 +1180,6 @@ given TypeChecker {
                     context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
                     context.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
                 }
-                self.restore_type_bindings(type_binding_snapshot)
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -1171,20 +1221,15 @@ given TypeChecker {
             .GivenDecl(target_type, type_params, members, span) then {
                 if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
                 } else {
-                    let type_binding_snapshot = self.snapshot_type_bindings()
-                    for tp in type_params then {
-                        self.bind_type_param(tp)
-                    }
-                    let resolved_target = self.resolve_type(target_type)
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    let resolved_target = if type_params.is_empty()
+                        then self.resolve_type(target_type)
+                        else self.resolve_type_with_bindings(target_type, bindings)
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     let target_type_name = self.type_node_name(target_type)
                     let trait_tool_target_name = if type_params.is_empty() and self.storage.trait_registry.get(target_type_name) is .Some(_) then Option[String].Some(target_type_name) else Option[String].None()
                     self.collect_given_signatures(members, resolved_target, type_params, Option[String].None())
                     for member in members then {
-                        let member_type_binding_snapshot = self.snapshot_type_bindings()
-                        for tp in member.type_params then {
-                            self.bind_type_param(tp)
-                        }
                         let method_name = member.name
                         let method_access = member.access
                         let method_type_params = member.type_params
@@ -1224,44 +1269,72 @@ given TypeChecker {
                             .None() then {
                             },
                         }
-                        self.restore_type_bindings(member_type_binding_snapshot)
                     }
-                    self.restore_type_bindings(type_binding_snapshot)
                 }
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
                 if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
                 } else {
-                    let type_binding_snapshot = self.snapshot_type_bindings()
-                    for tp in type_params then {
-                        self.bind_type_param(tp)
-                    }
-                    let resolved_target = self.resolve_type(target_type)
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    let resolved_target = if type_params.is_empty()
+                        then self.resolve_type(target_type)
+                        else self.resolve_type_with_bindings(target_type, bindings)
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     let trait_name = self.type_node_name(trait_type)
-                    let resolved_trait_args = self.trait_type_args(trait_type)
+                    let resolved_trait_args = self.trait_type_args_with_bindings(trait_type, bindings)
+                    if self.sema_progress_debug_enabled() then {
+                        println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=record-conformance trait=\(trait_name)")
+                    }
                     self.record_explicit_trait_conformance(resolved_target, trait_name, resolved_trait_args)
-                    self.record_generic_trait_conformance_template(resolved_target, type_params, trait_type, trait_name)
+                    self.record_generic_trait_conformance_template(resolved_target, type_params, trait_name, resolved_trait_args)
+                    if self.sema_progress_debug_enabled() then {
+                        println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=iterator-conformance trait=\(trait_name)")
+                    }
                     self.maybe_record_iterator_conformance(resolved_target, trait_type)
-                    // 注入 trait 类型参数
-                    self.inject_trait_type_args(trait_type, trait_name)
+                    if self.sema_progress_debug_enabled() then {
+                        println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=collect-signatures trait=\(trait_name)")
+                    }
                     self.collect_given_signatures(members, resolved_target, type_params, Option[String].Some(trait_name))
-                    for member in members then {
-                        let member_type_binding_snapshot = self.snapshot_type_bindings()
-                        for tp in member.type_params then {
-                            self.bind_type_param(tp)
+                    if self.sema_progress_debug_enabled() then {
+                        println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=collect-signatures-done trait=\(trait_name)")
+                    }
+                    let mut needs_template_registration = not type_params.is_empty()
+                    if not needs_template_registration then {
+                        for member in members then {
+                            if not member.type_params.is_empty() then {
+                                needs_template_registration = true
+                            } else when resolved_target in {
+                                .TraitObject(_, _) then {
+                                    needs_template_registration = true
+                                },
+                                _ then {
+                                    if self.mentions_unresolved_generic_placeholder(resolved_target) then {
+                                        needs_template_registration = true
+                                    }
+                                },
+                            }
                         }
-                        let method_name = member.name
-                        let method_access = member.access
-                        let method_type_params = member.type_params
-                        let method_params = member.params
-                        let method_return_type_node = member.return_type
-                        let no_checked_body = Option[ref TypedExpr].None()
-                        let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
-                            .TraitObject(_, _) then true,
-                            _ then self.mentions_unresolved_generic_placeholder(resolved_target),
+                    }
+                    if needs_template_registration then {
+                        // Only the template-registration path needs trait generic bindings in scope.
+                        if self.sema_progress_debug_enabled() then {
+                            println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=inject-trait-type-args trait=\(trait_name)")
                         }
-                        if should_register_template then {
+                        self.inject_trait_type_args(trait_type, trait_name)
+                        for member in members then {
+                            let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
+                                .TraitObject(_, _) then true,
+                                _ then self.mentions_unresolved_generic_placeholder(resolved_target),
+                            }
+                            if not should_register_template then {
+                                continue
+                            }
+                            let method_name = member.name
+                            let method_access = member.access
+                            let method_type_params = member.type_params
+                            let method_params = member.params
+                            let method_return_type_node = member.return_type
+                            let no_checked_body = Option[ref TypedExpr].None()
                             self.register_extension_method_template(
                                 extension_type_key,
                                 type_params,
@@ -1275,25 +1348,28 @@ given TypeChecker {
                                 Option[Type].None(),
                             )
                         }
-                        self.restore_type_bindings(member_type_binding_snapshot)
                     }
-                    self.restore_type_bindings(type_binding_snapshot)
+                    if self.sema_progress_debug_enabled() then {
+                        println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=restore trait=\(trait_name)")
+                    }
                 }
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
                 if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params) then {
                 } else {
-                    let type_binding_snapshot = self.snapshot_type_bindings()
-                    for tp in type_params then {
-                        self.bind_type_param(tp)
-                    }
-                    let resolved_target = self.resolve_type(target_type)
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    let resolved_target = if type_params.is_empty()
+                        then self.resolve_type(target_type)
+                        else self.resolve_type_with_bindings(target_type, bindings)
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     self.collect_given_signatures(members, resolved_target, type_params, Option[String].None())
                     for member in members then {
-                        let member_type_binding_snapshot = self.snapshot_type_bindings()
-                        for tp in member.type_params then {
-                            self.bind_type_param(tp)
+                        let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
+                            .TraitObject(_, _) then true,
+                            _ then self.mentions_unresolved_generic_placeholder(resolved_target),
+                        }
+                        if not should_register_template then {
+                            continue
                         }
                         let method_name = member.name
                         let method_access = member.access
@@ -1301,27 +1377,19 @@ given TypeChecker {
                         let method_params = member.params
                         let method_return_type_node = member.return_type
                         let no_checked_body = Option[ref TypedExpr].None()
-                        let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
-                            .TraitObject(_, _) then true,
-                            _ then self.mentions_unresolved_generic_placeholder(resolved_target),
-                        }
-                        if should_register_template then {
-                            self.register_extension_method_template(
-                                extension_type_key,
-                                type_params,
-                                method_name,
-                                method_access,
-                                method_type_params,
-                                method_params,
-                                method_return_type_node,
-                                Option[String].None(),
-                                no_checked_body,
-                                Option[Type].None(),
-                            )
-                        }
-                        self.restore_type_bindings(member_type_binding_snapshot)
+                        self.register_extension_method_template(
+                            extension_type_key,
+                            type_params,
+                            method_name,
+                            method_access,
+                            method_type_params,
+                            method_params,
+                            method_return_type_node,
+                            Option[String].None(),
+                            no_checked_body,
+                            Option[Type].None(),
+                        )
                     }
-                    self.restore_type_bindings(type_binding_snapshot)
                 }
             },
             .GivenNotTraitDecl(_, _, _, _) then {},
@@ -1388,6 +1456,9 @@ given TypeChecker {
         }
         let mut seen_names = List[String].new()
         for m in members then {
+            if self.sema_progress_debug_enabled() then {
+                println("[sema-pass2-given] target=\(self.context().type_display_name(target_type)) member=\(m.name)")
+            }
             if self.string_list_contains(seen_names, m.name) then {
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, self.duplicate_definition_message(m.name)))
                 continue
@@ -1412,14 +1483,17 @@ given TypeChecker {
             if not should_register_as_inherent then {
                 continue
             }
-            let type_binding_snapshot = self.snapshot_type_bindings()
-            for tp in m.type_params then {
-                self.bind_type_param(tp)
+            let member_bindings = self.generic_type_param_bindings(m.type_params)
+            if self.sema_progress_debug_enabled() then {
+                println("[sema-pass2-given-step] member=\(m.name) step=resolve-return")
             }
-            let ret = self.resolve_given_member_type(m.return_type, target_type)
+            let ret = self.resolve_given_member_type_with_bindings(m.return_type, target_type, member_bindings)
             let mut param_types = List[Type].new()
             for param in m.params then {
-                param_types.push(self.resolve_given_member_type(param.type_name, target_type))
+                param_types.push(self.resolve_given_member_type_with_bindings(param.type_name, target_type, member_bindings))
+            }
+            if self.sema_progress_debug_enabled() then {
+                println("[sema-pass2-given-step] member=\(m.name) step=make-symbol")
             }
             let method_symbol = self.make_method_callable_symbol_with_param_types(
                 m.name,
@@ -1432,12 +1506,14 @@ given TypeChecker {
                 self.storage.package_id,
             )
             if should_register_as_inherent then {
+                if self.sema_progress_debug_enabled() then {
+                    println("[sema-pass2-given-step] member=\(m.name) step=register")
+                }
                 self.storage.method_table.register(type_key, m.name, method_symbol)
                 if has_template_key then {
                     self.storage.method_table.register(template_lookup_key, m.name, method_symbol)
                 }
             }
-            self.restore_type_bindings(type_binding_snapshot)
         }
     }
 
@@ -1462,6 +1538,14 @@ given TypeChecker {
             out.push(TypeParameterDecl(tp.name, constraints))
         }
         return out
+    }
+
+    private generic_type_param_bindings(self, type_params List[TypeParameter]) Dict[String, Type] = {
+        let mut bindings = Dict[String, Type].new()
+        for tp in type_params then {
+            bindings.insert(tp.name, Type.GenericParameter(tp.name))
+        }
+        return bindings
     }
 
     private to_template_params(self, params List[Param]) List[TemplateParam] = {
@@ -1588,6 +1672,48 @@ given TypeChecker {
             constraints.push(self.type_node_name(c.val))
         }
         self.storage.generic_param_constraints.insert(tp.name, constraints)
+    }
+
+    private constraint_names_for_type_param(self, tp TypeParameter) List[String] = {
+        let mut constraints = List[String].new()
+        for c in tp.constraints then {
+            constraints.push(self.type_node_name(c.val))
+        }
+        return constraints
+    }
+
+    private snapshot_generic_constraints(self, type_params List[TypeParameter]) GenericConstraintSnapshot = {
+        let mut previous_constraints = Dict[String, Option[List[String]]].new()
+        for tp in type_params then {
+            let previous = when self.storage.generic_param_constraints.get(tp.name) in {
+                .Some(existing) then {
+                    let mut copied = List[String].with_capacity(existing.count())
+                    for constraint in existing then {
+                        copied.push(constraint)
+                    }
+                    yield Option[List[String]].Some(copied)
+                },
+                .None() then Option[List[String]].None(),
+            }
+            previous_constraints.insert(tp.name, previous)
+        }
+        return GenericConstraintSnapshot(previous_constraints)
+    }
+
+    private register_generic_constraints(self, type_params List[TypeParameter]) Void = {
+        for tp in type_params then {
+            self.storage.generic_param_constraints.insert(tp.name, self.constraint_names_for_type_param(tp))
+        }
+    }
+
+    private restore_generic_constraints(self, snapshot GenericConstraintSnapshot) Void = {
+        for entry in snapshot.previous_constraints then {
+            let name = entry.first
+            when entry.second in {
+                .Some(previous) then self.storage.generic_param_constraints.insert(name, previous),
+                .None() then self.storage.generic_param_constraints.remove(name),
+            }
+        }
     }
 
     private nominal_def_id_for_type(self, t Type) Option[DefId] = {

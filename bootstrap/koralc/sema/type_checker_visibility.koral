@@ -431,11 +431,15 @@ given TypeChecker {
     }
 
     private trait_type_args(self, trait_type TypeNode) List[Type] = {
+        return self.trait_type_args_with_bindings(trait_type, Dict[String, Type].new())
+    }
+
+    protected trait_type_args_with_bindings(self, trait_type TypeNode, bindings Dict[String, Type]) List[Type] = {
         return when trait_type in {
             .Generic(_, trait_args) then {
                 let mut out = List[Type].new()
                 for arg in trait_args then {
-                    out.push(self.resolve_type(arg.val))
+                    out.push(self.resolve_type_with_bindings(arg.val, bindings))
                 }
                 yield out
             },
@@ -443,12 +447,12 @@ given TypeChecker {
         }
     }
 
-    private record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_type TypeNode, trait_name String) Void = {
+    private record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_name String, trait_args List[Type]) Void = {
         let template = GenericTraitConformanceTemplate(
             target_type,
             self.to_template_type_params(owner_type_params),
             trait_name,
-            self.trait_type_args(trait_type),
+            trait_args,
         )
         self.storage.generic_trait_conformance_templates.push(template)
         // Also insert into the type-keyed index for O(1) lookup

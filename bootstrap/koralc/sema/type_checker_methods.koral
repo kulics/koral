@@ -1178,6 +1178,110 @@ given TypeChecker {
         return self.apply_type_bindings(t, bindings)
     }
 
+    private trait_method_bindings(self, trait_name String, receiver_type Type) Dict[String, Type] = {
+        let concrete_receiver = when receiver_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        let mut bindings = Dict[String, Type].new()
+        bindings.insert("Self", concrete_receiver)
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                for type_param in info.type_params then {
+                    if not bindings.contains_key(type_param) then {
+                        let bound_type = when self.storage.global_scope.lookup_type(type_param) in {
+                            .Some(existing) then existing,
+                            .None() then Type.GenericParameter(type_param),
+                        }
+                        bindings.insert(type_param, bound_type)
+                    }
+                }
+            },
+            .None() then panic("trait_method_bindings: missing trait info for \(trait_name)"),
+        }
+        let mut visited = Set[String].new()
+        return self.collect_trait_method_bindings_recursive(trait_name, bindings, visited.ref)
+    }
+
+    private collect_trait_method_bindings_recursive(
+        self,
+        trait_name String,
+        bindings Dict[String, Type],
+        visited mut ref Set[String],
+    ) Dict[String, Type] = {
+        if visited.contains(trait_name) then {
+            return bindings
+        }
+        visited.insert(trait_name)
+        when self.storage.trait_registry.get(trait_name) in {
+            .Some(info) then {
+                let mut collected = bindings
+                for parent in info.parent_traits then {
+                    if parent.name == "Any" then {
+                        continue
+                    }
+                    when self.storage.trait_registry.get(parent.name) in {
+                        .Some(parent_info) then {
+                            let mut parent_bindings = Dict[String, Type].new()
+                            for entry in collected then {
+                                parent_bindings.insert(entry.first, entry.second)
+                            }
+                            let mut idx UInt = 0
+                            while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
+                                let param_name = parent_info.type_params[idx]
+                                let resolved_arg = self.resolve_type_with_bindings(parent.type_arg_nodes[idx], collected)
+                                parent_bindings.insert(param_name, resolved_arg)
+                                if not collected.contains_key(param_name) then {
+                                    collected.insert(param_name, resolved_arg)
+                                }
+                                idx += 1
+                            }
+                            parent_bindings = self.collect_trait_method_bindings_recursive(parent.name, parent_bindings, visited)
+                            for entry in parent_bindings then {
+                                if not collected.contains_key(entry.first) then {
+                                    collected.insert(entry.first, entry.second)
+                                }
+                            }
+                        },
+                        .None() then panic("collect_trait_method_bindings_recursive: missing trait info for \(parent.name)"),
+                    }
+                }
+                return collected
+            },
+            .None() then panic("collect_trait_method_bindings_recursive: missing trait info for \(trait_name)"),
+        }
+    }
+
+    private resolve_trait_registry_method_signature(self, trait_name String, method_name String, receiver_type Type) Option[Symbol] = {
+        let bindings = self.trait_method_bindings(trait_name, receiver_type)
+        if self.lookup_method_signature(trait_name, method_name) is .Some(raw_method) then {
+            let mut bound_param_types = List[Type].new()
+            for parameter_type in self.method_param_types(raw_method) then {
+                bound_param_types.push(self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(parameter_type, bindings))))
+            }
+            let bound_return_type = self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(raw_method), bindings)))
+            return Option[Symbol].Some(self.rebuild_method_symbol(method_name, raw_method, bound_param_types, bound_return_type))
+        }
+        return when self.storage.trait_registry.flatten_methods(trait_name) in {
+            .Ok(methods) then when methods.get(method_name) in {
+                .Some(member) then {
+                    let mut typed_params = List[TypedParam].new()
+                    for p in member.params then {
+                        let resolved_param_type = self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(p.param_type, bindings)))
+                        typed_params.push(TypedParam(p.name, p.mutable, resolved_param_type, p.named))
+                    }
+                    let resolved_return_type = self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(member.return_type, bindings)))
+                    yield Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, resolved_return_type))
+                },
+                .None() then Option[Symbol].None(),
+            },
+            .Error(_) then panic("resolve_trait_registry_method_signature: failed to flatten trait methods"),
+        }
+    }
+
     private collect_ancestor_bindings(self, t Type, bindings mut ref Dict[String, Type]) Void = {
         when t in {
             .GenericParameter(name) then {
@@ -1283,20 +1387,14 @@ given TypeChecker {
         // GenericParameter 方法：通过约束 trait / method table 回退解析
         if inner_type is .GenericParameter(name) and self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
             for trait_name in constraints then {
-                when self.storage.trait_registry.flatten_methods(trait_name) in {
-                    .Ok(methods) then {
-                        if methods.get(method_name) is .Some(member) then {
-                            let ancestor_snapshot = self.snapshot_type_bindings()
-                            self.bind_ancestor_trait_type_params(trait_name, inner_type)
-                            let result = self.resolve_trait_member_type(member.return_type, inner_type)
-                            self.restore_type_bindings(ancestor_snapshot)
-                            return result
-                        }
-                    },
-                    .Error(_) then {},
+                if trait_name == "Any" then {
+                    continue
                 }
-                if self.lookup_method_signature(trait_name, method_name) is .Some(method) then {
-                    return self.resolve_signature_return_type(self.concrete_receiver_for_method(inner_type, method), method)
+                when self.resolve_trait_registry_method_signature(trait_name, method_name, inner_type) in {
+                    .Some(method) then {
+                        return self.method_return_type(method)
+                    },
+                    .None() then {},
                 }
             }
         }
@@ -1850,25 +1948,12 @@ given TypeChecker {
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
                     for trait_name in constraints then {
-                        when self.storage.trait_registry.flatten_methods(trait_name) in {
-                            .Ok(methods) then {
-                        if methods.get(method_name) is .Some(member) then {
-                            let ancestor_snapshot = self.snapshot_type_bindings()
-                            self.bind_ancestor_trait_type_params(trait_name, inner_type)
-                            let mut typed_params = List[TypedParam].new()
-                            for p in member.params then {
-                                let resolved_param_type = self.resolve_trait_member_type(p.param_type, inner_type)
-                                typed_params.push(TypedParam(p.name, p.mutable, resolved_param_type, p.named))
-                            }
-                            let resolved_return_type = self.resolve_trait_member_type(member.return_type, inner_type)
-                            self.restore_type_bindings(ancestor_snapshot)
-                            return Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, resolved_return_type))
+                        if trait_name == "Any" then {
+                            continue
                         }
-                    },
-                    .Error(_) then {},
-                }
-                        if self.lookup_method_signature(trait_name, method_name) is .Some(raw_method) then {
-                            return Option[Symbol].Some(raw_method)
+                        when self.resolve_trait_registry_method_signature(trait_name, method_name, inner_type) in {
+                            .Some(method) then { return Option[Symbol].Some(method) },
+                            .None() then {},
                         }
                     }
                 }

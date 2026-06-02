@@ -693,6 +693,9 @@ private final class MIRFunctionBuilder {
       if let place = lowerPlace(expression) {
         return MIRExprResult(type: expression.type, category: expression.valueCategory, operand: nil, place: place)
       }
+      if let place = lowerMaterializedMemberPathPlace(expression) {
+        return MIRExprResult(type: expression.type, category: expression.valueCategory, operand: nil, place: place)
+      }
       fatalError("Unsupported member-path value reached MIR lowering")
     case .intrinsicCall(let intrinsic):
       return lowerIntrinsicCall(intrinsic)
@@ -2257,13 +2260,13 @@ private final class MIRFunctionBuilder {
     if case .methodReference(let base, let method, _, _, _) = callee,
        !context.containsGenericParameter(callee.type),
        let callableMethod = concreteMethodSymbol(method: method, calleeType: callee.type, resultType: type) {
-      var argumentValues: [MIRValue] = [lowerValue(base)]
-      guard !currentBlockIsTerminated else { return nil }
+      var argumentValues: [MIRValue] = [lowerMethodReceiverArgument(base, method: callableMethod)]
       argumentValues.reserveCapacity(arguments.count + 1)
       for argument in arguments {
         argumentValues.append(lowerValue(argument))
         guard !currentBlockIsTerminated else { return nil }
       }
+      guard !currentBlockIsTerminated else { return nil }
       return finishCall(callee: .function(callableMethod), arguments: argumentValues, type: type)
     }
 
@@ -2274,15 +2277,91 @@ private final class MIRFunctionBuilder {
 
     let calleeOperand = lowerOperand(callee)
     guard !currentBlockIsTerminated else { return nil }
-
-    var argumentValues: [MIRValue] = []
-    argumentValues.reserveCapacity(arguments.count)
-    for argument in arguments {
-      argumentValues.append(lowerValue(argument))
-      guard !currentBlockIsTerminated else { return nil }
-    }
-
+    let argumentValues = lowerCallArgumentValues(callee: calleeOperand, arguments: arguments)
+    guard !currentBlockIsTerminated else { return nil }
     return finishCall(callee: calleeOperand, arguments: argumentValues, type: type)
+  }
+
+  private func lowerCallArgumentValues(callee: MIROperand, arguments: [TypedExpressionNode]) -> [MIRValue] {
+    let parameterTypes = functionParameterTypes(for: callee)
+    var values: [MIRValue] = []
+    values.reserveCapacity(arguments.count)
+    for (index, argument) in arguments.enumerated() {
+      let expectedType = index < parameterTypes.count ? parameterTypes[index] : nil
+      values.append(lowerCallArgument(argument, expectedType: expectedType))
+      if currentBlockIsTerminated { break }
+    }
+    return values
+  }
+
+  private func lowerCallArgument(_ argument: TypedExpressionNode, expectedType: Type?) -> MIRValue {
+    if let borrowed = lowerBorrowedReferenceArgument(argument, expectedType: expectedType) {
+      return borrowed
+    }
+    return lowerValue(argument)
+  }
+
+  private func lowerMethodReceiverArgument(_ base: TypedExpressionNode, method: Symbol) -> MIRValue {
+    let methodType = context.getSymbolType(method.defId) ?? method.type
+    if case .function(let parameters, _) = methodType,
+       let first = parameters.first,
+       let borrowed = lowerBorrowedReferenceArgument(base, expectedType: first.type) {
+      return borrowed
+    }
+    return lowerValue(base)
+  }
+
+  private func lowerBorrowedReferenceArgument(_ argument: TypedExpressionNode, expectedType: Type?) -> MIRValue? {
+    guard let expectedType else { return nil }
+    switch expectedType {
+    case .reference(let inner):
+      if argument.type == inner, let place = lowerPlace(argument) {
+        return .ref(place, kind: .shared, allocation: .stackBorrow)
+      }
+      if argument.type == expectedType {
+        return lowerBorrowedSourceValue(argument)
+      }
+    case .mutableReference(let inner):
+      if argument.type == inner, let place = lowerPlace(argument) {
+        return .ref(place, kind: .mutable, allocation: .stackBorrow)
+      }
+      if argument.type == expectedType {
+        return lowerBorrowedSourceValue(argument)
+      }
+    case .weakReference(let inner):
+      if argument.type == inner, let place = lowerPlace(argument) {
+        return .ref(place, kind: .weak, allocation: .stackBorrow)
+      }
+      if argument.type == expectedType {
+        return lowerBorrowedSourceValue(argument)
+      }
+    case .mutableWeakReference(let inner):
+      if argument.type == inner, let place = lowerPlace(argument) {
+        return .ref(place, kind: .mutableWeak, allocation: .stackBorrow)
+      }
+      if argument.type == expectedType {
+        return lowerBorrowedSourceValue(argument)
+      }
+    default:
+      break
+    }
+    return nil
+  }
+
+  private func functionParameterTypes(for callee: MIROperand) -> [Type] {
+    let calleeType: Type
+    switch callee {
+    case .function(let symbol):
+      calleeType = symbol.type
+    case .local(let localID):
+      calleeType = locals.first(where: { $0.id == localID })?.type ?? .void
+    case .constant:
+      return []
+    }
+    guard case .function(let parameters, _) = calleeType else {
+      return []
+    }
+    return parameters.map(\.type)
   }
 
   private func concreteMethodSymbol(
@@ -2290,6 +2369,11 @@ private final class MIRFunctionBuilder {
     calleeType: Type,
     resultType: Type
   ) -> Symbol? {
+    if let resolvedType = context.getSymbolType(method.defId),
+       case .function = resolvedType {
+      return Symbol(defId: method.defId, type: resolvedType, kind: method.kind)
+    }
+
     guard case .function(let parameters, _) = calleeType else { return nil }
 
     let concreteType = Type.function(parameters: parameters, returns: resultType)
@@ -2414,9 +2498,13 @@ private final class MIRFunctionBuilder {
   }
 
   private func lowerUniquenessProbeValue(_ expression: TypedExpressionNode) -> MIRValue {
+    lowerBorrowedSourceValue(expression)
+  }
+
+  private func lowerBorrowedSourceValue(_ expression: TypedExpressionNode) -> MIRValue {
     if case .castExpression(let inner, let targetType) = expression,
-       isOwnershipPreservingProbeCast(sourceType: inner.type, targetType: targetType) {
-      return lowerUniquenessProbeValue(inner)
+       isOwnershipPreservingBorrowCast(sourceType: inner.type, targetType: targetType) {
+      return lowerBorrowedSourceValue(inner)
     }
 
     if let result = lowerExpression(expression) {
@@ -2445,7 +2533,7 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func isOwnershipPreservingProbeCast(sourceType: Type, targetType: Type) -> Bool {
+  private func isOwnershipPreservingBorrowCast(sourceType: Type, targetType: Type) -> Bool {
     switch (sourceType, targetType) {
     case (.reference, .reference),
          (.reference, .mutableReference),
@@ -2497,7 +2585,7 @@ private final class MIRFunctionBuilder {
            .mutableWeakReference(let inner),
            .pointer(let inner),
            .mutablePointer(let inner):
-        basePlace = .deref(base: .operand(lowerOperand(source)), pointee: inner)
+        basePlace = .deref(base: lowerBorrowedSourceValue(source), pointee: inner)
       default:
         basePlace = lowerPlace(source)
       }
@@ -2507,7 +2595,7 @@ private final class MIRFunctionBuilder {
       }
       return place
     case .derefExpression(let inner, let type):
-      return .deref(base: .operand(lowerOperand(inner)), pointee: type)
+      return .deref(base: lowerBorrowedSourceValue(inner), pointee: type)
     case .castExpression(let inner, let type):
       switch (inner.type, type) {
       case (.reference, .reference),
@@ -2524,6 +2612,43 @@ private final class MIRFunctionBuilder {
     default:
       return nil
     }
+  }
+
+  private func lowerMaterializedMemberPathPlace(_ expression: TypedExpressionNode) -> MIRPlace? {
+    guard case .memberPath(let source, let path) = expression else {
+      return nil
+    }
+
+    let sourceResult: MIRExprResult
+    if let lowered = lowerExpression(source) {
+      sourceResult = lowered
+    } else {
+      return nil
+    }
+    guard !currentBlockIsTerminated else { return nil }
+
+    let basePlace: MIRPlace?
+    if let place = sourceResult.place {
+      basePlace = place
+    } else if let operand = sourceResult.operand {
+      switch operand {
+      case .local(let localID):
+        basePlace = .local(localID)
+      default:
+        let local = makeTemporary(type: source.type, nameHint: "member_base")
+        append(.declare(local.id))
+        append(.assign(.local(local.id), .operand(operand)))
+        basePlace = .local(local.id)
+      }
+    } else {
+      basePlace = nil
+    }
+
+    guard var place = basePlace else { return nil }
+    for field in path {
+      place = .field(base: place, field: field)
+    }
+    return place
   }
 
   private func capturePlace(for symbol: Symbol) -> MIRPlace {

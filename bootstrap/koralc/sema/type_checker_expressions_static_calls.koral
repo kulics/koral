@@ -511,6 +511,12 @@ given TypeChecker {
     }
 
     private check_call_expr_ref(self, callee ref Expr, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
+        let trace_lerp = self.lerp_trace_debug_enabled()
+            and self.storage.file_path.ends_with("\\std\\math\\float.koral")
+            and expr_span(callee).start.line == 287
+        if trace_lerp then {
+            println("[lerp-trace] call-enter kind=\(self.describe_expr_shallow(callee)) args=\(args.count().to_string())")
+        }
         let mut call_args = List[ref Expr].new()
         for arg in args then {
             call_args.push(arg)
@@ -534,12 +540,21 @@ given TypeChecker {
         }
 
         if self.check_intrinsic_call_ref(callee, call_args.ref, scope) is .Some(intrinsic_expr) then {
+            if trace_lerp then {
+                println("[lerp-trace] call-intrinsic result=\(self.display_type_name(intrinsic_expr.expr_type))")
+            }
             return intrinsic_expr
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
+        if trace_lerp then {
+            println("[lerp-trace] call-callee-checked type=\(self.display_type_name(typed_callee.expr_type))")
+        }
         let typed_callee_ref = box(typed_callee)
         if not self.validate_function_expression_argument_count(typed_callee_ref, call_args.ref) then {
+            if trace_lerp then {
+                println("[lerp-trace] call-argcount-invalid")
+            }
             return make_typed_expr(TypedExprKind.Call(typed_callee_ref, List[ref TypedExpr].new()), Type.Unknown())
         }
         let callee_param_specs = self.resolve_call_param_specs(callee, typed_callee_ref, scope)
@@ -641,6 +656,9 @@ given TypeChecker {
                 },
                 _ then {},
             }
+        }
+        if trace_lerp then {
+            println("[lerp-trace] call-bindings-ready")
         }
         let mut typed_args = List[ref TypedExpr].new()
         let mut arg_idx UInt = 0
@@ -1141,6 +1159,9 @@ given TypeChecker {
                     _ then make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
                 }
             } else make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
+        }
+        if trace_lerp then {
+            println("[lerp-trace] call-exit result=\(self.display_type_name(result.expr_type))")
         }
         return result
     }
