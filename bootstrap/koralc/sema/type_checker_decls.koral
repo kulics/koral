@@ -111,12 +111,15 @@ given TypeChecker {
                     let typed_params = self.check_params(params)
                     let resolved_ret = self.resolve_type(return_type)
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
-                    self.storage.resolution_scope = prev_resolution_scope
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
+                    // Keep resolution_scope pointing to fn_scope during body checking
+                    // so resolve_type sees generic params (matches Swift's withNewScope pattern)
+                    self.storage.resolution_scope = Option[Scope].Some(fn_scope)
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn begin file=\(self.storage.file_path) name=\(name)")
                     }
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
+                    self.storage.resolution_scope = prev_resolution_scope
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn checked-body file=\(self.storage.file_path) name=\(name)")
                     }
@@ -144,8 +147,8 @@ given TypeChecker {
                 self.register_generic_constraints(type_params)
                 finally { self.restore_generic_constraints(generic_constraint_snapshot) }
                 // Resolve signature in a generic scope if type params exist (Swift: withNewScope)
-                let resolved_ret = self.resolve_type(return_type)
-                let typed_params = self.check_params(params)
+                let mut resolved_ret = self.resolve_type(return_type)
+                let mut typed_params = self.check_params(params)
                 if not type_params.is_empty() then {
                     let mut s = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
