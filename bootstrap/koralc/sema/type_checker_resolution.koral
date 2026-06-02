@@ -62,6 +62,14 @@ given TypeChecker {
                 return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
             },
             .InferredSelf() then {
+                when self.storage.resolution_scope in {
+                    .Some(scope) then {
+                        if scope.lookup_type("Self") is .Some(t) then {
+                            return t
+                        }
+                    },
+                    .None() then {},
+                }
                 if self.storage.global_scope.lookup_type("Self") is .Some(t) then {
                     return t
                 }
@@ -83,7 +91,18 @@ given TypeChecker {
         return when node in {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
-                .None() then self.resolve_named_type(name),
+                .None() then {
+                    // Check resolution_scope before falling back to global (Swift: currentScope.resolveType)
+                    when self.storage.resolution_scope in {
+                        .Some(scope) then {
+                            if scope.lookup_type(name) is .Some(t) then {
+                                return self.canonicalize_alias_type(t)
+                            }
+                        },
+                        .None() then {},
+                    }
+                    yield self.resolve_named_type(name)
+                },
             },
             .Reference(inner, mutable) then {
                 let trait_ref_override = when inner.val in {
@@ -427,10 +446,24 @@ given TypeChecker {
     }
 
     private resolve_named_type(self, name String) Type = {
+        // Check resolution_scope first (analogous to Swift's currentScope.resolveType)
+        when self.storage.resolution_scope in {
+            .Some(scope) then {
+                if scope.lookup_type(name) is .Some(t) then {
+                    return self.canonicalize_alias_type(t)
+                }
+            },
+            .None() then {},
+        }
         if self.try_resolve_named_type_without_diag(name) is .Some(t) then {
-            let scope = Scope.new_root()
             let canonical = self.canonicalize_alias_type(t)
-            self.check_type_visibility(canonical, name, scope)
+            // Use resolution_scope for visibility check if available, otherwise use an empty
+            // root scope so that the visibility checker treats all global types as cross-module.
+            let vis_scope = when self.storage.resolution_scope in {
+                .Some(s) then s,
+                .None() then Scope.new_root(),
+            }
+            self.check_type_visibility(canonical, name, vis_scope)
             return canonical
         }
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Undefined type: \(name)"))

@@ -352,12 +352,26 @@ given TypeChecker {
                 .TraitObject(_, _) then false,
                 .OpaqueType(_) then false,
                 .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then constraints.contains("Deref"),
+                    .Some(constraints) then {
+                        let mut found = false
+                        for c in constraints then {
+                            if c.trait_name == "Deref" then { found = true }
+                        }
+                        yield found
+                    },
                     .None() then false,
                 },
                 _ then true,
             }
         }
+        // Check explicit trait conformance first (registered via given declarations in stdlib).
+        // This matches Swift's hasNominalConformance which checks declaredConformances + explicitConformances.
+        if self.has_explicit_trait_conformance(target_type, trait_name) then {
+            return true
+        }
+        // Fallback: hardcoded primitive type trait conformance for cases where
+        // given declarations haven't been processed yet (e.g., pass 2 ordering).
+        // Analogous to Swift's isBuiltinEqualityComparable/isBuiltinOrderingComparable.
         if self.primitive_scalar_satisfies_std_trait(target_type, trait_name) then {
             return true
         }
@@ -388,7 +402,7 @@ given TypeChecker {
                 return when self.storage.generic_param_constraints.get(name) in {
                     .Some(constraints) then {
                         for constraint in constraints then {
-                            if constraint == trait_name or self.storage.trait_registry.has_inheritance(constraint, trait_name) then {
+                            if constraint.trait_name == trait_name or self.storage.trait_registry.has_inheritance(constraint.trait_name, trait_name) then {
                                 return true
                             }
                         }
@@ -647,8 +661,9 @@ given TypeChecker {
             for tp in template.owner_type_params then {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
-                        if not self.satisfies_trait_requirement(bound_type, constraint) then {
-                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, constraint)
+                        let trait_name = self.type_node_name(constraint)
+                        if not self.satisfies_trait_requirement(bound_type, trait_name) then {
+                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, trait_name)
                             return result
                         }
                     }

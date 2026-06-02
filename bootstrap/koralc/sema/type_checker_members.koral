@@ -159,6 +159,19 @@ given TypeChecker {
         return out
     }
 
+    /// Build TypedParam list from already-resolved types, avoiding re-resolution.
+    /// Used in pass 2 for generic functions where resolve_type would fail on type params.
+    private build_typed_params_from_resolved(self, params List[Param], resolved_types List[Type]) List[TypedParam] = {
+        let mut out = List[TypedParam].new()
+        let mut idx UInt = 0
+        while idx < params.count() and idx < resolved_types.count() then {
+            let p = params[idx]
+            out.push(TypedParam(p.name, p.mutable, resolved_types[idx], p.named))
+            idx += 1
+        }
+        return out
+    }
+
     private check_params_in_scope(self, params List[Param], scope Scope) List[TypedParam] = {
         let mut out = List[TypedParam].new()
         for p in params then {
@@ -188,7 +201,7 @@ given TypeChecker {
     }
 
     private make_given_member_type_scope(self, self_type Type, owner_type_params List[TypeParameter], method_type_params List[TypeParameter]) Scope = {
-        let mut scope = Scope.new_root()
+        let mut scope = Scope.new_child(self.storage.global_scope)
         for tp in owner_type_params then {
             scope.define_generic_param(tp.name)
         }
@@ -221,7 +234,18 @@ given TypeChecker {
         return when node in {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
-                .None() then self.resolve_named_type(name),
+                .None() then {
+                    // Check resolution_scope before falling back (Swift: currentScope.resolveType)
+                    when self.storage.resolution_scope in {
+                        .Some(scope) then {
+                            if scope.lookup_type(name) is .Some(t) then {
+                                return self.canonicalize_alias_type(t)
+                            }
+                        },
+                        .None() then {},
+                    }
+                    yield self.resolve_named_type(name)
+                },
             },
             .Reference(inner, mutable) then {
                 let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
@@ -321,7 +345,8 @@ given TypeChecker {
     private check_trait_members(self, members List[TraitMember], type_params List[TypeParameter]) List[TypedTraitMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params)
         self.register_generic_constraints(type_params)
-        let mut trait_scope = Scope.new_root()
+        finally { self.restore_generic_constraints(owner_constraint_snapshot) }
+        let mut trait_scope = Scope.new_child(self.storage.global_scope)
         for tp in type_params then {
             trait_scope.define_generic_param(tp.name)
         }
@@ -330,18 +355,20 @@ given TypeChecker {
         for m in members then {
             let method_constraint_snapshot = self.snapshot_generic_constraints(m.type_params)
             self.register_generic_constraints(m.type_params)
+            finally { self.restore_generic_constraints(method_constraint_snapshot) }
             let mut member_scope = Scope.new_child(trait_scope)
             for tp in m.type_params then {
                 member_scope.define_generic_param(tp.name)
             }
+            let prev_resolution_scope = self.storage.resolution_scope
+            self.storage.resolution_scope = Option[Scope].Some(member_scope)
+            finally { self.storage.resolution_scope = prev_resolution_scope }
             let mut typed_params = List[TypedParam].new()
             for p in m.params then {
-                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, member_scope), p.named))
+                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name), p.named))
             }
-            out.push(TypedTraitMember(m.name, typed_params, self.resolve_type_in_scope(m.return_type, member_scope)))
-            self.restore_generic_constraints(method_constraint_snapshot)
+            out.push(TypedTraitMember(m.name, typed_params, self.resolve_type(m.return_type)))
         }
-        self.restore_generic_constraints(owner_constraint_snapshot)
         return out
     }
 
@@ -386,6 +413,7 @@ given TypeChecker {
     ) List[TypedGivenMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params)
         self.register_generic_constraints(type_params)
+        finally { self.restore_generic_constraints(owner_constraint_snapshot) }
         let mut out = List[TypedGivenMember].with_capacity(members.count())
         let is_generic_given_target = when target_type in {
             .TraitObject(_, _) then true,
@@ -394,19 +422,23 @@ given TypeChecker {
         for m in members then {
             let method_constraint_snapshot = self.snapshot_generic_constraints(m.type_params)
             self.register_generic_constraints(m.type_params)
+            finally { self.restore_generic_constraints(method_constraint_snapshot) }
             if self.sema_progress_debug_enabled() then {
                 println("[sema-given-member] file=\(self.storage.file_path) member=\(m.name)")
             }
             let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty()
             let should_store_checked_body = retain_checked_template_bodies or not should_retain_template_body
             let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
-            let typed_params = self.check_params_in_scope(m.params, member_type_scope)
-            let ret = self.resolve_type_in_scope(m.return_type, member_type_scope)
+            let prev_resolution_scope = self.storage.resolution_scope
+            self.storage.resolution_scope = Option[Scope].Some(member_type_scope)
+            let typed_params = self.check_params(m.params)
+            let ret = self.resolve_type(m.return_type)
             let typed_body = when m.body in {
                 .Some(b) then {
                     if self.skip_given_body_debug_enabled() then {
                         yield Option[ref TypedExpr].None()
                     }
+                    // Enter function context for body checking (Swift: withNewScope)
                     let prev_function_return_context = self.storage.function_return_context
                     let prev_in_loop = self.storage.in_loop
                     let prev_in_finally = self.storage.in_finally
@@ -417,19 +449,27 @@ given TypeChecker {
                     self.storage.in_loop = false
                     self.storage.in_finally = false
                     self.storage.yield_targets = List[mut ref YieldTarget].new()
+                    finally {
+                        self.storage.function_return_context = prev_function_return_context
+                        self.storage.in_loop = prev_in_loop
+                        self.storage.in_finally = prev_in_finally
+                        self.storage.yield_targets = prev_yield_targets
+                    }
                     let mut method_scope = self.make_method_scope(typed_params, target_type, type_params)
                     // 注入方法级别的泛型类型参数到 method scope
                     for tp in m.type_params then {
                         method_scope.define_generic_param(tp.name)
                     }
+                    // Keep resolution_scope set during body checking so resolve_type sees generic params
+                    self.storage.resolution_scope = Option[Scope].Some(method_scope)
+                    finally { self.storage.resolution_scope = prev_resolution_scope }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
-                    self.storage.function_return_context = prev_function_return_context
-                    self.storage.in_loop = prev_in_loop
-                    self.storage.in_finally = prev_in_finally
-                    self.storage.yield_targets = prev_yield_targets
                     yield if should_store_checked_body then Option[ref TypedExpr].Some(box(result)) else Option[ref TypedExpr].None()
                 },
-                .None() then Option[ref TypedExpr].None(),
+                .None() then {
+                    self.storage.resolution_scope = prev_resolution_scope
+                    yield Option[ref TypedExpr].None()
+                },
             }
             let template_body = if should_retain_template_body
             then {
@@ -467,7 +507,6 @@ given TypeChecker {
                     ret,
                     Option[ref TypedExpr].None(),
                 ))
-                self.restore_generic_constraints(method_constraint_snapshot)
                 continue
             }
             let mut context = self.context()
@@ -490,9 +529,7 @@ given TypeChecker {
                 ret,
                 program_body,
             ))
-            self.restore_generic_constraints(method_constraint_snapshot)
         }
-        self.restore_generic_constraints(owner_constraint_snapshot)
         return out
     }
 
@@ -505,7 +542,7 @@ given TypeChecker {
     }
 
     private make_method_scope(self, params List[TypedParam], self_type Type, type_params List[TypeParameter]) Scope = {
-        let mut scope = Scope.new_root()
+        let mut scope = Scope.new_child(self.storage.global_scope)
         // 注入泛型类型参数
         for tp in type_params then {
             scope.define_generic_param(tp.name)
@@ -529,7 +566,7 @@ given TypeChecker {
     }
 
     private make_fn_scope(self, params List[TypedParam]) Scope = {
-        let mut scope = Scope.new_root()
+        let mut scope = Scope.new_child(self.storage.global_scope)
         for p in params then {
             let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
             let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
@@ -539,7 +576,7 @@ given TypeChecker {
     }
 
     private make_generic_fn_scope(self, params List[TypedParam], type_params List[TypeParameter]) Scope = {
-        let mut scope = Scope.new_root()
+        let mut scope = Scope.new_child(self.storage.global_scope)
         for tp in type_params then {
             scope.define_generic_param(tp.name)
         }

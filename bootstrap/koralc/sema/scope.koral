@@ -38,6 +38,20 @@ given Scope {
         return Scope(s)
     }
 
+    // Create a child scope with generic parameters and optional Self binding.
+    // Mirrors Swift's pattern: withNewScope { defineGenericParameter(...); defineType("Self", ...) }
+    public new_generic_child(parent Scope, generic_param_names List[String], self_type Option[Type]) Scope = {
+        let child = Scope.new_child(parent)
+        for name in generic_param_names then {
+            child.define_generic_param(name)
+        }
+        when self_type in {
+            .Some(t) then child.define_type("Self", t),
+            .None() then {},
+        }
+        return child
+    }
+
     // storage ref 模式：self 值传递，mutations 通过 storage ref 自动传播
     public define(self, context CompilerContext, symbol Symbol) Void = {
         let name = context.symbol_name(symbol)
@@ -59,6 +73,12 @@ given Scope {
     }
 
     public lookup_type(self, name String) Option[Type] = {
+        // Generic params have highest priority (matches Swift's genericParameters check)
+        if self.storage.generic_params.contains(name) then {
+            if self.storage.type_entries.get(name) is .Some(t) then {
+                return .Some(t)
+            }
+        }
         if self.storage.type_entries.get(name) is .Some(t) then {
             return .Some(t)
         }
@@ -92,10 +112,6 @@ given Scope {
         return self.storage.generic_params.contains(name)
     }
 
-    public is_generic_param_local(self, name String) Bool = {
-        return self.storage.generic_params.contains(name)
-    }
-
     // 返回当前层的所有类型条目（不递归父链）。
     public all_types(self) Dict[String, Type] = {
         return self.storage.type_entries
@@ -122,17 +138,5 @@ given Scope {
         return self.storage.generic_params.count()
     }
 
-    // 恢复当前层的类型绑定状态，用于临时泛型参数作用域。
-    public restore_type_state(self, type_entries Dict[String, Type], generic_params Set[String]) Void = {
-        self.storage.type_entries = type_entries
-        self.storage.generic_params = generic_params
-    }
 
-    public remove_type(self, name String) Void = {
-        self.storage.type_entries.remove(name)
-    }
-
-    public remove_generic_param(self, name String) Void = {
-        self.storage.generic_params.remove(name)
-    }
 }

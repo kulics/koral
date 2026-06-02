@@ -191,7 +191,7 @@ given TypeChecker {
         self.storage.in_loop = false
         self.storage.in_finally = false
         self.storage.yield_targets = List[mut ref YieldTarget].new()
-        let mut scope = Scope.new_root()
+        let mut scope = Scope.new_child(self.storage.global_scope)
         let typed = if self.expr_contains_or_return(expr) then {
             self.push_diagnostic_at_span("'or return' can only be used inside a function", expr_span(expr))
             let fallback_type = when expected in {
@@ -251,13 +251,14 @@ given TypeChecker {
                 .Some(template) then {
                     for tp in template.type_parameters then {
                         for constraint in tp.constraints then {
-                            if constraint == "Any" then {
+                            let trait_name = self.type_node_name(constraint)
+                            if trait_name == "Any" then {
                                 continue
                             }
-                            when self.storage.trait_registry.get(constraint) in {
+                            when self.storage.trait_registry.get(trait_name) in {
                                 .Some(info) then {
                                     if self.make_visibility_checker() is .Some(checker) then {
-                                        when checker.check_symbol(info.module_path, constraint, false) in {
+                                        when checker.check_symbol(info.module_path, trait_name, false) in {
                                             .Ok(_) then {},
                                             .Error(message) then {
                                                 self.push_diagnostic(message.message())
@@ -829,14 +830,15 @@ given TypeChecker {
             .TraitObject(trait_name, _) then Option[String].Some(trait_name),
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
-                    for trait_name in constraints then {
-                        if self.lookup_method_signature(trait_name, method_name) is .Some(_) then {
-                            return Option[String].Some(trait_name)
+                    for constraint in constraints then {
+                        let cn = constraint.trait_name
+                        if self.lookup_method_signature(cn, method_name) is .Some(_) then {
+                            return Option[String].Some(cn)
                         }
-                        when self.storage.trait_registry.flatten_methods(trait_name) in {
+                        when self.storage.trait_registry.flatten_methods(cn) in {
                             .Ok(methods) then {
                                 if methods.get(method_name) is .Some(_) then {
-                                    return Option[String].Some(trait_name)
+                                    return Option[String].Some(cn)
                                 }
                             },
                             .Error(_) then {},
@@ -894,7 +896,7 @@ given TypeChecker {
                 .Some(constraints) then {
                     let mut matched = false
                     for constraint in constraints then {
-                        if constraint == trait_name then {
+                        if constraint.trait_name == trait_name then {
                             matched = true
                         }
                     }
@@ -1130,7 +1132,13 @@ given TypeChecker {
                     }
                     let should_defer_generic_deref_receiver_ref = when expr.expr_type in {
                         .GenericParameter(name) then when self.storage.generic_param_constraints.get(name) in {
-                            .Some(constraints) then constraints.contains("Deref"),
+                            .Some(constraints) then {
+                                let mut found = false
+                                for c in constraints then {
+                                    if c.trait_name == "Deref" then { found = true }
+                                }
+                                yield found
+                            },
                             .None() then false,
                         },
                         _ then false,

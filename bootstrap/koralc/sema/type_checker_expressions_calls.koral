@@ -32,7 +32,7 @@ given TypeChecker {
         if param_index >= template.parameters.count() then {
             return Option[Type].None()
         }
-        let mut generic_scope = Scope.new_root()
+        let mut generic_scope = Scope.new_child(self.storage.global_scope)
         for tp in template.type_parameters then {
             generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
         }
@@ -211,7 +211,7 @@ given TypeChecker {
                 idx += 1
             }
         } else {
-            let mut generic_scope = Scope.new_root()
+            let mut generic_scope = Scope.new_child(self.storage.global_scope)
             for tp in template.type_parameters then {
                 generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
             }
@@ -237,7 +237,7 @@ given TypeChecker {
             return Option[Type].None()
         }
 
-        let mut generic_scope = Scope.new_root()
+        let mut generic_scope = Scope.new_child(self.storage.global_scope)
         for tp in template.type_parameters then {
             generic_scope.define_type(tp.name, Type.GenericParameter(tp.name))
         }
@@ -264,11 +264,12 @@ given TypeChecker {
                             for tp in template.type_parameters then {
                                 if bindings.get(tp.name) is .Some(bound_type) then {
                                     for constraint in tp.constraints then {
-                                        if not (constraint == "Any") then {
-                                            when self.storage.trait_registry.get(constraint) in {
+                                        let trait_name = self.type_node_name(constraint)
+                                        if not (trait_name == "Any") then {
+                                            when self.storage.trait_registry.get(trait_name) in {
                                                 .Some(info) then {
                                                     if self.make_visibility_checker() is .Some(checker) then {
-                                                        when checker.check_symbol(info.module_path, constraint, false) in {
+                                                        when checker.check_symbol(info.module_path, trait_name, false) in {
                                                             .Ok(_) then {},
                                                             .Error(message) then {
                                                                 self.push_typed_expr_diagnostic(typed_callee, message.message())

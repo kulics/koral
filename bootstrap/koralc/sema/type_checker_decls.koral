@@ -56,6 +56,7 @@ given TypeChecker {
                 yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
+                // Enter function context — cleanup via finally (Swift: withNewScope pattern)
                 let prev_function_return_context = self.storage.function_return_context
                 let prev_in_loop = self.storage.in_loop
                 let prev_in_finally = self.storage.in_finally
@@ -65,8 +66,15 @@ given TypeChecker {
                 self.storage.yield_targets = List[mut ref YieldTarget].new()
                 self.storage.function_return_context.inferred_return_type = Option[Type].None()
                 self.storage.function_return_context.is_inferring = false
+                finally {
+                    self.storage.function_return_context = prev_function_return_context
+                    self.storage.in_loop = prev_in_loop
+                    self.storage.in_finally = prev_in_finally
+                    self.storage.yield_targets = prev_yield_targets
+                }
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                 self.register_generic_constraints(type_params)
+                finally { self.restore_generic_constraints(generic_constraint_snapshot) }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
@@ -93,13 +101,17 @@ given TypeChecker {
                         fn_sym,
                     )
                 } else {
-                    let mut generic_type_scope = Scope.new_root()
+                    let mut generic_type_scope = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
                         generic_type_scope.define_generic_param(tp.name)
                     }
-                    let typed_params = self.check_params_in_scope(params, generic_type_scope)
-                    let resolved_ret = self.resolve_type_in_scope(return_type, generic_type_scope)
+                    // Set resolution_scope so resolve_type sees generic params (like Swift's withNewScope)
+                    let prev_resolution_scope = self.storage.resolution_scope
+                    self.storage.resolution_scope = Option[Scope].Some(generic_type_scope)
+                    let typed_params = self.check_params(params)
+                    let resolved_ret = self.resolve_type(return_type)
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
+                    self.storage.resolution_scope = prev_resolution_scope
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn begin file=\(self.storage.file_path) name=\(name)")
@@ -125,43 +137,35 @@ given TypeChecker {
                         span,
                     )
                 }
-                self.storage.function_return_context = prev_function_return_context
-                self.storage.in_loop = prev_in_loop
-                self.storage.in_finally = prev_in_finally
-                self.storage.yield_targets = prev_yield_targets
-                self.restore_generic_constraints(generic_constraint_snapshot)
                 yield result
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                 self.register_generic_constraints(type_params)
-                let resolved_ret = if type_params.is_empty() then {
-                    yield self.resolve_type(return_type)
-                } else {
-                    let mut generic_type_scope = Scope.new_root()
+                finally { self.restore_generic_constraints(generic_constraint_snapshot) }
+                // Resolve signature in a generic scope if type params exist (Swift: withNewScope)
+                let resolved_ret = self.resolve_type(return_type)
+                let typed_params = self.check_params(params)
+                if not type_params.is_empty() then {
+                    let mut s = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
-                        generic_type_scope.define_generic_param(tp.name)
+                        s.define_generic_param(tp.name)
                     }
-                    yield self.resolve_type_in_scope(return_type, generic_type_scope)
+                    let prev = self.storage.resolution_scope
+                    self.storage.resolution_scope = Option[Scope].Some(s)
+                    // finally here would fire at if-block exit — too early for the code below.
+                    // Use explicit restore after the work that needs the scope.
+                    resolved_ret = self.resolve_type(return_type)
+                    typed_params = self.check_params(params)
+                    self.storage.resolution_scope = prev
                 }
-                let typed_params = if type_params.is_empty() then {
-                    yield self.check_params(params)
-                } else {
-                    let mut generic_type_scope = Scope.new_root()
-                    for tp in type_params then {
-                        generic_type_scope.define_generic_param(tp.name)
-                    }
-                    yield self.check_params_in_scope(params, generic_type_scope)
-                }
-                let result = TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
                     .None() then {
                         let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
                         yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
                     },
                 })
-                self.restore_generic_constraints(generic_constraint_snapshot)
-                yield result
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -217,7 +221,7 @@ given TypeChecker {
                 let typed_fields = if type_params.is_empty() then {
                     yield self.check_fields(fields)
                 } else {
-                    let mut type_scope = Scope.new_root()
+                    let mut type_scope = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
                         type_scope.define_generic_param(tp.name)
                     }
@@ -245,7 +249,7 @@ given TypeChecker {
                 let typed_cases = if type_params.is_empty() then {
                     yield self.check_enum_cases(cases)
                 } else {
-                    let mut type_scope = Scope.new_root()
+                    let mut type_scope = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
                         type_scope.define_generic_param(tp.name)
                     }
@@ -323,7 +327,7 @@ given TypeChecker {
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                 self.register_generic_constraints(type_params)
-                let mut trait_scope = Scope.new_root()
+                let mut trait_scope = Scope.new_child(self.storage.global_scope)
                 trait_scope.define_generic_param("Self")
                 for tp in type_params then {
                     trait_scope.define_generic_param(tp.name)
@@ -557,7 +561,7 @@ given TypeChecker {
     }
 
     private validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
-        let scope = Scope.new_root()
+        let scope = Scope.new_child(self.storage.global_scope)
         self.validate_trait_parent_type_arguments_in_scope(parents, scope)
     }
 

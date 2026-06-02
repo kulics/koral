@@ -21,14 +21,17 @@ protected type TypeCheckerStorage(
     mut yield_targets List[mut ref YieldTarget],
     mut constraint_solver ConstraintSolver,
     mut trait_registry TraitRegistry,
-    mut generic_param_constraints Dict[String, List[String]],
+    mut generic_param_constraints Dict[String, List[GenericConstraintBound]],
     mut generic_templates mut ref GenericTemplateRegistry,
     mut instantiation_requests Set[InstantiationRequest],
     mut import_graph Option[ImportGraph],
     mut explicit_trait_conformances Set[ExplicitTraitConformanceKey],
     mut generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
     mut conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
-    mut type_binding_snapshots List[TypeBindingSnapshot],
+    /// Current scope for type resolution — analogous to Swift's `currentScope`.
+    /// When set, `resolve_named_type` checks this scope before falling back to global scope.
+    /// This eliminates the need for separate resolve_type_in_scope / resolve_type_with_bindings variants.
+    mut resolution_scope Option[Scope],
 )
 
 public type TypeChecker(protected mut storage mut ref TypeCheckerStorage)
@@ -49,18 +52,15 @@ protected type FunctionReturnContext(
     mut is_inferring Bool,
 )
 
-protected type TypeBindingSnapshot(
-    mut restore_entries Dict[String, TypeBindingRestoreEntry],
-)
-
-protected type TypeBindingRestoreEntry(
-    old_type Option[Type],
-    old_generic_param Bool,
-    old_generic_param_constraints Option[List[String]],
+/// A single trait bound on a generic parameter, preserving type arguments.
+/// For example, `[R Iterator[T]]` produces GenericConstraintBound("Iterator", [GenericParameter("T")]).
+public type GenericConstraintBound(
+    trait_name String,
+    type_args List[Type],
 )
 
 protected type GenericConstraintSnapshot(
-    previous_constraints Dict[String, Option[List[String]]],
+    previous_constraints Dict[String, Option[List[GenericConstraintBound]]],
 )
 
 protected type GenericTraitConformanceTemplate(
@@ -116,14 +116,14 @@ given TypeChecker {
             List[mut ref YieldTarget].new(),
             ConstraintSolver.new(),
             TraitRegistry.new(),
-            Dict[String, List[String]].new(),
+            Dict[String, List[GenericConstraintBound]].new(),
             box(GenericTemplateRegistry.new()),
             Set[InstantiationRequest].new(),
             Option[ImportGraph].None(),
             Set[ExplicitTraitConformanceKey].new(),
             List[GenericTraitConformanceTemplate].new(),
             Dict[String, List[GenericTraitConformanceTemplate]].new(),
-            List[TypeBindingSnapshot].new()
+            Option[Scope].None()
         ))
         return TypeChecker(s)
     }
@@ -257,7 +257,6 @@ given TypeChecker {
         let pending_constraints = self.storage.constraint_solver.constraints.count()
         let pending_default_constraints = self.storage.constraint_solver.default_constraints.count()
         let next_def_id = self.context().next_def_id()
-        let type_binding_snapshot_count = self.storage.type_binding_snapshots.count()
         let instantiation_request_count = self.storage.instantiation_requests.count()
         let generic_param_constraint_name_count = self.storage.generic_param_constraints.count()
         let extension_key_count = self.storage.generic_templates.extension_methods.count()
@@ -1145,7 +1144,8 @@ given TypeChecker {
                     }
                     let stable_ret = resolved_ret
                     let mut context = self.context()
-                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
+                    let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
+                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
                     let mut pt_refs = List[ref Type].new()
                     for pt in stable_param_types then {
                         pt_refs.push(box(pt))
@@ -1177,7 +1177,8 @@ given TypeChecker {
                     }
                     let stable_ret = resolved_ret
                     let mut context = self.context()
-                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
+                    let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
+                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
                     context.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
                 }
             },
@@ -1256,6 +1257,7 @@ given TypeChecker {
                         }
                         when trait_tool_target_name in {
                             .Some(trait_name) then {
+                                let all_bindings = self.merged_type_param_bindings(type_params, method_type_params)
                                 self.backfill_trait_tool_method_to_existing_conformances(
                                     trait_name,
                                     method_name,
@@ -1263,7 +1265,7 @@ given TypeChecker {
                                     method_type_params,
                                     method_params,
                                     method_return_type_node,
-                                    self.resolve_given_member_type(member.return_type, resolved_target),
+                                    self.resolve_given_member_type_with_bindings(member.return_type, resolved_target, all_bindings),
                                 )
                             },
                             .None() then {
@@ -1320,6 +1322,8 @@ given TypeChecker {
                         if self.sema_progress_debug_enabled() then {
                             println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=inject-trait-type-args trait=\(trait_name)")
                         }
+                        let prev_resolution_scope = self.storage.resolution_scope
+                        finally { self.storage.resolution_scope = prev_resolution_scope }
                         self.inject_trait_type_args(trait_type, trait_name)
                         for member in members then {
                             let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
@@ -1443,6 +1447,16 @@ given TypeChecker {
     }
 
     private collect_given_signatures(self, members List[GivenMember], target_type Type, owner_type_params List[TypeParameter], conformance_trait_name Option[String]) Void = {
+        // Build a resolution scope with owner type params so resolve_type sees them
+        let prev_resolution_scope = self.storage.resolution_scope
+        finally { self.storage.resolution_scope = prev_resolution_scope }
+        if not owner_type_params.is_empty() then {
+            let mut sig_scope = Scope.new_child(self.storage.global_scope)
+            for tp in owner_type_params then {
+                sig_scope.define_generic_param(tp.name)
+            }
+            self.storage.resolution_scope = Option[Scope].Some(sig_scope)
+        }
         let type_key = self.extension_template_key(target_type)
         let has_template_key = when target_type in {
             .GenericStruct(_, _) then true,
@@ -1480,10 +1494,9 @@ given TypeChecker {
                     }
                 }
             }
-            if not should_register_as_inherent then {
-                continue
-            }
-            let member_bindings = self.generic_type_param_bindings(m.type_params)
+            // Always resolve types for all members (inherent + conformance)
+            // so cross-references within the same given block work.
+            let member_bindings = self.merged_type_param_bindings(owner_type_params, m.type_params)
             if self.sema_progress_debug_enabled() then {
                 println("[sema-pass2-given-step] member=\(m.name) step=resolve-return")
             }
@@ -1491,6 +1504,9 @@ given TypeChecker {
             let mut param_types = List[Type].new()
             for param in m.params then {
                 param_types.push(self.resolve_given_member_type_with_bindings(param.type_name, target_type, member_bindings))
+            }
+            if not should_register_as_inherent then {
+                continue
             }
             if self.sema_progress_debug_enabled() then {
                 println("[sema-pass2-given-step] member=\(m.name) step=make-symbol")
@@ -1531,9 +1547,9 @@ given TypeChecker {
     private to_template_type_params(self, type_params List[TypeParameter]) List[TypeParameterDecl] = {
         let mut out = List[TypeParameterDecl].new()
         for tp in type_params then {
-            let mut constraints = List[String].new()
+            let mut constraints = List[TypeNode].new()
             for constraint in tp.constraints then {
-                constraints.push(self.type_node_name(constraint.val))
+                constraints.push(constraint.val)
             }
             out.push(TypeParameterDecl(tp.name, constraints))
         }
@@ -1543,6 +1559,17 @@ given TypeChecker {
     private generic_type_param_bindings(self, type_params List[TypeParameter]) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         for tp in type_params then {
+            bindings.insert(tp.name, Type.GenericParameter(tp.name))
+        }
+        return bindings
+    }
+
+    private merged_type_param_bindings(self, owner_params List[TypeParameter], method_params List[TypeParameter]) Dict[String, Type] = {
+        let mut bindings = Dict[String, Type].new()
+        for tp in owner_params then {
+            bindings.insert(tp.name, Type.GenericParameter(tp.name))
+        }
+        for tp in method_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name))
         }
         return bindings
@@ -1593,107 +1620,84 @@ given TypeChecker {
         for tp in type_params then {
             let mut constraints = List[ref TypeNode].new()
             for constraint in tp.constraints then {
-                constraints.push(box(TypeNode.Identifier(constraint)))
+                constraints.push(box(constraint))
             }
             out.push(TypeParameter(tp.name, constraints))
         }
         return out
     }
 
-    private snapshot_type_bindings(self) UInt = {
-        let snapshot_index = self.storage.type_binding_snapshots.count()
-        self.storage.type_binding_snapshots.push(TypeBindingSnapshot(Dict[String, TypeBindingRestoreEntry].new()))
-        return snapshot_index
-    }
 
-    private restore_type_bindings(self, snapshot_index UInt) Void = {
-        let _ = snapshot_index
-        if self.storage.type_binding_snapshots.is_empty() then {
-            return
-        }
-        let top_index = self.storage.type_binding_snapshots.count() - 1(UInt)
-        let snapshot = self.storage.type_binding_snapshots[top_index]
-        let _ = self.storage.type_binding_snapshots.pop()
-        for entry in snapshot.restore_entries then {
-            let name = entry.first
-            let restore = entry.second
-            when restore.old_type in {
-                .Some(old_type) then self.storage.global_scope.define_type(name, old_type),
-                .None() then self.storage.global_scope.remove_type(name),
-            }
-            if restore.old_generic_param then {
-                self.storage.global_scope.define_generic_param(name)
-            } else {
-                self.storage.global_scope.remove_generic_param(name)
-            }
-            if restore.old_generic_param_constraints is .Some(old_constraints) then {
-                self.storage.generic_param_constraints.insert(name, old_constraints)
-            } else {
-                self.storage.generic_param_constraints.remove(name)
-            }
-        }
-    }
-
-    private record_type_binding_restore(self, name String) Void = {
-        if self.storage.type_binding_snapshots.is_empty() then {
-            return
-        }
-        let snapshot_index = self.storage.type_binding_snapshots.count() - 1(UInt)
-        let mut active_snapshot = self.storage.type_binding_snapshots[snapshot_index]
-        if active_snapshot.restore_entries.get(name) is .Some(_) then {
-            return
-        }
-        let old_constraints = when self.storage.generic_param_constraints.get(name) in {
-            .Some(constraints) then {
-                let mut copied = List[String].with_capacity(constraints.count())
-                for constraint in constraints then {
-                    copied.push(constraint)
-                }
-                yield Option[List[String]].Some(copied)
-            },
-            .None() then Option[List[String]].None(),
-        }
-        active_snapshot.restore_entries.insert(
-            name,
-            TypeBindingRestoreEntry(
-                self.storage.global_scope.lookup_local_type(name),
-                self.storage.global_scope.is_generic_param_local(name),
-                old_constraints
-            )
-        )
-        self.storage.type_binding_snapshots[snapshot_index] = active_snapshot
-    }
-
-    private bind_type_param(self, tp TypeParameter) Void = {
-        self.record_type_binding_restore(tp.name)
-        self.storage.global_scope.define_type(tp.name, Type.GenericParameter(tp.name))
-        let mut constraints = List[String].new()
+    private constraint_bounds_for_type_param(self, tp TypeParameter) List[GenericConstraintBound] = {
+        let mut constraints = List[GenericConstraintBound].new()
         for c in tp.constraints then {
-            constraints.push(self.type_node_name(c.val))
-        }
-        self.storage.generic_param_constraints.insert(tp.name, constraints)
-    }
-
-    private constraint_names_for_type_param(self, tp TypeParameter) List[String] = {
-        let mut constraints = List[String].new()
-        for c in tp.constraints then {
-            constraints.push(self.type_node_name(c.val))
+            constraints.push(self.resolve_constraint_bound(c.val))
         }
         return constraints
     }
 
+    /// Resolve a constraint TypeNode into a GenericConstraintBound, preserving type arguments.
+    /// Unlike resolve_type, this does NOT emit diagnostics for unresolved names —
+    /// forward-referenced generic params (e.g. T in [R Iterator[T], T]) fall back to GenericParameter.
+    private resolve_constraint_bound(self, node TypeNode) GenericConstraintBound = {
+        return when node in {
+            .Identifier(name) then GenericConstraintBound(name, List[Type].new()),
+            .Generic(base, args) then {
+                let mut resolved_args = List[Type].new()
+                for arg in args then {
+                    resolved_args.push(self.resolve_constraint_type_arg(arg.val))
+                }
+                yield GenericConstraintBound(base, resolved_args)
+            },
+            _ then GenericConstraintBound("?", List[Type].new()),
+        }
+    }
+
+    /// Lightweight type arg resolution for constraint bounds — no diagnostics on miss.
+    private resolve_constraint_type_arg(self, node TypeNode) Type = {
+        return when node in {
+            .Identifier(name) then self.resolve_constraint_identifier(name),
+            .Generic(base, args) then self.resolve_constraint_generic_type(base, args),
+            .Reference(inner, mutable) then self.resolve_constraint_ref_type(inner.val, mutable),
+            _ then Type.Unknown(),
+        }
+    }
+
+    private resolve_constraint_identifier(self, name String) Type = {
+        return when self.storage.global_scope.lookup_type(name) in {
+            .Some(t) then t,
+            .None() then Type.GenericParameter(name),
+        }
+    }
+
+    private resolve_constraint_generic_type(self, base String, args List[ref TypeNode]) Type = {
+        let mut resolved_args = List[Type].new()
+        for arg in args then {
+            resolved_args.push(self.resolve_constraint_type_arg(arg.val))
+        }
+        return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
+    }
+
+    private resolve_constraint_ref_type(self, inner TypeNode, mutable Bool) Type = {
+        let resolved_inner = self.resolve_constraint_type_arg(inner)
+        if mutable then {
+            return Type.MutableReferenceType(box(resolved_inner))
+        }
+        return Type.ReferenceType(box(resolved_inner))
+    }
+
     private snapshot_generic_constraints(self, type_params List[TypeParameter]) GenericConstraintSnapshot = {
-        let mut previous_constraints = Dict[String, Option[List[String]]].new()
+        let mut previous_constraints = Dict[String, Option[List[GenericConstraintBound]]].new()
         for tp in type_params then {
             let previous = when self.storage.generic_param_constraints.get(tp.name) in {
                 .Some(existing) then {
-                    let mut copied = List[String].with_capacity(existing.count())
+                    let mut copied = List[GenericConstraintBound].with_capacity(existing.count())
                     for constraint in existing then {
                         copied.push(constraint)
                     }
-                    yield Option[List[String]].Some(copied)
+                    yield Option[List[GenericConstraintBound]].Some(copied)
                 },
-                .None() then Option[List[String]].None(),
+                .None() then Option[List[GenericConstraintBound]].None(),
             }
             previous_constraints.insert(tp.name, previous)
         }
@@ -1702,7 +1706,7 @@ given TypeChecker {
 
     private register_generic_constraints(self, type_params List[TypeParameter]) Void = {
         for tp in type_params then {
-            self.storage.generic_param_constraints.insert(tp.name, self.constraint_names_for_type_param(tp))
+            self.storage.generic_param_constraints.insert(tp.name, self.constraint_bounds_for_type_param(tp))
         }
     }
 
@@ -1756,10 +1760,14 @@ given TypeChecker {
             return
         }
 
-        let type_binding_snapshot = self.snapshot_type_bindings()
+        // Use child scope instead of mutating global_scope (Swift: withNewScope)
+        let prev_resolution_scope = self.storage.resolution_scope
+        finally { self.storage.resolution_scope = prev_resolution_scope }
+        let child = Scope.new_child(self.storage.global_scope)
         for tp in type_params then {
-            self.bind_type_param(tp)
+            child.define_generic_param(tp.name)
         }
+        self.storage.resolution_scope = Option[Scope].Some(child)
         let resolved_type = self.resolve_type(type_node)
         when self.nominal_def_id_for_type(resolved_type) in {
             .Some(def_id) then {
@@ -1770,7 +1778,6 @@ given TypeChecker {
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Only nominal types can be marked as 'not Deref'"))
             },
         }
-        self.restore_type_bindings(type_binding_snapshot)
     }
 
     private check_given_not_trait_decl(self mut ref, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {

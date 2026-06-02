@@ -192,21 +192,19 @@ given TypeChecker {
 
     private inject_trait_type_args(self, trait_type TypeNode, trait_name String) Void = {
         if trait_type is .Generic(_, args) then {
-            // 从 TraitRegistry 查找 trait 的类型参数名
+            // Create a child scope with trait type params instead of mutating global_scope
+            // (Swift: withNewScope { defineGenericParameter(...) })
             if self.storage.trait_registry.get(trait_name) is .Some(info) then {
+                let mut child = Scope.new_child(self.storage.global_scope)
                 let mut i UInt = 0
                 for param_name in info.type_params then {
-                    if self.storage.global_scope.lookup_type(param_name) is .Some(_) then {
-                        i += 1
-                        continue
-                    }
                     if i < args.count() and args.get(i) is .Some(arg_ref) then {
                         let resolved_arg = self.resolve_type(arg_ref.val)
-                        self.record_type_binding_restore(param_name)
-                        self.storage.global_scope.define_type(param_name, resolved_arg)
+                        child.define_type(param_name, resolved_arg)
                     }
                     i += 1
                 }
+                self.storage.resolution_scope = Option[Scope].Some(child)
             }
         }
     }
@@ -229,28 +227,25 @@ given TypeChecker {
                     when self.storage.trait_registry.get(parent.name) in {
                         .Some(parent_info) then {
                             if not parent.type_arg_nodes.is_empty() and not parent_info.type_params.is_empty() then {
-                                // Generic parent — resolve arg nodes and bind type params
-                                let snapshot = self.snapshot_type_bindings()
-                                self.record_type_binding_restore("Self")
-                                self.storage.global_scope.define_type("Self", self_type)
+                                // Generic parent — resolve arg nodes in a child scope (Swift: withNewScope)
+                                let prev_resolution_scope = self.storage.resolution_scope
+                                finally { self.storage.resolution_scope = prev_resolution_scope }
+                                let child = Scope.new_child(self.storage.global_scope)
+                                child.define_type("Self", self_type)
                                 let mut idx UInt = 0
                                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
                                     let param_name = parent_info.type_params[idx]
-                                    if self.storage.global_scope.lookup_type(param_name) is .None() then {
-                                        let resolved = self.resolve_type(parent.type_arg_nodes[idx])
-                                        self.restore_type_bindings(snapshot)
-                                        self.record_type_binding_restore(param_name)
-                                        self.storage.global_scope.define_type(param_name, resolved)
-                                    } else {
-                                        self.restore_type_bindings(snapshot)
-                                    }
+                                    let resolved = self.resolve_type(parent.type_arg_nodes[idx])
+                                    child.define_type(param_name, resolved)
                                     idx += 1
                                 }
+                                self.storage.resolution_scope = Option[Scope].Some(child)
+                                // Recurse with child scope active
+                                self.bind_ancestor_trait_type_params_recursive(parent.name, self_type, visited)
                             }
                         },
                         .None() then {},
                     }
-                    self.bind_ancestor_trait_type_params_recursive(parent.name, self_type, visited)
                 }
             },
             .None() then {},
@@ -1188,6 +1183,43 @@ given TypeChecker {
         }
         let mut bindings = Dict[String, Type].new()
         bindings.insert("Self", concrete_receiver)
+
+        // If receiver is a GenericParameter, extract constraint type args for this trait
+        // to populate bindings. e.g. [R Iterator[T]] → Element -> T
+        let receiver_inner = when receiver_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        when receiver_inner in {
+            .GenericParameter(gp_name) then {
+                when self.storage.generic_param_constraints.get(gp_name) in {
+                    .Some(constraints) then {
+                        for constraint in constraints then {
+                            if constraint.trait_name == trait_name then {
+                                when self.storage.trait_registry.get(trait_name) in {
+                                    .Some(info) then {
+                                        let mut idx UInt = 0
+                                        while idx < info.type_params.count() and idx < constraint.type_args.count() then {
+                                            let param_name = info.type_params[idx]
+                                            if not bindings.contains_key(param_name) then {
+                                                bindings.insert(param_name, constraint.type_args[idx])
+                                            }
+                                            idx += 1
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            _ then {},
+        }
+
+        // Fill in any remaining unresolved trait type params from global_scope
         when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
                 for type_param in info.type_params then {
@@ -1386,11 +1418,12 @@ given TypeChecker {
         }
         // GenericParameter 方法：通过约束 trait / method table 回退解析
         if inner_type is .GenericParameter(name) and self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
-            for trait_name in constraints then {
-                if trait_name == "Any" then {
+            for constraint in constraints then {
+                let cn = constraint.trait_name
+                if cn == "Any" then {
                     continue
                 }
-                when self.resolve_trait_registry_method_signature(trait_name, method_name, inner_type) in {
+                when self.resolve_trait_registry_method_signature(cn, method_name, inner_type) in {
                     .Some(method) then {
                         return self.method_return_type(method)
                     },
@@ -1472,11 +1505,12 @@ given TypeChecker {
         when inner_type in {
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
-                    for trait_name in constraints then {
-                        if self.resolve_trait_method_self_type(trait_name, method_name, inner_type) is .Some(self_type) then {
+                    for constraint in constraints then {
+                        let cn = constraint.trait_name
+                        if self.resolve_trait_method_self_type(cn, method_name, inner_type) is .Some(self_type) then {
                             return Option[Type].Some(self_type)
                         }
-                        if self.lookup_method_signature(trait_name, method_name) is .Some(method) and self.method_param_count(method) > 0(UInt) then {
+                        if self.lookup_method_signature(cn, method_name) is .Some(method) and self.method_param_count(method) > 0(UInt) then {
                             return self.resolve_bound_method_self_type(inner_type, method)
                         }
                     }
@@ -1555,11 +1589,12 @@ given TypeChecker {
         when inner_type in {
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
-                    for trait_name in constraints then {
-                        if self.lookup_method_signature(trait_name, method_name) is .Some(method) then {
+                    for constraint in constraints then {
+                        let cn = constraint.trait_name
+                        if self.lookup_method_signature(cn, method_name) is .Some(method) then {
                             return self.resolve_signature_param_types(inner_type, method)
                         }
-                        let trait_params = self.resolve_trait_method_param_types(trait_name, method_name, inner_type)
+                        let trait_params = self.resolve_trait_method_param_types(cn, method_name, inner_type)
                         if not trait_params.is_empty() then {
                             return trait_params
                         }
@@ -1947,11 +1982,12 @@ given TypeChecker {
         when inner_type in {
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
-                    for trait_name in constraints then {
-                        if trait_name == "Any" then {
+                    for constraint in constraints then {
+                        let cn = constraint.trait_name
+                        if cn == "Any" then {
                             continue
                         }
-                        when self.resolve_trait_registry_method_signature(trait_name, method_name, inner_type) in {
+                        when self.resolve_trait_registry_method_signature(cn, method_name, inner_type) in {
                             .Some(method) then { return Option[Symbol].Some(method) },
                             .None() then {},
                         }
