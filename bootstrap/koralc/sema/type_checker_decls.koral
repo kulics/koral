@@ -105,21 +105,21 @@ given TypeChecker {
                     for tp in type_params then {
                         generic_type_scope.define_generic_param(tp.name)
                     }
-                    // Set resolution_scope so resolve_type sees generic params (like Swift's withNewScope)
-                    let prev_resolution_scope = self.storage.resolution_scope
-                    self.storage.resolution_scope = Option[Scope].Some(generic_type_scope)
+                    // Set current_scope so resolve_type sees generic params (like Swift's withNewScope)
+                    let prev_scope = self.storage.current_scope
+                    self.storage.current_scope = generic_type_scope
                     let typed_params = self.check_params(params)
                     let resolved_ret = self.resolve_type(return_type)
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
-                    // Keep resolution_scope pointing to fn_scope during body checking
+                    // Keep current_scope pointing to fn_scope during body checking
                     // so resolve_type sees generic params (matches Swift's withNewScope pattern)
-                    self.storage.resolution_scope = Option[Scope].Some(fn_scope)
+                    self.storage.current_scope = fn_scope
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn begin file=\(self.storage.file_path) name=\(name)")
                     }
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
-                    self.storage.resolution_scope = prev_resolution_scope
+                    self.storage.current_scope = prev_scope
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn checked-body file=\(self.storage.file_path) name=\(name)")
                     }
@@ -147,17 +147,17 @@ given TypeChecker {
                 self.register_generic_constraints(type_params)
                 finally { self.restore_generic_constraints(generic_constraint_snapshot) }
                 // Resolve signature in a generic scope if type params exist (Swift: withNewScope)
-                let prev = self.storage.resolution_scope
+                let prev = self.storage.current_scope
                 if not type_params.is_empty() then {
-                    let mut s = Scope.new_child(self.storage.global_scope)
+                    let mut s = Scope.new_child(self.storage.current_scope)
                     for tp in type_params then {
                         s.define_generic_param(tp.name)
                     }
-                    self.storage.resolution_scope = Option[Scope].Some(s)
+                    self.storage.current_scope = s
                 }
                 let resolved_ret = self.resolve_type(return_type)
                 let typed_params = self.check_params(params)
-                self.storage.resolution_scope = prev
+                self.storage.current_scope = prev
                 yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
                     .None() then {

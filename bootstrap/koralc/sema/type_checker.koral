@@ -33,9 +33,9 @@ protected type TypeCheckerStorage(
     mut trait_requirement_cache Dict[ExplicitTraitConformanceKey, Bool],
     mut generic_trait_status_cache Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus],
     /// Current scope for type resolution — analogous to Swift's `currentScope`.
-    /// When set, `resolve_named_type` checks this scope before falling back to global scope.
-    /// This eliminates the need for separate resolve_type_in_scope / resolve_type_with_bindings variants.
-    mut resolution_scope Option[Scope],
+    /// Always points to the innermost scope. Type resolution walks up the scope chain.
+    /// Initialized to global_scope in the constructor.
+    mut current_scope Scope,
 )
 
 public type TypeChecker(protected mut storage mut ref TypeCheckerStorage)
@@ -131,7 +131,7 @@ given TypeChecker {
             Set[ExplicitTraitConformanceKey].new(),
             Dict[ExplicitTraitConformanceKey, Bool].new(),
             Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus].new(),
-            Option[Scope].None()
+            global_scope
         ))
         return TypeChecker(s)
     }
@@ -1337,8 +1337,8 @@ given TypeChecker {
                         if self.sema_progress_debug_enabled() then {
                             println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=inject-trait-type-args trait=\(trait_name)")
                         }
-                        let prev_resolution_scope = self.storage.resolution_scope
-                        finally { self.storage.resolution_scope = prev_resolution_scope }
+                        let prev_scope = self.storage.current_scope
+                        finally { self.storage.current_scope = prev_scope }
                         self.inject_trait_type_args_with_bindings(trait_type, trait_name, bindings)
                         for member in members then {
                             let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
@@ -1462,15 +1462,15 @@ given TypeChecker {
     }
 
     private collect_given_signatures(self, members List[GivenMember], target_type Type, owner_type_params List[TypeParameter], conformance_trait_name Option[String]) Void = {
-        // Build a resolution scope with owner type params so resolve_type sees them
-        // Always set resolution_scope (like Swift's withNewScope) so generic params are visible
-        let prev_resolution_scope = self.storage.resolution_scope
-        finally { self.storage.resolution_scope = prev_resolution_scope }
-        let mut sig_scope = Scope.new_child(self.storage.global_scope)
+        // Build a scope with owner type params so resolve_type sees them
+        // Always set current_scope (like Swift's withNewScope) so generic params are visible
+        let prev_scope = self.storage.current_scope
+        finally { self.storage.current_scope = prev_scope }
+        let mut sig_scope = Scope.new_child(self.storage.current_scope)
         for tp in owner_type_params then {
             sig_scope.define_generic_param(tp.name)
         }
-        self.storage.resolution_scope = Option[Scope].Some(sig_scope)
+        self.storage.current_scope = sig_scope
         let type_key = self.extension_template_key(target_type)
         let has_template_key = when target_type in {
             .GenericStruct(_, _) then true,
@@ -1777,13 +1777,13 @@ given TypeChecker {
         }
 
         // Use child scope instead of mutating global_scope (Swift: withNewScope)
-        let prev_resolution_scope = self.storage.resolution_scope
-        finally { self.storage.resolution_scope = prev_resolution_scope }
-        let child = Scope.new_child(self.storage.global_scope)
+        let prev_scope = self.storage.current_scope
+        finally { self.storage.current_scope = prev_scope }
+        let child = Scope.new_child(self.storage.current_scope)
         for tp in type_params then {
             child.define_generic_param(tp.name)
         }
-        self.storage.resolution_scope = Option[Scope].Some(child)
+        self.storage.current_scope = child
         let resolved_type = self.resolve_type(type_node)
         when self.nominal_def_id_for_type(resolved_type) in {
             .Some(def_id) then {
