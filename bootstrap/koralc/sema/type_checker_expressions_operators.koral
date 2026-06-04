@@ -92,9 +92,16 @@ given TypeChecker {
                 } else {
                     trait_args.push(right_t)
                 }
-                when left_t in {
+                // Unwrap reference types before checking for GenericParameter
+                // (Swift's enforceTraitConformance unwraps references via typeModifierInnerType)
+                let unwrapped_left = when left_t in {
+                    .ReferenceType(inner) then inner.val,
+                    .MutableReferenceType(inner) then inner.val,
+                    _ then left_t,
+                }
+                when unwrapped_left in {
                     .GenericParameter(_) then {
-                        if not self.generic_parameter_satisfies_trait_constraint(left_t, trait_name) then {
+                        if not self.generic_parameter_satisfies_trait_constraint(unwrapped_left, trait_name) then {
                             let type_name = self.context().type_display_name(left_t)
                             let right_type_name = self.context().type_display_name(right_t)
                             self.storage.diagnostics.push(
@@ -106,7 +113,7 @@ given TypeChecker {
                             )
                             return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.Unknown())
                         }
-                        return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), left_t)
+                        return self.build_arithmetic_method_call(typed_left, typed_right, self.arithmetic_method_name(op), unwrapped_left)
                     },
                     _ then {},
                 }
