@@ -701,6 +701,9 @@ private final class MIRFunctionBuilder {
       return lowerIntrinsicCall(intrinsic)
     case .whenExpression(let subject, let cases, let type):
       if canLowerSimpleWhen(subject: subject, cases: cases) {
+        if canLowerToSwitchValue(subject: subject, cases: cases) {
+          return lowerSwitchWhenExpression(subject: subject, cases: cases, type: type)
+        }
         return lowerSimpleWhenExpression(subject: subject, cases: cases, type: type)
       }
       fatalError("Unsupported when expression reached MIR lowering")
@@ -2103,6 +2106,66 @@ private final class MIRFunctionBuilder {
     return true
   }
 
+  /// Check if a when expression can be lowered to a SwitchValue terminator.
+  /// This is possible when all patterns are simple enum case patterns
+  /// (with conditionless payloads) or simple integer/boolean literal patterns,
+  /// with at most one wildcard/default case.
+  private func canLowerToSwitchValue(subject: TypedExpressionNode, cases: [TypedMatchCase]) -> Bool {
+    // Must have at least 2 cases to benefit from switch
+    guard cases.count >= 2 else { return false }
+
+    // Dereference reference types to get the actual subject type
+    let subjectType: Type
+    switch subject.type {
+    case .reference(let inner), .mutableReference(let inner),
+         .weakReference(let inner), .mutableWeakReference(let inner):
+      subjectType = inner
+    default:
+      subjectType = subject.type
+    }
+
+    var hasDefault = false
+    var enumCaseCount = 0
+    var literalCount = 0
+
+    for matchCase in cases {
+      switch matchCase.pattern {
+      case .wildcard, .variable:
+        hasDefault = true
+      case .enumCase(_, _, let elements):
+        guard case .enum = subjectType else { return false }
+        // Only simple enum cases (no complex payload bindings) can use switch
+        guard elements.allSatisfy({ $0.isConditionlessPayloadPattern }) else { return false }
+        enumCaseCount += 1
+      case .integerLiteral:
+        guard subjectType.isIntegerType else { return false }
+        literalCount += 1
+      case .booleanLiteral:
+        guard subjectType == .bool else { return false }
+        literalCount += 1
+      default:
+        return false
+      }
+    }
+
+    // Must have at least 2 non-default cases
+    return (enumCaseCount + literalCount) >= 2
+  }
+
+  /// Extract the switch constant for a pattern, if it can be used in a SwitchValue.
+  private func switchConstantForPattern(_ pattern: TypedPattern, subjectType: Type) -> MIRConstant? {
+    switch pattern {
+    case .enumCase(_, let tagIndex, _):
+      return .integer(String(tagIndex), .int)
+    case .integerLiteral(let value):
+      return .integer(value, subjectType)
+    case .booleanLiteral(let value):
+      return .boolean(value)
+    default:
+      return nil
+    }
+  }
+
   private func lowerSimpleWhenExpression(
     subject: TypedExpressionNode,
     cases: [TypedMatchCase],
@@ -2172,6 +2235,138 @@ private final class MIRFunctionBuilder {
 
     if !currentBlockIsTerminated {
       terminate(.unreachable)
+    }
+
+    setCurrentBlock(joinBlock)
+    if let subjectScope {
+      append(.scopeExit(subjectScope))
+      _ = scopeStack.popLast()
+    }
+    guard let resultLocal else {
+      return MIRExprResult(type: type, category: .rvalue, operand: type == .void ? .constant(.void) : nil, place: nil)
+    }
+    return MIRExprResult(type: type, category: .rvalue, operand: .local(resultLocal.id), place: nil)
+  }
+
+  /// Lower a when expression with simple enum/literal patterns to SwitchValue.
+  /// This replaces a linear chain of branch checks with a single switch dispatch,
+  /// significantly reducing the number of MIR locals and C stack frame size.
+  private func lowerSwitchWhenExpression(
+    subject: TypedExpressionNode,
+    cases: [TypedMatchCase],
+    type: Type
+  ) -> MIRExprResult? {
+    guard !currentBlockIsTerminated else { return nil }
+
+    let resultLocal: MIRLocal? = (type != .void && type != .never)
+      ? makeTemporary(type: type, nameHint: "when_result")
+      : nil
+    if let resultLocal {
+      append(.declare(resultLocal.id))
+    }
+
+    guard let preparedSubject = preparePatternSubject(subject, nameHint: "when_subject") else {
+      return nil
+    }
+    let subjectPlace = preparedSubject.place
+    let subjectScope = preparedSubject.scope
+
+    // Extract the switch operand: enum tag for enum types, subject value for int/bool
+    // Handle reference types by dereferencing (matching patternMatchSubject logic)
+    let switchOperand: MIROperand
+    let subjectRead = MIRValue.placeRead(subjectPlace, ownership: .borrow)
+    let (matchedValue, matchedType) = patternMatchSubject(value: subjectRead, type: subject.type)
+
+    switch matchedType {
+    case .enum:
+      let tagValue = MIRValue.enumTag(MIREnumTag(subject: matchedValue, enumType: matchedType))
+      let tagLocal = materialize(tagValue, type: .int)
+      switchOperand = tagLocal
+    default:
+      // For int/bool, materialize the matched value
+      switchOperand = materialize(matchedValue, type: matchedType)
+    }
+
+    let dispatchBlock = currentBlockID
+    let joinBlock = makeBlock()
+    let yieldTargetDepth = pushYieldTargets(
+      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
+        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
+      },
+      resultLocal: resultLocal,
+      joinBlock: joinBlock
+    )
+    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
+
+    // Build switch cases and default
+    var switchCases: [MIRSwitchCase] = []
+    var defaultBlock: MIRBlockID?
+
+    for (index, matchCase) in cases.enumerated() {
+      let caseBlock = makeBlock()
+
+      switch matchCase.pattern {
+      case .wildcard, .variable:
+        defaultBlock = caseBlock
+      default:
+        if let constant = switchConstantForPattern(matchCase.pattern, subjectType: subject.type) {
+          switchCases.append(MIRSwitchCase(value: constant, target: caseBlock))
+        }
+      }
+    }
+
+    // If no explicit default, create one that goes to join (or unreachable)
+    let effectiveDefault: MIRBlockID
+    if let db = defaultBlock {
+      effectiveDefault = db
+    } else {
+      let unreachableBlock = makeBlock()
+      setCurrentBlock(unreachableBlock)
+      terminate(.unreachable)
+      effectiveDefault = unreachableBlock
+    }
+
+    // Emit the switch terminator
+    setCurrentBlock(dispatchBlock)
+    terminate(.switchValue(switchOperand, cases: switchCases, defaultBlock: effectiveDefault))
+
+    // Emit case bodies - map patterns to their switch case blocks
+    for (index, matchCase) in cases.enumerated() {
+      let caseBlock: MIRBlockID
+      switch matchCase.pattern {
+      case .wildcard, .variable:
+        guard let db = defaultBlock else { continue }
+        caseBlock = db
+      case .enumCase(_, let tagIndex, _):
+        let constant = MIRConstant.integer(String(tagIndex), .int)
+        guard let sc = switchCases.first(where: {
+          if case .integer(let v, _) = $0.value { return v == String(tagIndex) }
+          return false
+        }) else { continue }
+        caseBlock = sc.target
+      case .integerLiteral(let value):
+        guard let sc = switchCases.first(where: {
+          if case .integer(let v, _) = $0.value { return v == value }
+          return false
+        }) else { continue }
+        caseBlock = sc.target
+      case .booleanLiteral(let value):
+        guard let sc = switchCases.first(where: {
+          if case .boolean(let v) = $0.value { return v == value }
+          return false
+        }) else { continue }
+        caseBlock = sc.target
+      default:
+        continue
+      }
+
+      setCurrentBlock(caseBlock)
+      withPatternBindings(pattern: matchCase.pattern, subjectPlace: subjectPlace, subjectType: subject.type) {
+        lowerBranchBody(matchCase.body, resultLocal: resultLocal)
+      }
+      if !currentBlockIsTerminated {
+        terminate(.goto(joinBlock))
+      }
     }
 
     setCurrentBlock(joinBlock)

@@ -32,6 +32,9 @@ type MIRFunctionBuilder(
     mut loop_stack List[MIRLoopBuilderContext],
     mut scope_stack List[MIRScopeID],
     mut yield_target_stack List[MIRYieldTargetContext],
+    mut pattern_subject_operand Option[MIROperand],
+    mut pattern_subject_tag Option[MIROperand],
+    mut pattern_comparison_local Option[MIRLocalID],
 )
 
 given MIRFunctionBuilder {
@@ -67,6 +70,9 @@ given MIRFunctionBuilder {
             List[MIRLoopBuilderContext].new(),
             List[MIRScopeID].new(),
             List[MIRYieldTargetContext].new(),
+            Option[MIROperand].None(),
+            Option[MIROperand].None(),
+            Option[MIRLocalID].None(),
         )
     }
 
@@ -525,12 +531,16 @@ given MIRFunctionBuilder {
     }
 
     private lower_branch_body(self mut ref, expression ref TypedExpr, result_local Option[MIRLocalID]) Void = {
-        when self.lower_expression(expression) in {
-            .Some(result) then when result_local in {
-                .Some(local_id) then self.assign_branch_result(result, local_id),
-                .None() then {},
+        when result_local in {
+            .Some(local_id) then {
+                // Direct value assignment avoids creating intermediate temporaries,
+                // matching Swift compiler's lowerBranchBody optimization.
+                let value = self.lower_value(expression)
+                self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), value))
             },
-            .None() then {},
+            .None() then {
+                let _ = self.lower_expression(expression)
+            },
         }
     }
 
@@ -552,7 +562,218 @@ given MIRFunctionBuilder {
         self.set_current_block(exit_block)
     }
 
+    /// Check if a when expression can be lowered to SwitchValue instead of branch chains.
+    /// This is possible when all patterns are simple enum case patterns (with conditionless
+    /// payloads) or simple integer/boolean literal patterns, with at most one wildcard/default.
+    private can_lower_to_switch_value(self ref, subject ref TypedExpr, arms List[TypedWhenArm]) Bool = {
+        if arms.count() < 2(UInt) then { return false }
+        let subject_type = subject.expr_type
+        // Dereference reference types
+        let matched_type = when subject_type in {
+            .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then subject_type,
+        }
+        let mut enum_count UInt = 0
+        let mut literal_count UInt = 0
+        for arm in arms then {
+            when arm.pattern in {
+                .Wildcard() then {},
+                .Variable(_) then {},
+                .EnumCase(_, _, elements) then {
+                    if not (matched_type is .EnumType(_)) then { return false }
+                    for element in elements then {
+                        if not typed_pattern_is_conditionless_payload(element.pattern) then { return false }
+                    }
+                    enum_count += 1
+                },
+                .IntegerLiteral(_) then {
+                    let is_int = when matched_type in {
+                        .IntType() then true,
+                        .Int8Type() then true,
+                        .Int16Type() then true,
+                        .Int32Type() then true,
+                        .Int64Type() then true,
+                        .UIntType() then true,
+                        .UInt8Type() then true,
+                        .UInt16Type() then true,
+                        .UInt32Type() then true,
+                        .UInt64Type() then true,
+                        _ then false,
+                    }
+                    if not is_int then { return false }
+                    literal_count += 1
+                },
+                .BoolLiteral(_) then {
+                    if not (matched_type is .BoolType()) then { return false }
+                    literal_count += 1
+                },
+                _ then { return false },
+            }
+        }
+        return (enum_count + literal_count) >= 2(UInt)
+    }
+
+    /// Extract the switch constant for a pattern.
+    private switch_constant_for_pattern(self ref, pattern ref TypedPattern) Option[MIRConstant] = {
+        return when pattern in {
+            .EnumCase(_, tag_index, _) then Option[MIRConstant].Some(MIRConstant.Integer(tag_index.to_string(), Type.IntType())),
+            .IntegerLiteral(value) then Option[MIRConstant].Some(MIRConstant.Integer(value, Type.IntType())),
+            .BoolLiteral(value) then Option[MIRConstant].Some(MIRConstant.Boolean(value)),
+            _ then Option[MIRConstant].None(),
+        }
+    }
+
+    /// Lower a when expression with simple enum/literal patterns to SwitchValue.
+    /// This replaces a linear chain of branch checks with a single switch dispatch,
+    /// significantly reducing the number of MIR locals and C stack frame size.
+    private lower_switch_when_expression(self mut ref, subject ref TypedExpr, arms List[TypedWhenArm], result_type Type) Option[MIRExprResult] = {
+        let subject_value = self.lower_value(subject)
+        let subject_operand = self.materialize(subject_value, subject.expr_type)
+        let has_result = not self.type_is_void_or_never(result_type)
+        let mut result_local = Option[MIRLocalID].None()
+        if has_result then {
+            let local = self.make_temporary(result_type, "when_result")
+            self.append_statement(MIRStatement.Declare(local.id))
+            result_local = Option[MIRLocalID].Some(local.id)
+        }
+
+        // Dereference reference types to get the actual subject
+        let (matched_value, matched_type) = when subject.expr_type in {
+            .ReferenceType(inner) then {
+                let deref = MIRValue.PlaceRead(MIRPlace.Deref(box(MIRValue.PlaceRead(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), MIROwnershipUse.Borrow())), inner.val), MIROwnershipUse.Borrow())
+                yield Pair[MIRValue, Type](deref, inner.val)
+            },
+            .MutableReferenceType(inner) then {
+                let deref = MIRValue.PlaceRead(MIRPlace.Deref(box(MIRValue.PlaceRead(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), MIROwnershipUse.Borrow())), inner.val), MIROwnershipUse.Borrow())
+                yield Pair[MIRValue, Type](deref, inner.val)
+            },
+            _ then Pair[MIRValue, Type](MIRValue.PlaceRead(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), MIROwnershipUse.Borrow()), subject.expr_type),
+        }
+
+        // Extract switch operand: enum tag for enums, direct value for int/bool
+        let switch_operand = when matched_type in {
+            .EnumType(_) then {
+                let tag_value = MIRValue.EnumTag(MIREnumTag(box(matched_value), matched_type))
+                yield self.materialize(tag_value, Type.IntType())
+            },
+            _ then self.materialize(matched_value, matched_type),
+        }
+
+        let join_block = self.make_block()
+        let mut switch_cases = List[MIRSwitchCase].new()
+        let mut default_block = Option[MIRBlockID].None()
+
+        // Create case blocks and build switch cases
+        for arm in arms then {
+            let case_block = self.make_block()
+            when arm.pattern in {
+                .Wildcard() then { default_block = Option[MIRBlockID].Some(case_block) },
+                .Variable(_) then { default_block = Option[MIRBlockID].Some(case_block) },
+                _ then {
+                    when self.switch_constant_for_pattern(arm.pattern) in {
+                        .Some(constant) then { switch_cases.push(MIRSwitchCase(constant, case_block)) },
+                        .None() then {},
+                    }
+                },
+            }
+        }
+
+        // Create default block if not explicitly provided
+        let effective_default = when default_block in {
+            .Some(db) then db,
+            .None() then {
+                let unreachable_block = self.make_block()
+                let saved_block = self.current_block_index
+                self.set_current_block(unreachable_block)
+                self.terminate(MIRTerminator.Unreachable())
+                self.current_block_index = saved_block
+                yield unreachable_block
+            },
+        }
+
+        // Emit the switch terminator
+        self.terminate(MIRTerminator.SwitchValue(switch_operand, switch_cases, Option[MIRBlockID].Some(effective_default)))
+
+        // Emit case bodies
+        for arm in arms then {
+            let case_block = when arm.pattern in {
+                .Wildcard() then default_block,
+                .Variable(_) then default_block,
+                .EnumCase(_, tag_index, _) then {
+                    let target_value = MIRConstant.Integer(tag_index.to_string(), Type.IntType())
+                    let mut found = Option[MIRBlockID].None()
+                    for sc in switch_cases then {
+                        when sc.value in {
+                            .Integer(v, _) then {
+                                if v == tag_index.to_string() then {
+                                    found = Option[MIRBlockID].Some(sc.target)
+                                }
+                            },
+                            _ then {},
+                        }
+                    }
+                    yield found
+                },
+                .IntegerLiteral(value) then {
+                    let mut found = Option[MIRBlockID].None()
+                    for sc in switch_cases then {
+                        when sc.value in {
+                            .Integer(v, _) then {
+                                if v == value then {
+                                    found = Option[MIRBlockID].Some(sc.target)
+                                }
+                            },
+                            _ then {},
+                        }
+                    }
+                    yield found
+                },
+                .BoolLiteral(value) then {
+                    let mut found = Option[MIRBlockID].None()
+                    for sc in switch_cases then {
+                        when sc.value in {
+                            .Boolean(v) then {
+                                if v == value then {
+                                    found = Option[MIRBlockID].Some(sc.target)
+                                }
+                            },
+                            _ then {},
+                        }
+                    }
+                    yield found
+                },
+                _ then Option[MIRBlockID].None(),
+            }
+
+            when case_block in {
+                .Some(cb) then {
+                    self.set_current_block(cb)
+                    let subject_place = MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) })
+                    let branch_result_local = result_local
+                    self.with_pattern_bindings(arm.pattern, subject_place, subject.expr_type, () -> {
+                        self.lower_branch_body(arm.body, branch_result_local)
+                    })
+                    if not self.current_block_is_terminated() then { self.terminate(MIRTerminator.Goto(join_block)) }
+                },
+                .None() then {},
+            }
+        }
+
+        self.set_current_block(join_block)
+        return when result_local in {
+            .Some(local_id) then Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Local(local_id)), Option[MIRPlace].None())),
+            .None() then self.void_result(),
+        }
+    }
+
     private lower_when_expression(self mut ref, subject ref TypedExpr, arms List[TypedWhenArm], result_type Type) Option[MIRExprResult] = {
+        // Use SwitchValue lowering for simple enum/literal patterns
+        if self.can_lower_to_switch_value(subject, arms) then {
+            return self.lower_switch_when_expression(subject, arms, result_type)
+        }
         let subject_value = self.lower_value(subject)
         let subject_operand = self.materialize(subject_value, subject.expr_type)
         let has_result = not self.type_is_void_or_never(result_type)
@@ -565,6 +786,18 @@ given MIRFunctionBuilder {
         let dispatch_block = self.current_block_id()
         let join_block = self.make_block()
         let mut next_test_block = dispatch_block
+        // Pre-materialize subject operand for reuse across all pattern conditions,
+        // matching Swift compiler's lowerSimpleWhenExpression optimization.
+        let saved_pattern_subject = self.pattern_subject_operand
+        let saved_pattern_tag = self.pattern_subject_tag
+        let saved_comparison_local = self.pattern_comparison_local
+        self.pattern_subject_operand = Option[MIROperand].Some(subject_operand)
+        self.pattern_subject_tag = Option[MIROperand].None()
+        // Create a reusable comparison result local to reduce MIR local count.
+        // All pattern comparisons in this when expression share this single local.
+        let cmp_local = self.make_temporary(Type.BoolType(), "when_cmp")
+        self.append_statement(MIRStatement.Declare(cmp_local.id))
+        self.pattern_comparison_local = Option[MIRLocalID].Some(cmp_local.id)
         let mut index UInt = 0
         while index < arms.count() then {
             self.set_current_block(next_test_block)
@@ -585,6 +818,9 @@ given MIRFunctionBuilder {
             next_test_block = next_block
             index += 1
         }
+        self.pattern_subject_operand = saved_pattern_subject
+        self.pattern_subject_tag = saved_pattern_tag
+        self.pattern_comparison_local = saved_comparison_local
         self.set_current_block(join_block)
         return when result_local in {
             .Some(local_id) then Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Local(local_id)), Option[MIRPlace].None())),
@@ -645,17 +881,43 @@ given MIRFunctionBuilder {
     }
 
     private pattern_compare(self mut ref, subject_place MIRPlace, subject_type Type, expected MIROperand, op ComparisonOperator) MIROperand = {
-        let subject_operand = self.materialize(MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow()), subject_type)
-        return self.materialize(MIRValue.Binary(MIRBinaryOperation(subject_operand, MIRBinaryOperator.Comparison(op), expected, Type.BoolType())), Type.BoolType())
+        // Reuse the pre-materialized subject operand when available to avoid
+        // creating redundant temporaries across when/if branches.
+        let subject_operand = when self.pattern_subject_operand in {
+            .Some(op) then op,
+            .None() then self.materialize(MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow()), subject_type),
+        }
+        let comparison_value = MIRValue.Binary(MIRBinaryOperation(subject_operand, MIRBinaryOperator.Comparison(op), expected, Type.BoolType()))
+        // Reuse a single comparison result local across all arms when available.
+        // This significantly reduces MIR local count for pattern-heavy code.
+        when self.pattern_comparison_local in {
+            .Some(local_id) then {
+                self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), comparison_value))
+                return MIROperand.Local(local_id)
+            },
+            .None() then {
+                return self.materialize(comparison_value, Type.BoolType())
+            },
+        }
     }
 
     private pattern_binary(self mut ref, left MIROperand, op MIRBinaryOperator, right MIROperand) MIROperand = {
-        return self.materialize(MIRValue.Binary(MIRBinaryOperation(left, op, right, Type.BoolType())), Type.BoolType())
+        let value = MIRValue.Binary(MIRBinaryOperation(left, op, right, Type.BoolType()))
+        if self.pattern_comparison_local is .Some(local_id) then {
+            self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), value))
+            return MIROperand.Local(local_id)
+        }
+        return self.materialize(value, Type.BoolType())
     }
 
     private pattern_maybe_negate(self mut ref, operand MIROperand, negated Bool) MIROperand = {
         if negated then {
-            return self.materialize(MIRValue.Unary(MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, Type.BoolType())), Type.BoolType())
+            let value = MIRValue.Unary(MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, Type.BoolType()))
+            if self.pattern_comparison_local is .Some(local_id) then {
+                self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), value))
+                return MIROperand.Local(local_id)
+            }
+            return self.materialize(value, Type.BoolType())
         }
         return operand
     }
@@ -668,10 +930,31 @@ given MIRFunctionBuilder {
         tag_index UInt,
         elements List[TypedPatternElement],
     ) MIROperand = {
-        let tag_value = MIRValue.EnumTag(MIREnumTag(box(MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow())), subject_type))
-        let tag_operand = self.materialize(tag_value, Type.IntType())
+        // Reuse the cached tag operand when available to avoid creating redundant
+        // temporaries across when/if branches (matches Swift compiler optimization).
+        let tag_operand = when self.pattern_subject_tag in {
+            .Some(cached) then cached,
+            .None() then {
+                let subject_source = when self.pattern_subject_operand in {
+                    .Some(op) then MIRValue.Operand(op),
+                    .None() then MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow()),
+                }
+                let tag_value = MIRValue.EnumTag(MIREnumTag(box(subject_source), subject_type))
+                let tag = self.materialize(tag_value, Type.IntType())
+                self.pattern_subject_tag = Option[MIROperand].Some(tag)
+                yield tag
+            },
+        }
         let expected_tag = MIROperand.Constant(MIRConstant.Integer(tag_index.to_string(), Type.IntType()))
-        let tag_condition = self.materialize(MIRValue.Binary(MIRBinaryOperation(tag_operand, MIRBinaryOperator.Comparison(ComparisonOperator.Equal()), expected_tag, Type.BoolType())), Type.BoolType())
+        let tag_comparison = MIRValue.Binary(MIRBinaryOperation(tag_operand, MIRBinaryOperator.Comparison(ComparisonOperator.Equal()), expected_tag, Type.BoolType()))
+        // Reuse comparison local when available to reduce MIR local count.
+        let tag_condition = when self.pattern_comparison_local in {
+            .Some(local_id) then {
+                self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), tag_comparison))
+                yield MIROperand.Local(local_id)
+            },
+            .None() then self.materialize(tag_comparison, Type.BoolType()),
+        }
 
         if self.pattern_elements_are_conditionless(elements) then {
             return tag_condition

@@ -311,7 +311,40 @@ given TypeChecker {
         return ExplicitTraitConformanceKey(self.canonicalize_alias_type(target_type), trait_name, trait_arg_types)
     }
 
+    private trait_args_match(self, expected List[Type], actual List[Type]) Bool = {
+        let _ = self
+        if not (expected.count() == actual.count()) then {
+            return false
+        }
+        let mut i UInt = 0
+        while i < expected.count() then {
+            if not self.same_expr_type(expected[i], actual[i]) then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
+    private generic_param_has_trait_bound(self, name String, trait_name String, trait_arg_types List[Type]) Bool = {
+        return when self.storage.generic_param_constraints.get(name) in {
+            .Some(constraints) then {
+                for constraint in constraints then {
+                    if constraint.trait_name == trait_name and self.trait_args_match(constraint.type_args, trait_arg_types) then {
+                        return true
+                    }
+                    if trait_arg_types.is_empty() and self.storage.trait_registry.has_inheritance(constraint.trait_name, trait_name) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .None() then false,
+        }
+    }
+
     private record_explicit_trait_conformance(self, target_type Type, trait_name String, trait_arg_types List[Type]) Void = {
+        self.invalidate_trait_requirement_caches()
         self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name, trait_arg_types))
     }
 
@@ -364,11 +397,6 @@ given TypeChecker {
                 _ then true,
             }
         }
-        // Check explicit trait conformance first (registered via given declarations in stdlib).
-        // This matches Swift's hasNominalConformance which checks declaredConformances + explicitConformances.
-        if self.has_explicit_trait_conformance(target_type, trait_name) then {
-            return true
-        }
         // Fallback: hardcoded primitive type trait conformance for cases where
         // given declarations haven't been processed yet (e.g., pass 2 ordering).
         // Analogous to Swift's isBuiltinEqualityComparable/isBuiltinOrderingComparable.
@@ -379,13 +407,27 @@ given TypeChecker {
     }
 
     private satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
-        let result = if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then true else if self.has_explicit_trait_conformance(target_type, trait_name) then true else {
-            let empty_trait_args = List[Type].new()
-            yield when self.generic_trait_conformance_status(target_type, trait_name, empty_trait_args) in {
+        return self.satisfies_trait_requirement_with_args(target_type, trait_name, List[Type].new())
+    }
+
+    private satisfies_trait_requirement_with_args(self, target_type Type, trait_name String, trait_args List[Type]) Bool = {
+        let key = self.trait_conformance_key(target_type, trait_name, trait_args)
+        if self.storage.trait_requirement_in_progress.contains(key) then {
+            return false
+        }
+        when self.storage.trait_requirement_cache.get(key) in {
+            .Some(cached) then { return cached },
+            .None() then {},
+        }
+        self.storage.trait_requirement_in_progress.insert(key)
+        let result = if trait_args.is_empty() and self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then true else if self.has_explicit_trait_conformance_with_args(target_type, trait_name, trait_args) then true else {
+            yield when self.generic_trait_conformance_status(target_type, trait_name, trait_args) in {
                 .Satisfied() then true,
                 _ then false,
             }
         }
+        self.storage.trait_requirement_in_progress.remove(key)
+        self.storage.trait_requirement_cache.insert(key, result)
         return result
     }
 
@@ -394,22 +436,9 @@ given TypeChecker {
     }
 
     private has_explicit_trait_conformance_with_args(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
-        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
-            return true
-        }
         when target_type in {
             .GenericParameter(name) then {
-                return when self.storage.generic_param_constraints.get(name) in {
-                    .Some(constraints) then {
-                        for constraint in constraints then {
-                            if constraint.trait_name == trait_name or self.storage.trait_registry.has_inheritance(constraint.trait_name, trait_name) then {
-                                return true
-                            }
-                        }
-                        yield false
-                    },
-                    .None() then false,
-                }
+                return self.generic_param_has_trait_bound(name, trait_name, trait_arg_types)
             },
             _ then {},
         }
@@ -431,6 +460,9 @@ given TypeChecker {
         }
         for template in templates then {
             if template.trait_name == trait_name then {
+                continue
+            }
+            if not trait_arg_types.is_empty() then {
                 continue
             }
             if not self.storage.trait_registry.has_inheritance(template.trait_name, trait_name) then {
@@ -462,6 +494,7 @@ given TypeChecker {
     }
 
     private record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_name String, trait_args List[Type]) Void = {
+        self.invalidate_trait_requirement_caches()
         let template = GenericTraitConformanceTemplate(
             target_type,
             self.to_template_type_params(owner_type_params),
@@ -623,6 +656,22 @@ given TypeChecker {
     }
 
     private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
+        let key = self.trait_conformance_key(target_type, trait_name, trait_args)
+        if self.storage.generic_trait_status_in_progress.contains(key) then {
+            return GenericTraitConformanceStatus.MissingConformance()
+        }
+        when self.storage.generic_trait_status_cache.get(key) in {
+            .Some(cached) then { return cached },
+            .None() then {},
+        }
+        self.storage.generic_trait_status_in_progress.insert(key)
+        let result = self.compute_generic_trait_conformance_status(target_type, trait_name, trait_args)
+        self.storage.generic_trait_status_in_progress.remove(key)
+        self.storage.generic_trait_status_cache.insert(key, result)
+        return result
+    }
+
+    private compute_generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
         let mut matched_template = false
         let mut result = GenericTraitConformanceStatus.MissingConformance()
         // Use the type-keyed index for O(1) lookup instead of O(N) scan
@@ -661,9 +710,10 @@ given TypeChecker {
             for tp in template.owner_type_params then {
                 if bindings.get(tp.name) is .Some(bound_type) then {
                     for constraint in tp.constraints then {
-                        let trait_name = self.type_node_name(constraint)
-                        if not self.satisfies_trait_requirement(bound_type, trait_name) then {
-                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, trait_name)
+                        let required_trait_name = self.type_node_name(constraint)
+                        let required_trait_args = self.trait_type_args_with_bindings(constraint, bindings)
+                        if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
+                            result = GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, required_trait_name)
                             return result
                         }
                     }
@@ -706,6 +756,10 @@ given TypeChecker {
             .Unknown() then { return true },
             .TypeVar(_) then { return true },
             _ then {},
+        }
+
+        if self.is_implicitly_satisfied_trait_requirement(target_type, trait_name) then {
+            return true
         }
 
         if self.has_explicit_trait_conformance(target_type, trait_name) then {

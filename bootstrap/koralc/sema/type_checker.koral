@@ -28,6 +28,10 @@ protected type TypeCheckerStorage(
     mut explicit_trait_conformances Set[ExplicitTraitConformanceKey],
     mut generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
     mut conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    mut trait_requirement_in_progress Set[ExplicitTraitConformanceKey],
+    mut generic_trait_status_in_progress Set[ExplicitTraitConformanceKey],
+    mut trait_requirement_cache Dict[ExplicitTraitConformanceKey, Bool],
+    mut generic_trait_status_cache Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus],
     /// Current scope for type resolution — analogous to Swift's `currentScope`.
     /// When set, `resolve_named_type` checks this scope before falling back to global scope.
     /// This eliminates the need for separate resolve_type_in_scope / resolve_type_with_bindings variants.
@@ -123,6 +127,10 @@ given TypeChecker {
             Set[ExplicitTraitConformanceKey].new(),
             List[GenericTraitConformanceTemplate].new(),
             Dict[String, List[GenericTraitConformanceTemplate]].new(),
+            Set[ExplicitTraitConformanceKey].new(),
+            Set[ExplicitTraitConformanceKey].new(),
+            Dict[ExplicitTraitConformanceKey, Bool].new(),
+            Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus].new(),
             Option[Scope].None()
         ))
         return TypeChecker(s)
@@ -159,6 +167,13 @@ given TypeChecker {
         let mut message = "Duplicate definition: "
         message.push_string(name)
         return message
+    }
+
+    protected invalidate_trait_requirement_caches(self) Void = {
+        self.storage.trait_requirement_in_progress = Set[ExplicitTraitConformanceKey].new()
+        self.storage.generic_trait_status_in_progress = Set[ExplicitTraitConformanceKey].new()
+        self.storage.trait_requirement_cache = Dict[ExplicitTraitConformanceKey, Bool].new()
+        self.storage.generic_trait_status_cache = Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus].new()
     }
 
     protected push_diagnostic(self, message String) Void = {
@@ -1705,12 +1720,14 @@ given TypeChecker {
     }
 
     private register_generic_constraints(self, type_params List[TypeParameter]) Void = {
+        self.invalidate_trait_requirement_caches()
         for tp in type_params then {
             self.storage.generic_param_constraints.insert(tp.name, self.constraint_bounds_for_type_param(tp))
         }
     }
 
     private restore_generic_constraints(self, snapshot GenericConstraintSnapshot) Void = {
+        self.invalidate_trait_requirement_caches()
         for entry in snapshot.previous_constraints then {
             let name = entry.first
             when entry.second in {

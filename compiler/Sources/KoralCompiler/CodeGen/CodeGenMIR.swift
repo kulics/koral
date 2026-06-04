@@ -19,6 +19,9 @@ private struct MIRPlaceAccess {
 private struct MIRLocalLifetimePlan {
   let rootLocals: [MIRLocalID]
   let localsByScope: [MIRScopeID: [MIRLocalID]]
+  let hoistedDeclarationLocals: [MIRLocalID]
+  let blockLocalDeclarationsByBlock: [MIRBlockID: [MIRLocalID]]
+  let blockLocalDeclarationLocals: Set<MIRLocalID>
 }
 
 final class MIRFunctionCodeEmitter {
@@ -70,7 +73,11 @@ final class MIRFunctionCodeEmitter {
     }
     self.initFlagByLocalID = flags
 
-    self.lifetimePlan = Self.buildLifetimePlan(function: function, needsDrop: codeGen.needsDrop)
+    self.lifetimePlan = Self.buildLifetimePlan(
+      function: function,
+      trackedLocalIDs: Set(flags.keys),
+      needsDrop: codeGen.needsDrop
+    )
     self.blockLabelByID = Dictionary(uniqueKeysWithValues: function.blocks.map { ($0.id, "__mir_bb_\($0.id.rawValue)") })
   }
 
@@ -83,17 +90,22 @@ final class MIRFunctionCodeEmitter {
 
   private static func buildLifetimePlan(
     function: MIRFunction,
+    trackedLocalIDs: Set<MIRLocalID>,
     needsDrop: (Type) -> Bool
   ) -> MIRLocalLifetimePlan {
     var parentScopeByScope: [MIRScopeID: MIRScopeID] = [:]
     var declaredScopeByLocal: [MIRLocalID: MIRScopeID] = [:]
+    var declaredBlockByLocal: [MIRLocalID: MIRBlockID] = [:]
     var declarationOrderByLocal: [MIRLocalID: Int] = [:]
     var useScopesByLocal: [MIRLocalID: [Set<MIRScopeID>]] = [:]
+    var useBlocksByLocal: [MIRLocalID: Set<MIRBlockID>] = [:]
     var activeScopes: [MIRScopeID] = []
+    var currentBlock = function.entryBlock
     var position = 0
 
     func recordUse(_ local: MIRLocalID) {
       useScopesByLocal[local, default: []].append(Set(activeScopes))
+      useBlocksByLocal[local, default: []].insert(currentBlock)
     }
 
     func walkOperand(_ operand: MIROperand) {
@@ -199,6 +211,7 @@ final class MIRFunctionCodeEmitter {
     }
 
     for block in function.blocks {
+      currentBlock = block.id
       for statement in block.statements {
         position += 1
         switch statement {
@@ -215,6 +228,7 @@ final class MIRFunctionCodeEmitter {
           if let scope = activeScopes.last {
             declaredScopeByLocal[local] = scope
           }
+          declaredBlockByLocal[local] = currentBlock
           declarationOrderByLocal[local] = position
           recordUse(local)
         case .assign(let place, let value):
@@ -252,6 +266,9 @@ final class MIRFunctionCodeEmitter {
 
     var rootLocals: [MIRLocalID] = []
     var localsByScope: [MIRScopeID: [MIRLocalID]] = [:]
+    var hoistedDeclarationLocals: [MIRLocalID] = []
+    var blockLocalDeclarationsByBlock: [MIRBlockID: [MIRLocalID]] = [:]
+    var blockLocalDeclarationLocals: Set<MIRLocalID> = []
 
     for local in function.locals where local.type != .void && local.type != .never && needsDrop(local.type) {
       var scope = declaredScopeByLocal[local.id]
@@ -268,15 +285,38 @@ final class MIRFunctionCodeEmitter {
       }
     }
 
+    for local in function.locals where local.storage != .parameter && local.storage != .capture && local.type != .void && local.type != .never {
+      if !trackedLocalIDs.contains(local.id),
+         let declarationBlock = declaredBlockByLocal[local.id],
+         let useBlocks = useBlocksByLocal[local.id],
+         useBlocks.count == 1,
+         useBlocks.contains(declarationBlock) {
+        blockLocalDeclarationsByBlock[declarationBlock, default: []].append(local.id)
+        blockLocalDeclarationLocals.insert(local.id)
+      } else {
+        hoistedDeclarationLocals.append(local.id)
+      }
+    }
+
     let sortByDeclaration: (MIRLocalID, MIRLocalID) -> Bool = { lhs, rhs in
       (declarationOrderByLocal[lhs] ?? Int.min) < (declarationOrderByLocal[rhs] ?? Int.min)
     }
     rootLocals.sort(by: sortByDeclaration)
+    hoistedDeclarationLocals.sort(by: sortByDeclaration)
     for key in localsByScope.keys {
       localsByScope[key]?.sort(by: sortByDeclaration)
     }
+    for key in blockLocalDeclarationsByBlock.keys {
+      blockLocalDeclarationsByBlock[key]?.sort(by: sortByDeclaration)
+    }
 
-    return MIRLocalLifetimePlan(rootLocals: rootLocals, localsByScope: localsByScope)
+    return MIRLocalLifetimePlan(
+      rootLocals: rootLocals,
+      localsByScope: localsByScope,
+      hoistedDeclarationLocals: hoistedDeclarationLocals,
+      blockLocalDeclarationsByBlock: blockLocalDeclarationsByBlock,
+      blockLocalDeclarationLocals: blockLocalDeclarationLocals
+    )
   }
 
   private static func computeNonOwningLocals(function: MIRFunction) -> Set<MIRLocalID> {
@@ -331,8 +371,8 @@ final class MIRFunctionCodeEmitter {
   }
 
   private func emitLocalDeclarations() {
-    for local in function.locals where local.storage != .parameter && local.storage != .capture && local.type != .void && local.type != .never {
-      guard let name = localNameByID[local.id] else { continue }
+    for localID in lifetimePlan.hoistedDeclarationLocals {
+      guard let local = localByID[localID], let name = localNameByID[local.id] else { continue }
       codeGen.addIndent()
       codeGen.appendToBuffer("\(codeGen.cTypeName(local.type)) \(name);\n")
     }
@@ -348,7 +388,20 @@ final class MIRFunctionCodeEmitter {
   private func emitBlock(_ block: MIRBasicBlock) {
     guard let label = blockLabelByID[block.id] else { return }
     let preservedLocal = preservedReturnLocal(for: block.terminator)
+    let wrapsBlock = lifetimePlan.blockLocalDeclarationsByBlock[block.id]?.isEmpty == false
     codeGen.addIndent()
+    if wrapsBlock {
+      codeGen.appendToBuffer("\(label): {\n")
+      codeGen.withIndent {
+        for statement in block.statements {
+          emitStatement(statement, preserving: preservedLocal)
+        }
+        emitTerminator(block.terminator, preserving: preservedLocal)
+      }
+      codeGen.addIndent()
+      codeGen.appendToBuffer("}\n")
+      return
+    }
     codeGen.appendToBuffer("\(label):;\n")
     for statement in block.statements {
       emitStatement(statement, preserving: preservedLocal)
@@ -358,8 +411,14 @@ final class MIRFunctionCodeEmitter {
 
   private func emitStatement(_ statement: MIRStatement, preserving preservedLocal: MIRLocalID?) {
     switch statement {
-    case .declare:
-      break
+    case .declare(let local):
+      guard lifetimePlan.blockLocalDeclarationLocals.contains(local),
+            let info = localByID[local],
+            let name = localNameByID[local] else {
+        break
+      }
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(codeGen.cTypeName(info.type)) \(name);\n")
     case .assign(let place, let value):
       emitAssign(place: place, value: value)
     case .compoundAssign(let assignment):

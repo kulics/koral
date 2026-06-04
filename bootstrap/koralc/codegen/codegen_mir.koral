@@ -7,6 +7,9 @@ type MIRPlaceAccess(path String, control String, cleanups List[MIRValueCleanup])
 type MIRLocalLifetimePlan(
     root_locals List[MIRLocalID],
     locals_by_scope Dict[UInt, List[MIRLocalID]],
+    hoisted_declaration_locals List[MIRLocalID],
+    block_local_declarations_by_block Dict[UInt, List[MIRLocalID]],
+    block_local_declaration_locals Dict[UInt, Bool],
 )
 
 private let is_borrowed_reference_like_type(t Type) Bool = {
@@ -63,6 +66,119 @@ private let compute_non_owning_mir_locals(function ref MIRFunction) Dict[UInt, B
     return result
 }
 
+private let mir_record_local_use_block(use_blocks_by_local mut ref Dict[UInt, Dict[UInt, Bool]], local MIRLocalID, block MIRBlockID) Void = {
+    let mut blocks = use_blocks_by_local.get(local.raw_value) or else Dict[UInt, Bool].new()
+    blocks.insert(block.raw_value, true)
+    use_blocks_by_local.insert(local.raw_value, blocks)
+}
+
+private let mir_walk_operand_use_blocks(use_blocks_by_local mut ref Dict[UInt, Dict[UInt, Bool]], operand MIROperand, block MIRBlockID) Void = {
+    when operand in {
+        .Local(local) then mir_record_local_use_block(use_blocks_by_local, local, block),
+        _ then {},
+    }
+}
+
+private let mir_walk_place_use_blocks(use_blocks_by_local mut ref Dict[UInt, Dict[UInt, Bool]], place MIRPlace, block MIRBlockID) Void = {
+    when place in {
+        .Local(local) then mir_record_local_use_block(use_blocks_by_local, local, block),
+        .Global(_) then {},
+        .Field(base, _) then mir_walk_place_use_blocks(use_blocks_by_local, base.val, block),
+        .EnumPayload(base, _, _, _, _) then mir_walk_place_use_blocks(use_blocks_by_local, base.val, block),
+        .Deref(base, _) then mir_walk_value_use_blocks(use_blocks_by_local, base.val, block),
+        .PointerElement(base, _) then mir_walk_value_use_blocks(use_blocks_by_local, base.val, block),
+    }
+}
+
+private let mir_walk_intrinsic_use_blocks(use_blocks_by_local mut ref Dict[UInt, Dict[UInt, Bool]], intrinsic_node MIRIntrinsic, block MIRBlockID) Void = {
+    when intrinsic_node in {
+        .AllocMemory(count, _) then mir_walk_value_use_blocks(use_blocks_by_local, count.val, block),
+        .DeallocMemory(pointer) then mir_walk_value_use_blocks(use_blocks_by_local, pointer.val, block),
+        .CopyMemory(dest, source, count) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, dest.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, source.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, count.val, block)
+        },
+        .MoveMemory(dest, source, count) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, dest.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, source.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, count.val, block)
+        },
+        .IsUniqueMutable(value) then mir_walk_value_use_blocks(use_blocks_by_local, value.val, block),
+        .RefCount(value) then mir_walk_value_use_blocks(use_blocks_by_local, value.val, block),
+        .MakeRef(pointer, owner, _) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, pointer.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, owner.val, block)
+        },
+        .MakeMutRef(pointer, owner, _) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, pointer.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, owner.val, block)
+        },
+        .DowngradeRef(value, _) then mir_walk_value_use_blocks(use_blocks_by_local, value.val, block),
+        .DowngradeMutRef(value, _) then mir_walk_value_use_blocks(use_blocks_by_local, value.val, block),
+        .UpgradeRef(value, _) then mir_walk_value_use_blocks(use_blocks_by_local, value.val, block),
+        .UpgradeMutRef(value, _) then mir_walk_value_use_blocks(use_blocks_by_local, value.val, block),
+        .InitMemory(pointer, value) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, pointer.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, value.val, block)
+        },
+        .DeinitMemory(pointer) then mir_walk_value_use_blocks(use_blocks_by_local, pointer.val, block),
+        .TakeMemory(pointer, _) then mir_walk_value_use_blocks(use_blocks_by_local, pointer.val, block),
+        .NullPtr(_) then {},
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, out_handle.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, out_tid.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, closure.val, block)
+            mir_walk_value_use_blocks(use_blocks_by_local, stack_size.val, block)
+        },
+    }
+}
+
+private let mir_walk_value_use_blocks(use_blocks_by_local mut ref Dict[UInt, Dict[UInt, Bool]], value MIRValue, block MIRBlockID) Void = {
+    when value in {
+        .Operand(operand) then mir_walk_operand_use_blocks(use_blocks_by_local, operand, block),
+        .PlaceRead(place, _) then mir_walk_place_use_blocks(use_blocks_by_local, place, block),
+        .Binary(operation) then {
+            mir_walk_operand_use_blocks(use_blocks_by_local, operation.left, block)
+            mir_walk_operand_use_blocks(use_blocks_by_local, operation.right, block)
+        },
+        .Unary(operation) then mir_walk_operand_use_blocks(use_blocks_by_local, operation.operand, block),
+        .Call(call) then {
+            mir_walk_operand_use_blocks(use_blocks_by_local, call.callee, block)
+            for argument in call.arguments then {
+                mir_walk_value_use_blocks(use_blocks_by_local, argument.val, block)
+            }
+        },
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                mir_walk_value_use_blocks(use_blocks_by_local, field.val, block)
+            }
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                mir_walk_value_use_blocks(use_blocks_by_local, argument.val, block)
+            }
+        },
+        .EnumTag(tag) then mir_walk_value_use_blocks(use_blocks_by_local, tag.subject.val, block),
+        .TraitObjectConversion(conversion) then mir_walk_value_use_blocks(use_blocks_by_local, conversion.inner.val, block),
+        .TraitMethodCall(call) then {
+            mir_walk_value_use_blocks(use_blocks_by_local, call.receiver.val, block)
+            for argument in call.arguments then {
+                mir_walk_value_use_blocks(use_blocks_by_local, argument.val, block)
+            }
+        },
+        .Ref(place, _, _) then mir_walk_place_use_blocks(use_blocks_by_local, place, block),
+        .Pointer(place) then mir_walk_place_use_blocks(use_blocks_by_local, place, block),
+        .Cast(operand, _) then mir_walk_operand_use_blocks(use_blocks_by_local, operand, block),
+        .Intrinsic(node) then mir_walk_intrinsic_use_blocks(use_blocks_by_local, node, block),
+        .Lambda(lambda) then {
+            for source in lambda.capture_sources then {
+                mir_walk_place_use_blocks(use_blocks_by_local, source, block)
+            }
+        },
+    }
+}
+
 type MIRFunctionCodeEmitter(
     codegen mut ref CodeGen,
     function ref MIRFunction,
@@ -110,7 +226,7 @@ given MIRFunctionCodeEmitter {
             block_label_by_id.insert(block.id.raw_value, "__mir_bb_\(block.id.raw_value)")
         }
 
-        let plan = build_mir_lifetime_plan(function, codegen)
+        let plan = build_mir_lifetime_plan(function, codegen, init_flag_by_local_id)
         return MIRFunctionCodeEmitter(codegen, function, local_by_id, local_name_by_id, non_owning_local_ids, init_flag_by_local_id, block_label_by_id, plan, String.new())
     }
 
@@ -122,11 +238,14 @@ given MIRFunctionCodeEmitter {
     }
 
     private emit_local_declarations(self mut ref) Void = {
-        for local in self.function.locals then {
-            if local.storage is not .Parameter() and local.storage is not .Capture() and not self.codegen.type_is_void_or_never(local.local_type) then {
-                let name = self.local_name(local.id)
-                self.codegen.add_indent()
-                self.codegen.buffer.push_string("\(self.codegen.c_type_name(local.local_type)) \(name);\n")
+        for local_id in self.lifetime_plan.hoisted_declaration_locals then {
+            when self.local_by_id.get(local_id.raw_value) in {
+                .Some(local) then {
+                    let name = self.local_name(local.id)
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("\(self.codegen.c_type_name(local.local_type)) \(name);\n")
+                },
+                .None() then {},
             }
         }
         for local in self.function.locals then {
@@ -142,7 +261,24 @@ given MIRFunctionCodeEmitter {
     }
 
     private emit_block(self mut ref, block MIRBasicBlock) Void = {
+        let wraps_block = when self.lifetime_plan.block_local_declarations_by_block.get(block.id.raw_value) in {
+            .Some(locals) then not locals.is_empty(),
+            .None() then false,
+        }
         self.codegen.add_indent()
+        if wraps_block then {
+            self.codegen.buffer.push_string("\(self.block_label(block.id)): {\n")
+            let saved_indent = self.codegen.indent
+            self.codegen.indent = "\(self.codegen.indent)    "
+            for statement in block.statements then {
+                self.emit_statement(statement)
+            }
+            self.emit_terminator(block.terminator)
+            self.codegen.indent = saved_indent
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string("}\n")
+            return
+        }
         self.codegen.buffer.push_string("\(self.block_label(block.id)):;\n")
         for statement in block.statements then {
             self.emit_statement(statement)
@@ -152,7 +288,19 @@ given MIRFunctionCodeEmitter {
 
     private emit_statement(self mut ref, statement MIRStatement) Void = {
         when statement in {
-            .Declare(_) then {},
+            .Declare(local_id) then {
+                when self.lifetime_plan.block_local_declaration_locals.get(local_id.raw_value) in {
+                    .Some(_) then when self.local_by_id.get(local_id.raw_value) in {
+                        .Some(local) then {
+                            let name = self.local_name(local_id)
+                            self.codegen.add_indent()
+                            self.codegen.buffer.push_string("\(self.codegen.c_type_name(local.local_type)) \(name);\n")
+                        },
+                        .None() then {},
+                    },
+                    .None() then {},
+                }
+            },
             .Assign(place, value) then self.emit_assign(place, value),
             .CompoundAssign(assignment) then self.emit_compound_assign(assignment),
             .Drop(place) then self.emit_drop(place),
@@ -1201,11 +1349,16 @@ private let join_strings(values List[String], separator String) String = {
     return out
 }
 
-private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGen) MIRLocalLifetimePlan = {
+private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGen, init_flag_by_local_id Dict[UInt, String]) MIRLocalLifetimePlan = {
     let mut root_locals = List[MIRLocalID].new()
     let mut locals_by_scope = Dict[UInt, List[MIRLocalID]].new()
+    let mut hoisted_declaration_locals = List[MIRLocalID].new()
+    let mut block_local_declarations_by_block = Dict[UInt, List[MIRLocalID]].new()
+    let mut block_local_declaration_locals = Dict[UInt, Bool].new()
     let mut active_scopes = List[MIRScopeID].new()
     let mut local_by_id = Dict[UInt, MIRLocal].new()
+    let mut declared_block_by_local = Dict[UInt, MIRBlockID].new()
+    let mut use_blocks_by_local = Dict[UInt, Dict[UInt, Bool]].new()
     for local in function.locals then { local_by_id.insert(local.id.raw_value, local) }
     for block in function.blocks then {
         for statement in block.statements then {
@@ -1222,6 +1375,10 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
                     }
                 },
                 .Declare(local_id) then {
+                    mir_record_local_use_block(use_blocks_by_local.ref, local_id, block.id)
+                    if declared_block_by_local.get(local_id.raw_value) is .None() then {
+                        declared_block_by_local.insert(local_id.raw_value, block.id)
+                    }
                     when local_by_id.get(local_id.raw_value) in {
                         .Some(local) then {
                             if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
@@ -1240,11 +1397,62 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
                         .None() then {},
                     }
                 },
-                _ then {},
+                .Assign(place, value) then {
+                    mir_walk_place_use_blocks(use_blocks_by_local.ref, place, block.id)
+                    mir_walk_value_use_blocks(use_blocks_by_local.ref, value, block.id)
+                },
+                .CompoundAssign(assignment) then {
+                    mir_walk_place_use_blocks(use_blocks_by_local.ref, assignment.target, block.id)
+                    mir_walk_value_use_blocks(use_blocks_by_local.ref, assignment.value, block.id)
+                },
+                .Drop(place) then mir_walk_place_use_blocks(use_blocks_by_local.ref, place, block.id),
+                .Retain(value) then mir_walk_value_use_blocks(use_blocks_by_local.ref, value, block.id),
+                .Release(value) then mir_walk_value_use_blocks(use_blocks_by_local.ref, value, block.id),
+                .Evaluate(value) then mir_walk_value_use_blocks(use_blocks_by_local.ref, value, block.id),
+                .DebugSource(_) then {},
+            }
+        }
+        when block.terminator in {
+            .Branch(condition, _, _) then mir_walk_operand_use_blocks(use_blocks_by_local.ref, condition, block.id),
+            .SwitchValue(operand, _, _) then mir_walk_operand_use_blocks(use_blocks_by_local.ref, operand, block.id),
+            .ReturnValue(operand) then when operand in {
+                .Some(op) then mir_walk_operand_use_blocks(use_blocks_by_local.ref, op, block.id),
+                .None() then {},
+            },
+            _ then {},
+        }
+    }
+    for local in function.locals then {
+        if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) then {
+            let can_block_local = if init_flag_by_local_id.get(local.id.raw_value) is .None() then when declared_block_by_local.get(local.id.raw_value) in {
+                .Some(declaration_block) then when use_blocks_by_local.get(local.id.raw_value) in {
+                    .Some(use_blocks) then use_blocks.count() == 1(UInt) and use_blocks.contains_key(declaration_block.raw_value),
+                    .None() then false,
+                },
+                .None() then false,
+            } else false
+            if can_block_local then {
+                when declared_block_by_local.get(local.id.raw_value) in {
+                    .Some(declaration_block) then {
+                        let mut list = block_local_declarations_by_block.get(declaration_block.raw_value) or else List[MIRLocalID].new()
+                        list.push(local.id)
+                        block_local_declarations_by_block.insert(declaration_block.raw_value, list)
+                        block_local_declaration_locals.insert(local.id.raw_value, true)
+                    },
+                    .None() then hoisted_declaration_locals.push(local.id),
+                }
+            } else {
+                hoisted_declaration_locals.push(local.id)
             }
         }
     }
-    return MIRLocalLifetimePlan(root_locals, locals_by_scope)
+    return MIRLocalLifetimePlan(
+        root_locals,
+        locals_by_scope,
+        hoisted_declaration_locals,
+        block_local_declarations_by_block,
+        block_local_declaration_locals
+    )
 }
 
 given CodeGen {
