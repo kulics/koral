@@ -147,21 +147,17 @@ given TypeChecker {
                 self.register_generic_constraints(type_params)
                 finally { self.restore_generic_constraints(generic_constraint_snapshot) }
                 // Resolve signature in a generic scope if type params exist (Swift: withNewScope)
-                let mut resolved_ret = self.resolve_type(return_type)
-                let mut typed_params = self.check_params(params)
+                let prev = self.storage.resolution_scope
                 if not type_params.is_empty() then {
                     let mut s = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
                         s.define_generic_param(tp.name)
                     }
-                    let prev = self.storage.resolution_scope
                     self.storage.resolution_scope = Option[Scope].Some(s)
-                    // finally here would fire at if-block exit — too early for the code below.
-                    // Use explicit restore after the work that needs the scope.
-                    resolved_ret = self.resolve_type(return_type)
-                    typed_params = self.check_params(params)
-                    self.storage.resolution_scope = prev
                 }
+                let resolved_ret = self.resolve_type(return_type)
+                let typed_params = self.check_params(params)
+                self.storage.resolution_scope = prev
                 yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
                     .Some(s) then box(s),
                     .None() then {
@@ -399,7 +395,7 @@ given TypeChecker {
                         else self.resolve_type_with_bindings(target_type, bindings)
                     let resolved_trait_args = self.trait_type_args_with_bindings(trait_type, bindings)
                     self.record_explicit_trait_conformance(resolved_target, trait_name, resolved_trait_args)
-                    self.maybe_record_iterator_conformance(resolved_target, trait_type)
+                    self.maybe_record_iterator_conformance_with_bindings(resolved_target, trait_type, bindings)
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
                         self.context(),

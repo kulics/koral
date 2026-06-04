@@ -191,6 +191,10 @@ given TypeChecker {
     }
 
     private inject_trait_type_args(self, trait_type TypeNode, trait_name String) Void = {
+        self.inject_trait_type_args_with_bindings(trait_type, trait_name, Dict[String, Type].new())
+    }
+
+    private inject_trait_type_args_with_bindings(self, trait_type TypeNode, trait_name String, bindings Dict[String, Type]) Void = {
         if trait_type is .Generic(_, args) then {
             // Create a child scope with trait type params instead of mutating global_scope
             // (Swift: withNewScope { defineGenericParameter(...) })
@@ -199,7 +203,7 @@ given TypeChecker {
                 let mut i UInt = 0
                 for param_name in info.type_params then {
                     if i < args.count() and args.get(i) is .Some(arg_ref) then {
-                        let resolved_arg = self.resolve_type(arg_ref.val)
+                        let resolved_arg = self.resolve_type_with_bindings(arg_ref.val, bindings)
                         child.define_type(param_name, resolved_arg)
                     }
                     i += 1
@@ -232,6 +236,8 @@ given TypeChecker {
                                 finally { self.storage.resolution_scope = prev_resolution_scope }
                                 let child = Scope.new_child(self.storage.global_scope)
                                 child.define_type("Self", self_type)
+                                // Set resolution_scope BEFORE resolving so generic params are visible
+                                self.storage.resolution_scope = Option[Scope].Some(child)
                                 let mut idx UInt = 0
                                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
                                     let param_name = parent_info.type_params[idx]
@@ -239,7 +245,6 @@ given TypeChecker {
                                     child.define_type(param_name, resolved)
                                     idx += 1
                                 }
-                                self.storage.resolution_scope = Option[Scope].Some(child)
                                 // Recurse with child scope active
                                 self.bind_ancestor_trait_type_params_recursive(parent.name, self_type, visited)
                             }

@@ -134,9 +134,31 @@ given NameCollector {
                     self.push_name_diagnostic(self.duplicate_definition_message(name))
                     return
                 }
-                let mut context = self.context
-                let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, self.package_id, access, span)
-                self.global_scope.define_type(name, Type.OpaqueType(def_id))
+                // Register intrinsic types as their dedicated enum cases (matching Swift compiler)
+                // so that conformance keys are consistent between scope lookup and hardcoded checks.
+                let intrinsic_type = when name in {
+                    "Bool" then Type.BoolType(),
+                    "Never" then Type.NeverType(),
+                    "Int" then Type.IntType(),
+                    "Int8" then Type.Int8Type(),
+                    "Int16" then Type.Int16Type(),
+                    "Int32" then Type.Int32Type(),
+                    "Int64" then Type.Int64Type(),
+                    "UInt" then Type.UIntType(),
+                    "UInt8" then Type.UInt8Type(),
+                    "UInt16" then Type.UInt16Type(),
+                    "UInt32" then Type.UInt32Type(),
+                    "UInt64" then Type.UInt64Type(),
+                    "Float32" then Type.Float32Type(),
+                    "Float64" then Type.Float64Type(),
+                    _ then {
+                        // Unknown intrinsic type - allocate as OpaqueType
+                        let mut context = self.context
+                        let def_id = context.allocate_full_in_package(name, DefKind.TypeDef(TypeDefKind.Opaque()), self.module_path, self.source_file, self.package_id, access, span)
+                        yield Type.OpaqueType(def_id)
+                    },
+                }
+                self.global_scope.define_type(name, intrinsic_type)
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {

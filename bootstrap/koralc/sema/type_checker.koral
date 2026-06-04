@@ -1307,7 +1307,7 @@ given TypeChecker {
                     if self.sema_progress_debug_enabled() then {
                         println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=iterator-conformance trait=\(trait_name)")
                     }
-                    self.maybe_record_iterator_conformance(resolved_target, trait_type)
+                    self.maybe_record_iterator_conformance_with_bindings(resolved_target, trait_type, bindings)
                     if self.sema_progress_debug_enabled() then {
                         println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=collect-signatures trait=\(trait_name)")
                     }
@@ -1339,7 +1339,7 @@ given TypeChecker {
                         }
                         let prev_resolution_scope = self.storage.resolution_scope
                         finally { self.storage.resolution_scope = prev_resolution_scope }
-                        self.inject_trait_type_args(trait_type, trait_name)
+                        self.inject_trait_type_args_with_bindings(trait_type, trait_name, bindings)
                         for member in members then {
                             let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
                                 .TraitObject(_, _) then true,
@@ -1463,15 +1463,14 @@ given TypeChecker {
 
     private collect_given_signatures(self, members List[GivenMember], target_type Type, owner_type_params List[TypeParameter], conformance_trait_name Option[String]) Void = {
         // Build a resolution scope with owner type params so resolve_type sees them
+        // Always set resolution_scope (like Swift's withNewScope) so generic params are visible
         let prev_resolution_scope = self.storage.resolution_scope
         finally { self.storage.resolution_scope = prev_resolution_scope }
-        if not owner_type_params.is_empty() then {
-            let mut sig_scope = Scope.new_child(self.storage.global_scope)
-            for tp in owner_type_params then {
-                sig_scope.define_generic_param(tp.name)
-            }
-            self.storage.resolution_scope = Option[Scope].Some(sig_scope)
+        let mut sig_scope = Scope.new_child(self.storage.global_scope)
+        for tp in owner_type_params then {
+            sig_scope.define_generic_param(tp.name)
         }
+        self.storage.resolution_scope = Option[Scope].Some(sig_scope)
         let type_key = self.extension_template_key(target_type)
         let has_template_key = when target_type in {
             .GenericStruct(_, _) then true,

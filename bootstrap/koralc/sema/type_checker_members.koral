@@ -248,14 +248,70 @@ given TypeChecker {
                 },
             },
             .Reference(inner, mutable) then {
+                let trait_ref_override = when inner.val in {
+                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
+                        let trait_ref_inner = self.canonical_trait_object_type(name)
+                        yield Option[Type].Some(if mutable
+                            then Type.MutableReferenceType(box(trait_ref_inner))
+                            else self.resolve_reference_type(trait_ref_inner))
+                    } else Option[Type].None(),
+                    .Generic(base, args) then {
+                        yield if self.storage.trait_registry.get(base) is .Some(_) then {
+                            let mut resolved_args = List[Type].new()
+                            for arg in args then {
+                                resolved_args.push(self.resolve_type_with_self_and_bindings(arg.val, self_type, bindings))
+                            }
+                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
+                            yield Option[Type].Some(if mutable
+                                then Type.MutableReferenceType(box(trait_ref_inner))
+                                else self.resolve_reference_type(trait_ref_inner))
+                        } else Option[Type].None()
+                    },
+                    _ then Option[Type].None(),
+                }
+                when trait_ref_override in {
+                    .Some(resolved_trait_ref) then { yield resolved_trait_ref },
+                    .None() then {},
+                }
                 let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
-                yield if mutable then Type.MutableReferenceType(box(resolved_inner)) else self.resolve_reference_type(resolved_inner)
+                yield if mutable
+                    then Type.MutableReferenceType(box(resolved_inner))
+                    else self.resolve_reference_type(resolved_inner)
             },
             .Pointer(inner, mutable) then {
                 let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
                 yield if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
             },
-            .WeakReference(inner, mutable) then if mutable then Type.MutableWeakReferenceType(box(self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings))) else Type.WeakReferenceType(box(self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings))),
+            .WeakReference(inner, mutable) then {
+                // Check if inner is a trait name → trait object weakref
+                let trait_ref_override = when inner.val in {
+                    .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
+                        let trait_ref_inner = self.canonical_trait_object_type(name)
+                        yield Option[Type].Some(if mutable
+                            then Type.MutableWeakReferenceType(box(trait_ref_inner))
+                            else Type.WeakReferenceType(box(trait_ref_inner)))
+                    } else Option[Type].None(),
+                    .Generic(base, args) then {
+                        yield if self.storage.trait_registry.get(base) is .Some(_) then {
+                            let mut resolved_args = List[Type].new()
+                            for arg in args then {
+                                resolved_args.push(self.resolve_type_with_self_and_bindings(arg.val, self_type, bindings))
+                            }
+                            let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
+                            yield Option[Type].Some(if mutable
+                                then Type.MutableWeakReferenceType(box(trait_ref_inner))
+                                else Type.WeakReferenceType(box(trait_ref_inner)))
+                        } else Option[Type].None()
+                    },
+                    _ then Option[Type].None(),
+                }
+                when trait_ref_override in {
+                    .Some(resolved_trait_ref) then { yield resolved_trait_ref },
+                    .None() then {},
+                }
+                let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
+                yield if mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner))
+            },
             .Generic(base, args) then {
                 let mut resolved_args = List[ref Type].new()
                 for a in args then {
