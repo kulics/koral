@@ -813,13 +813,25 @@ final class MIRFunctionCodeEmitter {
     codeGen.addIndent()
     codeGen.appendToBuffer("\(envVar)->__refcount = 1;\n")
 
-    for capture in lambda.captures {
+    for (capture, captureSource) in zip(lambda.captures, lambda.captureSources) {
       let fieldName = captureFieldName(for: capture.symbol)
       guard let source = captureSourceOverrides[capture.symbol.defId.id] else {
         fatalError("Missing MIR lambda capture source for \(capture.symbol.defId.id)")
       }
-      codeGen.addIndent()
-      codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: "\(envVar)->\(fieldName)", indent: "")
+      let dest = "\(envVar)->\(fieldName)"
+      switch capture.captureKind {
+      case .byValue:
+        // Move: plain assignment, then consume the source so it won't be dropped again.
+        codeGen.addIndent()
+        codeGen.appendToBuffer("\(dest) = \(source);\n")
+        if case .local(let localID) = captureSource {
+          setInitFlag(localID, to: false)
+        }
+      case .byReference:
+        // Copy + retain: the original stays alive.
+        codeGen.addIndent()
+        codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
+      }
     }
 
     return codeGen.nextTempWithInit(
