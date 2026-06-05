@@ -447,6 +447,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
         MIRCall(
           callee: call.callee,
           arguments: promoteArguments(call.arguments, for: call.callee),
+          argumentOwnerships: call.argumentOwnerships,
           type: call.type
         )
       )
@@ -525,6 +526,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
         MIRCall(
           callee: call.callee,
           arguments: promoteArguments(call.arguments, for: call.callee),
+          argumentOwnerships: call.argumentOwnerships,
           type: call.type
         )
       )

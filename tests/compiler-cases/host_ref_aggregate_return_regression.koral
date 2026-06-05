@@ -1,0 +1,79 @@
+// EXPECT: 1
+// EXPECT: 1
+
+type Decl(value Int)
+
+type LoadedNode(
+    decl ref Decl,
+    source_file String,
+)
+
+type ModuleStorage(
+    path ref List[String],
+    mut nodes mut ref List[LoadedNode],
+)
+
+type Module(mut storage mut ref ModuleStorage)
+
+type UnitStorage(root Module)
+type Unit(mut storage mut ref UnitStorage)
+
+given Module {
+    public new() Self = {
+        let mut path = List[String].new()
+        path.push("root")
+
+        let mut nodes = List[LoadedNode].new()
+        let decl ref Decl = box(Decl(7))
+        nodes.push(LoadedNode(decl, "main"))
+
+        return Module(box(ModuleStorage(box(path), box(nodes))))
+    }
+
+    public path(self) List[String] = self.storage.path.val
+
+    public append_with_path(self, result mut ref List[Pair[LoadedNode, List[String]]]) Void = {
+        let module_path = self.path()
+        for node in self.storage.nodes.val then {
+            result.push(Pair[LoadedNode, List[String]](node, module_path))
+        }
+    }
+}
+
+given Unit {
+    public new(root Module) Self = Unit(box(UnitStorage(root)))
+
+    public collect_all_with_path(self) List[Pair[LoadedNode, List[String]]] = {
+        let mut result = List[Pair[LoadedNode, List[String]]].new()
+        self.storage.root.append_with_path(result.ref)
+        return result
+    }
+}
+
+let resolve_unit() Result[ref Unit] = {
+    let module = Module.new()
+    let unit = Unit.new(module)
+    return Result[ref Unit].Ok(box(unit))
+}
+
+let collect_with_path(module Module) List[Pair[LoadedNode, List[String]]] = {
+    let mut result = List[Pair[LoadedNode, List[String]]].new()
+    module.append_with_path(result.ref)
+    return result
+}
+
+let run() Result[Int] = {
+    let unit = resolve_unit() or return
+    let pairs = unit.collect_all_with_path()
+    println(pairs.count())
+    let mut path_total = 0
+    for pair in pairs then {
+        path_total += pair.second.count()(Int)
+    }
+    println(path_total)
+    return Result[Int].Ok(0)
+}
+
+let main() Int = {
+    return run() or else 1
+}

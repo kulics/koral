@@ -1014,7 +1014,9 @@ final class MIRFunctionCodeEmitter {
   }
 
   private func emitCall(_ call: MIRCall) -> MIRValueEmission {
-    let argumentEmissions = call.arguments.map { emitValue($0) }
+    let argumentEmissions = zip(call.arguments, call.argumentOwnerships).map { value, ownership in
+      emitDirectCallArgument(value, ownership: ownership)
+    }
     let argumentList = argumentEmissions.map(\.expression)
 
     let expression: String
@@ -1030,11 +1032,14 @@ final class MIRFunctionCodeEmitter {
       expression = emitClosureCall(closureExpr: calleeExpr, parameters: parameters, returnType: returns, arguments: argumentList)
     }
 
-    for argument in call.arguments {
-      consumeMovedSource(argument)
+    for (argument, ownership) in zip(call.arguments, call.argumentOwnerships) {
+      if ownership == .move || ownership == .take {
+        consumeMovedSource(argument)
+      }
     }
-    for emission in argumentEmissions {
-      emitCleanups(residualCleanups(for: emission, consumedExpression: true))
+    for (emission, ownership) in zip(argumentEmissions, call.argumentOwnerships) {
+      let consumedExpression = ownership == .copy || ownership == .move || ownership == .take
+      emitCleanups(residualCleanups(for: emission, consumedExpression: consumedExpression))
     }
 
     if call.type == .void || call.type == .never {
@@ -1043,11 +1048,51 @@ final class MIRFunctionCodeEmitter {
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: call.type))
   }
 
+  private func emitDirectCallArgument(_ value: MIRValue, ownership: MIROwnershipUse) -> MIRValueEmission {
+    let type = resolver.type(of: value) ?? .void
+    switch ownership {
+    case .copy:
+      let emission = emitValue(value)
+      guard codeGen.needsDrop(type) else {
+        return emission
+      }
+      if case .placeRead(_, .copy) = value {
+        return emission
+      }
+      let temp = codeGen.emitTempCopyOrMove(type: type, source: emission.expression, isLvalue: true)
+      emitCleanups(emission.cleanups)
+      return MIRValueEmission(expression: temp, cleanups: cleanupForTemporaryResult(expression: temp, type: type))
+    case .borrow:
+      return emitValue(value, sourceMode: true)
+    case .move, .take:
+      return emitValue(value, sourceMode: true)
+    }
+  }
+
   private func emitAggregate(_ aggregate: MIRAggregate) -> MIRValueEmission {
     let fieldEmissions = aggregate.fields.map { emitValue($0) }
-    let args = fieldEmissions.map(\.expression).joined(separator: ", ")
-    let expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(aggregate.type), initExpr: "{\(args)}")
-    for (value, emission) in zip(aggregate.fields, fieldEmissions) {
+    guard case .structure(let defId) = aggregate.type,
+          let members = codeGen.context.getStructMembers(defId),
+          members.count == aggregate.fields.count else {
+      let args = fieldEmissions.map(\.expression).joined(separator: ", ")
+      let expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(aggregate.type), initExpr: "{\(args)}")
+      for (value, emission) in zip(aggregate.fields, fieldEmissions) {
+        consumeMovedSource(value)
+        emitCleanups(residualCleanups(for: emission, consumedExpression: true))
+      }
+      return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: aggregate.type))
+    }
+
+    let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(aggregate.type))
+    for ((value, emission), member) in zip(zip(aggregate.fields, fieldEmissions), members) {
+      let fieldName = sanitizeCIdentifier(member.name)
+      codeGen.addIndent()
+      codeGen.emitCopyOrMove(
+        type: member.type,
+        source: emission.expression,
+        dest: "\(expression).\(fieldName)",
+        isLvalue: shouldCopyBorrowedAggregateField(value)
+      )
       consumeMovedSource(value)
       emitCleanups(residualCleanups(for: emission, consumedExpression: true))
     }
@@ -1079,7 +1124,12 @@ final class MIRFunctionCodeEmitter {
       let emission = fieldEmissions[emissionIndex]
       let fieldName = sanitizeCIdentifier(parameter.name)
       codeGen.addIndent()
-      codeGen.appendToBuffer("\(memberBase).\(fieldName) = \(emission.expression);\n")
+      codeGen.emitCopyOrMove(
+        type: parameter.type,
+        source: emission.expression,
+        dest: "\(memberBase).\(fieldName)",
+        isLvalue: shouldCopyBorrowedAggregateField(construction.arguments[emissionIndex])
+      )
       consumeMovedSource(construction.arguments[emissionIndex])
       emitCleanups(residualCleanups(for: emission, consumedExpression: true))
       emissionIndex += 1
@@ -1784,6 +1834,15 @@ final class MIRFunctionCodeEmitter {
       return false
     default:
       return true
+    }
+  }
+
+  private func shouldCopyBorrowedAggregateField(_ value: MIRValue) -> Bool {
+    switch value {
+    case .placeRead(_, .borrow):
+      return true
+    default:
+      return false
     }
   }
 

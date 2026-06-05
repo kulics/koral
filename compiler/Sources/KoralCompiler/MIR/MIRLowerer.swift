@@ -1347,6 +1347,7 @@ private final class MIRFunctionBuilder {
           MIRCall(
             callee: .function(equalsMethod),
             arguments: [subjectArgument, .operand(.constant(.string(value, matchedType)))],
+            argumentOwnerships: [.copy, .move],
             type: .bool
           )
         ),
@@ -2462,7 +2463,15 @@ private final class MIRFunctionBuilder {
         guard !currentBlockIsTerminated else { return nil }
       }
       guard !currentBlockIsTerminated else { return nil }
-      return finishCall(callee: .function(callableMethod), arguments: argumentValues, type: type)
+      var argumentOwnerships: [MIROwnershipUse] = [ownershipUse(for: base)]
+      argumentOwnerships.reserveCapacity(arguments.count + 1)
+      argumentOwnerships.append(contentsOf: arguments.map(ownershipUse(for:)))
+      return finishCall(
+        callee: .function(callableMethod),
+        arguments: argumentValues,
+        argumentOwnerships: argumentOwnerships,
+        type: type
+      )
     }
 
     if context.containsGenericParameter(callee.type)
@@ -2474,7 +2483,12 @@ private final class MIRFunctionBuilder {
     guard !currentBlockIsTerminated else { return nil }
     let argumentValues = lowerCallArgumentValues(callee: calleeOperand, arguments: arguments)
     guard !currentBlockIsTerminated else { return nil }
-    return finishCall(callee: calleeOperand, arguments: argumentValues, type: type)
+    return finishCall(
+      callee: calleeOperand,
+      arguments: argumentValues,
+      argumentOwnerships: arguments.map(ownershipUse(for:)),
+      type: type
+    )
   }
 
   private func lowerCallArgumentValues(callee: MIROperand, arguments: [TypedExpressionNode]) -> [MIRValue] {
@@ -2580,9 +2594,15 @@ private final class MIRFunctionBuilder {
   private func finishCall(
     callee: MIROperand,
     arguments: [MIRValue],
+    argumentOwnerships: [MIROwnershipUse],
     type: Type
   ) -> MIRExprResult? {
-    let value = MIRValue.call(MIRCall(callee: callee, arguments: arguments, type: type))
+    let value = MIRValue.call(MIRCall(
+      callee: callee,
+      arguments: arguments,
+      argumentOwnerships: argumentOwnerships,
+      type: type
+    ))
     if type == .never {
       append(.evaluate(value))
       terminate(.unreachable)

@@ -186,7 +186,7 @@ final class MIRPrinter {
       return "unary[\(renderUnaryOperator(operation.operatorKind))] \(renderOperand(operation.operand)): \(context.getDebugName(operation.type))"
     case .call(let call):
       let arguments = call.arguments.map(renderValue).joined(separator: ", ")
-      return "call \(renderOperand(call.callee))(\(arguments)): \(context.getDebugName(call.type))"
+      return "call[args=\(renderOwnerships(call.argumentOwnerships))] \(renderOperand(call.callee))(\(arguments)): \(context.getDebugName(call.type))"
     case .aggregate(let aggregate):
       return "aggregate \(context.getDebugName(aggregate.type))"
     case .enumCase(let construction):

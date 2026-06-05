@@ -251,6 +251,7 @@ struct MIRCompoundAssignment {
 struct MIRCall {
   let callee: MIROperand
   let arguments: [MIRValue]
+  let argumentOwnerships: [MIROwnershipUse]
   let type: Type
 }
 

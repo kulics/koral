@@ -203,6 +203,9 @@ final class MIRVerifier {
     case .call(let call):
       try verifyOperand(call.callee, in: function, localIDs: localIDs)
       try verifyConcrete(call.type, in: function, description: "call result has unresolved generic type")
+      if call.argumentOwnerships.count != call.arguments.count {
+        try fail(function, "call argument ownership count does not match argument count")
+      }
       for argument in call.arguments {
         try verifyValue(argument, in: function, localIDs: localIDs)
       }
