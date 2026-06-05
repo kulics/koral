@@ -1067,24 +1067,27 @@ private final class MIRFunctionBuilder {
       return nil
     }
 
-    let subjectValue: MIRValue
-    if let operand = result.operand {
-      subjectValue = .operand(operand)
-    } else if let place = result.place {
-      let ownership: MIROwnershipUse = result.category == .lvalue ? .copy : .move
-      subjectValue = .placeRead(place, ownership: ownership)
-    } else {
-      return nil
+    // If the subject is already a place (variable/parameter), use it directly.
+    // This avoids copying into a temporary, which would cause double-drop:
+    // the temporary is dropped at scope_exit AND the original is dropped later.
+    if let place = result.place {
+      return (place, nil)
     }
 
-    let subjectScope = makeScopeID()
-    append(.scopeEnter(subjectScope))
-    scopeStack.append(subjectScope)
+    // For complex expressions (rvalues), evaluate once and store in a temporary.
+    // The temporary is dropped at when/if scope_exit.
+    if let operand = result.operand {
+      let subjectScope = makeScopeID()
+      append(.scopeEnter(subjectScope))
+      scopeStack.append(subjectScope)
 
-    let subjectLocal = makeTemporary(type: subject.type, nameHint: nameHint)
-    append(.declare(subjectLocal.id))
-    append(.assign(.local(subjectLocal.id), subjectValue))
-    return (.local(subjectLocal.id), subjectScope)
+      let subjectLocal = makeTemporary(type: subject.type, nameHint: nameHint)
+      append(.declare(subjectLocal.id))
+      append(.assign(.local(subjectLocal.id), .operand(operand)))
+      return (.local(subjectLocal.id), subjectScope)
+    }
+
+    return nil
   }
 
   private func assignBranchResult(_ result: MIRExprResult, to local: MIRLocalID) {
