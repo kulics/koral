@@ -604,11 +604,20 @@ given TypeChecker {
         }
 
         if typed_left is .Some(typed_left_ref) and typed_right is .Some(typed_right_ref) and not self.same_expr_type(typed_left_ref.expr_type, typed_right_ref.expr_type) then {
-            let adapted_right = self.adapt_expr_to_expected_type_at(typed_right_ref.val, .Some(typed_left_ref.expr_type), .None())
-            typed_right = .Some(box(adapted_right))
-            if typed_right is .Some(adapted_right_ref) and not self.same_expr_type(typed_left_ref.expr_type, adapted_right_ref.expr_type) then {
-                let adapted_left = self.adapt_expr_to_expected_type_at(typed_left_ref.val, .Some(adapted_right_ref.expr_type), .None())
+            // Prefer coercing literals to the concrete type (like Swift's coerceLiteral)
+            let left_is_literal = when typed_left_ref.expr_kind in {
+                .IntegerLiteral(_) then true,
+                .FloatLiteral(_) then true,
+                _ then false,
+            }
+            if left_is_literal then {
+                // Coerce left literal to right's type
+                let adapted_left = self.adapt_expr_to_expected_type_at(typed_left_ref.val, .Some(typed_right_ref.expr_type), .None())
                 typed_left = .Some(box(adapted_left))
+            } else {
+                // Coerce right literal to left's type
+                let adapted_right = self.adapt_expr_to_expected_type_at(typed_right_ref.val, .Some(typed_left_ref.expr_type), .None())
+                typed_right = .Some(box(adapted_right))
             }
         }
 
