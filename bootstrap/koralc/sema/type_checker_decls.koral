@@ -46,13 +46,8 @@ given TypeChecker {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
                 let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
-                let sym = when self.lookup_current_file_symbol(name) in {
-                    .Some(s) then box(s),
-                    .None() then {
-                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
-                        yield box(Symbol(def_id, resolved, SymbolKind.Variable(if mutable then VariableKind.MutableValue() else VariableKind.Value())))
-                    },
-                }
+                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
+                let sym = box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable))
                 yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
@@ -84,13 +79,12 @@ given TypeChecker {
                     let stable_params = typed_params
                     let stable_ret = resolved_ret
                     let stable_body = box(typed_body)
-                    let fn_sym = when self.lookup_current_file_symbol(name) in {
-                        .Some(sym) then box(sym),
-                        .None() then {
-                            let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
-                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
-                        },
+                    let mut param_refs = List[ref Type].new()
+                    for param in stable_params then {
+                        param_refs.push(box(param.param_type))
                     }
+                    let fn_type = make_function_type(param_refs, stable_ret)
+                    let fn_sym = box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false))
                     yield TypedDecl.FunctionDecl(
                         access,
                         name,
@@ -158,13 +152,12 @@ given TypeChecker {
                 let resolved_ret = self.resolve_type(return_type)
                 let typed_params = self.check_params(params)
                 self.storage.current_scope = prev
-                yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
-                    .Some(s) then box(s),
-                    .None() then {
-                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
-                        yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
-                    },
-                })
+                let mut param_refs = List[ref Type].new()
+                for param in typed_params then {
+                    param_refs.push(box(param.param_type))
+                }
+                let fn_type = make_function_type(param_refs, resolved_ret)
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -189,13 +182,12 @@ given TypeChecker {
                         )
                     }
                 }
-                yield TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span, when self.lookup_current_file_symbol(name) in {
-                    .Some(s) then box(s),
-                    .None() then {
-                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Function())
-                        yield box(Symbol(def_id, Type.Unknown(), SymbolKind.Function()))
-                    },
-                })
+                let mut param_refs = List[ref Type].new()
+                for param in typed_params then {
+                    param_refs.push(box(param.param_type))
+                }
+                let fn_type = make_function_type(param_refs, resolved_ret)
+                yield TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
@@ -208,13 +200,8 @@ given TypeChecker {
                         )
                     )
                 }
-                yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved, span, when self.lookup_current_file_symbol(name) in {
-                    .Some(s) then box(s),
-                    .None() then {
-                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
-                        yield box(Symbol(def_id, resolved, SymbolKind.Variable(VariableKind.Value())))
-                    },
-                })
+                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
+                yield TypedDecl.ForeignLetDecl(access, name, mutable, resolved, span, box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable)))
             },
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let typed_fields = if type_params.is_empty() then {
@@ -227,19 +214,14 @@ given TypeChecker {
                     yield self.check_fields_in_scope(fields, type_scope)
                 }
                 yield if type_params.is_empty() then {
-                    let type_sym = when self.lookup_current_file_type_symbol(name) in {
-                        .Some(t) then when t in {
-                            .StructureType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
-                            _ then {
-                                let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()))
-                                yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
-                            },
-                        },
-                        .None() then {
-                            let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()))
-                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
-                        },
-                    }
+                    let fallback_type = Type.StructureType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()), access, span))
+                    let type_sym = box(self.make_top_level_type_symbol(
+                        name,
+                        TypeDefKind.Structure(),
+                        self.lookup_current_file_type_symbol(name) or else fallback_type,
+                        access,
+                        span,
+                    ))
                     yield TypedDecl.TypeStructDecl(access, name, typed_fields, span, type_sym)
                 }
                 else TypedDecl.GenericTypeStructDecl(access, name, span)
@@ -255,19 +237,14 @@ given TypeChecker {
                     yield self.check_enum_cases_in_scope(cases, type_scope)
                 }
                 yield if type_params.is_empty() then {
-                    let type_sym = when self.lookup_current_file_type_symbol(name) in {
-                        .Some(t) then when t in {
-                            .EnumType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
-                            _ then {
-                                let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()))
-                                yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
-                            },
-                        },
-                        .None() then {
-                            let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()))
-                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
-                        },
-                    }
+                    let fallback_type = Type.EnumType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()), access, span))
+                    let type_sym = box(self.make_top_level_type_symbol(
+                        name,
+                        TypeDefKind.Enum(),
+                        self.lookup_current_file_type_symbol(name) or else fallback_type,
+                        access,
+                        span,
+                    ))
                     yield TypedDecl.TypeEnumDecl(access, name, typed_cases, span, type_sym)
                 }
                 else TypedDecl.GenericTypeEnumDecl(access, name, span)
@@ -300,20 +277,17 @@ given TypeChecker {
                     },
                     .None() then Option[List[TypedField]].None(),
                 }
-                yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, when self.lookup_current_file_type_symbol(name) in {
-                    .Some(t) then when t in {
-                        .StructureType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
-                        .OpaqueType(def_id) then box(Symbol(def_id, t, SymbolKind.TypeSymbol())),
-                        _ then {
-                            let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Opaque()))
-                            yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
-                        },
-                    },
-                    .None() then {
-                        let def_id = self.allocate_unindexed_def_id(name, DefKind.TypeDef(TypeDefKind.Opaque()))
-                        yield box(Symbol(def_id, Type.Unknown(), SymbolKind.TypeSymbol()))
-                    },
-                })
+                let type_kind = when typed_fields in {
+                    .Some(_) then TypeDefKind.Structure(),
+                    .None() then TypeDefKind.Opaque(),
+                }
+                let fallback_type = when type_kind in {
+                    .Structure() then Type.StructureType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(type_kind), access, span)),
+                    .Opaque() then Type.OpaqueType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(type_kind), access, span)),
+                    _ then Type.OpaqueType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(type_kind), access, span)),
+                }
+                let symbol_type = self.lookup_current_file_type_symbol(name) or else fallback_type
+                yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, box(self.make_top_level_type_symbol(name, type_kind, symbol_type, access, span)))
             },
             .ModuleUsingDecl(path_segments, items, span) then {
                 yield TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)

@@ -226,15 +226,26 @@ given TypeChecker {
         return Option[Dict[String, Type]].Some(bindings)
     }
 
-    private resolve_generic_function_call_return_type(self, callee ref Expr, typed_callee ref TypedExpr, typed_args List[ref TypedExpr], expected Option[Type], scope Scope) Option[Type] = {
+    private resolve_generic_function_call_return_type(
+        self,
+        callee ref Expr,
+        typed_callee ref TypedExpr,
+        typed_args List[ref TypedExpr],
+        expected Option[Type],
+        scope Scope,
+        inferred_bindings Dict[String, Type],
+    ) Option[Type] = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return Option[Type].None()
         }
         if template.type_parameters.is_empty() then {
             return Option[Type].None()
         }
-        let mut bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
-            return Option[Type].None()
+        let mut bindings = inferred_bindings
+        if bindings.is_empty() then {
+            bindings = self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) or else {
+                return Option[Type].None()
+            }
         }
 
         let mut generic_scope = Scope.new_child(self.storage.global_scope)
@@ -254,19 +265,27 @@ given TypeChecker {
         return Option[Type].Some(self.apply_type_bindings(generic_return_type, bindings))
     }
 
-    private validate_generic_function_call_constraints(self, callee ref Expr, typed_callee ref TypedExpr, typed_args List[ref TypedExpr], scope Scope) Void = {
+    private validate_generic_function_call_constraints(
+        self,
+        callee ref Expr,
+        typed_callee ref TypedExpr,
+        typed_args List[ref TypedExpr],
+        scope Scope,
+        inferred_bindings Dict[String, Type],
+    ) Void = {
         when self.generic_function_template_for_callee(typed_callee) in {
             .Some(template) then {
                 if template.type_parameters.is_empty() then {
                 } else {
-                    when self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) in {
-                        .Some(bindings) then {
+                    let bindings = if inferred_bindings.is_empty() then self.infer_generic_function_bindings(callee, typed_callee, typed_args, scope) else Option[Dict[String, Type]].Some(inferred_bindings)
+                    when bindings in {
+                        .Some(resolved_bindings) then {
                             for tp in template.type_parameters then {
-                                if bindings.get(tp.name) is .Some(bound_type) then {
+                                if resolved_bindings.get(tp.name) is .Some(bound_type) then {
                                     for constraint in tp.constraints then {
                                         let trait_name = self.type_node_name(constraint)
                                         if not (trait_name == "Any") then {
-                                            let trait_args = self.trait_type_args_with_bindings(constraint, bindings)
+                                            let trait_args = self.trait_type_args_with_bindings(constraint, resolved_bindings)
                                             when self.storage.trait_registry.get(trait_name) in {
                                                 .Some(info) then {
                                                     if self.make_visibility_checker() is .Some(checker) then {

@@ -379,6 +379,66 @@ given TypeChecker {
         return context.allocate_unindexed(name, kind)
     }
 
+    // Reuse the pass1 DefId for top-level declarations, matching Swift's
+    // makeGlobalSymbol/getOrAllocateTypeDefId flow instead of allocating fallback ids.
+    protected get_or_allocate_top_level_def_id(
+        self mut ref,
+        name String,
+        kind DefKind,
+        access AccessModifier,
+        span SourceSpan,
+    ) DefId = {
+        let mut context = self.context()
+        return when access in {
+            .Private() then when context.lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path)) in {
+                .Some(existing) then existing,
+                .None() then context.allocate_full_in_package(name, kind, self.storage.module_path, self.storage.file_path, self.storage.package_id, access, span),
+            },
+            _ then when context.lookup_def_id(self.storage.module_path, name, Option[String].None()) in {
+                .Some(existing) then existing,
+                .None() then context.allocate_full_in_package(name, kind, self.storage.module_path, self.storage.file_path, self.storage.package_id, access, span),
+            },
+        }
+    }
+
+    protected make_top_level_symbol(
+        self mut ref,
+        name String,
+        symbol_type Type,
+        kind SymbolKind,
+        access AccessModifier,
+        span SourceSpan,
+        is_mutable Bool,
+    ) Symbol = {
+        let def_kind = when kind in {
+            .Function() then DefKind.Function(),
+            .Variable(_) then DefKind.Variable(),
+            .TypeSymbol() then panic("make_top_level_symbol: use make_top_level_type_symbol for type symbols"),
+            .Module() then DefKind.Module(),
+        }
+        let def_id = self.get_or_allocate_top_level_def_id(name, def_kind, access, span)
+        let symbol = Symbol(def_id, symbol_type, kind)
+        let mut context = self.context()
+        context.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, MethodKind.Normal(), is_mutable))
+        self.storage.global_scope.define(context, symbol)
+        return symbol
+    }
+
+    protected make_top_level_type_symbol(
+        self mut ref,
+        name String,
+        type_kind TypeDefKind,
+        symbol_type Type,
+        access AccessModifier,
+        span SourceSpan,
+    ) Symbol = {
+        let def_id = self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(type_kind), access, span)
+        let symbol = Symbol(def_id, symbol_type, SymbolKind.TypeSymbol())
+        let mut context = self.context()
+        context.set_symbol_info(def_id, SymbolInfo(symbol_type, SymbolKind.TypeSymbol(), MethodKind.Normal(), false))
+        return symbol
+    }
+
     protected fresh_type_variable(self, name Option[String], span SourceSpan) TypeVariable = {
         return self.storage.constraint_solver.fresh_type_variable(name, span)
     }
@@ -1152,24 +1212,20 @@ given TypeChecker {
                     }
                     yield self.resolve_type_with_bindings(return_type, bindings)
                 }
-                if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    let mut stable_param_types = List[Type].new()
-                    for param_type in param_types then {
-                        stable_param_types.push(param_type)
-                    }
-                    let stable_ret = resolved_ret
-                    let mut context = self.context()
-                    let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
-                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
-                    let mut pt_refs = List[ref Type].new()
-                    for pt in stable_param_types then {
-                        pt_refs.push(box(pt))
-                    }
-                    let fn_type = make_function_type(pt_refs, stable_ret)
-                    let updated = Symbol(sym.def_id, fn_type, sym.kind)
-                    context.set_symbol_info(sym.def_id, SymbolInfo(fn_type, sym.kind, MethodKind.Normal(), false))
-                    self.storage.global_scope.define(self.context(), updated)
+                let mut stable_param_types = List[Type].new()
+                for param_type in param_types then {
+                    stable_param_types.push(param_type)
                 }
+                let stable_ret = resolved_ret
+                let mut context = self.context()
+                let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
+                let mut pt_refs = List[ref Type].new()
+                for pt in stable_param_types then {
+                    pt_refs.push(box(pt))
+                }
+                let fn_type = make_function_type(pt_refs, stable_ret)
+                let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
+                context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 let mut param_types = List[Type].new()
@@ -1185,17 +1241,16 @@ given TypeChecker {
                     }
                     yield self.resolve_type_with_bindings(return_type, bindings)
                 }
-                if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    let mut stable_param_types = List[Type].new()
-                    for param_type in param_types then {
-                        stable_param_types.push(param_type)
-                    }
-                    let stable_ret = resolved_ret
-                    let mut context = self.context()
-                    let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
-                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
-                    context.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
+                let mut stable_param_types = List[Type].new()
+                for param_type in param_types then {
+                    stable_param_types.push(param_type)
                 }
+                let stable_ret = resolved_ret
+                let mut context = self.context()
+                let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
+                let fn_type = Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret))
+                let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
+                context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -1203,22 +1258,15 @@ given TypeChecker {
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
                 }
-                // Try file-scoped lookup first, then global scope
-                let sym = when self.lookup_current_file_symbol(name) in {
-                    .Some(s) then s,
-                    .None() then when self.storage.global_scope.lookup(name) in {
-                        .Some(gs) then gs,
-                        .None() then Symbol(self.allocate_unindexed_def_id(name, DefKind.Function()), Type.Unknown(), SymbolKind.Function()),
-                    },
-                }
                 let mut stable_param_types = List[Type].new()
                 for param_type in param_types then {
                     stable_param_types.push(param_type)
                 }
                 let stable_ret = resolved_ret
                 let mut context = self.context()
+                let fn_type = Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret))
+                let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
                 context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
-                context.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 if fields is .Some(raw_fields) and self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
@@ -1420,27 +1468,13 @@ given TypeChecker {
             .GivenNotTraitDecl(_, _, _, _) then {},
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
-                if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    let updated = Symbol(sym.def_id, resolved, sym.kind)
-                    self.storage.global_scope.define(self.context(), updated)
-                    let mut context = self.context()
-                    context.set_symbol_info(
-                        sym.def_id,
-                        SymbolInfo(resolved, sym.kind, MethodKind.Normal(), mutable)
-                    )
-                }
+                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
+                let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable)
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
-                if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    let updated = Symbol(sym.def_id, resolved, sym.kind)
-                    self.storage.global_scope.define(self.context(), updated)
-                    let mut context = self.context()
-                    context.set_symbol_info(
-                        sym.def_id,
-                        SymbolInfo(resolved, sym.kind, MethodKind.Normal(), mutable)
-                    )
-                }
+                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
+                let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 // 在 signature 收集阶段注册完整 Trait（包含方法）,
