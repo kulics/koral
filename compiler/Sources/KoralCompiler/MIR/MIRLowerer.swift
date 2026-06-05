@@ -2876,6 +2876,15 @@ private final class MIRFunctionBuilder {
     return .global(symbol.defId)
   }
 
+  private func isReferenceType(_ type: Type) -> Bool {
+    switch type {
+    case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
+
   private func referenceKind(for type: Type) -> MIRReferenceKind {
     switch type {
     case .mutableReference:
