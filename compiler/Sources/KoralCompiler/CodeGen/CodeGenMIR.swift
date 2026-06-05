@@ -482,6 +482,24 @@ final class MIRFunctionCodeEmitter {
     let destinationType = resolver.type(of: place) ?? function.returnType
     let localID = localTargetID(for: place)
 
+    // When MIR assigns a void constant to a struct/enum result (dead branch of when/if),
+    // emit memset instead of invalid `struct_var = 0`.
+    if isVoidConstant(value) && codeGen.needsDrop(destinationType) {
+      if let localID {
+        if let flag = initFlagByLocalID[localID] {
+          emitGuardedDrop(flag: flag, type: destinationType, expression: access.path)
+        }
+      }
+      codeGen.addIndent()
+      codeGen.appendToBuffer("memset(&(\(access.path)), 0, sizeof(\(access.path)));\n")
+      consumeMovedSource(value)
+      emitCleanups(access.cleanups)
+      if let localID, initFlagByLocalID[localID] != nil {
+        setInitFlag(localID, to: true)
+      }
+      return
+    }
+
     if let localID {
       if let flag = initFlagByLocalID[localID], localByID[localID]?.type == destinationType {
         emitGuardedDrop(flag: flag, type: destinationType, expression: access.path)
@@ -511,6 +529,13 @@ final class MIRFunctionCodeEmitter {
     consumeMovedSource(value)
     emitCleanups(access.cleanups)
     emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
+  }
+
+  private func isVoidConstant(_ value: MIRValue) -> Bool {
+    if case .operand(.constant(.void)) = value {
+      return true
+    }
+    return false
   }
 
   private func emitCompoundAssign(_ assignment: MIRCompoundAssignment) {
