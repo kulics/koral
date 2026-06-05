@@ -1228,29 +1228,27 @@ given TypeChecker {
                 context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
-                let mut param_types = List[Type].new()
-                let resolved_ret = if type_params.is_empty() then {
+                if not type_params.is_empty() then {
+                    // Generic intrinsic: only register template, defer type resolution to instantiation (Swift alignment)
+                    self.register_generic_function_template(name, type_params, params, return_type, Option[ref TypedExpr].None(), Option[Type].None())
+                } else {
+                    // Non-generic intrinsic: resolve types eagerly
+                    let mut param_types = List[Type].new()
                     for p in params then {
                         param_types.push(self.resolve_type(p.type_name))
                     }
-                    yield self.resolve_type(return_type)
-                } else {
-                    let bindings = self.generic_type_param_bindings(type_params)
-                    for p in params then {
-                        param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
+                    let resolved_ret = self.resolve_type(return_type)
+                    let mut stable_param_types = List[Type].new()
+                    for param_type in param_types then {
+                        stable_param_types.push(param_type)
                     }
-                    yield self.resolve_type_with_bindings(return_type, bindings)
+                    let stable_ret = resolved_ret
+                    let mut context = self.context()
+                    let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
+                    let fn_type = Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret))
+                    let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
+                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
                 }
-                let mut stable_param_types = List[Type].new()
-                for param_type in param_types then {
-                    stable_param_types.push(param_type)
-                }
-                let stable_ret = resolved_ret
-                let mut context = self.context()
-                let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
-                let fn_type = Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret))
-                let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
-                context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(typed_params_for_specs))
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -1435,7 +1433,11 @@ given TypeChecker {
                         then self.resolve_type(target_type)
                         else self.resolve_type_with_bindings(target_type, bindings)
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
-                    self.collect_given_signatures(members, resolved_target, type_params, Option[String].None())
+                    // For non-generic intrinsic given, resolve member signatures eagerly.
+                    // For generic intrinsic given, defer to instantiation (Swift alignment).
+                    if type_params.is_empty() then {
+                        self.collect_given_signatures(members, resolved_target, type_params, Option[String].None())
+                    }
                     for member in members then {
                         let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
                             .TraitObject(_, _) then true,
