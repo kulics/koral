@@ -1203,16 +1203,22 @@ given TypeChecker {
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
                 }
-                if self.lookup_current_file_symbol(name) is .Some(sym) then {
-                    let mut stable_param_types = List[Type].new()
-                    for param_type in param_types then {
-                        stable_param_types.push(param_type)
-                    }
-                    let stable_ret = resolved_ret
-                    let mut context = self.context()
-                    context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
-                    context.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
+                // Try file-scoped lookup first, then global scope
+                let sym = when self.lookup_current_file_symbol(name) in {
+                    .Some(s) then s,
+                    .None() then when self.storage.global_scope.lookup(name) in {
+                        .Some(gs) then gs,
+                        .None() then Symbol(self.allocate_unindexed_def_id(name, DefKind.Function()), Type.Unknown(), SymbolKind.Function()),
+                    },
                 }
+                let mut stable_param_types = List[Type].new()
+                for param_type in param_types then {
+                    stable_param_types.push(param_type)
+                }
+                let stable_ret = resolved_ret
+                let mut context = self.context()
+                context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
+                context.set_symbol_info(sym.def_id, SymbolInfo(Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret)), sym.kind, MethodKind.Normal(), false))
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 if fields is .Some(raw_fields) and self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
