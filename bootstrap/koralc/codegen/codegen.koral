@@ -167,13 +167,7 @@ given CodeGen {
     }
 
     c_identifier_opt(self, def_id DefId) Option[String] = {
-        return when self.context.get_cname(def_id) in {
-            .Some(name) then Option[String].Some(name),
-            .None() then when self.context.get_name(def_id) in {
-                .Some(name) then Option[String].Some(self.sanitize_codegen_identifier(name)),
-                .None() then Option[String].None(),
-            },
-        }
+        return self.context.get_cname(def_id)
     }
 
     c_name_for_def_id(self, def_id DefId) String = {
@@ -741,6 +735,17 @@ given CodeGen {
                         yield self.compose_method_c_name(owner_c_name, raw_method_name)
                     },
                     .None() then {
+                        let raw_method_name = self.context.symbol_name(symbol)
+                        when self.receiver_owner_type_from_function_type(symbol.symbol_type) in {
+                            .Some(receiver_type) then when self.lookup_receiver_method(receiver_type, raw_method_name) in {
+                                .Some(resolved_symbol) then when self.c_identifier_opt(resolved_symbol.def_id) in {
+                                    .Some(mapped_name) then { return mapped_name },
+                                    .None() then {},
+                                },
+                                .None() then {},
+                            },
+                            .None() then {},
+                        }
                         let raw_name = self.qualified_name(symbol)
                         yield when raw_name.find_last("_") in {
                             .Some(split_index) then {
@@ -753,6 +758,26 @@ given CodeGen {
                     },
                 },
             },
+        }
+    }
+
+    private receiver_owner_type_from_function_type(self, function_type Type) Option[Type] = {
+        let _ = self
+        return when function_type in {
+            .FunctionType(params, _) then {
+                if params.is_empty() then {
+                    return Option[Type].None()
+                }
+                let receiver_type = params[0(UInt)].param_type
+                yield Option[Type].Some(when receiver_type in {
+                    .ReferenceType(inner) then inner.val,
+                    .MutableReferenceType(inner) then inner.val,
+                    .WeakReferenceType(inner) then inner.val,
+                    .MutableWeakReferenceType(inner) then inner.val,
+                    _ then receiver_type,
+                })
+            },
+            _ then Option[Type].None(),
         }
     }
 
@@ -903,44 +928,6 @@ given CodeGen {
             then sanitized_method
             else "\(type_c_name)_\(sanitized_method)"
         return self.normalize_codegen_lookup_name(raw_name)
-    }
-
-    /// 查找方法的 DefId（通过方法名和 target_type 的模块路径匹配）
-    find_method_def_id(self, method_name String, target_type Type) Option[DefId] = {
-        let target_module_path = self.target_type_module_path(target_type)
-
-        // 遍历所有 DefId，找到名称为 method_name 且 DefKind 为 Function 的 DefId
-        // 优先找与 target_type 在同一模块的 DefId
-        let mut best_def_id_opt = Option[DefId].None()
-        let mut id UInt = 1
-        while id < self.context.next_def_id() then {
-            let def_id = DefId(id)
-            let name_match = if self.context.get_name(def_id) is .Some(n) then n == method_name else false
-            if name_match then {
-                let is_function = if self.context.get_kind(def_id) is .Some(k) then k is .Function() else false
-                if is_function then {
-                    // 检查这个 DefId 是否已经有可用的 C 标识符
-                    let already_mapped = self.has_c_identifier(def_id)
-                    if not already_mapped then {
-                        let method_module_path = self.context.get_module_path(def_id) or else List[String].new()
-                        // 检查模块路径是否匹配
-                        let paths_match = self.module_paths_equal(method_module_path, target_module_path)
-                        if paths_match then {
-                            return Option[DefId].Some(def_id)
-                        }
-                        // 如果没有找到匹配的，保存第一个找到的作为回退
-                        when best_def_id_opt in {
-                            .None() then {
-                                best_def_id_opt = Option[DefId].Some(def_id)
-                            },
-                            .Some(_) then {},
-                        }
-                    }
-                }
-            }
-            id += 1
-        }
-        return best_def_id_opt
     }
 
     /// 比较两个模块路径是否相等

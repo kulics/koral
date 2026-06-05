@@ -2560,10 +2560,13 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                 },
                 _ then {},
             }
-            let resolved_type = when bound_callee.expr_type in {
-                .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, return_type_ref.val),
-                _ then resolve_parameterized_type(mono, expr.expr_type),
-            }
+            let declared_resolved_type = resolve_parameterized_type(mono, expr.expr_type)
+            let resolved_type = if not has_generic_parameter(declared_resolved_type)
+                then declared_resolved_type
+                else when bound_callee.expr_type in {
+                    .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, return_type_ref.val),
+                    _ then declared_resolved_type,
+                }
             return box(TypedExpr(box(TypedExprKind.Call(bound_callee, new_args)), resolved_type))
         },
         _ then {},
@@ -3131,9 +3134,18 @@ private let bind_generic_function_call_callee(
                     if symbol.def_id.id > 0 and not has_generic_parameter(resolve_parameterized_type(mono, symbol.symbol_type)) and not has_ambiguous_remap then {
                         return callee
                     }
-                    yield when mono.storage.generic_templates.lookup_function_by_def_id(symbol.def_id) in {
+                    let symbol_name = mono.storage.context.symbol_name(symbol)
+                    yield when mono.storage.generic_templates.lookup_function(symbol_name) in {
                         .Some(by_name) then by_name,
-                        .None() then { return callee },
+                        .None() then {
+                            yield when mono.storage.context.get_name(symbol.def_id) in {
+                                .Some(def_name) then when mono.storage.generic_templates.lookup_function(def_name) in {
+                                    .Some(named) then named,
+                                    .None() then { return callee },
+                                },
+                                .None() then { return callee },
+                            }
+                        },
                     }
                 },
             }
@@ -3153,7 +3165,7 @@ private let bind_generic_function_call_callee(
             let mut i UInt = 0
             while i < template.parameters.count() and i < args.count() then {
                 let expected_node = template.parameters[i].param_type
-                let actual = resolve_parameterized_type(mono, args[i].val.expr_type)
+                let actual = infer_generic_function_call_argument_type(mono, args[i].val)
                 collect_generic_bindings_from_type_node(mono, expected_node, actual, template.type_parameters, inferred.ref)
                 i += 1
             }
@@ -3181,7 +3193,7 @@ private let bind_generic_function_call_callee(
 
                 let mut actual_param_types = List[ref Type].new()
                 for arg in args then {
-                    actual_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
+                    actual_param_types.push(box(infer_generic_function_call_argument_type(mono, arg)))
                 }
 
                 let pattern_call_type = make_function_type(pattern_param_types, pattern_return_type)
@@ -3262,6 +3274,21 @@ private let bind_generic_function_call_callee(
     return callee
 }
 
+private let infer_generic_function_call_argument_type(
+    mono ref Monomorphizer,
+    arg ref TypedExpr,
+) Type = {
+    let resolved = resolve_parameterized_type(mono, arg.expr_type)
+    if not has_generic_parameter(resolved) then {
+        return resolved
+    }
+    return when arg.expr_kind in {
+        .IntegerLiteral(_) then Type.IntType(),
+        .FloatLiteral(_) then Type.Float64Type(),
+        _ then resolved,
+    }
+}
+
 // Collect GenericParameter -> concrete Type bindings by structurally matching a
 // template parameter TypeNode against an actual call-site type.
 private let collect_generic_bindings_from_type_node(
@@ -3274,6 +3301,14 @@ private let collect_generic_bindings_from_type_node(
     when expected_node in {
         .Identifier(name) then {
             if is_type_parameter_name(name, type_params) then {
+                when actual in {
+                    .GenericParameter(actual_name) then {
+                        if is_type_parameter_name(actual_name, type_params) then {
+                            return
+                        }
+                    },
+                    _ then {},
+                }
                 when bindings.get(name) in {
                     .Some(existing) then {
                         if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(actual) then {
@@ -3538,11 +3573,22 @@ private let unify_generic_type_pattern(
     let normalized_actual = canonical_type_for_generic_binding(mono, actual)
     return when pattern in {
         .GenericParameter(name) then {
-            yield if not is_generic_type_param_name(name, type_param_names) then layout_key(pattern) == layout_key(normalized_actual) else when inferred.get(name) in {
-                .Some(existing) then layout_key(existing) == layout_key(normalized_actual),
-                .None() then {
-                    inferred.insert(name, normalized_actual)
-                    yield true
+            yield if not is_generic_type_param_name(name, type_param_names) then layout_key(pattern) == layout_key(normalized_actual) else when normalized_actual in {
+                .GenericParameter(actual_name) then {
+                    yield if is_generic_type_param_name(actual_name, type_param_names) then true else when inferred.get(name) in {
+                        .Some(existing) then layout_key(existing) == layout_key(normalized_actual),
+                        .None() then {
+                            inferred.insert(name, normalized_actual)
+                            yield true
+                        },
+                    }
+                },
+                _ then when inferred.get(name) in {
+                    .Some(existing) then layout_key(existing) == layout_key(normalized_actual),
+                    .None() then {
+                        inferred.insert(name, normalized_actual)
+                        yield true
+                    },
                 },
             }
         },
