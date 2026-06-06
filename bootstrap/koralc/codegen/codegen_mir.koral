@@ -391,7 +391,11 @@ given MIRFunctionCodeEmitter {
             },
         }
         let assigned_expression = self.adapt_expression_for_target_type(emission.expression, source_type, target_type, false)
-        self.codegen.append_copy_or_move_assignment(target_type, assigned_expression, access.path, false)
+        // When assigning through a deref (pointer/ref), the old value is released
+        // but the new value must be retained. Use copy semantics (retain) for
+        // deref places; for other non-local places (field access), move is fine.
+        let store_is_lvalue = self.is_deref_place(place)
+        self.codegen.append_copy_or_move_assignment(target_type, assigned_expression, access.path, store_is_lvalue)
         self.emit_cleanups(access.cleanups)
         self.emit_cleanups(self.residual_cleanups(emission, true))
         when self.local_target_id(place) in {
@@ -410,6 +414,17 @@ given MIRFunctionCodeEmitter {
                 _ then false,
             },
             _ then false,
+        }
+    }
+
+    private is_deref_place(self ref, place MIRPlace) Bool = {
+        return when place in {
+            .Deref(_, _) then true,
+            .Field(base, _) then self.is_deref_place(base.val),
+            .EnumPayload(base, _, _, _, _) then self.is_deref_place(base.val),
+            .Local(_) then false,
+            .Global(_) then false,
+            .PointerElement(_, _) then false,
         }
     }
 

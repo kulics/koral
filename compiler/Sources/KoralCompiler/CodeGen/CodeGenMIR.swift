@@ -518,7 +518,11 @@ final class MIRFunctionCodeEmitter {
       let prepared = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(destinationType))
       codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: prepared, isLvalue: false)
       codeGen.appendDropStatement(for: destinationType, value: access.path, indent: codeGen.indent)
-      codeGen.emitCopyOrMove(type: destinationType, source: prepared, dest: access.path, isLvalue: false)
+      // When assigning through a deref (pointer/ref), the old value is released
+      // but the new value must be retained. Use copy semantics (retain) for
+      // deref places; for other non-local places (field access), move is fine.
+      let storeIsLvalue = isDerefPlace(place)
+      codeGen.emitCopyOrMove(type: destinationType, source: prepared, dest: access.path, isLvalue: storeIsLvalue)
       consumeMovedSource(value)
       emitCleanups(access.cleanups)
       emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
@@ -536,6 +540,18 @@ final class MIRFunctionCodeEmitter {
       return true
     }
     return false
+  }
+
+  private func isDerefPlace(_ place: MIRPlace) -> Bool {
+    switch place {
+    case .deref:
+      return true
+    case .field(let base, _),
+         .enumPayload(let base, _, _, _, _):
+      return isDerefPlace(base)
+    case .local, .global, .pointerElement:
+      return false
+    }
   }
 
   private func emitCompoundAssign(_ assignment: MIRCompoundAssignment) {
