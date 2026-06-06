@@ -1,0 +1,48 @@
+// Test: AtomicBool.load() inside when-after-async returns wrong value
+// EXPECT: timed_out before when: false
+// EXPECT: timed_out inside when: false
+// EXPECT: done
+
+using std::sync { .. }
+using std::async { .. }
+using std::time { .. }
+
+type CmdResult {
+    Ok(code Int),
+    Err(msg String),
+}
+
+let main() Void = {
+    let finished = AtomicBool.new(false)
+    let timed_out = AtomicBool.new(false)
+
+    let watchdog = run_task(() -> {
+        sleep(50ms)
+        // Don't set timed_out - just let the main thread finish
+        let _ = finished.load()
+    })
+
+    // Simulate a process that finishes quickly
+    sleep(10ms)
+    finished.store(true)
+    let _ = watchdog.wait()
+
+    let result = CmdResult.Ok(0)
+
+    // Capture before when
+    let was_timed_out = timed_out.load()
+    print("timed_out before when: ")
+    println(was_timed_out.to_string())
+
+    // Check inside when branch
+    when result in {
+        .Ok(code) then {
+            let inner_timed_out = timed_out.load()
+            print("timed_out inside when: ")
+            println(inner_timed_out.to_string())
+        },
+        .Err(msg) then {},
+    }
+
+    println("done")
+}

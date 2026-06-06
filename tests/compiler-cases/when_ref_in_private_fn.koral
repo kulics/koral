@@ -1,0 +1,66 @@
+// Test: AtomicBool.load() inside when-expression branch
+// EXPECT: flag before: false
+// EXPECT: flag inside when: false
+// EXPECT: result: 0
+// EXPECT: done
+
+using std::sync { .. }
+using std::async { .. }
+using std::time { .. }
+
+type CmdResult {
+    Finished(code Int),
+    TimedOut(),
+    InfraError(msg String),
+}
+
+private let execute_with_timeout(flag ref AtomicBool) CmdResult = {
+    // Simulate: process finished successfully, flag is false
+    let wait_ok = true
+    let exit_code = 0
+
+    // This exact pattern: when X in { .Ok(s) then if flag then ... else ... }
+    // is what the test runner uses and what triggers the bug
+    if wait_ok then {
+        if flag.load() then {
+            return .TimedOut()
+        } else {
+            return .Finished(exit_code)
+        }
+    } else {
+        if flag.load() then {
+            return .TimedOut()
+        } else {
+            return .InfraError("failed")
+        }
+    }
+}
+
+let main() Void = {
+    let flag = AtomicBool.new(false)
+
+    let finished = AtomicBool.new(false)
+    let watchdog = run_task(() -> {
+        while not finished.load() then {
+            sleep(5ms)
+        }
+    })
+    sleep(10ms)
+    finished.store(true)
+    let _ = watchdog.wait()
+
+    print("flag before: ")
+    println(flag.load().to_string())
+
+    let result = execute_with_timeout(flag)
+    let code = when result in {
+        .Finished(c) then c,
+        .TimedOut() then -1,
+        .InfraError(_) then -2,
+    }
+    print("flag inside when: ")
+    println(flag.load().to_string())
+    print("result: ")
+    println(code.to_string())
+    println("done")
+}
