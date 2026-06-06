@@ -1715,10 +1715,17 @@ private final class MIRFunctionBuilder {
     switch pattern {
     case .variable(let symbol):
       if symbol.type != .void {
-        if symbol.type == subjectType {
-          patternPlaceByDefId[symbol.defId.id] = subjectPlace
+        let sourcePlace = symbol.type == subjectType ? subjectPlace : matchedPlace
+        // When the subject is accessed through a deref (mutable reference),
+        // capture the value into a local to prevent stale reads if the
+        // source is later modified (e.g., self.current = c.succ() then Some(c)).
+        if isDerefPlace(sourcePlace) && needsCopyCapture(symbol.type) {
+          let local = makeTemporary(type: symbol.type, nameHint: sanitizeCIdentifier(context.getName(symbol.defId) ?? "bind"))
+          append(.declare(local.id))
+          append(.assign(.local(local.id), .placeRead(sourcePlace, ownership: .copy)))
+          patternPlaceByDefId[symbol.defId.id] = .local(local.id)
         } else {
-          patternPlaceByDefId[symbol.defId.id] = matchedPlace
+          patternPlaceByDefId[symbol.defId.id] = sourcePlace
         }
       }
     case .enumCase(let caseName, let tagIndex, let elements):
@@ -2882,6 +2889,31 @@ private final class MIRFunctionBuilder {
   private func isReferenceType(_ type: Type) -> Bool {
     switch type {
     case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isDerefPlace(_ place: MIRPlace) -> Bool {
+    switch place {
+    case .deref:
+      return true
+    case .field(let base, _),
+         .enumPayload(let base, _, _, _, _):
+      return isDerefPlace(base)
+    case .local, .global, .pointerElement:
+      return false
+    }
+  }
+
+  private func needsCopyCapture(_ type: Type) -> Bool {
+    // Only capture scalar/primitive types. Struct/enum types would cause
+    // double-drop if captured (the local copy and the original both get dropped).
+    switch type {
+    case .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64,
+         .float32, .float64, .bool:
       return true
     default:
       return false

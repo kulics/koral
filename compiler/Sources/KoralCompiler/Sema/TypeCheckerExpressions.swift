@@ -7584,7 +7584,7 @@ extension TypeChecker {
       let iterVarExpr = TypedExpressionNode.variable(identifier: iterSymbol)
       let iterRefExpr = TypedExpressionNode.referenceExpression(
         expression: iterVarExpr,
-        type: .reference(inner: iteratorType)
+        type: .mutableReference(inner: iteratorType)
       )
       let nextCall = try buildNextCall(iterRef: iterRefExpr, elementType: elementType)
       
@@ -7647,8 +7647,14 @@ extension TypeChecker {
     iterRef: TypedExpressionNode,
     elementType: Type
   ) throws -> TypedExpressionNode {
-    // Get the iterator type from the reference
-    guard case .reference(let iteratorType) = iterRef.type else {
+    // Get the iterator type from the reference (ref or mut ref)
+    let iteratorType: Type
+    switch iterRef.type {
+    case .reference(let inner):
+      iteratorType = inner
+    case .mutableReference(let inner):
+      iteratorType = inner
+    default:
       throw SemanticError(.generic("Expected reference to iterator"), span: currentSpan)
     }
     
