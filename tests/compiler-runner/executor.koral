@@ -275,6 +275,9 @@ private let build_captured_command(
         .set_stderr(IoRedirect.File(stderr_file)))
 }
 
+/// Execute a command with a timeout using synchronous polling.
+/// Uses try_wait() in a loop instead of async watchdog to avoid codegen bugs
+/// with when-expression branches and AtomicBool.load().
 private let execute_command_with_timeout(
     config RunnerConfig,
     program String,
@@ -295,41 +298,59 @@ private let execute_command_with_timeout(
         }
 
     let pid = proc.pid()
-    let finished = AtomicBool.new(false)
-    let timed_out = AtomicBool.new(false)
-    let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap()
+    let poll_sleep = Duration.new(seconds: 0, nanoseconds: 100_000_000).unwrap()
+    let mut did_timeout = false
+    let mut exit_code = -1
+    let mut exit_signal = 0
 
-    let watchdog = run_task(() -> {
-        while not finished.load() then {
-            if start.elapsed().as_seconds() >= timeout_secs then {
-                timed_out.store(true)
-                let _ = kill_process(pid)
-                break
+    // Synchronous polling loop
+    let mut finished = false
+    while not finished then {
+        let try_result = proc.try_wait()
+        let mut found_exit = false
+        when try_result in {
+            .Ok(opt) then {
+                when opt in {
+                    .Some(status) then {
+                        exit_code = infer_exit_code(status)
+                        exit_signal = when status.signal() in { .Some(s) then s, .None then 0 }
+                        found_exit = true
+                    },
+                    .None then {},
+                }
+            },
+            .Error(_) then {
+                found_exit = true
+            },
+        }
+        if found_exit then {
+            finished = true
+        } else if start.elapsed().as_seconds() >= timeout_secs then {
+            did_timeout = true
+            let _ = kill_process(pid)
+            let wait_after_kill = proc.wait()
+            when wait_after_kill in {
+                .Ok(status) then {
+                    exit_code = infer_exit_code(status)
+                    exit_signal = when status.signal() in { .Some(s) then s, .None then 0 }
+                },
+                .Error(_) then {},
             }
+            finished = true
+        } else {
             sleep(poll_sleep)
         }
-    })
-
-    let wait_result = proc.wait()
-    finished.store(true)
-    let _ = watchdog.wait()
+    }
 
     let stdout_content = read_text_file_or_empty(stdout_path)
     let stderr_content = read_text_file_or_empty(stderr_path)
 
-    let execution CommandExecution = when wait_result in {
-        .Ok(status) then if timed_out.load() then {
-            yield .TimedOut(infer_exit_code(status))
-        } else {
-            yield .Finished(CommandOutput(status, stdout_content, stderr_content))
-        },
-        .Error(message) then if timed_out.load() then {
-            yield .TimedOut(-1)
-        } else {
-            yield .InfrastructureError("failed to wait process: " + message.message())
-        },
+    let status = if exit_signal > 0 then ExitStatus.from_signal(exit_signal) else ExitStatus.from_code(exit_code)
+    if did_timeout then {
+        return .TimedOut(exit_code)
+    } else {
+        return .Finished(CommandOutput(status, stdout_content, stderr_content))
     }
-    return execution
 }
 
 private let execute_built_executable_with_retry(
@@ -353,15 +374,37 @@ private let execute_built_executable_with_retry(
         timeout_secs,
         "failed to spawn built executable",
     )
-    return when first in {
-        .InfrastructureError(_) then {
-            sleep(100ms)
-            let second_program = prepared_run_executable_path(info, output_dir, 1(UInt)) or else {
+    let is_infra_err = when first in {
+        .InfrastructureError(_) then true,
+        _ then false,
+    }
+    if is_infra_err then {
+        sleep(100ms)
+        let second_program = prepared_run_executable_path(info, output_dir, 1(UInt)) or else {
+            return .InfrastructureError("failed to prepare built executable: " + it.message())
+        }
+        let second = execute_command_with_timeout(
+            config,
+            second_program.to_string(),
+            run_command_args_for_case(),
+            capture_root,
+            "run",
+            start,
+            timeout_secs,
+            "failed to spawn built executable",
+        )
+        let is_infra_err_2 = when second in {
+            .InfrastructureError(_) then true,
+            _ then false,
+        }
+        if is_infra_err_2 then {
+            sleep(150ms)
+            let third_program = prepared_run_executable_path(info, output_dir, 2(UInt)) or else {
                 return .InfrastructureError("failed to prepare built executable: " + it.message())
             }
-            let second = execute_command_with_timeout(
+            return execute_command_with_timeout(
                 config,
-                second_program.to_string(),
+                third_program.to_string(),
                 run_command_args_for_case(),
                 capture_root,
                 "run",
@@ -369,27 +412,11 @@ private let execute_built_executable_with_retry(
                 timeout_secs,
                 "failed to spawn built executable",
             )
-            yield when second in {
-                .InfrastructureError(_) then {
-                    sleep(150ms)
-                    let third_program = prepared_run_executable_path(info, output_dir, 2(UInt)) or else {
-                        return .InfrastructureError("failed to prepare built executable: " + it.message())
-                    }
-                    yield execute_command_with_timeout(
-                        config,
-                        third_program.to_string(),
-                        run_command_args_for_case(),
-                        capture_root,
-                        "run",
-                        start,
-                        timeout_secs,
-                        "failed to spawn built executable",
-                    )
-                },
-                _ then second,
-            }
-        },
-        _ then first,
+        } else {
+            return second
+        }
+    } else {
+        return first
     }
 }
 
@@ -492,7 +519,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         println("  cmd: \(config.compiler_bin.to_string()) \(build_args.join_to_string(" "))")
     }
 
-    let mut build_output = when execute_command_with_timeout(
+    let build_exec = execute_command_with_timeout(
         config,
         config.compiler_bin.to_string(),
         build_args,
@@ -501,7 +528,8 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         start,
         timeout_secs,
         "failed to spawn compiler",
-    ) in {
+    )
+    let mut build_output = when build_exec in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
             let duration_ms = start.elapsed().as_milliseconds()
@@ -558,7 +586,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         }
         compile_command_name = "build"
 
-        build_output = when execute_command_with_timeout(
+        let retry_exec = execute_command_with_timeout(
             config,
             config.compiler_bin.to_string(),
             build_args,
@@ -567,7 +595,8 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             start,
             timeout_secs,
             "failed to spawn compiler",
-        ) in {
+        )
+        build_output = when retry_exec in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
                 let current_duration_ms = start.elapsed().as_milliseconds()
@@ -626,14 +655,15 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             return pass_result(info, duration_ms, build_exit_code)
         }
 
-        let run_output = when execute_built_executable_with_retry(
+        let run_exec_result = execute_built_executable_with_retry(
             config,
             info,
             active_output_dir,
             active_output_dir,
             start,
             timeout_secs,
-        ) in {
+        )
+        let run_output = when run_exec_result in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
                 let current_duration_ms = start.elapsed().as_milliseconds()
@@ -647,38 +677,15 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 )
             },
             .InfrastructureError(message) then {
-                yield when execute_built_executable_with_retry(
-                    config,
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
                     info,
-                    active_output_dir,
-                    active_output_dir,
-                    start,
-                    timeout_secs,
-                ) in {
-                    .Finished(output) then output,
-                    .TimedOut(exit_code) then {
-                        let current_duration_ms = start.elapsed().as_milliseconds()
-                        return failure_result(
-                            info,
-                            "timed_out",
-                            "timeout",
-                            "case timed out after \(config.timeout_secs) seconds",
-                            exit_code,
-                            current_duration_ms,
-                        )
-                    },
-                    .InfrastructureError(_) then {
-                        let current_duration_ms = start.elapsed().as_milliseconds()
-                        return failure_result(
-                            info,
-                            "failed",
-                            "infrastructure_error",
-                            message,
-                            build_exit_code,
-                            current_duration_ms,
-                        )
-                    },
-                }
+                    "failed",
+                    "infrastructure_error",
+                    message,
+                    build_exit_code,
+                    current_duration_ms,
+                )
             },
         }
 
@@ -741,14 +748,15 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         return pass_result(info, duration_ms, build_exit_code)
     }
 
-    let run_output = when execute_built_executable_with_retry(
+    let run_exec_result2 = execute_built_executable_with_retry(
         config,
         info,
         active_output_dir,
         active_output_dir,
         start,
         timeout_secs,
-    ) in {
+    )
+    let run_output = when run_exec_result2 in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
             let current_duration_ms = start.elapsed().as_milliseconds()
@@ -762,38 +770,15 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         },
         .InfrastructureError(message) then {
-            yield when execute_built_executable_with_retry(
-                config,
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
                 info,
-                active_output_dir,
-                active_output_dir,
-                start,
-                timeout_secs,
-            ) in {
-                .Finished(output) then output,
-                .TimedOut(exit_code) then {
-                    let current_duration_ms = start.elapsed().as_milliseconds()
-                    return failure_result(
-                        info,
-                        "timed_out",
-                        "timeout",
-                        "case timed out after \(config.timeout_secs) seconds",
-                        exit_code,
-                        current_duration_ms,
-                    )
-                },
-                .InfrastructureError(_) then {
-                    let current_duration_ms = start.elapsed().as_milliseconds()
-                    return failure_result(
-                        info,
-                        "failed",
-                        "infrastructure_error",
-                        message,
-                        build_exit_code,
-                        current_duration_ms,
-                    )
-                },
-            }
+                "failed",
+                "infrastructure_error",
+                message,
+                build_exit_code,
+                current_duration_ms,
+            )
         },
     }
 
