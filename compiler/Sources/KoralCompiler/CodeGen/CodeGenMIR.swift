@@ -813,25 +813,18 @@ final class MIRFunctionCodeEmitter {
     codeGen.addIndent()
     codeGen.appendToBuffer("\(envVar)->__refcount = 1;\n")
 
-    for (capture, captureSource) in zip(lambda.captures, lambda.captureSources) {
+    for capture in lambda.captures {
       let fieldName = captureFieldName(for: capture.symbol)
       guard let source = captureSourceOverrides[capture.symbol.defId.id] else {
         fatalError("Missing MIR lambda capture source for \(capture.symbol.defId.id)")
       }
       let dest = "\(envVar)->\(fieldName)"
-      switch capture.captureKind {
-      case .byValue:
-        // Move: plain assignment, then consume the source so it won't be dropped again.
-        codeGen.addIndent()
-        codeGen.appendToBuffer("\(dest) = \(source);\n")
-        if case .local(let localID) = captureSource {
-          setInitFlag(localID, to: false)
-        }
-      case .byReference:
-        // Copy + retain: the original stays alive.
-        codeGen.addIndent()
-        codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
-      }
+      // Both byValue and byReference use copy assignment.
+      // For ref-containing types (like AtomicBool), _copy retains internal refs.
+      // For plain structs, _copy is a simple struct copy.
+      // The original variable remains valid and will be dropped by its own scope.
+      codeGen.addIndent()
+      codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
     }
 
     return codeGen.nextTempWithInit(
