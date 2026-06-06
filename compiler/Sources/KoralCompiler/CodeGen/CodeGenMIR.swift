@@ -1074,8 +1074,23 @@ final class MIRFunctionCodeEmitter {
         consumeMovedSource(argument)
       }
     }
-    for (emission, ownership) in zip(argumentEmissions, call.argumentOwnerships) {
-      let consumedExpression = ownership == .copy || ownership == .move || ownership == .take
+    for ((emission, ownership), argument) in zip(zip(argumentEmissions, call.argumentOwnerships), call.arguments) {
+      // move/take: caller gives up ownership, no cleanup needed.
+      // copy from borrow: the copy must be released after the call (borrowed receiver case).
+      // copy from other: the function consumes the copy, no caller cleanup.
+      let consumedExpression: Bool
+      switch ownership {
+      case .move, .take:
+        consumedExpression = true
+      case .copy:
+        if case .placeRead(_, .borrow) = argument {
+          consumedExpression = false
+        } else {
+          consumedExpression = true
+        }
+      case .borrow:
+        consumedExpression = false
+      }
       emitCleanups(residualCleanups(for: emission, consumedExpression: consumedExpression))
     }
 

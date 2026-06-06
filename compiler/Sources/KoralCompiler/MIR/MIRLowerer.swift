@@ -1715,17 +1715,10 @@ private final class MIRFunctionBuilder {
     switch pattern {
     case .variable(let symbol):
       if symbol.type != .void {
-        let sourcePlace = symbol.type == subjectType ? subjectPlace : matchedPlace
-        // When the subject is accessed through a deref (mutable reference),
-        // capture the value into a local to prevent stale reads if the
-        // source is later modified (e.g., self.current = c.succ() then Some(c)).
-        if isDerefPlace(sourcePlace) && needsCopyCapture(symbol.type) {
-          let local = makeTemporary(type: symbol.type, nameHint: sanitizeCIdentifier(context.getName(symbol.defId) ?? "bind"))
-          append(.declare(local.id))
-          append(.assign(.local(local.id), .placeRead(sourcePlace, ownership: .copy)))
-          patternPlaceByDefId[symbol.defId.id] = .local(local.id)
+        if symbol.type == subjectType {
+          patternPlaceByDefId[symbol.defId.id] = subjectPlace
         } else {
-          patternPlaceByDefId[symbol.defId.id] = sourcePlace
+          patternPlaceByDefId[symbol.defId.id] = matchedPlace
         }
       }
     case .enumCase(let caseName, let tagIndex, let elements):
@@ -1744,7 +1737,20 @@ private final class MIRFunctionBuilder {
           fieldIndex: index,
           fieldType: parameter.type
         )
-        bindPatternVariables(pattern: element, subjectPlace: payloadPlace, subjectType: parameter.type)
+        // If the payload is accessed through a deref (e.g., when self.current in
+        // { .Some(c) then ... }), the binding would alias into the deref target.
+        // If the body later modifies the deref target (self.current = ...), the
+        // binding would read stale data. Materialize the payload into a local.
+        let resolvedPlace: MIRPlace
+        if goesThroughDeref(matchedPlace) && parameter.type != .void {
+          let local = makeTemporary(type: parameter.type, nameHint: sanitizeCIdentifier(parameter.name.isEmpty ? "payload" : parameter.name))
+          append(.declare(local.id))
+          append(.assign(.local(local.id), .placeRead(payloadPlace, ownership: .copy)))
+          resolvedPlace = .local(local.id)
+        } else {
+          resolvedPlace = payloadPlace
+        }
+        bindPatternVariables(pattern: element, subjectPlace: resolvedPlace, subjectType: parameter.type)
       }
     case .structPattern(_, let elements):
       guard case .structure(let defId) = matchedType,
@@ -2895,27 +2901,14 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func isDerefPlace(_ place: MIRPlace) -> Bool {
+  private func goesThroughDeref(_ place: MIRPlace) -> Bool {
     switch place {
     case .deref:
       return true
     case .field(let base, _),
          .enumPayload(let base, _, _, _, _):
-      return isDerefPlace(base)
+      return goesThroughDeref(base)
     case .local, .global, .pointerElement:
-      return false
-    }
-  }
-
-  private func needsCopyCapture(_ type: Type) -> Bool {
-    // Only capture scalar/primitive types. Struct/enum types would cause
-    // double-drop if captured (the local copy and the original both get dropped).
-    switch type {
-    case .int, .int8, .int16, .int32, .int64,
-         .uint, .uint8, .uint16, .uint32, .uint64,
-         .float32, .float64, .bool:
-      return true
-    default:
       return false
     }
   }
