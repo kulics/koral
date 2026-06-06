@@ -360,6 +360,24 @@ given MIRFunctionCodeEmitter {
         let emission = self.emit_value(value)
         let target_type = self.type_of_place(place)
         let source_type = self.type_of_value(value)
+        // When MIR assigns a void constant to a struct/enum result (dead branch of when/if),
+        // emit memset instead of invalid `struct_var = 0`.
+        if self.is_void_constant(value) and self.codegen.needs_drop(target_type) then {
+            when self.local_target_id(place) in {
+                .Some(local_id) then when self.init_flag_by_local_id.get(local_id.raw_value) in {
+                    .Some(flag) then self.emit_guarded_drop(flag, target_type, access.path),
+                    .None() then {},
+                },
+                .None() then {},
+            }
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string("memset(&(\(access.path)), 0, sizeof(\(access.path)));\n")
+            when self.local_target_id(place) in {
+                .Some(local_id) then self.set_init_flag(local_id, true),
+                .None() then {},
+            }
+            return
+        }
         when self.local_target_id(place) in {
             .Some(local_id) then when self.init_flag_by_local_id.get(local_id.raw_value) in {
                 .Some(flag) then self.emit_guarded_drop(flag, target_type, access.path),
@@ -379,6 +397,19 @@ given MIRFunctionCodeEmitter {
         when self.local_target_id(place) in {
             .Some(local_id) then self.set_init_flag(local_id, true),
             .None() then {},
+        }
+    }
+
+    private is_void_constant(self ref, value MIRValue) Bool = {
+        return when value in {
+            .Operand(operand) then when operand in {
+                .Constant(constant) then when constant in {
+                    .Void() then true,
+                    _ then false,
+                },
+                _ then false,
+            },
+            _ then false,
         }
     }
 
