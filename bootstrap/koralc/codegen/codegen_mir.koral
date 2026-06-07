@@ -1063,8 +1063,49 @@ given MIRFunctionCodeEmitter {
 
     private emit_trait_object_conversion(self mut ref, conversion MIRTraitObjectConversion) MIRValueEmission = {
         let inner = self.emit_value_source(conversion.inner.val)
+        let inner_type = self.type_of_value(conversion.inner.val)
         let should_retain = conversion.source_ownership is .Copy() or conversion.source_ownership is .Borrow()
-        let expression = self.codegen.generate_trait_object_conversion_from_ref_value(inner.expression, conversion.trait_name, conversion.concrete_type, should_retain)
+        // If inner is a scalar type (not a ref), we need to heap-allocate it first
+        let is_ref_type = when inner_type in {
+            .ReferenceType(_) or .MutableReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then true,
+            _ then false,
+        }
+        let mut ref_expression = inner.expression
+        if not is_ref_type then {
+            // Heap-allocate the scalar value and create a ref
+            let pointee_c_type = self.codegen.c_type_name(inner_type)
+            let ref_temp = self.codegen.next_temp_with_decl("struct __koral_Ref")
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".ptr = malloc(sizeof(")
+            self.codegen.buffer.push_string(pointee_c_type)
+            self.codegen.buffer.push_string("));\n")
+            let dest_expr = "*(" + pointee_c_type + "*)" + ref_temp + ".ptr"
+            self.codegen.append_copy_or_move_assignment(inner_type, inner.expression, dest_expr, false)
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control));\n")
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string("((struct __koral_Control*)")
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".control)->strong_count = 1;\n")
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string("((struct __koral_Control*)")
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".control)->weak_count = 1;\n")
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string("((struct __koral_Control*)")
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".control)->ptr = ")
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".ptr;\n")
+            self.codegen.add_indent()
+            self.codegen.buffer.push_string("((struct __koral_Control*)")
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".control)->dtor = NULL;\n")
+            ref_expression = ref_temp
+        }
+        let expression = self.codegen.generate_trait_object_conversion_from_ref_value(ref_expression, conversion.trait_name, conversion.concrete_type, should_retain)
         self.emit_residual_cleanups(inner, conversion.source_ownership is .Move())
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, conversion.result_type))
     }

@@ -687,6 +687,23 @@ final class MIRFunctionCodeEmitter {
     }
   }
 
+  private func isReferenceLikeType(_ type: Type) -> Bool {
+    switch type {
+    case .reference, .mutableReference, .weakReference, .mutableWeakReference, .traitObject:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func isParameterOperand(_ operand: MIROperand) -> Bool {
+    guard case .local(let local) = operand,
+          let info = localByID[local] else {
+      return false
+    }
+    return info.storage == .parameter
+  }
+
   private func emitReturn(_ operand: MIROperand?, preserving preservedLocal: MIRLocalID?) {
     if let operand {
       let emission = emitOperandValue(operand)
@@ -700,6 +717,15 @@ final class MIRFunctionCodeEmitter {
         let returnedLocal = preservedLocal ?? preservedReturnLocal(for: operand, emission: emission)
         setInitFlag(returnedLocal, to: false)
         emitReturnCleanup(excluding: returnedLocal)
+        // For borrowed reference parameters, retain before returning so the
+        // caller receives an owned reference. Without this, the caller and
+        // the callee parameter share the same control block, and both
+        // releases cause a double-free.
+        if isParameterOperand(operand),
+           isReferenceLikeType(returnType) {
+          codeGen.addIndent()
+          codeGen.appendToBuffer("__koral_retain((\(emission.expression)).control);\n")
+        }
         returnExpression = emission.expression
       }
       codeGen.addIndent()

@@ -1,0 +1,25 @@
+// EXPECT: ref assign shared control ok
+
+// Test that assigning one ref variable to another properly retains
+// the control block, preventing double-free on drop.
+//
+// Pattern: two ref variables share the same control block.
+// Both go out of scope and should each release independently.
+
+let pick_ref(flag Bool, a ref Int, b ref Int) ref Int = {
+    return if flag then a else b
+}
+
+let main() Int = {
+    let mut x = 42
+    let r = x.ref
+    // pick_ref returns one of the args (which are both r).
+    // The returned ref shares the same control block as r.
+    let chosen = pick_ref(true, r, r)
+    // Both r and chosen should be valid.
+    assert(chosen.val == 42, "chosen value")
+    // When this function exits, both r and chosen are dropped.
+    // The control block's strong_count should reach 0 correctly.
+    println("ref assign shared control ok")
+    return 0
+}

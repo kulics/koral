@@ -1,0 +1,35 @@
+// EXPECT: ref alias double free ok
+
+// Test that when a function returns its borrowed ref parameter directly,
+// the caller's ARC correctly retains the returned value.
+//
+// Pattern from bootstrap's bind_generic_function_call_callee:
+//   fn bind(callee ref TypedExpr, ...) ref TypedExpr = {
+//       ...
+//       return callee   // returns borrowed param directly
+//   }
+//   let bound = bind(new_callee, ...)
+//   // bound and new_callee share the same control block
+//   // When both are dropped → double-free if no retain at return
+
+let return_param(x ref Int) ref Int = {
+    // Returns the borrowed parameter directly.
+    // The compiler must retain x before returning so the caller owns it.
+    return x
+}
+
+let make_heap_ref() ref Int = {
+    let mut v = 42
+    return v.ref
+}
+
+let main() Int = {
+    let r = make_heap_ref()
+    // return_param returns r. The caller must get an owned copy.
+    let bound = return_param(r)
+    // r and bound share the same control block.
+    // If the compiler didn't retain at return, both drops cause double-free.
+    assert(bound.val == 42, "bound value")
+    println("ref alias double free ok")
+    return 0
+}
