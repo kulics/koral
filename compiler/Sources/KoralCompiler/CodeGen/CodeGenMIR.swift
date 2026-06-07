@@ -773,6 +773,12 @@ final class MIRFunctionCodeEmitter {
       return true
     }
 
+    // Don't copy parameters - they are borrowed values that need to be retained
+    // but not copied to a temporary
+    if info.storage == .parameter {
+      return false
+    }
+
     return nonOwningLocalIDs.contains(local)
   }
 
