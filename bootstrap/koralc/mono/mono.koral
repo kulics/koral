@@ -3,6 +3,7 @@
 // by the Monomorphizer after processing all instantiation requests.
 
 using std::container { .. }
+using std::os { env }
 using "instantiation_request"
 using "generic_template_registry"
 using "codegen_view"
@@ -166,6 +167,44 @@ private let concrete_receiver_method_lookup_key(context CompilerContext, receive
     return "\(receiver_key).\(method_name)"
 }
 
+private let push_concrete_receiver_lookup_alias(alias_list List[String], alias String) List[String] = {
+    if alias.is_empty() then { return alias_list }
+    if alias_list.contains(alias) then { return alias_list }
+    let mut updated = alias_list
+    updated.push(alias)
+    return updated
+}
+
+private let concrete_receiver_lookup_aliases(context CompilerContext, t Type) List[String] = {
+    let mut aliases = List[String].new()
+    aliases = push_concrete_receiver_lookup_alias(aliases, mono_concrete_layout_key_for_type(context, t))
+
+    when t in {
+        .StructureType(def_id) then {
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "")
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_template_name(def_id) or else "")
+        },
+        .EnumType(def_id) then {
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "")
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_template_name(def_id) or else "")
+        },
+        .OpaqueType(def_id) then {
+            aliases = push_concrete_receiver_lookup_alias(aliases, context.get_name(def_id) or else "")
+            when context.lookup_type(def_id) in {
+                .Some(mapped_type) then {
+                    for alias in concrete_receiver_lookup_aliases(context, mapped_type) then {
+                        aliases = push_concrete_receiver_lookup_alias(aliases, alias)
+                    }
+                },
+                .None() then {},
+            }
+        },
+        _ then {},
+    }
+
+    return aliases
+}
+
 private let concrete_trait_method_lookup_key(context CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
     let normalized = mono_receiver_lookup_type(context, receiver_type)
     let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
@@ -196,7 +235,7 @@ public type VtableRequest(
 
 // The output of the monomorphization phase.
 public type MonomorphizedProgram(
-    global_nodes List[TypedDecl],
+    mut global_nodes List[ref TypedDecl],
     traits Dict[String, TraitDeclInfo],
     vtable_requests List[VtableRequest],
     receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
@@ -227,7 +266,7 @@ public type TypeCheckerOutput(
 protected type MonomorphizerStorage(
     // ── Input ────────────────────────────────────────────────────────────────
     generic_templates GenericTemplateRegistry,
-    source_given_decls List[TypedDecl],
+    source_given_decls List[ref TypedDecl],
 
     // ── Caches ───────────────────────────────────────────────────────────────
     mut instantiated_types Dict[String, Type],
@@ -238,7 +277,8 @@ protected type MonomorphizerStorage(
     mut generated_layouts Set[String],
 
     // ── Output ───────────────────────────────────────────────────────────────
-    mut generated_nodes List[TypedDecl],
+    mut generated_nodes List[ref TypedDecl],
+    initial_generated_node_count UInt,
 
     // ── State ────────────────────────────────────────────────────────────────
     mut layout_to_template_info Dict[String, TemplateInfo],
@@ -276,7 +316,7 @@ public type Monomorphizer(protected mut storage mut ref MonomorphizerStorage)
 
 // Returns true when a TypedDecl is a non-generic global node that should be
 // preserved verbatim in the monomorphized output.
-private let is_non_generic_decl(decl TypedDecl) Bool = {
+private let is_non_generic_decl(decl ref TypedDecl) Bool = {
     return when decl in {
         .UsingDecl(_, _, _)              then false,
         .ForeignFunctionDecl(_, _, _, _, _, _) then true,
@@ -305,21 +345,21 @@ private let is_non_generic_decl(decl TypedDecl) Bool = {
     }
 }
 
-private let given_member_has_generic_parameter(member TypedGivenMember) Bool = {
+private let given_member_has_generic_parameter(member ref TypedGivenMember) Bool = {
     for param in member.params then {
         if has_generic_parameter(param.param_type) then { return true }
     }
     return has_generic_parameter(member.return_type)
 }
 
-private let given_members_have_generic_parameter(members List[TypedGivenMember]) Bool = {
-    for member in members then {
-        if given_member_has_generic_parameter(member) then { return true }
+private let given_members_have_generic_parameter(members List[ref TypedGivenMember]) Bool = {
+    for member_ref in members then {
+        if given_member_has_generic_parameter(member_ref) then { return true }
     }
     return false
 }
 
-private let is_source_given_decl(decl TypedDecl) Bool = {
+private let is_source_given_decl(decl ref TypedDecl) Bool = {
     return when decl in {
         .GivenDecl(_, _, _) then true,
         .GivenTraitDecl(_, _, _, _, _) then true,
@@ -329,7 +369,7 @@ private let is_source_given_decl(decl TypedDecl) Bool = {
 }
 
 /// Extract the DefId from a TypedDecl node's embedded identifier, if present.
-protected let decl_def_id(decl TypedDecl) Option[DefId] = {
+protected let decl_def_id(decl ref TypedDecl) Option[DefId] = {
     return when decl in {
         .FunctionDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
         .IntrinsicFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
@@ -344,19 +384,19 @@ protected let decl_def_id(decl TypedDecl) Option[DefId] = {
 }
 
 private type MonoProgramInputs(
-    initial_nodes List[TypedDecl],
-    source_given_decls List[TypedDecl],
+    initial_nodes List[ref TypedDecl],
+    source_given_decls List[ref TypedDecl],
 )
 
 private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
-    let mut initial_nodes = List[TypedDecl].new()
-    let mut source_given_decls = List[TypedDecl].new()
-    for decl in program.declarations then {
-        if is_source_given_decl(decl) then {
-            source_given_decls.push(decl)
+    let mut initial_nodes = List[ref TypedDecl].new()
+    let mut source_given_decls = List[ref TypedDecl].new()
+    for decl_ref in program.declarations then {
+        if is_source_given_decl(decl_ref) then {
+            source_given_decls.push(decl_ref)
         }
-        if is_non_generic_decl(decl) then {
-            initial_nodes.push(decl)
+        if is_non_generic_decl(decl_ref) then {
+            initial_nodes.push(decl_ref)
         }
     }
     return MonoProgramInputs(initial_nodes, source_given_decls)
@@ -427,6 +467,7 @@ given Monomorphizer {
             Set[String].new(),
             // output
             initial_nodes,
+            initial_nodes.count(),
             // state
             Dict[String, TemplateInfo].new(),
             Dict[String, Dict[String, ConcreteMethodEntry]].new(),
@@ -457,7 +498,7 @@ given Monomorphizer {
     // Register method DefIds from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
     // into extension_method_def_ids so that resolve_static_method_call_to_call
     // can find them, using a single stable concrete receiver key.
-    private seed_given_method_def_ids(self ref, node TypedDecl) Void = {
+    private seed_given_method_def_ids(self ref, node ref TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
                 self.register_given_members_def_ids(target_type, Option[String].None(), members)
@@ -472,7 +513,7 @@ given Monomorphizer {
         }
     }
 
-    private register_given_members_def_ids(self ref, target_type Type, trait_conformance Option[String], members List[TypedGivenMember]) Void = {
+    private register_given_members_def_ids(self ref, target_type Type, trait_conformance Option[String], members List[ref TypedGivenMember]) Void = {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
@@ -483,18 +524,20 @@ given Monomorphizer {
             },
             _ then target_type,
         }
-        let type_key = mono_concrete_layout_key_for_type(self.storage.context, resolved_type)
+        let type_keys = concrete_receiver_lookup_aliases(self.storage.context, resolved_type)
 
-        for m in members then {
-            if given_member_has_generic_parameter(m) then {
+        for m_ref in members then {
+            if given_member_has_generic_parameter(m_ref) then {
                 continue
             }
             self.register_concrete_callable_if_absent(
-                ConcreteCallableInfo(m.def_id, m.name, Option[Type].Some(target_type), trait_conformance)
+                ConcreteCallableInfo(m_ref.def_id, m_ref.name, Option[Type].Some(target_type), trait_conformance)
             )
-            let key1 = "\(type_key).\(m.name)"
-            if not self.storage.extension_method_def_ids.contains_key(key1) then {
-                self.storage.extension_method_def_ids.insert(key1, m.def_id)
+            for type_key in type_keys then {
+                let key1 = "\(type_key).\(m_ref.name)"
+                if not self.storage.extension_method_def_ids.contains_key(key1) then {
+                    self.storage.extension_method_def_ids.insert(key1, m_ref.def_id)
+                }
             }
         }
     }
@@ -514,8 +557,8 @@ given Monomorphizer {
         // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
         // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
         // so that resolve_static_method_call_to_call can find them.
-        for node in self.storage.generated_nodes then {
-            self.seed_given_method_def_ids(node)
+        for node_ref in self.storage.generated_nodes then {
+            self.seed_given_method_def_ids(node_ref)
         }
 
         let mut processed_iterations = 0
@@ -578,17 +621,24 @@ given Monomorphizer {
         //
         // Re-seed extension_method_def_ids from any newly-generated GivenDecl nodes
         // (the work-queue loop may have instantiated new extension methods).
-        for node in self.storage.generated_nodes then {
-            self.seed_given_method_def_ids(node)
+        for node_ref in self.storage.generated_nodes then {
+            self.seed_given_method_def_ids(node_ref)
         }
 
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
-        let mut resolved_nodes = List[TypedDecl].new()
+        let mut resolved_nodes = List[ref TypedDecl].new()
         let mut ri = 0(UInt)
         while ri < self.storage.generated_nodes.count() then {
             let node = self.storage.generated_nodes[ri]
-            resolved_nodes.push(resolve_types_in_global_node(self, node))
+            if ri < self.storage.initial_generated_node_count then {
+                resolved_nodes.push(box(resolve_types_in_global_node(self, node)))
+            } else {
+                // Monomorphization-created nodes are emitted with fully-resolved
+                // concrete types already; re-resolving them in bootstrap only
+                // re-enters ref-heavy bodies and reintroduces ownership bugs.
+                resolved_nodes.push(node)
+            }
             ri += 1(UInt)
         }
         self.storage.generated_nodes = resolved_nodes
@@ -673,22 +723,18 @@ given Monomorphizer {
 
     // Instantiate a generic function template with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.1).
-    instantiate_function_impl(self ref, template GenericFunctionTemplate, args List[ref Type]) InstantiatedFunction = {
+    instantiate_function_impl(self ref, template ref GenericFunctionTemplate, args List[ref Type]) InstantiatedFunction = {
         return instantiate_function(self, template, args)
     }
 
     // Instantiate a generic extension method with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.2).
-    instantiate_extension_method_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) Symbol = {
-        let sym = instantiate_extension_method(self, base_type, template_name, box(template), type_args, method_type_args)
+    instantiate_extension_method_impl(self ref, base_type Type, template_name String, template ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) Symbol = {
+        let sym = instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args)
         return sym
     }
 
-    instantiate_extension_method_def_id_impl(self ref, base_type Type, template_name String, template GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
-        return instantiate_extension_method_def_id(self, base_type, template_name, box(template), type_args, method_type_args)
-    }
-
-    instantiate_extension_method_def_id_ref_impl(self ref, base_type Type, template_name String, template mut ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
+    instantiate_extension_method_def_id_impl(self ref, base_type Type, template_name String, template ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
         return instantiate_extension_method_def_id(self, base_type, template_name, template, type_args, method_type_args)
     }
 
@@ -724,7 +770,7 @@ given Monomorphizer {
     // Key format: concrete receiver layout key + method name, preserving
     // ref/mutref/ptr wrappers so blanket impls do not overwrite value impls.
     // Merges: extension_method_def_ids + GivenDecl/GivenTraitDecl + concrete_callables.
-    build_static_method_lookup(self, nodes List[TypedDecl]) Dict[String, DefId] = {
+    build_static_method_lookup(self, nodes List[ref TypedDecl]) Dict[String, DefId] = {
         let materialized = self.build_materialized_def_ids()
         let mut lookup = Dict[String, DefId].new()
 
@@ -735,38 +781,38 @@ given Monomorphizer {
 
         // Step 2: Register methods from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl.
         // GivenDecl (inherent) overwrites; GivenTraitDecl only inserts if absent.
-        for node in nodes then {
-            when node in {
+        for node_ref in nodes then {
+            when node_ref in {
                 .GivenTraitDecl(target_type, _, _, members, _) then {
-                    for m in members then {
-                        if given_member_has_generic_parameter(m) then { continue }
-                        let method_name = when self.storage.receiver_method_dispatch.get(m.def_id) in {
+                    for m_ref in members then {
+                        if given_member_has_generic_parameter(m_ref) then { continue }
+                        let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
                             .Some(info) then info.method_name,
-                            .None() then m.name,
+                            .None() then m_ref.name,
                         }
                         let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, method_name)
                         if not lookup.contains_key(key) then {
-                            lookup.insert(key, m.def_id)
+                            lookup.insert(key, m_ref.def_id)
                         }
                     }
                 },
                 .GivenDecl(target_type, members, _) then {
-                    for m in members then {
-                        if given_member_has_generic_parameter(m) then { continue }
-                        let method_name = when self.storage.receiver_method_dispatch.get(m.def_id) in {
+                    for m_ref in members then {
+                        if given_member_has_generic_parameter(m_ref) then { continue }
+                        let method_name = when self.storage.receiver_method_dispatch.get(m_ref.def_id) in {
                             .Some(info) then info.method_name,
-                            .None() then m.name,
+                            .None() then m_ref.name,
                         }
                         let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, method_name)
-                        lookup.insert(key, m.def_id)
+                        lookup.insert(key, m_ref.def_id)
                     }
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
-                    for m in members then {
-                        if given_member_has_generic_parameter(m) then { continue }
-                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, m.name)
+                    for m_ref in members then {
+                        if given_member_has_generic_parameter(m_ref) then { continue }
+                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, m_ref.name)
                         if not lookup.contains_key(key) then {
-                            lookup.insert(key, m.def_id)
+                            lookup.insert(key, m_ref.def_id)
                         }
                     }
                 },
@@ -789,8 +835,8 @@ given Monomorphizer {
     private build_materialized_def_ids(self) Set[UInt] = {
         let mut materialized = Set[UInt].new()
 
-        for node in self.storage.generated_nodes then {
-            when node in {
+        for node_ref in self.storage.generated_nodes then {
+            when node_ref in {
                 .FunctionDecl(_, _, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
                 .IntrinsicFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
                 .ForeignFunctionDecl(_, _, _, _, _, id) then { materialized.insert(id.def_id.id) },
@@ -800,18 +846,18 @@ given Monomorphizer {
                 .TypeEnumDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
                 .ForeignTypeDecl(_, _, _, _, id) then { materialized.insert(id.def_id.id) },
                 .GivenDecl(_, members, _) then {
-                    for member in members then {
-                        materialized.insert(member.def_id.id)
+                    for member_ref in members then {
+                        materialized.insert(member_ref.def_id.id)
                     }
                 },
                 .GivenTraitDecl(_, _, _, members, _) then {
-                    for member in members then {
-                        materialized.insert(member.def_id.id)
+                    for member_ref in members then {
+                        materialized.insert(member_ref.def_id.id)
                     }
                 },
                 .IntrinsicGivenDecl(_, members, _) then {
-                    for member in members then {
-                        materialized.insert(member.def_id.id)
+                    for member_ref in members then {
+                        materialized.insert(member_ref.def_id.id)
                     }
                 },
                 _ then {},
@@ -991,8 +1037,8 @@ given Monomorphizer {
         self,
         foreign_def_ids mut ref Set[UInt]
     ) Void = {
-        for node in self.storage.generated_nodes then {
-            when node in {
+        for node_ref in self.storage.generated_nodes then {
+            when node_ref in {
                 .ForeignFunctionDecl(_, _, _, _, _, id) then {
                     foreign_def_ids.insert(id.def_id.id)
                 },
@@ -1014,8 +1060,8 @@ given Monomorphizer {
         c_identifier_by_def_id mut ref Dict[UInt, String]
     ) Void = {
         // First pass: register c identifiers for all nodes that carry an identifier.
-        for node in self.storage.generated_nodes then {
-            when node in {
+        for node_ref in self.storage.generated_nodes then {
+            when node_ref in {
                 .GivenDecl(_, _, _) then {},
                 .GivenTraitDecl(_, _, _, _, _) then {},
                 .FunctionDecl(_, name, _, _, _, _, fn_id) then {
@@ -1047,18 +1093,18 @@ given Monomorphizer {
         }
 
         // Second pass: register c identifiers for GivenDecl/GivenTraitDecl methods.
-        for node in self.storage.generated_nodes then {
-            when node in {
+        for node_ref in self.storage.generated_nodes then {
+            when node_ref in {
                 .GivenDecl(target_type, members, _) then {
                     let type_c_name = self.codegen_emitted_type_name(c_identifier_by_def_id.val, type_def_ids_by_name, target_type)
-                    for m in members then {
-                        c_identifier_by_def_id.insert(m.def_id.id, self.codegen_compose_method_c_name(type_c_name, m.name))
+                    for m_ref in members then {
+                        c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, m_ref.name))
                     }
                 },
                 .GivenTraitDecl(target_type, _, _, members, _) then {
                     let type_c_name = self.codegen_emitted_type_name(c_identifier_by_def_id.val, type_def_ids_by_name, target_type)
-                    for m in members then {
-                        c_identifier_by_def_id.insert(m.def_id.id, self.codegen_compose_method_c_name(type_c_name, m.name))
+                    for m_ref in members then {
+                        c_identifier_by_def_id.insert(m_ref.def_id.id, self.codegen_compose_method_c_name(type_c_name, m_ref.name))
                     }
                 },
                 _ then {},
@@ -1123,8 +1169,8 @@ public let print_monomorphized_program(program MonomorphizedProgram, context Com
     let vtable_count = program.vtable_requests.count()
     println("MonomorphizedProgram {")
     println("  global_nodes: \(node_count)")
-    for node in program.global_nodes then {
-        print_mono_node(node, context)
+    for node_ref in program.global_nodes then {
+        print_mono_node(node_ref.val, context)
     }
     println("  vtable_requests: \(vtable_count)")
     println("}")

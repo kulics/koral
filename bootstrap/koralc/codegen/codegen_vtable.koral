@@ -816,137 +816,6 @@ given CodeGen {
         return local_types
     }
 
-    private mir_place_type_for_vtable_scan(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
-        let _ = self
-        return when place in {
-            .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
-            .Field(_, field) then field.symbol_type,
-            .EnumPayload(_, _, _, _, field_type) then field_type,
-            .Deref(_, pointee) then pointee,
-            .PointerElement(_, element) then element,
-            .Global(_) then Type.Unknown(),
-        }
-    }
-
-    private mir_value_type_for_vtable_scan(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
-        return when value in {
-            .Operand(operand) then when operand in {
-                .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
-                .Function(symbol) then symbol.symbol_type,
-                .Constant(constant) then when constant in {
-                    .Integer(_, t) then t,
-                    .Float(_, t) then t,
-                    .StringLiteral(_, t) then t,
-                    .Boolean(_) then Type.BoolType(),
-                    .Void() then Type.VoidType(),
-                },
-            },
-            .PlaceRead(place, _) then self.mir_place_type_for_vtable_scan(place, local_types),
-            .Binary(operation) then operation.result_type,
-            .Unary(operation) then operation.result_type,
-            .Call(call) then call.result_type,
-            .Aggregate(aggregate) then aggregate.aggregate_type,
-            .EnumCase(construction) then construction.enum_type,
-            .EnumTag(_) then Type.IntType(),
-            .TraitObjectConversion(conversion) then conversion.result_type,
-            .TraitMethodCall(call) then call.result_type,
-            .Ref(place, kind, _) then {
-                let inner = self.mir_place_type_for_vtable_scan(place, local_types)
-                yield when kind in {
-                    .Shared() then Type.ReferenceType(box(inner)),
-                    .Mutable() then Type.MutableReferenceType(box(inner)),
-                    .Weak() then Type.WeakReferenceType(box(inner)),
-                    .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
-                }
-            },
-            .Pointer(place) then Type.PointerType(box(self.mir_place_type_for_vtable_scan(place, local_types))),
-            .Cast(_, target_type) then target_type,
-            .Intrinsic(_) then Type.Unknown(),
-            .Lambda(lambda) then lambda.lambda_type,
-        }
-    }
-
-    private append_implicit_trait_object_request(
-        self,
-        requests mut ref List[VtableCodegenRequest],
-        concrete_type Type,
-        trait_type Type,
-    ) Void = {
-        when self.trait_target_type_name(trait_type) in {
-            .Some(trait_name) then {
-                let trait_type_args = self.trait_target_type_args(trait_type)
-                requests.push(VtableCodegenRequest(
-                    concrete_type,
-                    trait_name,
-                    trait_type_args,
-                    self.get_ordered_trait_members_for_vtable(trait_name, concrete_type, trait_type_args),
-                ))
-            },
-            .None() then {},
-        }
-    }
-
-    private collect_implicit_enum_case_vtable_requests(
-        self,
-        construction MIREnumConstruction,
-        requests mut ref List[VtableCodegenRequest],
-        local_types Dict[UInt, Type],
-    ) Void = {
-        let mut case_params = List[EnumCaseParam].new()
-        when construction.enum_type in {
-            .EnumType(def_id) then {
-                when self.context.get_enum_cases(def_id) in {
-                    .Some(cases) then {
-                        for case_info in cases then {
-                            if case_info.name == construction.case_name or case_info.name.ends_with(".\(construction.case_name)") then {
-                                case_params = case_info.params
-                                break
-                            }
-                        }
-                    },
-                    .None() then {},
-                }
-            },
-            _ then {},
-        }
-
-        let mut idx UInt = 0
-        while idx < construction.arguments.count() and idx < case_params.count() then {
-            let target_type = case_params[idx].param_type
-            let source_type = self.mir_value_type_for_vtable_scan(construction.arguments[idx].val, local_types)
-            when self.trait_conversion_source_concrete_type(source_type) in {
-                .Some(concrete_type) then self.append_implicit_trait_object_request(requests, concrete_type, target_type),
-                .None() then {},
-            }
-            idx += 1
-        }
-    }
-
-    private collect_implicit_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
-        let mut requests = List[VtableCodegenRequest].new()
-        for function in self.program.functions then {
-            let local_types = self.mir_local_type_map(function)
-            for block in function.blocks then {
-                for statement in block.statements then {
-                    when statement in {
-                        .Assign(_, value) then when value in {
-                            .EnumCase(construction) then self.collect_implicit_enum_case_vtable_requests(construction, requests.ref, local_types),
-                            .TraitObjectConversion(conversion) then self.append_implicit_trait_object_request(requests.ref, conversion.concrete_type, conversion.result_type),
-                            _ then {},
-                        },
-                        .Evaluate(value) then when value in {
-                            .EnumCase(construction) then self.collect_implicit_enum_case_vtable_requests(construction, requests.ref, local_types),
-                            .TraitObjectConversion(conversion) then self.append_implicit_trait_object_request(requests.ref, conversion.concrete_type, conversion.result_type),
-                            _ then {},
-                        },
-                        _ then {},
-                    }
-                }
-            }
-        }
-        return requests
-    }
-
     private collect_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
         let mut requests = List[VtableCodegenRequest].new()
         for global in self.program.globals then {
@@ -961,9 +830,6 @@ given CodeGen {
                 },
                 _ then {},
             }
-        }
-        for request in self.collect_implicit_mir_vtable_codegen_requests() then {
-            requests.push(request)
         }
         return requests
     }
@@ -1042,7 +908,7 @@ given CodeGen {
 
         for req in sorted_requests then {
             let trait_name = req.trait_name
-            let concrete_type = self.trait_vtable_receiver_type(trait_name, self.normalize_vtable_receiver_type(req.concrete_type))
+            let concrete_type = req.concrete_type
 
             // 获取具体类型的 C 标识符
             let concrete_c_name_opt = self.concrete_type_c_name(concrete_type)
@@ -1109,7 +975,7 @@ given CodeGen {
     ///
     /// Requirements: 10.6
     public generate_trait_object_conversion_from_ref_value(self mut ref, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
-        let normalized_concrete_type = self.trait_vtable_receiver_type(trait_name, concrete_type)
+        let normalized_concrete_type = concrete_type
         let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
             .Some(name) then name,
             .None() then self.c_type_name(normalized_concrete_type),

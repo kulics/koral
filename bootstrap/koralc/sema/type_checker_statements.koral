@@ -151,8 +151,8 @@ given TypeChecker {
         let block_type = if self.typed_statement_can_fall_through(stmt)
             then Type.VoidType()
             else Type.NeverType()
-        let mut statements = List[TypedStatement].new()
-        statements.push(stmt)
+        let mut statements = List[ref TypedStatement].new()
+        statements.push(box(stmt))
         return make_typed_expr(TypedExprKind.Block(statements), block_type)
     }
 
@@ -249,7 +249,7 @@ given TypeChecker {
                     _ then typed_subj.expr_type,
                 }
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
-                let mut typed_arms = List[TypedWhenArm].new()
+                let mut typed_arms = List[ref TypedWhenArm].new()
                 let mut patterns = List[ref TypedPattern].new()
                 for arm in arms then {
                     let mut arm_scope = Scope.new_child(scope)
@@ -263,7 +263,7 @@ given TypeChecker {
                     }
                     let lowered_pattern_ref = box(self.lower_typed_pattern(arm_pattern_ref, typed_subj.expr_type, arm_scope))
                     patterns.push(lowered_pattern_ref)
-                    typed_arms.push(TypedWhenArm(lowered_pattern_ref, box(typed_body), typed_arm_type))
+                    typed_arms.push(box(TypedWhenArm(lowered_pattern_ref, box(typed_body), typed_arm_type)))
                 }
                 let ex_checker = ExhaustivenessChecker.new(
                     exhaustiveness_subject_type,
@@ -334,9 +334,9 @@ given TypeChecker {
         return box(Symbol(def_id, t, SymbolKind.Variable(variable_kind)))
     }
 
-    private push_assignment_temp_decl(self, prefix String, value TypedExpr, variable_kind VariableKind, statements mut ref List[TypedStatement]) ref Symbol = {
+    private push_assignment_temp_decl(self, prefix String, value TypedExpr, variable_kind VariableKind, statements mut ref List[ref TypedStatement]) ref Symbol = {
         let sym = self.make_assignment_temp_symbol(prefix, value.expr_type, variable_kind)
-        statements.push(TypedStatement.LetStmt(sym, box(value), unknown_span()))
+        statements.push(box(TypedStatement.LetStmt(sym, box(value), unknown_span())))
         return sym
     }
 
@@ -480,7 +480,7 @@ given TypeChecker {
         let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, "__index_set")
         let adapted_base = self.adapt_receiver_to_expected_self_type(typed_base, expected_self_type)
 
-        let mut block_statements = List[TypedStatement].new()
+        let mut block_statements = List[ref TypedStatement].new()
         let base_symbol = self.push_assignment_temp_decl("__sub_base", adapted_base, VariableKind.SubscriptBaseBorrowAlias(), block_statements.ref)
         let mut arg_symbols = List[ref Symbol].new()
         for typed_arg in typed_args then {
@@ -525,12 +525,12 @@ given TypeChecker {
         }
         call_args.push(box(value_var))
         let set_call = self.build_builtin_subscript_helper_call(base_var, call_args, "__index_set")
-        block_statements.push(TypedStatement.ExprStmt(box(set_call), unknown_span()))
+        block_statements.push(box(TypedStatement.ExprStmt(box(set_call), unknown_span())))
         return TypedStatement.ExprStmt(box(make_typed_expr(TypedExprKind.Block(block_statements), Type.VoidType())), unknown_span())
     }
 
     private check_block_in_scope(self, statements List[Statement], expected Option[Type], scope Scope) TypedExpr = {
-        let mut typed_stmts = List[TypedStatement].new()
+        let mut typed_stmts = List[ref TypedStatement].new()
         let mut block_type = Type.VoidType()
         let mut stmt_idx Int = 0
         let statements_count = statements.count()
@@ -543,7 +543,7 @@ given TypeChecker {
             }
             let diagnostic_count_before = self.storage.diagnostics.count()
             let ts = self.check_statement(stmt, expected, scope)
-            typed_stmts.push(ts)
+            typed_stmts.push(box(ts))
             when self.typed_statement_branch_result_type(ts) in {
                 .Some(result_type) then {
                     block_type = result_type

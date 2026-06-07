@@ -146,18 +146,18 @@ given TypeChecker {
         self mut ref,
         target_type Type,
         trait_name Option[String],
-        members List[TypedGivenMember],
+        members List[ref TypedGivenMember],
     ) Void = {
         let owner = Option[ReceiverMethodOwner].Some(ReceiverMethodOwner.ConcreteType(self.context().type_display_name(target_type)))
-        for member in members then {
-            let is_receiver_style = member.params.count() > 0(UInt) and member.params[0(UInt)].name == "self"
+        for member_ref in members then {
+            let is_receiver_style = member_ref.params.count() > 0(UInt) and member_ref.params[0(UInt)].name == "self"
             if is_receiver_style then {
                 self.storage.generic_templates.receiver_method_dispatch.insert(
-                    member.def_id,
-                    ReceiverMethodDispatchInfo(member.def_id, member.name, owner, trait_name),
+                    member_ref.def_id,
+                    ReceiverMethodDispatchInfo(member_ref.def_id, member_ref.name, owner, trait_name),
                 )
             } else {
-                self.storage.generic_templates.receiver_method_dispatch.remove(member.def_id)
+                self.storage.generic_templates.receiver_method_dispatch.remove(member_ref.def_id)
             }
         }
     }
@@ -277,7 +277,7 @@ given TypeChecker {
         let extension_key_count = self.storage.generic_templates.extension_methods.count()
         let mut extension_template_count = 0(UInt)
         for entry in self.storage.generic_templates.extension_methods then {
-            extension_template_count += entry.second.val.count()
+            extension_template_count += entry.second.count()
         }
         let method_type_key_count = self.storage.method_table.methods.count()
         let global_scope_entry_count = self.storage.global_scope.entry_count()
@@ -932,7 +932,7 @@ given TypeChecker {
 
     public check_program(self mut ref, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
-        let mut typed_decls = List[TypedDecl].new()
+        let mut typed_decls = List[ref TypedDecl].new()
         for decl in program.declarations then {
             when decl in {
                 .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
@@ -942,7 +942,7 @@ given TypeChecker {
                     let td = self.check_decl(decl, retain_checked_template_bodies)
                     let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
                     if retain_checked_template_bodies then when finalized_decl in {
-                        .Some(resolved) then typed_decls.push(resolved),
+                        .Some(resolved) then typed_decls.push(box(resolved)),
                         .None() then {},
                     }
                 },
@@ -1000,7 +1000,7 @@ given TypeChecker {
             println("[sema-phase] pass3: check decl begin")
         }
         // Pass 3: check bodies
-        let mut typed_decls = List[TypedDecl].new()
+        let mut typed_decls = List[ref TypedDecl].new()
         let total_nodes = nodes.count()
         let mut checked_decl_count = 0(UInt)
         let skip_decl_check = self.skip_decl_check_debug_enabled()
@@ -1037,7 +1037,7 @@ given TypeChecker {
                         let td = self.check_decl(pair.first.decl, retain_checked_template_bodies)
                         let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
                         if retain_checked_template_bodies then when finalized_decl in {
-                            .Some(resolved) then typed_decls.push(resolved),
+                            .Some(resolved) then typed_decls.push(box(resolved)),
                             .None() then {},
                         }
                     }

@@ -397,7 +397,14 @@ given TypeChecker {
                 return self.lower_enum_constructor_expr(enum_type, method_name, typed_args)
             },
             .None() then {
-                let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
+                let raw_declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
+                let declared_receiver_type = when raw_declared_receiver_type in {
+                    .Unknown() then when scoped_receiver_type_opt in {
+                        .Some(scoped_receiver_type) then scoped_receiver_type,
+                        .None() then raw_declared_receiver_type,
+                    },
+                    _ then raw_declared_receiver_type,
+                }
                 let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
                 let resolved_method_type_args = when static_sig_opt in {
                     .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, typed_args, method_type_args, expected),
@@ -1179,8 +1186,8 @@ given TypeChecker {
                     let mut inferred = Option[Type].None()
                     if name == "Pair" and typed_args.count() == 2 then {
                         let mut resolved_args = List[ref Type].new()
-                        resolved_args.push(box(typed_args[0(UInt)].val.expr_type))
-                        resolved_args.push(box(typed_args[1(UInt)].val.expr_type))
+                        resolved_args.push(box(typed_args[0(UInt)].expr_type))
+                        resolved_args.push(box(typed_args[1(UInt)].expr_type))
                         inferred = Option[Type].Some(Type.GenericStruct(name, resolved_args))
                     }
                     yield inferred

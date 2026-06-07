@@ -6,6 +6,7 @@
 // 参照 compiler/Sources/KoralCompiler/CodeGen/CodeGen.swift
 
 using "c_identifier_utils"
+using "codegen_buffer"
 using "codegen_indexes"
 using "codegen_expressions_literals"
 using "codegen_memory"
@@ -47,7 +48,7 @@ public type CodeGen(
     c_keywords Set[String],
 
     // 输出缓冲区
-    mut buffer mut ref String,
+    mut buffer mut ref CodegenBuffer,
 
     // 代码生成状态
     mut indent String,
@@ -65,6 +66,12 @@ public type CodeGen(
 
     // 已输出函数实现名（避免同名函数重复定义）
     mut emitted_function_names Set[String],
+
+    // 预热后的类型名缓存，降低 codegen 热路径中的字符串构造成本
+    mut c_type_name_cache Dict[String, String],
+
+    // 预热后的 callable 名缓存，降低 MIR emit 热路径中的方法名拼接成本
+    mut callable_c_name_cache Dict[UInt, String],
 )
 
 given CodeGen {
@@ -77,7 +84,7 @@ given CodeGen {
             context,
             make_c_keywords_set(),
             // buffer
-            box(String.new()),
+            box(CodegenBuffer.new()),
             // indent
             String.new(),
             // temp_var_counter
@@ -92,6 +99,10 @@ given CodeGen {
             Option[String].None(),
             // emitted_function_names
             Set[String].new(),
+            // c_type_name_cache
+            Dict[String, String].new(),
+            // callable_c_name_cache
+            Dict[UInt, String].new(),
         )
         return cg
     }
@@ -389,16 +400,14 @@ given CodeGen {
     }
 
     private concrete_callable_symbol(self, def_id DefId, requested_result_type Type) Option[Symbol] = {
-        return when self.c_identifier_opt(def_id) in {
-            .Some(_) then {
-                let result_type = when self.context.get_function_return_type(def_id) in {
-                    .Some(return_type) then self.requested_or_symbol_result_type(requested_result_type, return_type),
-                    .None() then requested_result_type,
-                }
-                yield Option[Symbol].Some(Symbol(def_id, result_type, SymbolKind.Function()))
-            },
-            .None() then Option[Symbol].None(),
+        if def_id.id == 0 then {
+            return Option[Symbol].None()
         }
+        let result_type = when self.context.get_function_return_type(def_id) in {
+            .Some(return_type) then self.requested_or_symbol_result_type(requested_result_type, return_type),
+            .None() then requested_result_type,
+        }
+        return Option[Symbol].Some(Symbol(def_id, result_type, SymbolKind.Function()))
     }
 
     bound_concrete_method_symbol(self, def_id DefId, receiver_type Type, requested_result_type Type) Option[Symbol] = {
@@ -714,7 +723,7 @@ given CodeGen {
         }
     }
 
-    callable_c_name(self, symbol ref Symbol) String = {
+    private compute_callable_c_name_uncached(self, symbol ref Symbol) String = {
         return when self.concrete_callable_info(symbol.def_id) in {
             .Some(info) then when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
@@ -758,6 +767,29 @@ given CodeGen {
                     },
                 },
             },
+        }
+    }
+
+    public precompute_callable_c_name_cache(self mut ref) Void = {
+        for global in self.program.globals then {
+            when global in {
+                .ForeignFunction(identifier, _, _) then self.callable_c_name_cache.insert(identifier.def_id.id, self.compute_callable_c_name_uncached(identifier)),
+                .GlobalVariable(_, initializer_function, _, _) then self.callable_c_name_cache.insert(initializer_function.def_id.id, self.compute_callable_c_name_uncached(initializer_function)),
+                .Function(identifier, _, _, _) then self.callable_c_name_cache.insert(identifier.def_id.id, self.compute_callable_c_name_uncached(identifier)),
+                .Given(_, _, _, methods) then {
+                    for method in methods then {
+                        self.callable_c_name_cache.insert(method.def_id.id, self.compute_callable_c_name_uncached(method))
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+
+    callable_c_name(self, symbol ref Symbol) String = {
+        return when self.callable_c_name_cache.get(symbol.def_id.id) in {
+            .Some(name) then name,
+            .None() then self.compute_callable_c_name_uncached(symbol),
         }
     }
 
@@ -1411,9 +1443,7 @@ given CodeGen {
         }
     }
 
-    /// 将 Koral Type 映射到 C 类型名称字符串
-    public c_type_name(self, t Type) String = {
-        // 原始类型委托给 TypeHandler 的 primitive_c_type_name
+    private compute_c_type_name_uncached(self, t Type) String = {
         let kind = type_handler_kind_from(t)
         when kind in {
             .Primitive() then { return primitive_c_type_name(t) },
@@ -1427,10 +1457,92 @@ given CodeGen {
             .Some(name) then { return name },
             .None() then {},
         }
-        // Unresolved generic types reaching codegen indicate a monomorphization bug.
-        // Match Swift's fatalError("Unresolved type during codegen") behavior.
         let display = self.context.type_display_name(t)
         panic("Unresolved type \(display) during codegen")
+    }
+
+    private cache_c_type_name(self mut ref, t Type) Void = {
+        if self.type_contains_generic(t) then { return }
+        if t is .Unknown() then { return }
+        let key = stable_type_key(t)
+        if self.c_type_name_cache.contains_key(key) then { return }
+        when t in {
+            .ReferenceType(inner) then self.cache_c_type_name(inner.val),
+            .MutableReferenceType(inner) then self.cache_c_type_name(inner.val),
+            .WeakReferenceType(inner) then self.cache_c_type_name(inner.val),
+            .MutableWeakReferenceType(inner) then self.cache_c_type_name(inner.val),
+            .PointerType(inner) then self.cache_c_type_name(inner.val),
+            .MutablePointerType(inner) then self.cache_c_type_name(inner.val),
+            .FunctionType(params, return_type) then {
+                for entry in params then { self.cache_c_type_name(entry.param_type) }
+                self.cache_c_type_name(return_type.val)
+            },
+            .GenericStruct(_, args) then for arg in args then { self.cache_c_type_name(arg.val) },
+            .GenericEnum(_, args) then for arg in args then { self.cache_c_type_name(arg.val) },
+            .TraitObject(_, args) then for arg in args then { self.cache_c_type_name(arg.val) },
+            _ then {},
+        }
+        self.c_type_name_cache.insert(key, self.compute_c_type_name_uncached(t))
+    }
+
+    public precompute_c_type_name_cache(self mut ref) Void = {
+        for global in self.program.globals then {
+            when global in {
+                .ForeignFunction(_, params, return_type) then {
+                    for param in params then { self.cache_c_type_name(param.param_type) }
+                    self.cache_c_type_name(return_type)
+                },
+                .ForeignGlobalVariable(_, _, decl_type) then self.cache_c_type_name(decl_type),
+                .GlobalVariable(_, _, _, decl_type) then self.cache_c_type_name(decl_type),
+                .ForeignStruct(_, fields) or .StructDeclaration(_, fields) then {
+                    for field in fields then { self.cache_c_type_name(field.field_type) }
+                },
+                .EnumDeclaration(_, cases) then {
+                    for case_info in cases then {
+                        for field in case_info.fields then { self.cache_c_type_name(field.field_type) }
+                    }
+                },
+                .Function(_, params, return_type, _) then {
+                    for param in params then { self.cache_c_type_name(param.param_type) }
+                    self.cache_c_type_name(return_type)
+                },
+                .Given(target_type, _, trait_type_args, _) then {
+                    self.cache_c_type_name(target_type)
+                    for trait_arg in trait_type_args then { self.cache_c_type_name(trait_arg) }
+                },
+                .TraitVTable(vtable) then {
+                    self.cache_c_type_name(vtable.concrete_type)
+                    for trait_arg in vtable.trait_type_args then { self.cache_c_type_name(trait_arg) }
+                    for method in vtable.methods then {
+                        when method.return_type in {
+                            .Some(return_type) then self.cache_c_type_name(return_type),
+                            .None() then {},
+                        }
+                        for param in method.parameters then {
+                            when param.param_type in {
+                                .Some(param_type) then self.cache_c_type_name(param_type),
+                                .None() then {},
+                            }
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        for function in self.program.functions then {
+            self.cache_c_type_name(function.return_type)
+            for param in function.params then { self.cache_c_type_name(param.param_type) }
+            for local in function.locals then { self.cache_c_type_name(local.local_type) }
+        }
+    }
+
+    /// 将 Koral Type 映射到 C 类型名称字符串
+    public c_type_name(self, t Type) String = {
+        return when self.c_type_name_cache.get(stable_type_key(t)) in {
+            .Some(name) then name,
+            .None() then self.compute_c_type_name_uncached(t),
+        }
     }
 
     private nominal_type_from_c_type_name(self, c_type String) Option[Type] = {
@@ -1545,6 +1657,18 @@ given CodeGen {
         return name
     }
 
+    public next_temp_with_call_0(self mut ref, c_type String, func_name String) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(func_name)
+        self.buffer.push_string("();\n")
+        return name
+    }
+
     public next_temp_with_call_2(self mut ref, c_type String, func_name String, first_arg String, second_arg String) String = {
         let name = self.next_temp()
         self.add_indent()
@@ -1558,6 +1682,43 @@ given CodeGen {
         self.buffer.push_string(", ")
         self.buffer.push_string(second_arg)
         self.buffer.push_string(");\n")
+        return name
+    }
+
+    public push_joined_strings(self ref, values List[String], separator String) Void = {
+        let mut first = true
+        for value in values then {
+            if not first then {
+                self.buffer.push_string(separator)
+            }
+            self.buffer.push_string(value)
+            first = false
+        }
+    }
+
+    public next_temp_with_call_args(self mut ref, c_type String, func_name String, arguments List[String]) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = ")
+        self.buffer.push_string(func_name)
+        self.buffer.push_rune('(')
+        self.push_joined_strings(arguments, ", ")
+        self.buffer.push_string(");\n")
+        return name
+    }
+
+    public next_temp_with_braced_values(self mut ref, c_type String, values List[String]) String = {
+        let name = self.next_temp()
+        self.add_indent()
+        self.buffer.push_string(c_type)
+        self.buffer.push_rune(' ')
+        self.buffer.push_string(name)
+        self.buffer.push_string(" = {")
+        self.push_joined_strings(values, ", ")
+        self.buffer.push_string("};\n")
         return name
     }
 

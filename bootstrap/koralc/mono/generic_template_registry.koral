@@ -140,8 +140,8 @@ public type GenericExtensionMethodTemplate(
 public type GenericTemplateRegistry(
     mut struct_templates Dict[String, GenericStructTemplate],
     mut enum_templates Dict[String, GenericEnumTemplate],
-    mut function_templates Dict[String, mut ref GenericFunctionTemplate],
-    mut extension_methods Dict[String, mut ref List[mut ref GenericExtensionMethodTemplate]],
+    mut function_templates Dict[String, ref GenericFunctionTemplate],
+    mut extension_methods Dict[String, List[ref GenericExtensionMethodTemplate]],
     mut intrinsic_extension_methods Dict[String, List[IntrinsicExtensionEntry]],
     mut traits Dict[String, TraitDeclInfo],
     mut concrete_extension_methods Dict[String, Dict[String, Symbol]],
@@ -153,22 +153,22 @@ public type GenericTemplateRegistry(
 )
 
 given GenericTemplateRegistry {
-    private select_extension_method_ref(
+    private select_extension_method(
         self,
-        templates List[mut ref GenericExtensionMethodTemplate],
+        templates List[ref GenericExtensionMethodTemplate],
         method_name String,
         method_type_arg_count Option[UInt],
         extension_type_arg_count Option[UInt],
-    ) Option[mut ref GenericExtensionMethodTemplate] = {
-        let mut first_match = Option[mut ref GenericExtensionMethodTemplate].None()
-        let mut first_checked_return = Option[mut ref GenericExtensionMethodTemplate].None()
-        for template in templates then {
-            if template.method.name <> method_name then {
+    ) Option[ref GenericExtensionMethodTemplate] = {
+        let mut first_match = Option[ref GenericExtensionMethodTemplate].None()
+        let mut first_checked_return = Option[ref GenericExtensionMethodTemplate].None()
+        for template_ref in templates then {
+            if template_ref.method.name <> method_name then {
                 continue
             }
             when method_type_arg_count in {
                 .Some(count) then {
-                    if template.method.type_params.count() <> count then {
+                    if template_ref.method.type_params.count() <> count then {
                         continue
                     }
                 },
@@ -176,27 +176,27 @@ given GenericTemplateRegistry {
             }
             when extension_type_arg_count in {
                 .Some(count) then {
-                    if template.type_params.count() <> count then {
+                    if template_ref.type_params.count() <> count then {
                         continue
                     }
                 },
                 .None() then {},
             }
-            if template.checked_body is .Some(_) then {
-                return Option[mut ref GenericExtensionMethodTemplate].Some(template)
+            if template_ref.checked_body is .Some(_) then {
+                return Option[ref GenericExtensionMethodTemplate].Some(template_ref)
             }
-            if template.checked_return_type is .Some(_) and first_checked_return is .None() then {
-                first_checked_return = Option[mut ref GenericExtensionMethodTemplate].Some(template)
+            if template_ref.checked_return_type is .Some(_) and first_checked_return is .None() then {
+                first_checked_return = Option[ref GenericExtensionMethodTemplate].Some(template_ref)
             }
             when first_match in {
                 .Some(_) then {},
                 .None() then {
-                    first_match = Option[mut ref GenericExtensionMethodTemplate].Some(template)
+                    first_match = Option[ref GenericExtensionMethodTemplate].Some(template_ref)
                 },
             }
         }
         return when first_checked_return in {
-            .Some(template) then Option[mut ref GenericExtensionMethodTemplate].Some(template),
+            .Some(template_ref) then Option[ref GenericExtensionMethodTemplate].Some(template_ref),
             .None() then first_match,
         }
     }
@@ -206,8 +206,8 @@ given GenericTemplateRegistry {
         return GenericTemplateRegistry(
             Dict[String, GenericStructTemplate].new(),
             Dict[String, GenericEnumTemplate].new(),
-            Dict[String, mut ref GenericFunctionTemplate].new(),
-            Dict[String, mut ref List[mut ref GenericExtensionMethodTemplate]].new(),
+            Dict[String, ref GenericFunctionTemplate].new(),
+            Dict[String, List[ref GenericExtensionMethodTemplate]].new(),
             Dict[String, List[IntrinsicExtensionEntry]].new(),
             Dict[String, TraitDeclInfo].new(),
             Dict[String, Dict[String, Symbol]].new(),
@@ -230,69 +230,54 @@ given GenericTemplateRegistry {
     }
 
     // Look up a generic function template by name.
-    public lookup_function(self, name String) Option[GenericFunctionTemplate] = {
-        return when self.function_templates.get(name) in {
-            .Some(template_ref) then Option[GenericFunctionTemplate].Some(template_ref.val),
-            .None() then Option[GenericFunctionTemplate].None(),
-        }
-    }
-
-    public lookup_function_ref(self, name String) Option[mut ref GenericFunctionTemplate] = {
+    public lookup_function(self, name String) Option[ref GenericFunctionTemplate] = {
         return self.function_templates.get(name)
     }
 
     // Look up a generic function template by DefId.
     // This avoids collisions when different modules contain helper functions
     // with the same textual name.
-    public lookup_function_by_def_id(self, def_id DefId) Option[GenericFunctionTemplate] = {
+    public lookup_function_by_def_id(self, def_id DefId) Option[ref GenericFunctionTemplate] = {
         for entry in self.function_templates then {
-            let template = entry.second.val
-            if template.def_id.id == def_id.id then {
-                return Option[GenericFunctionTemplate].Some(template)
+            let template_ref = entry.second
+            if template_ref.def_id.id == def_id.id then {
+                return Option[ref GenericFunctionTemplate].Some(template_ref)
             }
         }
-        return Option[GenericFunctionTemplate].None()
+        return Option[ref GenericFunctionTemplate].None()
     }
 
     // Look up all generic extension method templates for a given type/template name.
-    public lookup_extension_methods(self, name String) Option[List[mut ref GenericExtensionMethodTemplate]] = {
+    public lookup_extension_methods(self, name String) Option[List[ref GenericExtensionMethodTemplate]] = {
         when self.extension_methods.get(name) in {
             .Some(templates) then {
-                let mut copied = List[mut ref GenericExtensionMethodTemplate].with_capacity(templates.val.count())
-                for template in templates.val then {
-                    copied.push(template)
-                }
-                return Option[List[mut ref GenericExtensionMethodTemplate]].Some(copied)
+                return Option[List[ref GenericExtensionMethodTemplate]].Some(templates)
             },
             .None() then {},
         }
         if name.contains("[") then {
-            return Option[List[mut ref GenericExtensionMethodTemplate]].None()
+            return Option[List[ref GenericExtensionMethodTemplate]].None()
         }
         for entry in self.extension_methods then {
             let key = entry.first
             if key.ends_with("]\(name)") then {
-                let mut copied = List[mut ref GenericExtensionMethodTemplate].with_capacity(entry.second.val.count())
-                for template in entry.second.val then {
-                    copied.push(template)
-                }
-                return Option[List[mut ref GenericExtensionMethodTemplate]].Some(copied)
+                return Option[List[ref GenericExtensionMethodTemplate]].Some(entry.second)
             }
         }
-        return Option[List[mut ref GenericExtensionMethodTemplate]].None()
+        return Option[List[ref GenericExtensionMethodTemplate]].None()
     }
 
-    public lookup_extension_method_ref(
+    public lookup_extension_method(
         self,
         name String,
         method_name String,
         method_type_arg_count Option[UInt],
         extension_type_arg_count Option[UInt],
-    ) Option[mut ref GenericExtensionMethodTemplate] = {
+    ) Option[ref GenericExtensionMethodTemplate] = {
         when self.extension_methods.get(name) in {
             .Some(templates) then {
-                return self.select_extension_method_ref(
-                    templates.val,
+                return self.select_extension_method(
+                    templates,
                     method_name,
                     method_type_arg_count,
                     extension_type_arg_count,
@@ -301,19 +286,19 @@ given GenericTemplateRegistry {
             .None() then {},
         }
         if name.contains("[") then {
-            return Option[mut ref GenericExtensionMethodTemplate].None()
+            return Option[ref GenericExtensionMethodTemplate].None()
         }
         for entry in self.extension_methods then {
             let key = entry.first
             if key.ends_with("]\(name)") then {
-                return self.select_extension_method_ref(
-                    entry.second.val,
+                return self.select_extension_method(
+                    entry.second,
                     method_name,
                     method_type_arg_count,
                     extension_type_arg_count,
                 )
             }
         }
-        return Option[mut ref GenericExtensionMethodTemplate].None()
+        return Option[ref GenericExtensionMethodTemplate].None()
     }
 }

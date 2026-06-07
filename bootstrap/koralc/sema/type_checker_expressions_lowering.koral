@@ -81,9 +81,9 @@ given TypeChecker {
     private wrap_receiver_materialized_call(self, temp_symbol_opt Option[ref Symbol], original_receiver TypedExpr, call_expr TypedExpr) TypedExpr = {
         return when temp_symbol_opt in {
             .Some(temp_symbol) then {
-                let mut block_statements = List[TypedStatement].new()
-                block_statements.push(TypedStatement.LetStmt(temp_symbol, box(original_receiver), unknown_span()))
-                block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
+                let mut block_statements = List[ref TypedStatement].new()
+                block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(original_receiver), unknown_span())))
+                block_statements.push(box(TypedStatement.ExprStmt(box(call_expr), unknown_span())))
                 yield make_typed_expr(TypedExprKind.Block(block_statements), call_expr.expr_type)
             },
             .None() then call_expr,
@@ -127,12 +127,13 @@ given TypeChecker {
     }
 
     private empty_typed_block(self, t Type) TypedExpr = {
-        return make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), t)
+        return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), t)
     }
 
     private lower_static_method_call_expr(self, receiver_type Type, method_name String, args List[ref TypedExpr], fallback_return_type Type) TypedExpr = {
         let mut effective_type_name = ""
         let mut receiver_type_args = List[Type].new()
+        let mut resolved_receiver_type = receiver_type
         when receiver_type in {
             .GenericStruct(template, type_args) then {
                 effective_type_name = template
@@ -191,7 +192,7 @@ given TypeChecker {
                 .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, args, List[Type].new(), Option[Type].Some(fallback_return_type)),
                 .None() then List[Type].new(),
             }
-            let resolved_receiver_type = when static_sig_opt in {
+            resolved_receiver_type = when static_sig_opt in {
                 .Some(sig) then {
                     let bindings = self.resolve_static_call_type_bindings(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, Option[Type].Some(fallback_return_type))
                     yield self.apply_type_bindings(declared_receiver_type, bindings)
@@ -209,7 +210,7 @@ given TypeChecker {
         }
         let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type else resolved_return_type
         let method_symbol = self.make_method_symbol(method_name, return_type)
-        return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(method_symbol), List[Type].new(), List[Type].new(), args), return_type)
+        return make_typed_expr(TypedExprKind.StaticMethodCall(resolved_receiver_type, method_name, box(method_symbol), List[Type].new(), List[Type].new(), args), return_type)
     }
 
     private lower_enum_constructor_expr(self, enum_type Type, case_name String, args List[ref TypedExpr]) TypedExpr = {
@@ -258,28 +259,28 @@ given TypeChecker {
     }
 
     private lower_if_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_then TypedExpr, typed_else Option[ref TypedExpr], result_type Type, scope Scope) TypedExpr = {
-        let mut arms = List[TypedWhenArm].new()
-        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(pattern), typed_subj.expr_type, scope)), box(typed_then), typed_then.expr_type))
+        let mut arms = List[ref TypedWhenArm].new()
+        arms.push(box(TypedWhenArm(box(self.lower_typed_pattern(box(pattern), typed_subj.expr_type, scope)), box(typed_then), typed_then.expr_type)))
         when typed_else in {
             .Some(else_ref) then {
-                arms.push(TypedWhenArm(box(TypedPattern.Wildcard()), else_ref, else_ref.expr_type))
+                arms.push(box(TypedWhenArm(box(TypedPattern.Wildcard()), else_ref, else_ref.expr_type)))
             },
             .None() then {
                 let empty_else = self.empty_typed_block(Type.VoidType())
-                arms.push(TypedWhenArm(box(TypedPattern.Wildcard()), box(empty_else), empty_else.expr_type))
+                arms.push(box(TypedWhenArm(box(TypedPattern.Wildcard()), box(empty_else), empty_else.expr_type)))
             },
         }
         return make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), arms), result_type)
     }
 
     private lower_while_pattern_from_typed(self, typed_subj TypedExpr, pattern PatternNode, typed_body TypedExpr, scope Scope) TypedStatement = {
-        let mut arms = List[TypedWhenArm].new()
-        arms.push(TypedWhenArm(box(self.lower_typed_pattern(box(pattern), typed_subj.expr_type, scope)), box(typed_body), typed_body.expr_type))
+        let mut arms = List[ref TypedWhenArm].new()
+        arms.push(box(TypedWhenArm(box(self.lower_typed_pattern(box(pattern), typed_subj.expr_type, scope)), box(typed_body), typed_body.expr_type)))
 
-        let mut break_statements = List[TypedStatement].new()
-        break_statements.push(TypedStatement.BreakStmt(unknown_span()))
+        let mut break_statements = List[ref TypedStatement].new()
+        break_statements.push(box(TypedStatement.BreakStmt(unknown_span())))
         let break_block = make_typed_expr(TypedExprKind.Block(break_statements), Type.VoidType())
-        arms.push(TypedWhenArm(box(TypedPattern.Wildcard()), box(break_block), break_block.expr_type))
+        arms.push(box(TypedWhenArm(box(TypedPattern.Wildcard()), box(break_block), break_block.expr_type)))
 
         let when_expr = make_typed_expr(TypedExprKind.WhenExpr(box(typed_subj), arms), Type.VoidType())
         let loop_condition = make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType())
@@ -349,8 +350,8 @@ given TypeChecker {
 
         let temp_symbol = self.make_expr_temp_symbol("__collection", result_type, VariableKind.MutableValue())
         let init_expr = self.lower_static_method_call_expr(result_type, "new", List[ref TypedExpr].new(), result_type)
-        let mut block_statements = List[TypedStatement].new()
-        block_statements.push(TypedStatement.LetStmt(temp_symbol, box(init_expr), unknown_span()))
+        let mut block_statements = List[ref TypedStatement].new()
+        block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(init_expr), unknown_span())))
 
         let push_return_type = self.resolve_method_return_type(result_type, "push")
         let element_method_name = if self.is_unresolved_expr_type(push_return_type) then "insert" else "push"
@@ -359,11 +360,11 @@ given TypeChecker {
             let mut call_args = List[ref TypedExpr].new()
             call_args.push(elem)
             let call_expr = self.lower_receiver_method_call_expr(receiver, element_method_name, call_args)
-            block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
+            block_statements.push(box(TypedStatement.ExprStmt(box(call_expr), unknown_span())))
         }
 
         let result_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
-        block_statements.push(TypedStatement.ExprStmt(box(result_var), unknown_span()))
+        block_statements.push(box(TypedStatement.ExprStmt(box(result_var), unknown_span())))
         return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
     }
 
@@ -374,8 +375,8 @@ given TypeChecker {
 
         let temp_symbol = self.make_expr_temp_symbol("__dict", result_type, VariableKind.MutableValue())
         let init_expr = self.lower_static_method_call_expr(result_type, "new", List[ref TypedExpr].new(), result_type)
-        let mut block_statements = List[TypedStatement].new()
-        block_statements.push(TypedStatement.LetStmt(temp_symbol, box(init_expr), unknown_span()))
+        let mut block_statements = List[ref TypedStatement].new()
+        block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(init_expr), unknown_span())))
 
         for entry in typed_entries then {
             let receiver = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
@@ -383,11 +384,11 @@ given TypeChecker {
             call_args.push(entry.first)
             call_args.push(entry.second)
             let call_expr = self.lower_receiver_method_call_expr(receiver, "insert", call_args)
-            block_statements.push(TypedStatement.ExprStmt(box(call_expr), unknown_span()))
+            block_statements.push(box(TypedStatement.ExprStmt(box(call_expr), unknown_span())))
         }
 
         let result_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
-        block_statements.push(TypedStatement.ExprStmt(box(result_var), unknown_span()))
+        block_statements.push(box(TypedStatement.ExprStmt(box(result_var), unknown_span())))
         return make_typed_expr(TypedExprKind.Block(block_statements), result_type)
     }
 
@@ -549,8 +550,8 @@ given TypeChecker {
         }
         let while_stmt = self.lower_while_pattern_from_typed(next_call, loop_pattern, typed_body, for_scope)
 
-        let mut block_statements = List[TypedStatement].new()
-        block_statements.push(TypedStatement.LetStmt(iterator_symbol, box(iterator_init), unknown_span()))
+        let mut block_statements = List[ref TypedStatement].new()
+        block_statements.push(box(TypedStatement.LetStmt(iterator_symbol, box(iterator_init), unknown_span())))
         block_statements.push(while_stmt)
         return make_typed_expr(TypedExprKind.Block(block_statements), Type.VoidType())
     }

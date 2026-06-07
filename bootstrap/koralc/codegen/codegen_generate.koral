@@ -32,20 +32,26 @@ type ForeignDeclarations(
 )
 
 given CodeGen {
-    private validate_codegen_inputs(self ref) Void = {
-        for function in self.program.functions then {
-            if self.type_contains_generic(function.identifier.symbol_type) then {
-                panic("Generic function symbol reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
-            }
-            if self.type_contains_generic(function.return_type) or self.params_contain_generic(function.params) then {
-                panic("Generic function signature reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
-            }
-            for local in function.locals then {
-                if self.type_contains_generic(local.local_type) then {
-                    panic("Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier)): \(local.name) :: \(self.context.type_display_name(local.local_type))")
-                }
+    public validate_mir_function(self ref, function ref MIRFunction) Void = {
+        if self.type_contains_generic(function.identifier.symbol_type) then {
+            panic("Generic function symbol reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+        }
+        if self.type_contains_generic(function.return_type) or self.params_contain_generic(function.params) then {
+            panic("Generic function signature reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+        }
+        for local in function.locals then {
+            if self.type_contains_generic(local.local_type) then {
+                panic("Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier)): \(local.name) :: \(self.context.type_display_name(local.local_type))")
             }
         }
+    }
+
+    public validate_mir_functions(self ref, functions List[ref MIRFunction]) Void = {
+        for function in functions then { self.validate_mir_function(function) }
+    }
+
+    private validate_codegen_inputs(self ref) Void = {
+        self.validate_mir_functions(self.program.functions)
 
         for global in self.program.globals then {
             when global in {
@@ -275,8 +281,16 @@ given CodeGen {
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
     public generate_into_buffer(self mut ref) Void = {
-        self.buffer = box(String.new())
         self.validate_codegen_inputs()
+        self.generate_prelude_into_buffer()
+        self.emit_mir_function_implementations()
+        self.finalize_program_into_buffer()
+    }
+
+    public generate_prelude_into_buffer(self mut ref) Void = {
+        self.buffer = box(CodegenBuffer.new())
+        self.precompute_c_type_name_cache()
+        self.precompute_callable_c_name_cache()
         let foreign_declarations = self.scan_program_codegen_inputs()
         self.emit_includes()
         self.emit_foreign_types(foreign_declarations)
@@ -285,11 +299,13 @@ given CodeGen {
         self.emit_mir_function_declarations()
         self.emit_mir_global_variables()
         self.emit_vtable_definitions()
-        self.emit_mir_function_implementations()
+    }
+
+    public finalize_program_into_buffer(self mut ref) Void = {
         self.emit_c_main()
     }
 
-    public generated_buffer(self ref) ref String = self.buffer
+    public generated_buffer(self ref) ref CodegenBuffer = self.buffer
 
     public generate(self mut ref) String = {
         self.generate_into_buffer()
@@ -426,22 +442,17 @@ given CodeGen {
 
     emit_mir_function_declarations(self ref) Void = {
         let mut emitted = Set[String].new()
-        for function in self.program.functions then {
-            let c_name = self.callable_c_name(function.identifier)
-            if emitted.contains(c_name) then { continue }
-            emitted.insert(c_name)
-            if self.type_contains_generic(function.return_type) or self.params_contain_generic(function.params) then {
-                panic("Generic MIR function declaration reached codegen: \(self.context.symbol_name(function.identifier)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
+        for global in self.program.globals then {
+            when global in {
+                .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(initializer_function, emitted.ref),
+                .Function(identifier, params, return_type, _) then self.emit_declared_function_declaration(identifier, params, return_type, emitted.ref),
+                .Given(_, _, _, methods) then {
+                    for method in methods then {
+                        self.emit_symbol_function_declaration(method, emitted.ref)
+                    }
+                },
+                _ then {},
             }
-            if self.type_is_never(function.return_type) then {
-                self.buffer.push_string("_Noreturn ")
-            }
-            let return_c_type = self.c_type_name(function.return_type)
-            let declaration_params = when self.context.get_function_type(function.identifier.def_id) in {
-                .Some(function_type) then self.build_param_type_list_from_function_type(function.params, function_type),
-                .None() then self.build_param_type_list(function.params),
-            }
-            self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n")
         }
         self.buffer.push_string("\n")
     }
@@ -484,9 +495,46 @@ given CodeGen {
 
     emit_mir_function_implementations(self mut ref) Void = {
         for function in self.program.functions then {
-            let function_ref = box(function)
-            self.generate_mir_global_function(function_ref)
+            self.emit_mir_global_function(function)
         }
+    }
+
+    private emit_declared_function_declaration(
+        self ref,
+        identifier ref Symbol,
+        params List[TypedParam],
+        return_type Type,
+        emitted mut ref Set[String],
+    ) Void = {
+        let c_name = self.callable_c_name(identifier)
+        if emitted.contains(c_name) then { return }
+        emitted.insert(c_name)
+        if self.type_contains_generic(return_type) or self.params_contain_generic(params) then {
+            panic("Generic MIR function declaration reached codegen: \(self.context.symbol_name(identifier)) :: \(self.context.type_display_name(identifier.symbol_type))")
+        }
+        if self.type_is_never(return_type) then {
+            self.buffer.push_string("_Noreturn ")
+        }
+        let return_c_type = self.c_type_name(return_type)
+        let declaration_params = self.build_param_type_list(params)
+        self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n")
+    }
+
+    private emit_symbol_function_declaration(self ref, symbol ref Symbol, emitted mut ref Set[String]) Void = {
+        let c_name = self.callable_c_name(symbol)
+        if emitted.contains(c_name) then { return }
+        emitted.insert(c_name)
+        let fn_type = symbol.symbol_type
+        let return_type = self.function_type_return_type(fn_type)
+        if self.type_contains_generic(return_type) then {
+            panic("Generic MIR function declaration reached codegen: \(self.context.symbol_name(symbol)) :: \(self.context.type_display_name(symbol.symbol_type))")
+        }
+        if self.type_is_never(return_type) then {
+            self.buffer.push_string("_Noreturn ")
+        }
+        let return_c_type = self.c_type_name(return_type)
+        let declaration_params = self.build_param_type_list_from_function_type(fn_type)
+        self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n")
     }
 
     // ── emit_c_main ───────────────────────────────────────────────────────────
@@ -619,47 +667,25 @@ given CodeGen {
         return result
     }
 
-    public build_param_type_list_from_function_type(self, params List[TypedParam], function_type Type) String = {
-        if params.is_empty() then { return "void" }
-        if self.function_type_param_count(function_type) <> params.count() then {
-            return self.build_param_type_list(params)
+    public build_param_type_list_from_function_type(self, fn_type Type) String = {
+        return when fn_type in {
+            .FunctionType(params, _) then {
+                if params.is_empty() then { return "void" }
+                let mut result = String.new()
+                let mut first = true
+                let mut index UInt = 0
+                while index < params.count() then {
+                    if not first then {
+                        result.push_string(", ")
+                    }
+                    result.push_string(self.c_type_name(params[index].val.param_type))
+                    first = false
+                    index += 1
+                }
+                yield result
+            },
+            _ then "void",
         }
-
-        let mut result = String.new()
-        let mut index = 0(UInt)
-        while index < self.function_type_param_count(function_type) then {
-            if index > 0(UInt) then {
-                result.push_string(", ")
-            }
-            let param_type = self.function_type_param_type(function_type, index) or else params[index].param_type
-            result.push_string(self.c_type_name(param_type))
-            index += 1(UInt)
-        }
-        return result
-    }
-
-    public build_named_param_list_from_function_type(self, params List[TypedParam], function_type Type) String = {
-        if params.is_empty() then { return "void" }
-        if self.function_type_param_count(function_type) <> params.count() then {
-            return self.build_param_list(params)
-        }
-
-        let mut result = String.new()
-        let mut index = 0(UInt)
-        while index < self.function_type_param_count(function_type) then {
-            if index > 0(UInt) then {
-                result.push_string(", ")
-            }
-            let param = params[index]
-            let param_type = self.function_type_param_type(function_type, index) or else param.param_type
-            let c_type = self.c_type_name(param_type)
-            let c_name = self.c_identifier_for_param(param)
-            result.push_string(c_type)
-            result.push_string(" ")
-            result.push_string(c_name)
-            index += 1(UInt)
-        }
-        return result
     }
 
     // ── 辅助：泛型参数检测 ────────────────────────────────────────────────────

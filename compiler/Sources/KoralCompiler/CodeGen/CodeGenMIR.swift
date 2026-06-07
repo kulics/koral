@@ -24,6 +24,69 @@ private struct MIRLocalLifetimePlan {
   let blockLocalDeclarationLocals: Set<MIRLocalID>
 }
 
+fileprivate struct MIRFunctionEmitPlan {
+  let localByID: [MIRLocalID: MIRLocal]
+  let localNameByID: [MIRLocalID: String]
+  let nonOwningLocalIDs: Set<MIRLocalID>
+  let initFlagByLocalID: [MIRLocalID: String]
+  let lifetimePlan: MIRLocalLifetimePlan
+  let blockLabelByID: [MIRBlockID: String]
+
+  static func build(
+    codeGen: CodeGen,
+    function: MIRFunction,
+    localNameOverridesByDefId: [UInt64: String] = [:]
+  ) -> MIRFunctionEmitPlan {
+    let localByID = Dictionary(uniqueKeysWithValues: function.locals.map { ($0.id, $0) })
+
+    var localNameByID: [MIRLocalID: String] = [:]
+    for local in function.locals {
+      if let symbol = local.symbol {
+        localNameByID[local.id] = localNameOverridesByDefId[symbol.defId.id] ?? codeGen.cIdentifier(for: symbol)
+      } else {
+        let base = sanitizeCIdentifier(local.name)
+        let stem = base.isEmpty ? "mir_local" : base
+        localNameByID[local.id] = "__mir_\(stem)_\(local.id.rawValue)"
+      }
+    }
+
+    let nonOwningLocalIDs = MIRFunctionCodeEmitter.computeNonOwningLocals(function: function)
+
+    var initFlagByLocalID: [MIRLocalID: String] = [:]
+    for local in function.locals
+    where local.storage != .capture
+      && local.type != .void
+      && local.type != .never
+      && codeGen.needsDrop(local.type)
+      && !nonOwningLocalIDs.contains(local.id) {
+      initFlagByLocalID[local.id] = "__mir_init_\(local.id.rawValue)"
+    }
+
+    let lifetimePlan = MIRFunctionCodeEmitter.buildLifetimePlan(
+      function: function,
+      trackedLocalIDs: Set(initFlagByLocalID.keys),
+      needsDrop: codeGen.needsDrop
+    )
+    let blockLabelByID = Dictionary(
+      uniqueKeysWithValues: function.blocks.map { ($0.id, "__mir_bb_\($0.id.rawValue)") }
+    )
+
+    return MIRFunctionEmitPlan(
+      localByID: localByID,
+      localNameByID: localNameByID,
+      nonOwningLocalIDs: nonOwningLocalIDs,
+      initFlagByLocalID: initFlagByLocalID,
+      lifetimePlan: lifetimePlan,
+      blockLabelByID: blockLabelByID
+    )
+  }
+}
+
+fileprivate struct MIRFunctionRenderResult {
+  let definitions: String
+  let body: String
+}
+
 final class MIRFunctionCodeEmitter {
   private let codeGen: CodeGen
   private let function: MIRFunction
@@ -42,43 +105,16 @@ final class MIRFunctionCodeEmitter {
     nestedTypeDefinitions + nestedFunctionDefinitions
   }
 
-  init(codeGen: CodeGen, function: MIRFunction, localNameOverridesByDefId: [UInt64: String] = [:]) {
+  fileprivate init(codeGen: CodeGen, function: MIRFunction, plan: MIRFunctionEmitPlan) {
     self.codeGen = codeGen
     self.function = function
     self.resolver = MIRTypeResolver(function: function, context: codeGen.context)
-    self.localByID = Dictionary(uniqueKeysWithValues: function.locals.map { ($0.id, $0) })
-
-    var names: [MIRLocalID: String] = [:]
-    for local in function.locals {
-      if let symbol = local.symbol {
-        names[local.id] = localNameOverridesByDefId[symbol.defId.id] ?? codeGen.cIdentifier(for: symbol)
-      } else {
-        let base = sanitizeCIdentifier(local.name)
-        let stem = base.isEmpty ? "mir_local" : base
-        names[local.id] = "__mir_\(stem)_\(local.id.rawValue)"
-      }
-    }
-    self.localNameByID = names
-
-    self.nonOwningLocalIDs = Self.computeNonOwningLocals(function: function)
-
-    var flags: [MIRLocalID: String] = [:]
-    for local in function.locals
-    where local.storage != .capture
-      && local.type != .void
-      && local.type != .never
-      && codeGen.needsDrop(local.type)
-      && !nonOwningLocalIDs.contains(local.id) {
-      flags[local.id] = "__mir_init_\(local.id.rawValue)"
-    }
-    self.initFlagByLocalID = flags
-
-    self.lifetimePlan = Self.buildLifetimePlan(
-      function: function,
-      trackedLocalIDs: Set(flags.keys),
-      needsDrop: codeGen.needsDrop
-    )
-    self.blockLabelByID = Dictionary(uniqueKeysWithValues: function.blocks.map { ($0.id, "__mir_bb_\($0.id.rawValue)") })
+    self.localByID = plan.localByID
+    self.localNameByID = plan.localNameByID
+    self.nonOwningLocalIDs = plan.nonOwningLocalIDs
+    self.initFlagByLocalID = plan.initFlagByLocalID
+    self.lifetimePlan = plan.lifetimePlan
+    self.blockLabelByID = plan.blockLabelByID
   }
 
   func emitBody() {
@@ -88,7 +124,7 @@ final class MIRFunctionCodeEmitter {
     }
   }
 
-  private static func buildLifetimePlan(
+  fileprivate static func buildLifetimePlan(
     function: MIRFunction,
     trackedLocalIDs: Set<MIRLocalID>,
     needsDrop: (Type) -> Bool
@@ -319,7 +355,7 @@ final class MIRFunctionCodeEmitter {
     )
   }
 
-  private static func computeNonOwningLocals(function: MIRFunction) -> Set<MIRLocalID> {
+  fileprivate static func computeNonOwningLocals(function: MIRFunction) -> Set<MIRLocalID> {
     var assignedValuesByLocal: [MIRLocalID: [MIRValue]] = [:]
 
     for block in function.blocks {
@@ -654,12 +690,21 @@ final class MIRFunctionCodeEmitter {
   private func emitReturn(_ operand: MIROperand?, preserving preservedLocal: MIRLocalID?) {
     if let operand {
       let emission = emitOperandValue(operand)
-      let returnedLocal = preservedLocal ?? preservedReturnLocal(for: operand, emission: emission)
-      setInitFlag(returnedLocal, to: false)
-      emitReturnCleanup(excluding: returnedLocal)
+      let returnType = resolver.type(of: operand) ?? .void
+      let shouldCopy = shouldCopyReturnedOperand(operand, type: returnType)
+      let returnExpression: String
+      if shouldCopy {
+        returnExpression = codeGen.emitTempCopyOrMove(type: returnType, source: emission.expression, isLvalue: true)
+        emitReturnCleanup(excluding: nil)
+      } else {
+        let returnedLocal = preservedLocal ?? preservedReturnLocal(for: operand, emission: emission)
+        setInitFlag(returnedLocal, to: false)
+        emitReturnCleanup(excluding: returnedLocal)
+        returnExpression = emission.expression
+      }
       codeGen.addIndent()
-      codeGen.appendToBuffer("return \(emission.expression);\n")
-      emitCleanups(residualCleanups(for: emission, consumedExpression: true))
+      codeGen.appendToBuffer("return \(returnExpression);\n")
+      emitCleanups(residualCleanups(for: emission, consumedExpression: !shouldCopy))
       return
     }
 
@@ -712,6 +757,23 @@ final class MIRFunctionCodeEmitter {
     }
 
     return nil
+  }
+
+  private func shouldCopyReturnedOperand(_ operand: MIROperand, type: Type) -> Bool {
+    guard codeGen.needsDrop(type) else {
+      return false
+    }
+
+    guard case .local(let local) = operand,
+          let info = localByID[local] else {
+      return false
+    }
+
+    if info.storage == .capture {
+      return true
+    }
+
+    return nonOwningLocalIDs.contains(local)
   }
 
   private func emitGuardedDrop(flag: String, type: Type, expression: String) {
@@ -849,27 +911,34 @@ final class MIRFunctionCodeEmitter {
     )
   }
 
-  private func renderNestedMIRFunctionBody(
+  private func renderMIRFunctionBody(
     _ mirFunction: MIRFunction,
     localNameOverridesByDefId: [UInt64: String] = [:]
-  ) -> (definitions: String, body: String) {
+  ) -> MIRFunctionRenderResult {
     let savedBuffer = codeGen.buffer
     let savedIndent = codeGen.indent
     codeGen.buffer = ""
     codeGen.indent = "  "
 
-    let emitter = MIRFunctionCodeEmitter(
+    let plan = MIRFunctionEmitPlan.build(
       codeGen: codeGen,
       function: mirFunction,
       localNameOverridesByDefId: localNameOverridesByDefId
     )
+    let emitter = MIRFunctionCodeEmitter(
+      codeGen: codeGen,
+      function: mirFunction,
+      plan: plan
+    )
     emitter.emitBody()
-    let body = codeGen.buffer
-    let definitions = emitter.generatedDefinitions
+    let result = MIRFunctionRenderResult(
+      definitions: emitter.generatedDefinitions,
+      body: codeGen.buffer
+    )
 
     codeGen.buffer = savedBuffer
     codeGen.indent = savedIndent
-    return (definitions, body)
+    return result
   }
 
   private func generateNoCaptureLambdaFunction(
@@ -884,7 +953,7 @@ final class MIRFunctionCodeEmitter {
       "\(codeGen.cTypeName(functionParameters[index].type)) \(codeGen.cIdentifier(for: parameter))"
     }
     let paramsStr = params.isEmpty ? "void" : params.joined(separator: ", ")
-    let nested = renderNestedMIRFunctionBody(mirFunction)
+    let nested = renderMIRFunctionBody(mirFunction)
 
     var functionBuffer = nested.definitions
     functionBuffer += "\nstatic \(returnCType) \(name)(\(paramsStr));\n"
@@ -913,7 +982,7 @@ final class MIRFunctionCodeEmitter {
     for capture in captures {
       localNameOverridesByDefId[capture.symbol.defId.id] = "__captured->\(captureFieldName(for: capture.symbol))"
     }
-    let nested = renderNestedMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
+    let nested = renderMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
 
     var functionBuffer = nested.definitions
     functionBuffer += "\nstatic \(returnCType) \(name)(\(params.joined(separator: ", ")));\n"
@@ -1991,16 +2060,35 @@ final class MIRFunctionCodeEmitter {
 }
 
 extension CodeGen {
-  func emitMIRFunctionBody(_ mirFunction: MIRFunction, localNameOverridesByDefId: [UInt64: String] = [:]) {
-    let emitter = MIRFunctionCodeEmitter(
+  fileprivate func renderMIRFunctionBody(
+    _ mirFunction: MIRFunction,
+    localNameOverridesByDefId: [UInt64: String] = [:]
+  ) -> MIRFunctionRenderResult {
+    let savedBuffer = buffer
+    let savedIndent = indent
+    buffer = ""
+    indent = "  "
+
+    let plan = MIRFunctionEmitPlan.build(
       codeGen: self,
       function: mirFunction,
       localNameOverridesByDefId: localNameOverridesByDefId
     )
+    let emitter = MIRFunctionCodeEmitter(codeGen: self, function: mirFunction, plan: plan)
     emitter.emitBody()
-    if !emitter.generatedDefinitions.isEmpty {
-      buffer = emitter.generatedDefinitions + buffer
+    let result = MIRFunctionRenderResult(definitions: emitter.generatedDefinitions, body: buffer)
+
+    buffer = savedBuffer
+    indent = savedIndent
+    return result
+  }
+
+  func emitMIRFunctionBody(_ mirFunction: MIRFunction, localNameOverridesByDefId: [UInt64: String] = [:]) {
+    let rendered = renderMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
+    if !rendered.definitions.isEmpty {
+      buffer += rendered.definitions
     }
+    buffer += rendered.body
   }
 
   func generateMIRGlobalFunction(
@@ -2014,10 +2102,10 @@ extension CodeGen {
 
     let savedBuffer = buffer
     buffer = ""
+    let rendered = renderMIRFunctionBody(mirFunction)
+    buffer += rendered.definitions
     buffer += "\(returnType) \(cName)(\(paramList)) {\n"
-    withIndent {
-      emitMIRFunctionBody(mirFunction)
-    }
+    buffer += rendered.body
     buffer += "}\n"
 
     let functionCode = buffer

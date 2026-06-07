@@ -860,7 +860,7 @@ given TypeChecker {
         let uint_type = Type.UIntType()
         let byte_ptr_type = Type.PointerType(box(Type.UInt8Type()))
         let mut_byte_ptr_type = Type.MutablePointerType(box(Type.UInt8Type()))
-        let mut block_statements = List[TypedStatement].new()
+        let mut block_statements = List[ref TypedStatement].new()
         let mut part_symbols = List[ref Symbol].new()
 
         for part in parts then {
@@ -872,7 +872,7 @@ given TypeChecker {
             }
             let string_part = self.convert_interpolated_part_to_string(part, scope)
             let part_symbol = self.make_expr_temp_symbol("__interp_part", string_part.expr_type, VariableKind.Value())
-            block_statements.push(TypedStatement.LetStmt(part_symbol, box(string_part), unknown_span()))
+            block_statements.push(box(TypedStatement.LetStmt(part_symbol, box(string_part), unknown_span())))
             part_symbols.push(part_symbol)
         }
         if part_symbols.is_empty() then {
@@ -890,7 +890,7 @@ given TypeChecker {
         }
 
         let total_symbol = self.make_expr_temp_symbol("__interp_total", uint_type, VariableKind.Value())
-        block_statements.push(TypedStatement.LetStmt(total_symbol, box(total_expr), unknown_span()))
+        block_statements.push(box(TypedStatement.LetStmt(total_symbol, box(total_expr), unknown_span())))
 
         let total_var = make_typed_expr(TypedExprKind.Variable(total_symbol), total_symbol.symbol_type)
         let one_uint = make_typed_expr(TypedExprKind.IntegerLiteral("1"), uint_type)
@@ -903,16 +903,16 @@ given TypeChecker {
             mut_byte_ptr_type,
         )
         let data_symbol = self.make_expr_temp_symbol("__interp_data", mut_byte_ptr_type, VariableKind.Value())
-        block_statements.push(TypedStatement.LetStmt(data_symbol, box(alloc_expr), unknown_span()))
+        block_statements.push(box(TypedStatement.LetStmt(data_symbol, box(alloc_expr), unknown_span())))
         let zero_uint = make_typed_expr(TypedExprKind.IntegerLiteral("0"), uint_type)
         let offset_symbol = self.make_expr_temp_symbol("__interp_offset", uint_type, VariableKind.MutableValue())
-        block_statements.push(TypedStatement.LetStmt(offset_symbol, box(zero_uint), unknown_span()))
+        block_statements.push(box(TypedStatement.LetStmt(offset_symbol, box(zero_uint), unknown_span())))
 
         for part_symbol in part_symbols then {
             let part_var = make_typed_expr(TypedExprKind.Variable(part_symbol), part_symbol.symbol_type)
             let part_len_expr = self.build_unary_method_call(part_var, "count", uint_type)
             let part_len_symbol = self.make_expr_temp_symbol("__interp_len", uint_type, VariableKind.Value())
-            block_statements.push(TypedStatement.LetStmt(part_len_symbol, box(part_len_expr), unknown_span()))
+            block_statements.push(box(TypedStatement.LetStmt(part_len_symbol, box(part_len_expr), unknown_span())))
 
             let data_var = make_typed_expr(TypedExprKind.Variable(data_symbol), data_symbol.symbol_type)
             let offset_var = make_typed_expr(TypedExprKind.Variable(offset_symbol), offset_symbol.symbol_type)
@@ -926,13 +926,13 @@ given TypeChecker {
                 TypedExprKind.IntrinsicCall(TypedIntrinsic.CopyMemory(box(dest_expr), box(source_expr), box(part_len_var))),
                 Type.VoidType(),
             )
-            block_statements.push(TypedStatement.ExprStmt(box(copy_expr), unknown_span()))
+            block_statements.push(box(TypedStatement.ExprStmt(box(copy_expr), unknown_span())))
             let offset_add = make_typed_expr(
                 TypedExprKind.ArithmeticExpr(box(offset_var), ArithmeticOperator.Add(), box(part_len_var)),
                 uint_type,
             )
             let offset_target = make_typed_expr(TypedExprKind.Variable(offset_symbol), offset_symbol.symbol_type)
-            block_statements.push(TypedStatement.AssignmentStmt(box(offset_target), box(offset_add), unknown_span()))
+            block_statements.push(box(TypedStatement.AssignmentStmt(box(offset_target), box(offset_add), unknown_span())))
         }
 
         let data_var = make_typed_expr(TypedExprKind.Variable(data_symbol), data_symbol.symbol_type)
@@ -946,7 +946,7 @@ given TypeChecker {
             TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(box(end_ptr_expr), box(zero_byte))),
             Type.VoidType(),
         )
-        block_statements.push(TypedStatement.ExprStmt(box(init_expr), unknown_span()))
+        block_statements.push(box(TypedStatement.ExprStmt(box(init_expr), unknown_span())))
 
         let final_data = make_typed_expr(TypedExprKind.Variable(data_symbol), data_symbol.symbol_type)
         let final_total = make_typed_expr(TypedExprKind.Variable(total_symbol), total_symbol.symbol_type)
@@ -963,7 +963,7 @@ given TypeChecker {
         build_args.push(box(final_total))
         build_args.push(box(final_cap))
         let built_string = self.lower_static_method_call_expr(string_type, "from_owned_utf8_ptr_unchecked", build_args, string_type)
-        block_statements.push(TypedStatement.ExprStmt(box(built_string), unknown_span()))
+        block_statements.push(box(TypedStatement.ExprStmt(box(built_string), unknown_span())))
 
         return make_typed_expr(TypedExprKind.Block(block_statements), string_type)
     }

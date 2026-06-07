@@ -769,11 +769,9 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
 
     debug_phase("\(phase_prefix): mir lower")
     let mir_start = MonoTime.now()
-    let mir_program = MIRLowerer.new(mono_program.ref, context).lower()
-    let _ = mir_program.functions.count()
+    let mut lowerer = MIRLowerer.new(mono_program.ref, context)
+    let mut metadata_program = lowerer.metadata_program()
     profile_phase("\(phase_prefix): mir lower", mir_start)
-
-    let codegen_output = Pair[CompilerContext, MIRProgram](context, mir_program)
 
     let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir)
 
@@ -785,22 +783,29 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
         return Option[Pair[Path, List[String]]].None()
     }
 
-    {
-        let context = codegen_output.first
-        let mut mir_program = codegen_output.second
-        debug_phase("\(phase_prefix): codegen")
-        let codegen_start = MonoTime.now()
-        let mut cg = CodeGen.new(mir_program.ref, context)
-        let generated_c = cg.generate()
-        profile_phase("\(phase_prefix): codegen", codegen_start)
-
-        write_text_file(output_path, content: generated_c) or else {
-            eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
-            if profile_total_phase then {
-                profile_phase("\(phase_prefix): total", total_start)
-            }
-            return Option[Pair[Path, List[String]]].None()
+    debug_phase("\(phase_prefix): codegen")
+    let codegen_start = MonoTime.now()
+    let mut cg = CodeGen.new(metadata_program, context)
+    cg.generate_prelude_into_buffer()
+    while true then {
+        when lowerer.lower_next_work_item() in {
+            .Some(function) then {
+                cg.validate_mir_function(function)
+                cg.emit_mir_global_function(function)
+            },
+            .None() then { break },
         }
+    }
+    cg.finalize_program_into_buffer()
+    let generated_c = cg.generated_buffer().to_string()
+    profile_phase("\(phase_prefix): codegen", codegen_start)
+
+    write_text_file(output_path, content: generated_c) or else {
+        eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
+        if profile_total_phase then {
+            profile_phase("\(phase_prefix): total", total_start)
+        }
+        return Option[Pair[Path, List[String]]].None()
     }
 
     debug_phase("\(phase_prefix): done")

@@ -317,76 +317,55 @@ given CodeGen {
     public collect_and_sort_type_declarations(self mut ref) List[TypeDeclaration] = {
         let mut decl_map = Dict[String, TypeDeclaration].new()
 
-        let mut id UInt = 1
-        while id < self.context.next_def_id() then {
-            let def_id = DefId(id)
-            let is_type = when self.context.get_kind(def_id) in {
-                .Some(k) then when k in {
-                    .TypeDef(_) then true,
-                    _ then false,
-                },
-                .None() then false,
-            }
-            if not is_type then {
-                id += 1
-                continue
-            }
-
-            let name = self.context.get_name(def_id) or else {
-                id += 1
-                continue
-            }
-            let is_concrete_generic_instance = when self.context.get_template_name(def_id) in {
-                .Some(_) then {
-                    yield when self.context.get_type_arguments(def_id) in {
-                        .Some(type_args) then {
-                            let mut concrete = true
-                            for type_arg in type_args then {
-                                if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
-                                    concrete = false
+        for global in self.program.globals then {
+            when global in {
+                .StructDeclaration(identifier, fields) then {
+                    let c_name = self.c_identifier_for_symbol(identifier)
+                    let candidate = TypeDeclaration.Structure(c_name, fields)
+                    when decl_map.get(c_name) in {
+                        .Some(existing) then when existing in {
+                            .Structure(_, existing_fields) then {
+                                if existing_fields.count() < fields.count() then {
+                                    decl_map.insert(c_name, candidate)
                                 }
-                            }
-                            yield concrete
+                            },
+                            _ then decl_map.insert(c_name, candidate),
                         },
-                        .None() then false,
+                        .None() then decl_map.insert(c_name, candidate),
                     }
                 },
-                .None() then true,
-            }
-            if not is_concrete_generic_instance then {
-                id += 1
-                continue
-            }
-            let c_name = when self.c_identifier_opt(def_id) in {
-                .Some(cn) then cn,
-                .None() then self.sanitize_codegen_identifier(name),
-            }
-
-            if decl_map.get(c_name) is .Some(_) then {
-                id += 1
-                continue
-            }
-
-            when self.concrete_struct_fields_from_def(def_id) in {
-                .Some(fields) then {
-                    let decl = if self.is_foreign_type(name)
-                        then TypeDeclaration.ForeignStructure(c_name, fields)
-                        else TypeDeclaration.Structure(c_name, fields)
-                    decl_map.insert(c_name, decl)
-                    id += 1
-                    continue
+                .EnumDeclaration(identifier, cases) then {
+                    let c_name = self.c_identifier_for_symbol(identifier)
+                    let candidate = TypeDeclaration.Enum(c_name, cases)
+                    when decl_map.get(c_name) in {
+                        .Some(existing) then when existing in {
+                            .Enum(_, existing_cases) then {
+                                if existing_cases.count() < cases.count() then {
+                                    decl_map.insert(c_name, candidate)
+                                }
+                            },
+                            _ then decl_map.insert(c_name, candidate),
+                        },
+                        .None() then decl_map.insert(c_name, candidate),
+                    }
                 },
-                .None() then {},
-            }
-
-            when self.concrete_enum_cases_from_def(def_id) in {
-                .Some(cases) then {
-                    decl_map.insert(c_name, TypeDeclaration.Enum(c_name, cases))
+                .ForeignStruct(identifier, fields) then {
+                    let c_name = self.c_identifier_for_symbol(identifier)
+                    let candidate = TypeDeclaration.ForeignStructure(c_name, fields)
+                    when decl_map.get(c_name) in {
+                        .Some(existing) then when existing in {
+                            .ForeignStructure(_, existing_fields) then {
+                                if existing_fields.count() < fields.count() then {
+                                    decl_map.insert(c_name, candidate)
+                                }
+                            },
+                            _ then decl_map.insert(c_name, candidate),
+                        },
+                        .None() then decl_map.insert(c_name, candidate),
+                    }
                 },
-                .None() then {},
+                _ then {},
             }
-
-            id += 1
         }
 
         // 第二步：构建依赖图

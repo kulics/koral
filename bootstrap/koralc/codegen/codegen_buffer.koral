@@ -1,0 +1,74 @@
+// codegen_buffer.koral - bootstrap codegen 专用可变输出缓冲
+//
+// 避免使用 String 的 COW 语义作为主输出缓冲，防止在大规模 append
+// 时反复整段克隆累计输出。
+
+protected type CodegenBufferStorage(mut data mut ptr UInt8, mut len UInt, mut cap UInt)
+
+given CodegenBufferStorage as Drop {
+    drop(source mut ptr Self) Void = {
+        dealloc_memory(source.data)
+    }
+}
+
+public type CodegenBuffer(protected mut storage mut ref CodegenBufferStorage)
+
+given CodegenBuffer {
+    public new() CodegenBuffer = {
+        return CodegenBuffer.with_capacity(256)
+    }
+
+    public with_capacity(cap UInt) CodegenBuffer = {
+        let actual_cap = if cap < 1 then 1(UInt) else cap + 1
+        let data = alloc_memory[UInt8](actual_cap)
+        init_memory(data, 0)
+        let storage = box(CodegenBufferStorage(data, 0, actual_cap))
+        return CodegenBuffer(storage)
+    }
+
+    private ensure_capacity(self ref, min_cap UInt) Void = {
+        if self.storage.cap >= min_cap then {
+            return
+        }
+
+        let mut new_cap = self.storage.cap * 2
+        if new_cap < min_cap then {
+            new_cap = min_cap
+        }
+
+        let new_data = alloc_memory[UInt8](new_cap)
+        copy_memory(new_data, self.storage.data, self.storage.len + 1)
+        dealloc_memory(self.storage.data)
+        self.storage.data = new_data
+        self.storage.cap = new_cap
+    }
+
+    public count(self ref) UInt = self.storage.len
+
+    public push_byte(self ref, value UInt8) Void = {
+        self.ensure_capacity(self.storage.len + 2)
+        self.storage.data[self.storage.len] = value
+        self.storage.len += 1
+        self.storage.data[self.storage.len] = 0
+    }
+
+    public push_string(self ref, other String) Void = {
+        let other_len = other.count()
+        if other_len == 0 then {
+            return
+        }
+
+        self.ensure_capacity(self.storage.len + other_len + 1)
+        copy_memory(self.storage.data + self.storage.len, other.borrow_ptr(), other_len)
+        self.storage.len += other_len
+        self.storage.data[self.storage.len] = 0
+    }
+
+    public push_rune(self ref, rune Rune) Void = {
+        self.push_string(rune.to_string())
+    }
+
+    public to_string(self ref) String = {
+        return String.from_utf8_ptr_unchecked(self.storage.data, self.storage.len)
+    }
+}

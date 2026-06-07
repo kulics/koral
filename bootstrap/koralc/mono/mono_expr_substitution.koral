@@ -166,8 +166,8 @@ private let infer_type_construction_type_from_args(
 
     if args.count() == 2(UInt) and (template_name == "Pair" or template_name.ends_with(".Pair")) then {
         let mut pair_args = List[ref Type].new()
-        pair_args.push(box(resolve_parameterized_type(mono, args[0(UInt)].val.expr_type)))
-        pair_args.push(box(resolve_parameterized_type(mono, args[1(UInt)].val.expr_type)))
+        pair_args.push(box(resolve_parameterized_type(mono, args[0(UInt)].expr_type)))
+        pair_args.push(box(resolve_parameterized_type(mono, args[1(UInt)].expr_type)))
         return Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct("Pair", pair_args)))
     }
 
@@ -198,7 +198,7 @@ private let infer_type_construction_type_from_args(
             let mut i UInt = 0
             while i < args.count() then {
                 let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, empty_subst)
-                infer_type_bindings_from_constructor_pattern(mono, field_pattern, resolve_parameterized_type(mono, args[i].val.expr_type), bindings.ref)
+                infer_type_bindings_from_constructor_pattern(mono, field_pattern, resolve_parameterized_type(mono, args[i].expr_type), bindings.ref)
                 i += 1
             }
 
@@ -601,9 +601,9 @@ private let substitute_expr_kind(
 
         // Block: substitute all statements.
         .Block(statements) then {
-            let mut new_stmts = List[TypedStatement].new()
-            for stmt in statements then {
-                new_stmts.push(substitute_statement(mono, stmt, substitution))
+            let mut new_stmts = List[ref TypedStatement].new()
+            for stmt_ref in statements then {
+                new_stmts.push(box(substitute_statement(mono, stmt_ref, substitution)))
             }
             yield box(TypedExprKind.Block(new_stmts))
         },
@@ -624,12 +624,12 @@ private let substitute_expr_kind(
         // WhenExpr: substitute subject and all arms.
         .WhenExpr(subject, arms) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
-            let mut new_arms = List[TypedWhenArm].new()
-            for arm in arms then {
-                let new_pattern  = substitute_pattern(mono, arm.pattern, substitution)
-                let new_body     = substitute_types_in_expression(mono, arm.body, substitution)
-                let new_arm_type = mono.substitute_type_impl(arm.arm_type, substitution)
-                new_arms.push(TypedWhenArm(box(new_pattern), new_body, new_arm_type))
+            let mut new_arms = List[ref TypedWhenArm].new()
+            for arm_ref in arms then {
+                let new_pattern  = substitute_pattern(mono, arm_ref.pattern, substitution)
+                let new_body     = substitute_types_in_expression(mono, arm_ref.body, substitution)
+                let new_arm_type = mono.substitute_type_impl(arm_ref.arm_type, substitution)
+                new_arms.push(box(TypedWhenArm(box(new_pattern), new_body, new_arm_type)))
             }
             yield box(TypedExprKind.WhenExpr(new_subject, new_arms))
         },
@@ -913,11 +913,11 @@ private let bind_static_method_symbol(
         let lookup_key = "\(receiver_key).\(mono.storage.context.symbol_name(method))"
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
-                let bound_return_type = when mono.storage.context.get_function_return_type(def_id) in {
-                    .Some(return_type) then return_type,
+                let bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
+                    .Some(function_type) then function_type,
                     .None() then method.symbol_type,
                 }
-                return Symbol(def_id, bound_return_type, method.kind)
+                return Symbol(def_id, bound_symbol_type, method.kind)
             },
             .None() then {},
         }
@@ -931,11 +931,11 @@ private let bind_static_method_symbol(
         let lookup_key = "\(receiver_key).\(method_name)"
         when mono.storage.extension_method_def_ids.get(lookup_key) in {
             .Some(def_id) then {
-                let bound_return_type = when mono.storage.context.get_function_return_type(def_id) in {
-                    .Some(return_type) then return_type,
+                let bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
+                    .Some(function_type) then function_type,
                     .None() then method.symbol_type,
                 }
-                return Symbol(def_id, bound_return_type, method.kind)
+                return Symbol(def_id, bound_symbol_type, method.kind)
             },
             .None() then {},
         }
@@ -1057,11 +1057,11 @@ private let lookup_exact_receiver_method_symbol(
         if not method_type_matches_expected(mono, candidate_type, expected_method_type_opt) then {
             continue
         }
-        let bound_return_type = when mono.storage.context.get_function_return_type(def_id) in {
-            .Some(return_type) then return_type,
+        let bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
+            .Some(function_type) then function_type,
             .None() then method.symbol_type,
         }
-        return Option[Symbol].Some(Symbol(def_id, bound_return_type, method.kind))
+        return Option[Symbol].Some(Symbol(def_id, bound_symbol_type, method.kind))
     }
 
     let direct_lookup_key = "\(layout_key(resolved_receiver_type)).\(method_name)"
@@ -1069,14 +1069,34 @@ private let lookup_exact_receiver_method_symbol(
         .Some(def_id) then {
             let candidate_type = mono.storage.context.get_function_type(def_id) or else Type.Unknown()
             if method_type_matches_expected(mono, candidate_type, expected_method_type_opt) then {
-                let bound_return_type = when mono.storage.context.get_function_return_type(def_id) in {
-                    .Some(return_type) then return_type,
+                let bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
+                    .Some(function_type) then function_type,
                     .None() then method.symbol_type,
                 }
-                return Option[Symbol].Some(Symbol(def_id, bound_return_type, method.kind))
+                return Option[Symbol].Some(Symbol(def_id, bound_symbol_type, method.kind))
             }
         },
         .None() then {},
+    }
+
+    for receiver_alias in static_method_receiver_aliases(mono, resolved_receiver_type) then {
+        let alias_lookup_key = "\(receiver_alias).\(method_name)"
+        if alias_lookup_key == direct_lookup_key then {
+            continue
+        }
+        when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
+            .Some(def_id) then {
+                let candidate_type = mono.storage.context.get_function_type(def_id) or else Type.Unknown()
+                if method_type_matches_expected(mono, candidate_type, expected_method_type_opt) then {
+                    let bound_symbol_type = when mono.storage.context.get_function_type(def_id) in {
+                        .Some(function_type) then function_type,
+                        .None() then method.symbol_type,
+                    }
+                    return Option[Symbol].Some(Symbol(def_id, bound_symbol_type, method.kind))
+                }
+            },
+            .None() then {},
+        }
     }
 
     return Option[Symbol].None()
@@ -1311,7 +1331,7 @@ let align_method_reference_base_for_bound_method(
 // Substitute types in a TypedStatement node.
 public let substitute_statement(
     mono ref Monomorphizer,
-    stmt TypedStatement,
+    stmt ref TypedStatement,
     substitution Dict[String, Type],
 ) TypedStatement = {
     return when stmt in {
@@ -1367,11 +1387,11 @@ public let substitute_statement(
         },
         .WhenStmt(subject, arms, span) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
-            let mut new_arms = List[TypedWhenArm].new()
-            for arm in arms then {
-                let new_body = substitute_types_in_expression(mono, arm.body, substitution)
-                let new_arm_type = mono.substitute_type_impl(arm.arm_type, substitution)
-                new_arms.push(TypedWhenArm(arm.pattern, new_body, new_arm_type))
+            let mut new_arms = List[ref TypedWhenArm].new()
+            for arm_ref in arms then {
+                let new_body = substitute_types_in_expression(mono, arm_ref.body, substitution)
+                let new_arm_type = mono.substitute_type_impl(arm_ref.arm_type, substitution)
+                new_arms.push(box(TypedWhenArm(arm_ref.pattern, new_body, new_arm_type)))
             }
             yield TypedStatement.WhenStmt(new_subject, new_arms, span)
         },
@@ -1418,20 +1438,20 @@ public let substitute_pattern(
     return when pattern in {
         // StructPattern: recurse into each element pattern.
         .StructPattern(type_name, elements) then {
-            let mut new_elements = List[TypedPatternElement].new()
+            let mut new_elements = List[ref TypedPatternElement].new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
-                new_elements.push(TypedPatternElement(elem.label, box(new_sub)))
+                new_elements.push(box(TypedPatternElement(elem.label, box(new_sub))))
             }
             yield TypedPattern.StructPattern(type_name, new_elements)
         },
 
         // EnumCase: recurse into each element pattern.
         .EnumCase(case_name, tag_index, elements) then {
-            let mut new_elements = List[TypedPatternElement].new()
+            let mut new_elements = List[ref TypedPatternElement].new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
-                new_elements.push(TypedPatternElement(elem.label, box(new_sub)))
+                new_elements.push(box(TypedPatternElement(elem.label, box(new_sub))))
             }
             yield TypedPattern.EnumCase(case_name, tag_index, new_elements)
         },

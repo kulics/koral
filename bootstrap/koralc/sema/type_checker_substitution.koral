@@ -92,16 +92,17 @@ given TypeChecker {
         return out
     }
 
-    private apply_subst_to_given_members(self, subst TypeSubstitution, members List[TypedGivenMember]) List[TypedGivenMember] = {
-        let mut out = List[TypedGivenMember].new()
-        for m in members then {
+    private apply_subst_to_given_members(self, subst TypeSubstitution, members List[ref TypedGivenMember]) List[ref TypedGivenMember] = {
+        let mut out = List[ref TypedGivenMember].new()
+        for m_ref in members then {
+            let m = m_ref.val
             let new_body = when m.body in {
                 .Some(b) then Option[ref TypedExpr].Some(self.apply_subst_to_expr(subst, b)),
                 .None() then Option[ref TypedExpr].None(),
             }
             let new_params = self.apply_subst_to_params(subst, m.params)
             let new_return_type = subst.apply(m.return_type)
-            out.push(TypedGivenMember(m.def_id, m.name, new_params, new_return_type, new_body))
+            out.push(box(TypedGivenMember(m.def_id, m.name, new_params, new_return_type, new_body)))
         }
         return out
     }
@@ -257,12 +258,12 @@ given TypeChecker {
         }
     }
 
-    private apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[TypedWhenArm]) List[TypedWhenArm] = {
-        let mut out = List[TypedWhenArm].new()
+    private apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[ref TypedWhenArm]) List[ref TypedWhenArm] = {
+        let mut out = List[ref TypedWhenArm].new()
         for arm in arms then {
             let new_body = self.apply_subst_to_expr(subst, arm.body)
             let new_arm_type = new_body.expr_type
-            out.push(TypedWhenArm(arm.pattern, new_body, new_arm_type))
+            out.push(box(TypedWhenArm(arm.pattern, new_body, new_arm_type)))
         }
         return out
     }
@@ -362,9 +363,9 @@ given TypeChecker {
                 ))
             },
             .Block(statements) then {
-                let mut new_statements = List[TypedStatement].new()
+                let mut new_statements = List[ref TypedStatement].new()
                 for stmt in statements then {
-                    new_statements.push(self.apply_subst_to_statement(subst, stmt))
+                    new_statements.push(box(self.apply_subst_to_statement(subst, stmt)))
                 }
                 yield box(TypedExprKind.Block(new_statements))
             },

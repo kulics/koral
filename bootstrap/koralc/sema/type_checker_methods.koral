@@ -149,7 +149,7 @@ given TypeChecker {
             .Some(kind) then when kind in {
                 .String() then {
                     self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(base)))
-                    yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown())
+                    yield make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
                 },
                 .List(_) or .Deque(_) then {
                     let helper_name = if mutable then "__index_mut_ref" else "__index_ref"
@@ -181,7 +181,7 @@ given TypeChecker {
                     "subscript is only supported for String, List, Deque, and pointer types",
                     self.typed_expr_span(box(base))
                 )
-                yield make_typed_expr(TypedExprKind.Block(List[TypedStatement].new()), Type.Unknown())
+                yield make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
             },
         }
     }
@@ -732,15 +732,14 @@ given TypeChecker {
     private resolve_extension_template_signature(self, base_type Type, inner_type Type, method_name String) Option[Symbol] = {
         let template_key = self.generic_extension_lookup_key(inner_type)
         return when template_key in {
-            .Some(key) then when self.storage.generic_templates.lookup_extension_method_ref(
+            .Some(key) then when self.storage.generic_templates.lookup_extension_method(
                 key,
                 method_name,
                 Option[UInt].None(),
                 Option[UInt].Some(self.receiver_type_args(inner_type).count()),
             ) in {
-                .Some(template_ref) then {
+                .Some(template) then {
                     let actual_type_args = self.receiver_type_args(inner_type)
-                    let template = template_ref.val
                     let mut bindings = Dict[String, Type].new()
                     let mut i UInt = 0
                     while i < template.type_params.count() and i < actual_type_args.count() then {
@@ -1739,7 +1738,7 @@ given TypeChecker {
         let mut arg_i UInt = 0
         while arg_i < args.count() and arg_i + 1(UInt) < self.method_param_count(method) then {
             let param_type = self.method_param_type(method, arg_i + 1(UInt)) or else Type.Unknown()
-            self.infer_type_bindings(param_type, args[arg_i].val.expr_type, bindings)
+            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings)
             arg_i += 1
         }
         return bindings
@@ -1842,7 +1841,7 @@ given TypeChecker {
         let mut arg_i UInt = 0
         while arg_i < args.count() and arg_i < self.method_param_count(method) then {
             let param_type = self.method_param_type(method, arg_i) or else Type.Unknown()
-            self.infer_type_bindings(param_type, args[arg_i].val.expr_type, bindings.ref)
+            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings.ref)
             arg_i += 1
         }
 

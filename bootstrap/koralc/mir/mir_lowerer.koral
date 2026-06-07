@@ -1,105 +1,88 @@
+using std::os { env }
+
 public type MIRLowerer(
-    program ref MonomorphizedProgram,
+    program mut ref MonomorphizedProgram,
     context CompilerContext,
+    mut pending_work_items List[ref MIRFunctionWorkItem],
+    mut streaming_nodes_prepared Bool,
 )
 
 given MIRLowerer {
-    public new(program ref MonomorphizedProgram, context CompilerContext) MIRLowerer =
-        MIRLowerer(program, context)
+    public new(program mut ref MonomorphizedProgram, context CompilerContext) MIRLowerer =
+        MIRLowerer(program, context, List[ref MIRFunctionWorkItem].new(), false)
 
-    public lower(self) MIRProgram = {
-        let mut globals = List[MIRGlobal].new()
-        let mut functions = List[MIRFunction].new()
+    public metadata_program(self) ref MIRProgram = {
+        let mut globals_reversed = List[MIRGlobal].new()
 
         for request in self.program.vtable_requests then {
-            globals.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
+            globals_reversed.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
         }
 
-        for node in self.program.global_nodes then {
-            when node in {
+        for node_ref in self.program.global_nodes then {
+            when node_ref in {
                 .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals.push(MIRGlobal.ForeignFunction(identifier, params, return_type))
+                    globals_reversed.push(MIRGlobal.ForeignFunction(identifier, params, return_type))
                 },
                 .ForeignLetDecl(_, _, mutable, decl_type, _, identifier) then {
-                    globals.push(MIRGlobal.ForeignGlobalVariable(identifier, mutable, decl_type))
+                    globals_reversed.push(MIRGlobal.ForeignGlobalVariable(identifier, mutable, decl_type))
                 },
                 .ForeignTypeDecl(_, _, fields, _, identifier) then {
                     when fields in {
-                        .Some(f) then globals.push(MIRGlobal.ForeignStruct(identifier, f)),
-                        .None() then globals.push(MIRGlobal.ForeignType(identifier)),
+                        .Some(f) then globals_reversed.push(MIRGlobal.ForeignStruct(identifier, f)),
+                        .None() then globals_reversed.push(MIRGlobal.ForeignType(identifier)),
                     }
                 },
                 .LetDecl(_, _, mutable, decl_type, initializer, _, identifier) then {
-                    let init_function = self.make_global_initializer(identifier, initializer)
-                    globals.push(MIRGlobal.GlobalVariable(identifier, init_function.identifier, mutable, decl_type))
-                    functions.push(init_function)
+                    let init_function = self.make_global_initializer_symbol(identifier)
+                    globals_reversed.push(MIRGlobal.GlobalVariable(identifier, init_function, mutable, decl_type))
+                    let _ = initializer
                 },
                 .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                     let kind = MIRFunctionKind.Global()
-                    globals.push(MIRGlobal.Function(identifier, params, return_type, kind))
-                    if self.should_lower_function(identifier) then {
-                        functions.push(self.make_function(identifier, params, return_type, kind, body))
-                    }
+                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, kind))
+                    let _ = body
                 },
                 .IntrinsicFunctionDecl(_, _, params, return_type, _, identifier) then {
-                    globals.push(MIRGlobal.Function(identifier, params, return_type, MIRFunctionKind.Global()))
+                    globals_reversed.push(MIRGlobal.Function(identifier, params, return_type, MIRFunctionKind.Global()))
                 },
                 .TypeStructDecl(_, _, fields, _, identifier) then {
-                    globals.push(MIRGlobal.StructDeclaration(identifier, fields))
+                    globals_reversed.push(MIRGlobal.StructDeclaration(identifier, fields))
                 },
                 .TypeEnumDecl(_, _, cases, _, identifier) then {
-                    globals.push(MIRGlobal.EnumDeclaration(identifier, cases))
+                    globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases))
                 },
                 .GivenDecl(target_type, members, _) then {
                     let mut method_symbols = List[ref Symbol].new()
-                    for member in members then {
-                        let symbol = self.make_given_member_symbol(member)
+                    for member_ref in members then {
+                        let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
                             method_symbols.push(symbol)
                         }
-                        when member.body in {
-                            .Some(body) then {
-                                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                                if self.should_lower_function(symbol) then {
-                                    functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
-                                }
-                            },
-                            .None() then {},
-                        }
                     }
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
                     }
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
                     let mut method_symbols = List[ref Symbol].new()
-                    for member in members then {
-                        let symbol = self.make_given_member_symbol(member)
+                    for member_ref in members then {
+                        let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
                             method_symbols.push(symbol)
                         }
                     }
                     if not self.context.contains_generic_parameter(target_type) then {
-                        globals.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].None(), List[Type].new(), method_symbols))
                     }
                 },
                 .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
                     let mut copied_trait_args = List[Type].new()
                     for arg in trait_args then { copied_trait_args.push(arg) }
                     let mut method_symbols = List[ref Symbol].new()
-                    for member in members then {
-                        let symbol = self.make_given_member_symbol(member)
+                    for member_ref in members then {
+                        let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
                             method_symbols.push(symbol)
-                        }
-                        when member.body in {
-                            .Some(body) then {
-                                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
-                                if self.should_lower_function(symbol) then {
-                                    functions.push(self.make_function(symbol, member.params, member.return_type, kind, body))
-                                }
-                            },
-                            .None() then {},
                         }
                     }
                     let mut trait_args_concrete = true
@@ -109,12 +92,12 @@ given MIRLowerer {
                         }
                     }
                     if not self.context.contains_generic_parameter(target_type) and trait_args_concrete then {
-                        globals.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols))
+                        globals_reversed.push(MIRGlobal.Given(target_type, Option[String].Some(trait_name), copied_trait_args, method_symbols))
                     }
                 },
-                .GenericFunctionDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
-                .GenericTypeStructDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
-                .GenericTypeEnumDecl(_, name, _) then globals.push(MIRGlobal.TemplatePlaceholder(name)),
+                .GenericFunctionDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
+                .GenericTypeStructDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
+                .GenericTypeEnumDecl(_, name, _) then globals_reversed.push(MIRGlobal.TemplatePlaceholder(name)),
                 .TraitDecl(_, _, _, _) then {},
                 .TypeAliasDecl(_, _, _, _) then {},
                 .IntrinsicTypeDecl(_, _, _) then {},
@@ -122,15 +105,140 @@ given MIRLowerer {
             }
         }
 
-        return MIRProgram(
+        let mut globals = List[MIRGlobal].new()
+        while not globals_reversed.is_empty() then {
+            globals.push(globals_reversed.pop() or else { break })
+        }
+
+        let program = box(MIRProgram(
             globals,
-            functions,
+            List[ref MIRFunction].new(),
             self.context,
             self.program.static_method_by_key,
             self.program.traits,
             self.program.receiver_method_dispatch,
             self.program.concrete_callables_by_def_id,
-        )
+        ))
+        return program
+    }
+
+    public lower_next_work_item(self mut ref) Option[ref MIRFunction] = {
+        self.prepare_streaming_nodes()
+
+        while true then {
+            when self.pending_work_items.pop() in {
+                .Some(item) then {
+                    return Option[ref MIRFunction].Some(self.lower_work_item(item))
+                },
+                .None() then {},
+            }
+
+            let node_ref = self.program.global_nodes.pop() or else { return Option[ref MIRFunction].None() }
+            self.enqueue_node_work_items(node_ref)
+        }
+        return Option[ref MIRFunction].None()
+    }
+
+    private prepare_streaming_nodes(self mut ref) Void = {
+        if self.streaming_nodes_prepared then {
+            return
+        }
+
+        let mut reversed = List[ref TypedDecl].new()
+        while not self.program.global_nodes.is_empty() then {
+            reversed.push(self.program.global_nodes.pop() or else { break })
+        }
+        self.program.global_nodes = reversed
+        self.streaming_nodes_prepared = true
+    }
+
+    private enqueue_node_work_items(self mut ref, node_ref ref TypedDecl) Void = {
+        when node_ref in {
+            .LetDecl(_, _, _, _, initializer, _, identifier) then {
+                let init_function = self.make_global_initializer_symbol(identifier)
+                self.pending_work_items.push(box(MIRFunctionWorkItem(
+                    init_function,
+                    List[TypedParam].new(),
+                    identifier.symbol_type,
+                    MIRFunctionKind.Global(),
+                    initializer,
+                )))
+            },
+            .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
+                if self.should_lower_function(identifier) then {
+                    self.pending_work_items.push(box(MIRFunctionWorkItem(
+                        identifier,
+                        params,
+                        return_type,
+                        MIRFunctionKind.Global(),
+                        body,
+                    )))
+                }
+            },
+            .GivenDecl(target_type, members, _) then {
+                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
+                let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
+                for member_ref in members then {
+                    let symbol = self.make_given_member_symbol(member_ref)
+                    when member_ref.body in {
+                        .Some(body) then {
+                            if self.should_lower_function(symbol) then {
+                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+                while not methods_reversed.is_empty() then {
+                    self.pending_work_items.push(methods_reversed.pop() or else { break })
+                }
+            },
+            .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
+                let mut copied_trait_args = List[Type].new()
+                for arg in trait_args then { copied_trait_args.push(arg) }
+                let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
+                let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
+                for member_ref in members then {
+                    let symbol = self.make_given_member_symbol(member_ref)
+                    when member_ref.body in {
+                        .Some(body) then {
+                            if self.should_lower_function(symbol) then {
+                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+                while not methods_reversed.is_empty() then {
+                    self.pending_work_items.push(methods_reversed.pop() or else { break })
+                }
+            },
+            _ then {},
+        }
+    }
+
+    public lower(self mut ref) ref MIRProgram = {
+        let program = self.metadata_program()
+        let mut functions = List[ref MIRFunction].new()
+        while true then {
+            when self.lower_next_work_item() in {
+                .Some(function) then functions.push(function),
+                .None() then { break },
+            }
+        }
+        return box(MIRProgram(
+            program.globals,
+            functions,
+            program.context,
+            program.static_method_lookup,
+            program.traits,
+            program.receiver_method_dispatch,
+            program.concrete_callables_by_def_id,
+        ))
+    }
+
+    public lower_work_item(self, item ref MIRFunctionWorkItem) ref MIRFunction = {
+        return self.make_function(item.identifier, item.params, item.return_type, item.kind, item.body)
     }
 
     private make_function(
@@ -140,7 +248,7 @@ given MIRLowerer {
         return_type Type,
         kind MIRFunctionKind,
         body ref TypedExpr,
-    ) MIRFunction = {
+    ) ref MIRFunction = {
         let mut builder = MIRFunctionBuilder.new(
             self.program,
             identifier,
@@ -159,10 +267,10 @@ given MIRLowerer {
         return not self.context.contains_generic_parameter(identifier.symbol_type)
     }
 
-    private make_global_initializer(self, identifier ref Symbol, value ref TypedExpr) MIRFunction = {
+    private make_global_initializer_symbol(self, identifier ref Symbol) ref Symbol = {
         let function_type = Type.FunctionType(List[ref FunctionParamEntry].new(), box(identifier.symbol_type))
         let mut context = self.context
-        let symbol = box(context.create_symbol(
+        return box(context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
             self.context.get_module_path(identifier.def_id) or else List[String].new(),
             self.context.get_source_file(identifier.def_id) or else "<mir_global_init>",
@@ -173,13 +281,18 @@ given MIRLowerer {
             unknown_span(),
             false,
         ))
-        return self.make_function(symbol, List[TypedParam].new(), identifier.symbol_type, MIRFunctionKind.Global(), value)
     }
 
-    private make_given_member_symbol(self, member TypedGivenMember) ref Symbol = {
+    private make_given_member_symbol(self, member ref TypedGivenMember) ref Symbol = {
         let function_type = when self.context.get_function_type(member.def_id) in {
             .Some(t) then t,
-            .None() then member.return_type,
+            .None() then {
+                let mut param_types = List[ref Type].new()
+                for param in member.params then {
+                    param_types.push(box(param.param_type))
+                }
+                yield Type.FunctionType(types_to_param_entries(param_types), box(member.return_type))
+            },
         }
         return box(Symbol(member.def_id, function_type, SymbolKind.Function()))
     }
