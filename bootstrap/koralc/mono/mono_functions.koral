@@ -132,6 +132,21 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
     let func_symbol = Symbol(def_id, function_type, SymbolKind.Function())
     mono.storage.instantiated_function_symbols.insert(mangled_name, func_symbol)
 
+    // Register ConcreteCallableInfo so codegen can resolve the C name.
+    // For generic given methods (e.g. Path.join[T]), the original def_id
+    // has no ConcreteCallableInfo because seed_given_method_def_ids skips
+    // generic members. Register under the ORIGINAL template def_id as key,
+    // with info.def_id pointing to the monomorphized def_id which has the
+    // correct C name set by collect_codegen_c_identifiers.
+    // This way, call sites using the original def_id can look up
+    // ConcreteCallableInfo and find the monomorphized C name via info.def_id.
+    if template.def_id <> def_id then {
+        let info = ConcreteCallableInfo(def_id, template.name, Option[Type].None(), Option[String].None())
+        if not mono.storage.concrete_callables_by_def_id.contains_key(template.def_id) then {
+            mono.storage.concrete_callables_by_def_id.insert(template.def_id, info)
+        }
+    }
+
     // Record the DefId remapping from the generic template's DefId to the concrete one.
     when mono.storage.remapped_function_def_ids.get(template.def_id.id) in {
         .Some(existing_list) then {
@@ -2168,3 +2183,5 @@ public let instantiate_trait_placeholder_method(
     mono.storage.in_progress_trait_placeholder_keys.remove(trait_placeholder_key)
     mono.storage.resolved_trait_placeholder_keys.insert(trait_placeholder_key)
 }
+// DEBUG: Check if Path.join goes through instantiate_function
+
