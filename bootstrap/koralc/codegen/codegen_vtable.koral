@@ -995,4 +995,36 @@ given CodeGen {
         return result
     }
 
+    /// Generate a copy of the value pointed to by a ref.
+    /// Used when assigning a ref to a non-ref value type variable.
+    /// For struct/enum types: `__koral_Type_copy(&(*(struct Type*)ref_value.ptr))`
+    /// For primitive types: `(*(type*)ref_value.ptr)` (no copy function needed)
+    public generate_copy_from_ref_value(self mut ref, ref_value String, pointee_c_type String) String = {
+        // Check if this is a primitive type (no struct/enum prefix)
+        let is_primitive = not pointee_c_type.starts_with("struct ") and not pointee_c_type.starts_with("enum ")
+        if is_primitive then {
+            // Primitive types: just dereference
+            let mut result = String.new()
+            result.push_string("(*(")
+            result.push_string(pointee_c_type)
+            result.push_string("*)")
+            result.push_string(ref_value)
+            result.push_string(".ptr)")
+            return result
+        }
+        // Strip "struct " or "enum " prefix for the copy function name
+        let copy_name = if pointee_c_type.starts_with("struct ") then pointee_c_type.substring(7..<pointee_c_type.count())
+            else if pointee_c_type.starts_with("enum ") then pointee_c_type.substring(5..<pointee_c_type.count())
+            else pointee_c_type
+        let mut result = String.new()
+        result.push_string("__koral_")
+        result.push_string(copy_name)
+        result.push_string("_copy(&(*(struct ")
+        result.push_string(copy_name)
+        result.push_string("*)")
+        result.push_string(ref_value)
+        result.push_string(".ptr))")
+        return result
+    }
+
 }
