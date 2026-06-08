@@ -738,6 +738,26 @@ given CodeGen {
                     .Some(owner_type) then {
                         let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
                         let raw_method_name = self.context.symbol_name(symbol)
+                        // Try to find the monomorphized C name by searching
+                        // concrete_callables_by_def_id for a matching entry.
+                        // The call site's def_id differs from the monomorphized def_id,
+                        // but the ConcreteCallableInfo stores the logical_name and owner_type.
+                        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+                            let info = entry.second
+                            if info.logical_name == raw_method_name then {
+                                when info.owner_type in {
+                                    .Some(info_owner) then {
+                                        if self.emitted_type_c_name_fallback(info_owner) == owner_c_name then {
+                                            when self.c_identifier_opt(info.def_id) in {
+                                                .Some(c_id) then { return c_id },
+                                                .None() then {},
+                                            }
+                                        }
+                                    },
+                                    _ then {},
+                                }
+                            }
+                        }
                         yield self.compose_method_c_name(owner_c_name, raw_method_name)
                     },
                     .None() then {
@@ -751,6 +771,22 @@ given CodeGen {
                                 .None() then {},
                             },
                             .None() then {},
+                        }
+                        // Try to find the monomorphized C name by searching
+                        // concrete_callables_by_def_id for a matching entry.
+                        // This handles extension methods from given blocks where
+                        // the call site's def_id differs from the monomorphized def_id.
+                        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+                            let info = entry.second
+                            if info.logical_name == raw_method_name then {
+                                when self.c_identifier_opt(info.def_id) in {
+                                    .Some(c_id) then {
+                                        // Verify the C name looks correct (contains the method name)
+                                        if c_id.contains(raw_method_name) then { return c_id }
+                                    },
+                                    .None() then {},
+                                }
+                            }
                         }
                         let raw_name = self.qualified_name(symbol)
                         yield when raw_name.find_last("_") in {

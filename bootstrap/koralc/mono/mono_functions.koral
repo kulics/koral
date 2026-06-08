@@ -1084,6 +1084,32 @@ public let instantiate_extension_method_from_entry(
         ConcreteCallableInfo(def_id, template.method.name, Option[Type].Some(base_type), template.conformance_trait_name)
     )
 
+    // For extension methods from given blocks, register the monomorphized
+    // def_id in remapped_function_def_ids so that bind_generic_function_call_callee
+    // can find it from the original def_id used by call sites.
+    // Search extension_method_def_ids using the base key (without type args)
+    // to find the original def_id.
+    let base_lookup_key = "\(concrete_lookup_type_name).\(template.method.name)"
+    when mono.storage.extension_method_def_ids.get(base_lookup_key) in {
+        .Some(original_def_id) then {
+            if original_def_id <> def_id then {
+                when mono.storage.remapped_function_def_ids.get(original_def_id.id) in {
+                    .Some(existing_list) then {
+                        let mut updated = existing_list
+                        updated.push(Pair(def_id, function_type))
+                        mono.storage.remapped_function_def_ids.insert(original_def_id.id, updated)
+                    },
+                    .None() then {
+                        let mut new_list = List[Pair[DefId, Type]].new()
+                        new_list.push(Pair(def_id, function_type))
+                        mono.storage.remapped_function_def_ids.insert(original_def_id.id, new_list)
+                    },
+                }
+            }
+        },
+        .None() then {},
+    }
+
     // f. Register in extension_method_def_ids with dual keys.
     //    Primary key: "concreteLookupTypeName.methodName"
     mono.storage.extension_method_def_ids.insert(lookup_key, def_id)
@@ -2183,5 +2209,3 @@ public let instantiate_trait_placeholder_method(
     mono.storage.in_progress_trait_placeholder_keys.remove(trait_placeholder_key)
     mono.storage.resolved_trait_placeholder_keys.insert(trait_placeholder_key)
 }
-// DEBUG: Check if Path.join goes through instantiate_function
-
