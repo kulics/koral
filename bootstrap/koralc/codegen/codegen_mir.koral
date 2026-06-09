@@ -1139,32 +1139,13 @@ given MIRFunctionCodeEmitter {
         target_type Type,
         retain_source Bool,
     ) String = {
-        // Handle trait object conversions
-        let trait_result = when self.trait_object_target_name(target_type) in {
+        return when self.trait_object_target_name(target_type) in {
             .Some(trait_name) then when self.trait_object_source_concrete_type(source_type) in {
                 .Some(concrete_type) then self.codegen.generate_trait_object_conversion_from_ref_value(expression, trait_name, concrete_type, retain_source),
                 .None() then expression,
             },
             .None() then expression,
         }
-        // Handle ref-to-value dereference: when source is a ref type and target
-        // is a non-ref value type, dereference the ref to get the value.
-        if trait_result == expression then {
-            when source_type in {
-                .ReferenceType(inner) or .MutableReferenceType(inner) then {
-                    let is_target_ref = when target_type in {
-                        .ReferenceType(_) or .MutableReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then true,
-                        _ then false,
-                    }
-                    if not is_target_ref then {
-                        let pointee_c_type = self.codegen.c_type_name(inner.val)
-                        return self.codegen.generate_copy_from_ref_value(expression, pointee_c_type)
-                    }
-                },
-                _ then {},
-            }
-        }
-        return trait_result
     }
 
     private emit_trait_method_call(self mut ref, call MIRTraitMethodCall) MIRValueEmission = {
@@ -1345,17 +1326,7 @@ given MIRFunctionCodeEmitter {
 
     private emit_cast_operand(self mut ref, operand MIROperand, target_type Type) MIRValueEmission = {
         let source = self.emit_operand_value(operand)
-        let source_type = self.type_of_operand(operand)
-        // When casting a ref to a scalar type, dereference the ref first
-        let mut cast_source = source.expression
-        when source_type in {
-            .ReferenceType(inner) or .MutableReferenceType(inner) then {
-                let pointee_c_type = self.codegen.c_type_name(inner.val)
-                cast_source = "(*(" + pointee_c_type + "*)" + source.expression + ".ptr)"
-            },
-            _ then {},
-        }
-        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(target_type), "(\(self.codegen.c_type_name(target_type)))\(cast_source)")
+        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(target_type), "(\(self.codegen.c_type_name(target_type)))\(source.expression)")
         self.emit_cleanup(source.cleanup)
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, target_type))
     }

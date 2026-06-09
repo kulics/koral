@@ -711,22 +711,19 @@ given TypeChecker {
                 .Some(_) then Option[String].Some(template_name),
                 .None() then Option[String].None(),
             },
-            .StructureType(def_id) then {
-                // For concrete types, use template name if available, otherwise use type name.
-                // This allows extension methods from given blocks (e.g. given Path { join[T]... })
-                // to be found via the extension_methods registry.
-                let key = when self.context().get_template_name(def_id) in {
-                    .Some(template_name) then template_name,
-                    .None() then self.context().get_name(def_id) or else "",
-                }
-                yield if key.is_empty() then Option[String].None() else Option[String].Some(key)
+            .StructureType(def_id) then when self.context().get_template_name(def_id) in {
+                .Some(template_name) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                    .Some(_) then Option[String].Some(template_name),
+                    .None() then Option[String].None(),
+                },
+                .None() then Option[String].None(),
             },
-            .EnumType(def_id) then {
-                let key = when self.context().get_template_name(def_id) in {
-                    .Some(template_name) then template_name,
-                    .None() then self.context().get_name(def_id) or else "",
-                }
-                yield if key.is_empty() then Option[String].None() else Option[String].Some(key)
+            .EnumType(def_id) then when self.context().get_template_name(def_id) in {
+                .Some(template_name) then when self.storage.generic_templates.lookup_enum(template_name) in {
+                    .Some(_) then Option[String].Some(template_name),
+                    .None() then Option[String].None(),
+                },
+                .None() then Option[String].None(),
             },
             _ then Option[String].None(),
         }
@@ -982,19 +979,10 @@ given TypeChecker {
                 yield Option[String].Some(template)
             },
             .StructureType(def_id) then {
-                // For concrete types, use template name if available, otherwise type name.
-                // This allows extension methods from given blocks (e.g. given Path { join[T]... })
-                // to be found via resolve_extension_template_signature.
-                yield when self.context().get_template_name(def_id) in {
-                    .Some(name) then Option[String].Some(name),
-                    .None() then self.context().get_name(def_id),
-                }
+                yield self.context().get_template_name(def_id)
             },
             .EnumType(def_id) then {
-                yield when self.context().get_template_name(def_id) in {
-                    .Some(name) then Option[String].Some(name),
-                    .None() then self.context().get_name(def_id),
-                }
+                yield self.context().get_template_name(def_id)
             },
             _ then Option[String].None(),
         }
