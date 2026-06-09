@@ -3213,10 +3213,30 @@ private let bind_generic_function_call_callee(
             // between helpers that share the same textual name across modules.
             let template_opt = if symbol.def_id.id > 0 then mono.storage.generic_templates.lookup_function_by_def_id(symbol.def_id)
                 else Option[ref GenericFunctionTemplate].None()
+            // If this is a method call (has arguments) and the template has a
+            // receiver parameter, it might be an extension method from a given block
+            // (e.g. Path.join[T]). Route through try_bind_generic_method_call so
+            // the monomorphizer can properly instantiate it.
+            when template_opt in {
+                .Some(t) then {
+                    if not args.is_empty() and not t.parameters.is_empty() and t.parameters[0(UInt)].name == "self" then {
+                        let dummy_type = resolve_parameterized_type(mono, symbol.symbol_type)
+                        return box(TypedExpr(box(TypedExprKind.Variable(box(Symbol(DefId(0), dummy_type, SymbolKind.Function())))), dummy_type))
+                    }
+                },
+                .None() then {},
+            }
             let template = when template_opt in {
                 .Some(t) then t,
                 .None() then {
                     if symbol.def_id.id > 0 and not has_generic_parameter(resolve_parameterized_type(mono, symbol.symbol_type)) and not has_ambiguous_remap then {
+                        // If the call has arguments (method call), this might be an extension
+                        // method from a given block (e.g. Path.join[T]).
+                        // Route through try_bind_generic_method_call.
+                        if not args.is_empty() then {
+                            let dummy_type = resolve_parameterized_type(mono, symbol.symbol_type)
+                            return box(TypedExpr(box(TypedExprKind.Variable(box(Symbol(DefId(0), dummy_type, SymbolKind.Function())))), dummy_type))
+                        }
                         return callee
                     }
                     let symbol_name = mono.storage.context.symbol_name(symbol)
