@@ -2456,10 +2456,62 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                 _ then {},
             }
             let mut bound_callee = bind_generic_function_call_callee(mono, new_callee, new_args, resolve_parameterized_type(mono, expr.expr_type))
+            // Also try try_bind_generic_method_call for MethodReference callees
+            // that were not resolved by bind_generic_function_call_callee.
+            // This handles extension methods from given blocks (e.g. Path.join[T]).
+            when new_callee.expr_kind in {
+                .MethodReference(_, _, method_ref, _, _, _) then {
+                    if new_args.count() > 0(UInt) then {
+                        let receiver_type = resolve_parameterized_type(mono, new_args[0(UInt)].expr_type)
+                        let binding_receiver_type = when receiver_type in {
+                            .ReferenceType(inner) then inner.val,
+                            .MutableReferenceType(inner) then inner.val,
+                            .WeakReferenceType(inner) then inner.val,
+                            .MutableWeakReferenceType(inner) then inner.val,
+                            _ then receiver_type,
+                        }
+                        if not has_generic_parameter(binding_receiver_type) then {
+                            let method_name = mono.storage.context.symbol_name(method_ref)
+                            if not method_name.is_empty() then {
+                                let dummy_method = Symbol(DefId(0), Type.Unknown(), SymbolKind.Function())
+                                let rebound = try_bind_generic_method_call(
+                                    mono,
+                                    binding_receiver_type,
+                                    dummy_method,
+                                    new_args,
+                                    resolve_parameterized_type(mono, expr.expr_type),
+                                ).val
+                                if rebound.def_id.id > 0 then {
+                                    let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, rebound)
+                                    let adapted_receiver = adapt_receiver_expr_for_method(mono, new_args[0(UInt)], rebound)
+                                    let dispatch_callsite = ensure_receiver_dispatch_callsite(
+                                        mono,
+                                        .None(),
+                                        binding_receiver_type,
+                                        rebound,
+                                        Option[String].Some(method_name),
+                                    )
+                                    let rebound_callee = box(TypedExpr(
+                                        box(TypedExprKind.MethodReference(adapted_receiver, adapted_receiver.expr_type, box(rebound), List[Type].new(), List[Type].new(), dispatch_callsite)),
+                                        rebound.symbol_type,
+                                    ))
+                                    return box(TypedExpr(box(TypedExprKind.Call(rebound_callee, new_args)), resolved_type))
+                                }
+                            }
+                        }
+                    }
+                },
+                _ then {},
+            }
             when bound_callee.expr_kind in {
                 .Variable(symbol) then {
                     if symbol.def_id.id == 0 and new_args.count() > 0(UInt) then {
-                        let normalized_name = get_semantic_method_name(mono, symbol)
+                        // Get method name from new_callee, not from the dummy symbol
+                        let normalized_name = when new_callee.expr_kind in {
+                            .MethodReference(_, _, method_ref, _, _, _) then mono.storage.context.symbol_name(method_ref),
+                            .Variable(orig_symbol) then get_semantic_method_name(mono, orig_symbol),
+                            _ then get_semantic_method_name(mono, symbol),
+                        }
                         let receiver_type = resolve_parameterized_type(mono, new_args[0(UInt)].expr_type)
                         let binding_receiver_type = when receiver_type in {
                             .ReferenceType(inner) then inner.val,
