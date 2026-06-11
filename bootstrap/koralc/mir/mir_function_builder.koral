@@ -1313,7 +1313,27 @@ given MIRFunctionBuilder {
                         }
                         return self.finish_call(MIROperand.Function(box(callable_method)), values, ownerships, result_type)
                     },
-                    .None() then {},
+                    .None() then {
+                        // Fallback: construct a concrete method symbol from arg/result types.
+                        // This handles cases where callee_type is not FunctionType but the
+                        // method can still be called (e.g., extension methods on concrete types).
+                        let mut param_types = List[ref Type].new()
+                        param_types.push(box(base.expr_type))
+                        for arg in args then { param_types.push(box(arg.expr_type)) }
+                        let concrete_type = Type.FunctionType(types_to_param_entries(param_types), box(result_type))
+                        if not self.context.contains_generic_parameter(concrete_type) then {
+                            let fallback_method = Symbol(method.def_id, concrete_type, method.kind)
+                            let mut values = List[ref MIRValue].new()
+                            let mut ownerships = List[MIROwnershipUse].new()
+                            values.push(box(self.lower_method_receiver_argument(base, fallback_method)))
+                            ownerships.push(self.ownership_use(base))
+                            for arg in args then {
+                                values.push(box(self.lower_value(arg)))
+                                ownerships.push(self.ownership_use(arg))
+                            }
+                            return self.finish_call(MIROperand.Function(box(fallback_method)), values, ownerships, result_type)
+                        }
+                    },
                 }
             },
             _ then {},
