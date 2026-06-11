@@ -352,10 +352,8 @@ given MIRFunctionBuilder {
                 }
             },
             .Call(callee, args) then self.lower_call(callee, args, expression.expr_type),
-            .GenericCall(function_symbol, _, args) then self.finish_call(MIROperand.Function(function_symbol), self.lower_call_arguments(MIROperand.Function(function_symbol), args), expression.expr_type),
-            .StaticMethodCall(receiver_type, method_name, _, _, _, _) then {
-                panic("Unsupported static method call reached MIR lowering: \(method_name) on \(type_to_string(receiver_type))")
-            },
+            .GenericCall(function_symbol, _, args) then self.finish_call_from_typed_args(MIROperand.Function(function_symbol), args, expression.expr_type),
+            .StaticMethodCall(receiver_type, method_name, _, _, _, _) then Option[MIRExprResult].None(),
             .TypeConstruction(identifier, _, args) then self.lower_type_construction(identifier, args, expression.expr_type),
             .EnumConstruction(enum_type, case_name, args) then self.lower_enum_construction(enum_type, case_name, args),
             .MethodReference(_, _, method, _, _, _) then Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Function(method)), Option[MIRPlace].None())),
@@ -1306,9 +1304,14 @@ given MIRFunctionBuilder {
                 when self.concrete_method_symbol(method, callee.expr_type, result_type) in {
                     .Some(callable_method) then {
                         let mut values = List[ref MIRValue].new()
+                        let mut ownerships = List[MIROwnershipUse].new()
                         values.push(box(self.lower_method_receiver_argument(base, callable_method)))
-                        for arg in args then { values.push(box(self.lower_value(arg))) }
-                        return self.finish_call(MIROperand.Function(box(callable_method)), values, result_type)
+                        ownerships.push(self.ownership_use(base))
+                        for arg in args then {
+                            values.push(box(self.lower_value(arg)))
+                            ownerships.push(self.ownership_use(arg))
+                        }
+                        return self.finish_call(MIROperand.Function(box(callable_method)), values, ownerships, result_type)
                     },
                     .None() then {},
                 }
@@ -1316,7 +1319,8 @@ given MIRFunctionBuilder {
             _ then {},
         }
         let callee_operand = self.lower_operand(callee)
-        return self.finish_call(callee_operand, self.lower_call_arguments(callee_operand, args), result_type)
+        let lowered = self.lower_call_arguments(callee_operand, args)
+        return self.finish_call(callee_operand, lowered.first, lowered.second, result_type)
     }
 
     private semantic_method_name(self ref, method ref Symbol) String = {
@@ -1498,16 +1502,18 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_call_arguments(self mut ref, callee MIROperand, args ref List[ref TypedExpr]) List[ref MIRValue] = {
+    private lower_call_arguments(self mut ref, callee MIROperand, args ref List[ref TypedExpr]) Pair[List[ref MIRValue], List[MIROwnershipUse]] = {
         let param_types = self.function_parameter_types(callee)
         let mut values = List[ref MIRValue].new()
+        let mut ownerships = List[MIROwnershipUse].new()
         let mut index UInt = 0
         while index < args.count() then {
             let expected_type = if index < param_types.count() then Option[Type].Some(param_types[index]) else Option[Type].None()
             values.push(box(self.lower_call_argument(args[index], expected_type)))
+            ownerships.push(self.ownership_use(args[index]))
             index += 1
         }
-        return values
+        return Pair[List[ref MIRValue], List[MIROwnershipUse]](values, ownerships)
     }
 
     private lower_call_argument(self mut ref, arg ref TypedExpr, expected_type Option[Type]) MIRValue = {
@@ -1599,8 +1605,8 @@ given MIRFunctionBuilder {
         }
     }
 
-    private finish_call(self mut ref, callee MIROperand, values List[ref MIRValue], result_type Type) Option[MIRExprResult] = {
-        let value = MIRValue.Call(MIRCall(callee, values, result_type))
+    private finish_call(self mut ref, callee MIROperand, values List[ref MIRValue], ownerships List[MIROwnershipUse], result_type Type) Option[MIRExprResult] = {
+        let value = MIRValue.Call(MIRCall(callee, values, ownerships, result_type))
         if self.type_is_never(result_type) then {
             self.append_statement(MIRStatement.Evaluate(value))
             self.terminate(MIRTerminator.Unreachable())
@@ -1614,11 +1620,20 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
+    private finish_call_from_typed_args(self mut ref, callee MIROperand, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
+        let lowered = self.lower_call_arguments(callee, args)
+        return self.finish_call(callee, lowered.first, lowered.second, result_type)
+    }
+
     private lower_type_construction(self mut ref, identifier ref Symbol, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         let mut values = List[ref MIRValue].new()
-        for arg in args then { values.push(box(self.lower_value(arg))) }
+        let mut ownerships = List[MIROwnershipUse].new()
+        for arg in args then {
+            values.push(box(self.lower_value(arg)))
+            ownerships.push(self.ownership_use(arg))
+        }
         let aggregate_type = self.recover_type_construction_result_type(identifier, args, result_type)
-        let result = self.materialize(MIRValue.Aggregate(MIRAggregate(aggregate_type, values)), aggregate_type)
+        let result = self.materialize(MIRValue.Aggregate(MIRAggregate(aggregate_type, values, ownerships)), aggregate_type)
         return Option[MIRExprResult].Some(MIRExprResult(aggregate_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 

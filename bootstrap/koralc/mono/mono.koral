@@ -285,6 +285,7 @@ protected type MonomorphizerStorage(
     mut extension_methods Dict[String, Dict[String, ConcreteMethodEntry]],
     mut extension_method_def_ids Dict[String, DefId],
     mut concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
+    mut concrete_callable_name_index Dict[String, List[DefId]],
     mut remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
     mut receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mut vtable_requests List[VtableRequest],
@@ -414,6 +415,16 @@ given Monomorphizer {
     protected register_concrete_callable_if_absent(self ref, info ConcreteCallableInfo) Void = {
         if not self.storage.concrete_callables_by_def_id.contains_key(info.def_id) then {
             self.storage.concrete_callables_by_def_id.insert(info.def_id, info)
+            // Build secondary index: "layout_key(owner).method_name" -> [def_id, ...]
+            when info.owner_type in {
+                .Some(owner_type) then {
+                    let index_key = "\(layout_key(owner_type)).\(info.logical_name)"
+                    let mut existing = self.storage.concrete_callable_name_index.get(index_key) or else List[DefId].new()
+                    existing.push(info.def_id)
+                    self.storage.concrete_callable_name_index.insert(index_key, existing)
+                },
+                _ then {},
+            }
         }
     }
 
@@ -473,6 +484,7 @@ given Monomorphizer {
             Dict[String, Dict[String, ConcreteMethodEntry]].new(),
             Dict[String, DefId].new(),
             Dict[DefId, ConcreteCallableInfo].new(),
+            Dict[String, List[DefId]].new(),
             Dict[UInt, List[Pair[DefId, Type]]].new(),
             input.generic_templates.receiver_method_dispatch,
             List[VtableRequest].new(),
