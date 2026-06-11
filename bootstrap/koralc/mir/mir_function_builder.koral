@@ -356,7 +356,25 @@ given MIRFunctionBuilder {
             .StaticMethodCall(receiver_type, method_name, _, _, _, _) then Option[MIRExprResult].None(),
             .TypeConstruction(identifier, _, args) then self.lower_type_construction(identifier, args, expression.expr_type),
             .EnumConstruction(enum_type, case_name, args) then self.lower_enum_construction(enum_type, case_name, args),
-            .MethodReference(_, _, method, _, _, _) then Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Function(method)), Option[MIRPlace].None())),
+            .MethodReference(base_expr, _, method, _, _, _) then {
+                // Method references used as values.
+                // If expression type is FunctionType, return as value (closure callback).
+                // Otherwise, call the method with base as receiver (self parameter).
+                let is_func_type = when expression.expr_type in {
+                    .FunctionType(_, _) then true,
+                    _ then false,
+                }
+                if is_func_type then {
+                    yield Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Function(method)), Option[MIRPlace].None()))
+                } else {
+                    let base_emission = self.lower_value(base_expr)
+                    let mut call_values = List[ref MIRValue].new()
+                    let mut call_ownerships = List[MIROwnershipUse].new()
+                    call_values.push(box(base_emission))
+                    call_ownerships.push(self.ownership_use(base_expr))
+                    return self.finish_call(MIROperand.Function(method), call_values, call_ownerships, expression.expr_type)
+                }
+            },
             .TraitMethodPlaceholder(_, _, method, _, _) then Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Function(method)), Option[MIRPlace].None())),
             .TraitObjectConversion(inner, trait_type, concrete_type) then self.lower_trait_object_conversion(inner, trait_type, concrete_type, expression.expr_type),
             .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then self.lower_trait_method_call(receiver, trait_type, method_name, method_index, args, expression.expr_type),
