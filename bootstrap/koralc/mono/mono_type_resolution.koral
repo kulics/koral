@@ -4424,14 +4424,31 @@ private let infer_extension_method_type_args(
     let mut method_bindings = Dict[String, Type].new()
     let mut i UInt = 0
     while i < pattern_param_types.count() then {
+        // Handle implicit ref/mut ref conversions: if the pattern has a reference
+        // wrapper but the actual doesn't, wrap the actual to match.
+        // e.g., pattern `mut ref List[T]` with actual `List[CaseInfo]` becomes
+        //       pattern `mut ref List[T]` with actual `mut ref List[CaseInfo]`.
+        let pattern_type = pattern_param_types[i].val
+        let actual_type = actual_param_types[i].val
+        let adapted_actual = when pattern_type in {
+            .ReferenceType(_) then when actual_type in {
+                .ReferenceType(_) then actual_type,
+                _ then Type.ReferenceType(box(actual_type)),
+            },
+            .MutableReferenceType(_) then when actual_type in {
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableReferenceType(box(actual_type)),
+            },
+            _ then actual_type,
+        }
         if not unify_generic_type_pattern(
             mono,
-            pattern_param_types[i].val,
-            actual_param_types[i].val,
+            pattern_type,
+            adapted_actual,
             type_param_names,
             method_bindings.ref,
         ) then {
-            if type_mentions_method_type_params(pattern_param_types[i].val, type_param_names) then {
+            if type_mentions_method_type_params(pattern_type, type_param_names) then {
                 return Option[List[ref Type]].None()
             }
         }
