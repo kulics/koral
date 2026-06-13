@@ -683,6 +683,29 @@ given MIRFunctionBuilder {
         }
     }
 
+    private prepare_pattern_subject(self mut ref, subject ref TypedExpr, name_hint String) Option[Pair[MIRPlace, Option[MIRScopeID]]] = {
+        return when self.lower_expression(subject) in {
+            .Some(result) then when result.place in {
+                .Some(place) then Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(Pair[MIRPlace, Option[MIRScopeID]](place, Option[MIRScopeID].None())),
+                .None() then when result.operand in {
+                    .Some(operand) then {
+                        let subject_scope = self.make_scope_id()
+                        self.scope_stack.push(subject_scope)
+                        self.append_statement(MIRStatement.ScopeEnter(subject_scope))
+                        let subject_local = self.make_temporary(subject.expr_type, name_hint)
+                        self.append_statement(MIRStatement.Declare(subject_local.id))
+                        self.append_statement(MIRStatement.Assign(MIRPlace.Local(subject_local.id), MIRValue.Operand(operand)))
+                        yield Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(
+                            Pair[MIRPlace, Option[MIRScopeID]](MIRPlace.Local(subject_local.id), Option[MIRScopeID].Some(subject_scope))
+                        )
+                    },
+                    .None() then Option[Pair[MIRPlace, Option[MIRScopeID]]].None(),
+                },
+            },
+            .None() then Option[Pair[MIRPlace, Option[MIRScopeID]]].None(),
+        }
+    }
+
     private lower_branch_body(self mut ref, expression ref TypedExpr, result_local Option[MIRLocalID]) Void = {
         when result_local in {
             .Some(local_id) then {
@@ -783,8 +806,6 @@ given MIRFunctionBuilder {
     /// This replaces a linear chain of branch checks with a single switch dispatch,
     /// significantly reducing the number of MIR locals and C stack frame size.
     private lower_switch_when_expression(self mut ref, subject ref TypedExpr, arms ref List[ref TypedWhenArm], result_type Type) Option[MIRExprResult] = {
-        let subject_value = self.lower_value(subject)
-        let subject_operand = self.materialize(subject_value, subject.expr_type)
         let has_result = not self.type_is_void_or_never(result_type)
         let mut result_local = Option[MIRLocalID].None()
         if has_result then {
@@ -792,20 +813,15 @@ given MIRFunctionBuilder {
             self.append_statement(MIRStatement.Declare(local.id))
             result_local = Option[MIRLocalID].Some(local.id)
         }
+        let prepared_subject = self.prepare_pattern_subject(subject, "when_subject") or else { return Option[MIRExprResult].None() }
+        let subject_place = prepared_subject.first
+        let subject_scope = prepared_subject.second
         let dispatch_block = self.current_block_id()
 
-        // Dereference reference types to get the actual subject
-        let (matched_value, matched_type) = when subject.expr_type in {
-            .ReferenceType(inner) then {
-                let deref = MIRValue.PlaceRead(MIRPlace.Deref(box(MIRValue.PlaceRead(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), MIROwnershipUse.Borrow())), inner.val), MIROwnershipUse.Borrow())
-                yield Pair[MIRValue, Type](deref, inner.val)
-            },
-            .MutableReferenceType(inner) then {
-                let deref = MIRValue.PlaceRead(MIRPlace.Deref(box(MIRValue.PlaceRead(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), MIROwnershipUse.Borrow())), inner.val), MIROwnershipUse.Borrow())
-                yield Pair[MIRValue, Type](deref, inner.val)
-            },
-            _ then Pair[MIRValue, Type](MIRValue.PlaceRead(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), MIROwnershipUse.Borrow()), subject.expr_type),
-        }
+        let matched = self.pattern_match_place(subject_place, subject.expr_type)
+        let matched_place = matched.first
+        let matched_type = matched.second
+        let matched_value = MIRValue.PlaceRead(matched_place, MIROwnershipUse.Borrow())
 
         // Extract switch operand: enum tag for enums, direct value for int/bool
         let switch_operand = when matched_type in {
@@ -906,7 +922,6 @@ given MIRFunctionBuilder {
             when case_block in {
                 .Some(cb) then {
                     self.set_current_block(cb)
-                    let subject_place = MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) })
                     let branch_result_local = result_local
                     self.with_pattern_bindings(arm.pattern, subject_place, subject.expr_type, () -> {
                         self.lower_branch_body(arm.body, branch_result_local)
@@ -918,6 +933,14 @@ given MIRFunctionBuilder {
         }
 
         self.set_current_block(join_block)
+        when subject_scope in {
+            .Some(scope) then {
+                self.append_statement(MIRStatement.ScopeExit(scope))
+                let _ = self.scope_stack.pop()
+                self.finalies_by_scope.remove(scope.raw_value)
+            },
+            .None() then {},
+        }
         return when result_local in {
             .Some(local_id) then Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Local(local_id)), Option[MIRPlace].None())),
             .None() then self.void_result(),
@@ -929,8 +952,6 @@ given MIRFunctionBuilder {
         if self.can_lower_to_switch_value(subject, arms) then {
             return self.lower_switch_when_expression(subject, arms, result_type)
         }
-        let subject_value = self.lower_value(subject)
-        let subject_operand = self.materialize(subject_value, subject.expr_type)
         let has_result = not self.type_is_void_or_never(result_type)
         let mut result_local = Option[MIRLocalID].None()
         if has_result then {
@@ -938,6 +959,9 @@ given MIRFunctionBuilder {
             self.append_statement(MIRStatement.Declare(local.id))
             result_local = Option[MIRLocalID].Some(local.id)
         }
+        let prepared_subject = self.prepare_pattern_subject(subject, "when_subject") or else { return Option[MIRExprResult].None() }
+        let subject_place = prepared_subject.first
+        let subject_scope = prepared_subject.second
         let dispatch_block = self.current_block_id()
         let join_block = self.make_block()
         let mut next_test_block = dispatch_block
@@ -946,13 +970,16 @@ given MIRFunctionBuilder {
         let saved_pattern_subject = self.pattern_subject_operand
         let saved_pattern_tag = self.pattern_subject_tag
         let saved_comparison_local = self.pattern_comparison_local
-        self.pattern_subject_operand = Option[MIROperand].Some(subject_operand)
+        self.pattern_subject_operand = when subject_place in {
+            .Local(local_id) then Option[MIROperand].Some(MIROperand.Local(local_id)),
+            _ then Option[MIROperand].None(),
+        }
         self.pattern_subject_tag = Option[MIROperand].None()
         self.pattern_comparison_local = Option[MIRLocalID].None()
         let mut index UInt = 0
         while index < arms.count() then {
             self.set_current_block(next_test_block)
-            let condition = self.lower_pattern_condition(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), subject.expr_type, arms[index].pattern, false)
+            let condition = self.lower_pattern_condition(subject_place, subject.expr_type, arms[index].pattern, false)
             let condition_block = self.current_block_id()
             let body_block = self.make_block()
             let next_block = if index + 1(UInt) == arms.count() then join_block else self.make_block()
@@ -960,7 +987,6 @@ given MIRFunctionBuilder {
             self.terminate(MIRTerminator.Branch(condition, body_block, next_block))
             self.set_current_block(body_block)
             let arm = arms[index]
-            let subject_place = MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) })
             let branch_result_local = result_local
             self.with_pattern_bindings(arm.pattern, subject_place, subject.expr_type, () -> {
                 self.lower_branch_body(arm.body, branch_result_local)
@@ -973,6 +999,14 @@ given MIRFunctionBuilder {
         self.pattern_subject_tag = saved_pattern_tag
         self.pattern_comparison_local = saved_comparison_local
         self.set_current_block(join_block)
+        when subject_scope in {
+            .Some(scope) then {
+                self.append_statement(MIRStatement.ScopeExit(scope))
+                let _ = self.scope_stack.pop()
+                self.finalies_by_scope.remove(scope.raw_value)
+            },
+            .None() then {},
+        }
         return when result_local in {
             .Some(local_id) then Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Local(local_id)), Option[MIRPlace].None())),
             .None() then self.void_result(),
@@ -1228,6 +1262,18 @@ given MIRFunctionBuilder {
         }
     }
 
+    private goes_through_deref(self ref, place MIRPlace) Bool = {
+        let _ = self
+        return when place in {
+            .Deref(_, _) then true,
+            .Field(base, _) then self.goes_through_deref(base.val),
+            .EnumPayload(base, _, _, _, _) then self.goes_through_deref(base.val),
+            .Local(_) then false,
+            .Global(_) then false,
+            .PointerElement(_, _) then false,
+        }
+    }
+
     private bind_pattern_variables(self mut ref, pattern ref TypedPattern, subject_place MIRPlace, subject_type Type) Void = {
         let matched = self.pattern_match_place(subject_place, subject_type)
         let matched_place = matched.first
@@ -1262,7 +1308,16 @@ given MIRFunctionBuilder {
                         while idx < elements.count() then {
                             let param = case_info.params[idx]
                             let payload_place = MIRPlace.EnumPayload(box(matched_place), case_name, param.name, idx, param.param_type)
-                            self.bind_pattern_variables(elements[idx].pattern, payload_place, param.param_type)
+                            let resolved_place = if self.goes_through_deref(matched_place) and param.param_type is not .VoidType() then {
+                                let local_name = if param.name.is_empty() then "payload" else param.name
+                                let local = self.make_temporary(param.param_type, local_name)
+                                self.append_statement(MIRStatement.Declare(local.id))
+                                self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), MIRValue.PlaceRead(payload_place, MIROwnershipUse.Copy())))
+                                yield MIRPlace.Local(local.id)
+                            } else {
+                                yield payload_place
+                            }
+                            self.bind_pattern_variables(elements[idx].pattern, resolved_place, param.param_type)
                             idx += 1
                         }
                     },
