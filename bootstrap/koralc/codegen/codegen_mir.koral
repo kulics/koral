@@ -1865,22 +1865,12 @@ given MIRFunctionCodeEmitter {
         for capture in captures then {
             let field_name = self.capture_field_name(capture.val)
             if self.codegen.needs_drop(capture.symbol_type) then {
-                let drop_expr = "env->\(field_name)"
-                // Generate drop code inline
-                when capture.symbol_type in {
-                    .ReferenceType(_) or .MutableReferenceType(_) then {
-                        self.nested_definitions.push_string("    if (env->\(field_name).control) { __koral_release(env->\(field_name).control); }\n")
-                    },
-                    .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
-                        self.nested_definitions.push_string("    if (env->\(field_name).control) { __koral_weak_release(env->\(field_name).control); }\n")
-                    },
-                    .FunctionType(_, _) then {
-                        self.nested_definitions.push_string("    __koral_closure_release(env->\(field_name));\n")
-                    },
-                    _ then {
-                        self.nested_definitions.push_string("    __koral_\(self.codegen.c_type_name(capture.symbol_type))_drop(env->\(field_name));\n")
-                    },
-                }
+                let saved_buffer = self.codegen.buffer
+                self.codegen.buffer = box(CodegenBuffer.new())
+                self.codegen.add_indent()
+                self.codegen.append_drop_statement(capture.symbol_type, "env->\(field_name)")
+                self.nested_definitions.push_string(self.codegen.buffer.to_string())
+                self.codegen.buffer = saved_buffer
             }
         }
         self.nested_definitions.push_string("    free(raw_env);\n")
