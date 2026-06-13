@@ -1182,8 +1182,15 @@ given TypeChecker {
                     yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), final_ret_type)
                 }
             },
-            .QualifiedMethodCall(base, trait_name, method_name, args, _) then {
+            .QualifiedMethodCall(base, trait_name, method_name, args, span) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                if not self.dispatches_via_trait_object(initial_typed_base.expr_type)
+                    and initial_typed_base.expr_type is not .GenericParameter(_)
+                then {
+                    let mut method_path = List[String].new()
+                    method_path.push(method_name)
+                    yield self.check_call_expr_ref(box(Expr.MemberPath(base, method_path, span)), args, expected, scope)
+                }
                 let trait_dispatch_requires_object = self.dispatches_via_trait_object(initial_typed_base.expr_type)
                     or initial_typed_base.expr_type is .GenericParameter(_)
                 let expected_self_type = if trait_dispatch_requires_object
@@ -1213,8 +1220,13 @@ given TypeChecker {
                 )
                 yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), qmc_ret_type)
             },
-            .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, _) then {
+            .QualifiedGenericMethodCall(base, trait_name, method_type_args, method_name, args, span) then {
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
+                if not self.dispatches_via_trait_object(initial_typed_base.expr_type)
+                    and initial_typed_base.expr_type is not .GenericParameter(_)
+                then {
+                    yield self.check_member_dispatch_expr_ref(box(Expr.GenericMethodCall(base, method_type_args, method_name, args, span)), expected, scope)
+                }
                 let trait_dispatch_requires_object = self.dispatches_via_trait_object(initial_typed_base.expr_type)
                     or initial_typed_base.expr_type is .GenericParameter(_)
                 let expected_self_type = if trait_dispatch_requires_object

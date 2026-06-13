@@ -1987,6 +1987,46 @@ given TypeChecker {
         return Option[Type].None()
     }
 
+    private collect_ordered_trait_members(
+        self,
+        trait_name String,
+        ordered mut ref List[TypedTraitMember],
+        seen mut ref Set[String],
+        visited mut ref Set[String],
+    ) Void = {
+        if visited.contains(trait_name) then {
+            return
+        }
+        visited.insert(trait_name)
+        let info = self.storage.trait_registry.get(trait_name) or else {
+            return
+        }
+        for parent in info.parent_traits then {
+            self.collect_ordered_trait_members(parent.name, ordered, seen, visited)
+        }
+        for member in info.methods then {
+            if not seen.contains(member.name) then {
+                seen.insert(member.name)
+                ordered.push(member)
+            }
+        }
+    }
+
+    protected trait_vtable_method_index(self, trait_name String, method_name String) Option[Int] = {
+        let mut ordered = List[TypedTraitMember].new()
+        let mut seen = Set[String].new()
+        let mut visited = Set[String].new()
+        self.collect_ordered_trait_members(trait_name, ordered.ref, seen.ref, visited.ref)
+        let mut index UInt = 0
+        while index < ordered.count() then {
+            if ordered[index].name == method_name then {
+                return Option[Int].Some(index(Int))
+            }
+            index += 1
+        }
+        return Option[Int].None()
+    }
+
     // 从 trait registry 解析 qualified method call 的返回类型。
     // 先查 trait registry，再回退到 base_type 的 method_table。
     protected resolve_qualified_method_return_type(self, trait_name String, method_name String, base_type Type) Type = {

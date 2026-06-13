@@ -623,6 +623,29 @@ given TypeChecker {
         if trace_lerp then {
             println("[lerp-trace] call-callee-checked type=\(self.display_type_name(typed_callee.expr_type))")
         }
+        when callee in {
+            .MemberPath(_, path, _) then {
+                if typed_callee.expr_type is .Unknown() and not path.is_empty() and path[path.count() - 1(UInt)] == "drop" then {
+                    when self.split_member_path_call_callee(callee) in {
+                        .Some(parts) then {
+                            let typed_receiver = self.check_child_expr_ref(parts.first, .None(), scope)
+                            if self.has_explicit_std_drop_conformance(typed_receiver.expr_type) then {
+                                self.storage.diagnostics.push(
+                                    make_diagnostic(
+                                        DiagnosticStage.Semantic(),
+                                        self.storage.file_path,
+                                        "Member 'drop' not found in type '\(self.context().type_display_name(typed_receiver.expr_type))'"
+                                    )
+                                )
+                                return make_typed_expr(TypedExprKind.Call(box(typed_callee), List[ref TypedExpr].new()), Type.Unknown())
+                            }
+                        },
+                        .None() then {},
+                    }
+                }
+            },
+            _ then {},
+        }
         let typed_callee_ref = box(typed_callee)
         if not self.validate_function_expression_argument_count(typed_callee_ref, call_args.ref) then {
             if trace_lerp then {
@@ -1213,6 +1236,17 @@ given TypeChecker {
                 .None() then Option[TypedExpr].None(),
             },
             _ then when typed_callee.expr_kind in {
+            .TraitMethodPlaceholder(receiver, trait_type, method, _, _) then {
+                let trait_name = self.trait_name_from_type(trait_type)
+                let method_name = self.context().symbol_name(method)
+                let expected_self_type = self.resolve_trait_method_self_type(trait_name, method_name, receiver.expr_type)
+                let prepared_receiver = self.prepare_call_receiver(receiver.val, expected_self_type)
+                let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(prepared_receiver.first, expected_self_type, method_name)
+                self.maybe_record_trait_method_instantiation(adapted_receiver.expr_type, method_name, List[Type].new())
+                let method_index = self.trait_vtable_method_index(trait_name, method_name) or else -1
+                let call_expr = make_typed_expr(TypedExprKind.TraitMethodCall(box(adapted_receiver), trait_type, method_name, method_index, typed_args), ret_type)
+                yield Option[TypedExpr].Some(self.wrap_receiver_materialized_call(prepared_receiver.second, receiver.val, call_expr))
+            },
             .TraitMethodCall(receiver, trait_type, method_name, method_index, _) then {
                 let expected_self_type = when trait_type in {
                     .TraitObject(trait_name, _) then self.resolve_trait_method_self_type(trait_name, method_name, receiver.expr_type),
