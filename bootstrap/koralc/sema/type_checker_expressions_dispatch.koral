@@ -1153,11 +1153,8 @@ given TypeChecker {
                         .Some(trait_name) then if trait_dispatch_requires_object then {
                             self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
                             let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
-                            let qualified_base = if self.dispatches_via_trait_object(typed_base.expr_type)
-                                then typed_base
-                                else self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type))
                             yield make_typed_expr(
-                                TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
+                                TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
                                 method_symbol.symbol_type,
                             )
                         } else {
@@ -1210,9 +1207,8 @@ given TypeChecker {
                 let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
                 let qmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qmc_ret_type)
-                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type)) else typed_base
                 let callee = make_typed_expr(
-                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), List[Type].new(), .None()),
+                    TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), List[Type].new(), .None()),
                     method_symbol.symbol_type,
                 )
                 yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), qmc_ret_type)
@@ -1246,9 +1242,8 @@ given TypeChecker {
                 let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
                 let qgmc_ret_type = self.resolve_qualified_method_return_type(trait_name, method_name, typed_base.expr_type)
                 let method_symbol = self.make_method_symbol(method_name, qgmc_ret_type)
-                let qualified_base = if trait_dispatch_requires_object then self.wrap_trait_object_conversion(typed_base, trait_type, self.trait_object_conversion_result_type(typed_base.expr_type, trait_type)) else typed_base
                 let callee = make_typed_expr(
-                    TypedExprKind.TraitMethodPlaceholder(box(qualified_base), trait_type, box(method_symbol), resolved_method_type_args, .None()),
+                    TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), resolved_method_type_args, .None()),
                     method_symbol.symbol_type,
                 )
                 yield make_typed_expr(TypedExprKind.Call(box(callee), typed_args), qgmc_ret_type)
@@ -1500,12 +1495,22 @@ given TypeChecker {
             .Unary(op, inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, expected, scope)
                 yield when op in {
-                    .Negate() then
-                        if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(typed_inner.expr_type)
-                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
-                        else if not self.enforce_explicit_trait_requirement(typed_inner.expr_type, "Neg")
-                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), Type.Unknown())
-                        else self.build_unary_method_call(typed_inner, "neg", typed_inner.expr_type),
+                    .Negate() then when typed_inner.expr_kind in {
+                        .IntegerLiteral(value) then {
+                            yield if self.is_integer_type(typed_inner.expr_type)
+                                then make_typed_expr(TypedExprKind.IntegerLiteral("-\(value)"), typed_inner.expr_type)
+                                else if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(typed_inner.expr_type)
+                                    then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
+                                    else if not self.enforce_explicit_trait_requirement(typed_inner.expr_type, "Neg")
+                                        then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), Type.Unknown())
+                                        else self.build_unary_method_call(typed_inner, "neg", typed_inner.expr_type)
+                        },
+                        _ then if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(typed_inner.expr_type)
+                            then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type)
+                            else if not self.enforce_explicit_trait_requirement(typed_inner.expr_type, "Neg")
+                                then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), Type.Unknown())
+                                else self.build_unary_method_call(typed_inner, "neg", typed_inner.expr_type),
+                    },
                     _ then make_typed_expr(TypedExprKind.Unary(op, box(typed_inner)), typed_inner.expr_type),
                 }
             },

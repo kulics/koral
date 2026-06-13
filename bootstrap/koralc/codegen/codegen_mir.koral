@@ -1554,9 +1554,75 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, pointer_type))
     }
 
+    private is_float_cast_source_type(self ref, t Type) Bool = {
+        let _ = self
+        return when t in {
+            .Float32Type() then true,
+            .Float64Type() then true,
+            _ then false,
+        }
+    }
+
+    private is_signed_int_cast_target_type(self ref, t Type) Bool = {
+        let _ = self
+        return when t in {
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .IntType() then true,
+            _ then false,
+        }
+    }
+
+    private is_unsigned_int_cast_target_type(self ref, t Type) Bool = {
+        let _ = self
+        return when t in {
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            .UIntType() then true,
+            _ then false,
+        }
+    }
+
+    private float_cast_target_bounds(self ref, t Type) Option[Pair[String, String]] = {
+        let _ = self
+        return when t in {
+            .Int8Type() then Option[Pair[String, String]].Some(Pair[String, String]("INT8_MIN", "INT8_MAX")),
+            .Int16Type() then Option[Pair[String, String]].Some(Pair[String, String]("INT16_MIN", "INT16_MAX")),
+            .Int32Type() then Option[Pair[String, String]].Some(Pair[String, String]("INT32_MIN", "INT32_MAX")),
+            .Int64Type() then Option[Pair[String, String]].Some(Pair[String, String]("INT64_MIN", "INT64_MAX")),
+            .IntType() then Option[Pair[String, String]].Some(Pair[String, String]("INTPTR_MIN", "INTPTR_MAX")),
+            .UInt8Type() then Option[Pair[String, String]].Some(Pair[String, String]("0", "UINT8_MAX")),
+            .UInt16Type() then Option[Pair[String, String]].Some(Pair[String, String]("0", "UINT16_MAX")),
+            .UInt32Type() then Option[Pair[String, String]].Some(Pair[String, String]("0", "UINT32_MAX")),
+            .UInt64Type() then Option[Pair[String, String]].Some(Pair[String, String]("0", "UINT64_MAX")),
+            .UIntType() then Option[Pair[String, String]].Some(Pair[String, String]("0", "UINTPTR_MAX")),
+            _ then Option[Pair[String, String]].None(),
+        }
+    }
+
     private emit_cast_operand(self mut ref, operand MIROperand, target_type Type) MIRValueEmission = {
         let source = self.emit_operand_value(operand)
-        let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(target_type), "(\(self.codegen.c_type_name(target_type)))\(source.expression)")
+        let source_type = self.type_of_operand(operand)
+        let target_c_type = self.codegen.c_type_name(target_type)
+        let expression = if self.is_float_cast_source_type(source_type)
+            and (self.is_signed_int_cast_target_type(target_type) or self.is_unsigned_int_cast_target_type(target_type))
+        then when self.float_cast_target_bounds(target_type) in {
+            .Some(bounds) then {
+                let float_value = self.codegen.next_temp_with_init("double", "(double)\(source.expression)")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("if (!(\(float_value) >= (double)\(bounds.first) && \(float_value) <= (double)\(bounds.second))) {\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("    __koral_panic_float_cast_overflow();\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("}\n")
+                yield self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(float_value)")
+            },
+            .None() then self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(source.expression)"),
+        } else self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(source.expression)")
         self.emit_cleanup(source.cleanup)
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, target_type))
     }
@@ -1600,7 +1666,7 @@ given MIRFunctionCodeEmitter {
                 let p = self.emit_value_source(pointer.val)
                 let v = self.emit_value_source(value.val)
                 let element_type = self.pointer_element_type(self.type_of_value(pointer.val))
-                self.codegen.append_copy_or_move_assignment(element_type, v.expression, "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)", false)
+                self.codegen.append_copy_assignment(element_type, v.expression, "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)")
                 self.consume_moved_source(value.val)
                 self.emit_cleanup(p.cleanup)
                 self.emit_residual_cleanups(v, true)
@@ -2321,18 +2387,19 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
                     }
                     if local_id.raw_value < function.locals.count() then {
                         let local = function.locals[local_id.raw_value]
-                            if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
-                                if active_scopes.is_empty() then {
-                                    root_locals.push(local_id)
-                                } else {
-                                    let scope = active_scopes[active_scopes.count() - 1(UInt)]
-                                    let mut list = locals_by_scope.get(scope.raw_value) or else List[MIRLocalID].new()
-                                    list.push(local_id)
-                                    locals_by_scope.insert(scope.raw_value, list)
-                                }
-                            } else if local.storage is .Parameter() and codegen.needs_drop(local.local_type) then {
+                        let is_block_result_local = local.name.starts_with("block_result")
+                        if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
+                            if is_block_result_local or active_scopes.is_empty() then {
                                 root_locals.push(local_id)
+                            } else {
+                                let scope = active_scopes[active_scopes.count() - 1(UInt)]
+                                let mut list = locals_by_scope.get(scope.raw_value) or else List[MIRLocalID].new()
+                                list.push(local_id)
+                                locals_by_scope.insert(scope.raw_value, list)
                             }
+                        } else if local.storage is .Parameter() and codegen.needs_drop(local.local_type) then {
+                            root_locals.push(local_id)
+                        }
                     }
                 },
                 .Assign(place, value) then {

@@ -1232,6 +1232,16 @@ let align_method_reference_base_for_bound_method(
         _ then receiver_expr,
     }
     let current_type = resolve_parameterized_type(mono, current_expr.expr_type)
+    let effective_current_type = when current_expr.expr_kind in {
+        .Variable(symbol) then when resolve_parameterized_type(mono, symbol.symbol_type) in {
+            .ReferenceType(_) then resolve_parameterized_type(mono, symbol.symbol_type),
+            .MutableReferenceType(_) then resolve_parameterized_type(mono, symbol.symbol_type),
+            .WeakReferenceType(_) then resolve_parameterized_type(mono, symbol.symbol_type),
+            .MutableWeakReferenceType(_) then resolve_parameterized_type(mono, symbol.symbol_type),
+            _ then current_type,
+        },
+        _ then current_type,
+    }
     let expected_self_type_opt = when resolve_parameterized_type(mono, method.symbol_type) in {
         .FunctionType(fn_params, _) then {
             let param_types = param_entry_types(fn_params)
@@ -1246,14 +1256,14 @@ let align_method_reference_base_for_bound_method(
 
     return when expected_self_type_opt in {
         .Some(expected_self_type) then {
-            yield if layout_key(expected_self_type) == layout_key(current_type) then {
+            yield if layout_key(expected_self_type) == layout_key(effective_current_type) then {
                 yield current_expr
             } else when expected_self_type in {
                 .ReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, inner.val)
-                    yield if layout_key(inner_type) == layout_key(current_type) then {
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
                         yield box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
-                    } else when current_type in {
+                    } else when effective_current_type in {
                         .MutableReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner.val)
                             yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
@@ -1267,9 +1277,9 @@ let align_method_reference_base_for_bound_method(
                 },
                 .MutableReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, inner.val)
-                    yield if layout_key(inner_type) == layout_key(current_type) then {
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
                         yield box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
-                    } else when current_type in {
+                    } else when effective_current_type in {
                         .ReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, actual_inner.val)
                             yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
@@ -1289,7 +1299,7 @@ let align_method_reference_base_for_bound_method(
                         _ then current_expr,
                     }
                 },
-                _ then when current_type in {
+                _ then when effective_current_type in {
                     .ReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, inner.val)
                         yield if layout_key(inner_type) == layout_key(expected_self_type) then {

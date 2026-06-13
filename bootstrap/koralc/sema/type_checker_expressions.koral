@@ -986,9 +986,32 @@ given TypeChecker {
             }
 
             let mut adapted = expr
+            let declared_ref_like_type_opt = when expr.expr_kind in {
+                .Variable(symbol) then when symbol.symbol_type in {
+                    .ReferenceType(_) then Option[Type].Some(symbol.symbol_type),
+                    .MutableReferenceType(_) then Option[Type].Some(symbol.symbol_type),
+                    .WeakReferenceType(_) then Option[Type].Some(symbol.symbol_type),
+                    .MutableWeakReferenceType(_) then Option[Type].Some(symbol.symbol_type),
+                    _ then Option[Type].None(),
+                },
+                _ then Option[Type].None(),
+            }
             when expected_type in {
                 .MutableReferenceType(inner) then {
                     let expected_inner = inner.val
+                    when declared_ref_like_type_opt in {
+                        .Some(declared_ref_type) then when declared_ref_type in {
+                            .MutableReferenceType(actual_inner_ref) then {
+                                let actual_inner = actual_inner_ref.val
+                                if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
                     when expr.expr_type in {
                         .MutableReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
@@ -1036,6 +1059,26 @@ given TypeChecker {
                 .ReferenceType(inner) then {
                     let expected_inner = inner.val
                     let should_defer_generic_ref_retype = self.contains_generic_parameter(expected_inner)
+                    when declared_ref_like_type_opt in {
+                        .Some(declared_ref_type) then when declared_ref_type in {
+                            .ReferenceType(actual_inner_ref) then {
+                                let actual_inner = actual_inner_ref.val
+                                if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            .MutableReferenceType(actual_inner_ref) then {
+                                let actual_inner = actual_inner_ref.val
+                                if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
                     when expr.expr_type in {
                         .ReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
@@ -1101,6 +1144,26 @@ given TypeChecker {
                 },
                 .WeakReferenceType(inner) then {
                     let expected_inner = inner.val
+                    when declared_ref_like_type_opt in {
+                        .Some(declared_ref_type) then when declared_ref_type in {
+                            .WeakReferenceType(actual_inner_ref) then {
+                                let actual_inner = actual_inner_ref.val
+                                if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            .MutableWeakReferenceType(actual_inner_ref) then {
+                                let actual_inner = actual_inner_ref.val
+                                if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
                     when expr.expr_type in {
                         .WeakReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val
@@ -1123,6 +1186,19 @@ given TypeChecker {
                 },
                 .MutableWeakReferenceType(inner) then {
                     let expected_inner = inner.val
+                    when declared_ref_like_type_opt in {
+                        .Some(declared_ref_type) then when declared_ref_type in {
+                            .MutableWeakReferenceType(actual_inner_ref) then {
+                                let actual_inner = actual_inner_ref.val
+                                if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
                     when expr.expr_type in {
                         .MutableWeakReferenceType(actual_inner_ref) then {
                             let actual_inner = actual_inner_ref.val

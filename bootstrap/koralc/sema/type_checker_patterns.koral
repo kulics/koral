@@ -45,6 +45,55 @@ given TypeChecker {
         }
     }
 
+    private pattern_match_subject_type(self, subject_type Type) Type = {
+        let _ = self
+        return when subject_type in {
+            .ReferenceType(inner) then inner.val,
+            .MutableReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then subject_type,
+        }
+    }
+
+    private lower_rune_literal_pattern(self, value String, subject_type Type, span SourceSpan) TypedPattern = {
+        let matched_type = self.pattern_match_subject_type(subject_type)
+        let rune_count = value.to_runes().count()
+        if rune_count == 0(UInt) then {
+            self.push_diagnostic_at_span("Rune literal cannot be empty", span)
+            return TypedPattern.IntegerLiteral("0")
+        }
+        if rune_count <> 1(UInt) then {
+            self.push_diagnostic_at_span(
+                "Rune literal must contain exactly one Unicode code point, but '\(value)' contains \(rune_count.to_string())'",
+                span
+            )
+            return TypedPattern.IntegerLiteral("0")
+        }
+
+        let scalar_value = self.rune_literal_scalar_value(value)
+        if self.is_rune_type(matched_type) then {
+            return TypedPattern.IntegerLiteral(scalar_value)
+        }
+        if matched_type is .UInt8Type() then {
+            let bytes = value.to_bytes()
+            if bytes.count() == 1(UInt) and bytes[0(UInt)] <= 127(UInt8) then {
+                return TypedPattern.IntegerLiteral(scalar_value)
+            }
+            self.push_diagnostic_at_span(
+                "Rune literal pattern must be a single ASCII character when matching UInt8",
+                span
+            )
+            return TypedPattern.IntegerLiteral("0")
+        }
+
+        self.push_diagnostic_at_span(
+            "Type mismatch: expected Rune or UInt8, got \(type_to_string(matched_type))",
+            span
+        )
+        return TypedPattern.IntegerLiteral("0")
+    }
+
     protected lower_typed_pattern(self, pattern ref PatternNode, subject_type Type, scope Scope) TypedPattern = {
         return when pattern in {
             .Wildcard(_) then TypedPattern.Wildcard(),
@@ -56,7 +105,7 @@ given TypeChecker {
             .IntegerLiteral(value, _) then TypedPattern.IntegerLiteral(value),
             .NegativeIntegerLiteral(value, _) then TypedPattern.NegativeIntegerLiteral(value),
             .StringLiteral(value, _) then TypedPattern.StringLiteral(value),
-            .RuneLiteral(value, _) then TypedPattern.RuneLiteral(value),
+            .RuneLiteral(value, span) then self.lower_rune_literal_pattern(value, subject_type, span),
             .ComparisonPattern(op, value, _) then TypedPattern.ComparisonPattern(op, value),
             .AndPattern(left, right, _) then {
                 yield TypedPattern.AndPattern(

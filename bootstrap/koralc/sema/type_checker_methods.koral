@@ -904,6 +904,33 @@ given TypeChecker {
         return Option[Type].Some(self.concrete_receiver_for_method(base_type, method))
     }
 
+    private bind_direct_method_signature(self, base_type Type, method_name String, raw_method Symbol) Symbol = {
+        let receiver_type = self.concrete_receiver_for_method(base_type, raw_method)
+        let mut bindings = Dict[String, Type].new()
+        if self.method_param_count(raw_method) > 0(UInt) then {
+            let self_param_type = self.method_param_type(raw_method, 0(UInt)) or else Type.Unknown()
+            self.infer_type_bindings(self_param_type, receiver_type, bindings)
+        }
+        let concrete_self = when receiver_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        bindings.insert("Self", concrete_self)
+
+        let mut bound_param_types = List[Type].new()
+        for parameter_type in self.method_param_types(raw_method) then {
+            bound_param_types.push(self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(parameter_type, bindings))))
+        }
+        if not bound_param_types.is_empty() then {
+            bound_param_types[0(UInt)] = receiver_type
+        }
+        let bound_return_type = self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(self.method_return_type(raw_method), bindings)))
+        return self.rebuild_method_symbol(method_name, raw_method, bound_param_types, bound_return_type)
+    }
+
     private replace_type_occurrence(self, t Type, pattern Type, replacement Type) Type = {
         if self.same_expr_type(t, pattern) then {
             return replacement
@@ -1833,7 +1860,7 @@ given TypeChecker {
 
         let type_key = self.context().type_display_name(inner_type)
         if self.lookup_method_signature(type_key, method_name) is .Some(raw_method) then {
-            return Option[Symbol].Some(raw_method)
+            return Option[Symbol].Some(self.bind_direct_method_signature(base_type, method_name, raw_method))
         }
 
         when self.resolve_extension_template_signature(normalized_base_type, inner_type, method_name) in {
@@ -1843,7 +1870,7 @@ given TypeChecker {
 
         let template_key = self.resolve_method_template_key(inner_type)
         if template_key is .Some(key) and self.lookup_method_signature(key, method_name) is .Some(raw_method) then {
-            return Option[Symbol].Some(raw_method)
+            return Option[Symbol].Some(self.bind_direct_method_signature(base_type, method_name, raw_method))
         }
 
         // Check weakref intrinsic given extension methods (e.g., to_ref on T weakref / T mut weakref)
