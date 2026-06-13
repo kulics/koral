@@ -812,7 +812,33 @@ given TypeChecker {
                                            and not self.is_unresolved_expr_type(else_t)
                                            and not then_is_never
                                            and not else_is_never then {
-                                            typed_then = self.check_expr_in_yield_body_context(source_arm.second, .Some(else_t), scope)
+                                            let then_is_ref_like = when typed_then.expr_type in {
+                                                .ReferenceType(_) then true,
+                                                .MutableReferenceType(_) then true,
+                                                .WeakReferenceType(_) then true,
+                                                .MutableWeakReferenceType(_) then true,
+                                                .PointerType(_) then true,
+                                                .MutablePointerType(_) then true,
+                                                _ then false,
+                                            }
+                                            let else_is_ref_like = when else_t in {
+                                                .ReferenceType(_) then true,
+                                                .MutableReferenceType(_) then true,
+                                                .WeakReferenceType(_) then true,
+                                                .MutableWeakReferenceType(_) then true,
+                                                .PointerType(_) then true,
+                                                .MutablePointerType(_) then true,
+                                                _ then false,
+                                            }
+                                            if else_is_ref_like and not then_is_ref_like then {
+                                                current_else = .Some(box(self.adapt_expr_to_expected_type_at(
+                                                    typed_else_ref.val,
+                                                    .Some(typed_then.expr_type),
+                                                    .Some(self.typed_expr_span(typed_else_ref))
+                                                )))
+                                            } else {
+                                                typed_then = self.check_expr_in_yield_body_context(source_arm.second, .Some(else_t), scope)
+                                            }
                                         }
                                     }
                                     self.report_expected_void_branch_mismatch(
@@ -1372,7 +1398,14 @@ given TypeChecker {
 
     private check_literal_pattern_expr_ref(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
-            .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
+            .Identifier(name, span) then {
+                let typed_ident = self.check_identifier_expr_at(name, span, scope)
+                yield self.adapt_expr_to_expected_type_at(
+                    typed_ident,
+                    expected,
+                    Option[SourceSpan].Some(span)
+                )
+            },
             .IntegerLiteral(value, _) then {
                 let t = when expected in {
                     .Some(et) then when et in {
@@ -1420,11 +1453,47 @@ given TypeChecker {
             },
             .CastExpr(type_node, inner, _) then {
                 let target = self.resolve_type_in_scope(type_node, scope)
-                let typed_inner = when inner in {
+                let raw_typed_inner = when inner in {
                     .IntegerLiteral(value, _) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                     .FloatLiteral(value, _) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
                     .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(value, target),
-                    _ then self.check_expr_scoped_ref(inner, .None(), scope),
+                    _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
+                }
+                let adapted_inner = self.adapt_expr_to_expected_type_at(raw_typed_inner, .Some(target), Option[SourceSpan].Some(expr_span(inner)))
+                let typed_inner = when adapted_inner.expr_type in {
+                    .ReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                        and target is not .MutableReferenceType(_)
+                        and target is not .WeakReferenceType(_)
+                        and target is not .MutableWeakReferenceType(_)
+                        and target is not .PointerType(_)
+                        and target is not .MutablePointerType(_)
+                    then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                    else adapted_inner,
+                    .MutableReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                        and target is not .MutableReferenceType(_)
+                        and target is not .WeakReferenceType(_)
+                        and target is not .MutableWeakReferenceType(_)
+                        and target is not .PointerType(_)
+                        and target is not .MutablePointerType(_)
+                    then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                    else adapted_inner,
+                    .WeakReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                        and target is not .MutableReferenceType(_)
+                        and target is not .WeakReferenceType(_)
+                        and target is not .MutableWeakReferenceType(_)
+                        and target is not .PointerType(_)
+                        and target is not .MutablePointerType(_)
+                    then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                    else adapted_inner,
+                    .MutableWeakReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                        and target is not .MutableReferenceType(_)
+                        and target is not .WeakReferenceType(_)
+                        and target is not .MutableWeakReferenceType(_)
+                        and target is not .PointerType(_)
+                        and target is not .MutablePointerType(_)
+                    then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                    else adapted_inner,
+                    _ then adapted_inner,
                 }
                 yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
             },

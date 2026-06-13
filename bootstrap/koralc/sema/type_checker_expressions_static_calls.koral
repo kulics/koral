@@ -48,6 +48,30 @@ given TypeChecker {
         return Type.Unknown()
     }
 
+    private split_typed_member_path_call_callee(self, typed_callee TypedExpr) Option[Pair[TypedExpr, String]] = {
+        return when typed_callee.expr_kind in {
+            .MemberPath(base_ref, path) then {
+                if path.is_empty() then {
+                    return Option[Pair[TypedExpr, String]].None()
+                }
+                let method_name = path[path.count() - 1]
+                let receiver_expr = if path.count() == 1 then base_ref.val else {
+                    let mut receiver_path = List[String].new()
+                    let mut receiver_type = base_ref.expr_type
+                    let mut idx UInt = 0
+                    while idx + 1 < path.count() then {
+                        receiver_path.push(path[idx])
+                        receiver_type = self.resolve_member_type(receiver_type, path[idx])
+                        idx += 1
+                    }
+                    yield make_typed_expr(TypedExprKind.MemberPath(base_ref, receiver_path), receiver_type)
+                }
+                yield Option[Pair[TypedExpr, String]].Some(Pair[TypedExpr, String](receiver_expr, method_name))
+            },
+            _ then Option[Pair[TypedExpr, String]].None(),
+        }
+    }
+
     private missing_member_call_expr(self, typed_callee TypedExpr, typed_args List[ref TypedExpr], base_expr ref Expr, member String, scope Scope) TypedExpr = {
         if self.should_suppress_missing_member_call_diagnostic(typed_callee) then {
             return make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), Type.Unknown())
@@ -332,11 +356,47 @@ given TypeChecker {
                 .BitwiseExpr(left, op, right, _) then self.check_bitwise_expr_ref(left, op, right, static_param_expected, scope),
                 .CastExpr(type_node, inner, _) then {
                     let target = self.resolve_type_in_scope(type_node, scope)
-                    let typed_inner = when inner in {
+                    let raw_typed_inner = when inner in {
                         .IntegerLiteral(value, _) then make_typed_expr(TypedExprKind.IntegerLiteral(value), target),
                         .FloatLiteral(value, _) then make_typed_expr(TypedExprKind.FloatLiteral(value), target),
                         .RuneLiteral(value, _) then self.lower_rune_literal_for_cast(value, target),
                         _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
+                    }
+                    let adapted_inner = self.adapt_expr_to_expected_type_at(raw_typed_inner, .Some(target), Option[SourceSpan].Some(expr_span(inner)))
+                    let typed_inner = when adapted_inner.expr_type in {
+                        .ReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                            and target is not .MutableReferenceType(_)
+                            and target is not .WeakReferenceType(_)
+                            and target is not .MutableWeakReferenceType(_)
+                            and target is not .PointerType(_)
+                            and target is not .MutablePointerType(_)
+                        then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                        else adapted_inner,
+                        .MutableReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                            and target is not .MutableReferenceType(_)
+                            and target is not .WeakReferenceType(_)
+                            and target is not .MutableWeakReferenceType(_)
+                            and target is not .PointerType(_)
+                            and target is not .MutablePointerType(_)
+                        then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                        else adapted_inner,
+                        .WeakReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                            and target is not .MutableReferenceType(_)
+                            and target is not .WeakReferenceType(_)
+                            and target is not .MutableWeakReferenceType(_)
+                            and target is not .PointerType(_)
+                            and target is not .MutablePointerType(_)
+                        then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                        else adapted_inner,
+                        .MutableWeakReferenceType(inner_ref) then if target is not .ReferenceType(_)
+                            and target is not .MutableReferenceType(_)
+                            and target is not .WeakReferenceType(_)
+                            and target is not .MutableWeakReferenceType(_)
+                            and target is not .PointerType(_)
+                            and target is not .MutablePointerType(_)
+                        then self.adapt_expr_to_expected_type_at(adapted_inner, .Some(inner_ref.val), Option[SourceSpan].Some(expr_span(inner)))
+                        else adapted_inner,
+                        _ then adapted_inner,
                     }
                     yield make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
                 },
@@ -616,28 +676,32 @@ given TypeChecker {
                 method_call_bindings = self.resolve_signature_method_type_bindings(receiver_type, method_val, List[Type].new())
                 has_method_call_bindings = true
             },
-            .MemberPath(base_ref, path) then if not path.is_empty() and not (typed_callee.expr_type is .FunctionType(_, _)) then {
-                let method_name = path[path.count() - 1]
-                let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
-                let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
-                let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
+            .MemberPath(_, _) then when self.split_typed_member_path_call_callee(typed_callee) in {
+                .Some(parts) then {
+                    let method_name = parts.second
+                    let receiver_expr = parts.first
+                    let expected_self_type = self.resolve_method_self_type(receiver_expr.expr_type, method_name)
+                    let prepared_base = self.prepare_call_receiver(receiver_expr, expected_self_type)
+                    let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
                     when self.resolve_source_method_signature(receiver_type, method_name) in {
-                    .Some(method) then {
-                        method_param_types_for_inference = List[Type].new()
-                        let param_types = when method.symbol_type in {
-                            .FunctionType(params, _) then param_entry_types(params),
-                            _ then List[ref Type].new(),
-                        }
-                        let mut param_i UInt = 1
-                        while param_i < param_types.count() then {
-                            method_param_types_for_inference.push(param_types[param_i].val)
-                            param_i += 1
-                        }
-                        method_call_bindings = self.resolve_signature_method_type_bindings(receiver_type, method, List[Type].new())
-                        has_method_call_bindings = true
-                    },
-                    .None() then {},
-                }
+                        .Some(method) then {
+                            method_param_types_for_inference = List[Type].new()
+                            let param_types = when method.symbol_type in {
+                                .FunctionType(params, _) then param_entry_types(params),
+                                _ then List[ref Type].new(),
+                            }
+                            let mut param_i UInt = 1
+                            while param_i < param_types.count() then {
+                                method_param_types_for_inference.push(param_types[param_i].val)
+                                param_i += 1
+                            }
+                            method_call_bindings = self.resolve_signature_method_type_bindings(receiver_type, method, List[Type].new())
+                            has_method_call_bindings = true
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
             },
             _ then {},
         }
@@ -814,20 +878,24 @@ given TypeChecker {
                     },
                 }
             },
-            .MemberPath(base_ref, path) then if not path.is_empty() then {
-                let method_name = path[path.count() - 1]
-                let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
-                let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
-                let typed_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
-                yield when self.resolve_source_method_signature(typed_base.expr_type, method_name) in {
-                    .Some(sig) then {
-                        let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, List[Type].new(), expected)
-                        let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
-                        yield Option[Pair[Type, List[Type]]].Some(Pair[Type, List[Type]](inferred_return_type, inferred_method_type_args))
-                    },
-                    .None() then Option[Pair[Type, List[Type]]].None(),
-                }
-            } else Option[Pair[Type, List[Type]]].None(),
+            .MemberPath(_, _) then when self.split_typed_member_path_call_callee(typed_callee) in {
+                .Some(parts) then {
+                    let method_name = parts.second
+                    let receiver_expr = parts.first
+                    let expected_self_type = self.resolve_method_self_type(receiver_expr.expr_type, method_name)
+                    let prepared_base = self.prepare_call_receiver(receiver_expr, expected_self_type)
+                    let typed_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                    yield when self.resolve_source_method_signature(typed_base.expr_type, method_name) in {
+                        .Some(sig) then {
+                            let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, List[Type].new(), expected)
+                            let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
+                            yield Option[Pair[Type, List[Type]]].Some(Pair[Type, List[Type]](inferred_return_type, inferred_method_type_args))
+                        },
+                        .None() then Option[Pair[Type, List[Type]]].None(),
+                    }
+                },
+                .None() then Option[Pair[Type, List[Type]]].None(),
+            },
             _ then Option[Pair[Type, List[Type]]].None(),
         }
 
@@ -1039,9 +1107,10 @@ given TypeChecker {
                     .None() then Option[TypedExpr].None(),
                 }
             },
-            .MemberPath(base_ref, path) then if not path.is_empty() and not (typed_callee.expr_type is .FunctionType(_, _)) then {
-                let base = base_ref.val
-                let method_name = path[path.count() - 1]
+            .MemberPath(_, _) then when self.split_typed_member_path_call_callee(typed_callee) in {
+                .Some(parts) then {
+                let base = parts.first
+                let method_name = parts.second
                 let base_type = base.expr_type
                 let normalized_base_type = base_type
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
@@ -1146,7 +1215,9 @@ given TypeChecker {
                     .Some(call_expr) then Option[TypedExpr].Some(self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)),
                     .None() then Option[TypedExpr].None(),
                 }
-            } else Option[TypedExpr].None(),
+                },
+                .None() then Option[TypedExpr].None(),
+            },
             _ then when typed_callee.expr_kind in {
             .TraitMethodCall(receiver, trait_type, method_name, method_index, _) then {
                 let expected_self_type = when trait_type in {

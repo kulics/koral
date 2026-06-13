@@ -595,6 +595,51 @@ given TypeChecker {
         let mut typed_left = self.check_expr_core_ref(left, .None(), scope)
         let mut typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
 
+        let left_value_type = when typed_left.expr_type in {
+            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .PointerType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref.val),
+            _ then Option[Type].None(),
+        }
+        let right_value_type = when typed_right.expr_type in {
+            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .PointerType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref.val),
+            _ then Option[Type].None(),
+        }
+        when left_value_type in {
+            .Some(left_inner) then {
+                let right_is_scalar_like = self.is_numeric_type(typed_right.expr_type)
+                    or self.is_float_type(typed_right.expr_type)
+                    or self.is_rune_type(typed_right.expr_type)
+                    or typed_right.expr_type is .BoolType()
+                    or self.is_numeric_literal_expr(typed_right)
+                if right_is_scalar_like then {
+                    typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(left_inner), .Some(expr_span(left)))
+                }
+            },
+            .None() then {},
+        }
+        when right_value_type in {
+            .Some(right_inner) then {
+                let left_is_scalar_like = self.is_numeric_type(typed_left.expr_type)
+                    or self.is_float_type(typed_left.expr_type)
+                    or self.is_rune_type(typed_left.expr_type)
+                    or typed_left.expr_type is .BoolType()
+                    or self.is_numeric_literal_expr(typed_left)
+                if left_is_scalar_like then {
+                    typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(right_inner), .Some(expr_span(right)))
+                }
+            },
+            .None() then {},
+        }
+
         if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
             if self.is_null_ptr_call_expr(left) and (typed_right.expr_type is .PointerType(_) or typed_right.expr_type is .MutablePointerType(_)) then {
                 typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
@@ -607,6 +652,12 @@ given TypeChecker {
                 _ then false,
             } and (self.is_integer_type(typed_right.expr_type) or self.is_rune_type(typed_right.expr_type)) then {
                 typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
+            }
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
+                typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(typed_left.expr_type), Option[SourceSpan].Some(expr_span(right)))
+            }
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
+                typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(typed_right.expr_type), Option[SourceSpan].Some(expr_span(left)))
             }
         }
 

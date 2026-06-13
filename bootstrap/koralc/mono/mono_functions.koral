@@ -263,18 +263,18 @@ public let select_extension_template(
 
 private let patched_extension_template_with_body(
     template ref GenericExtensionMethodTemplate,
-    checked_body Option[ref TypedExpr],
+    donor ref GenericExtensionMethodTemplate,
 ) ref GenericExtensionMethodTemplate = {
     return box(GenericExtensionMethodTemplate(
         template.type_params,
-        template.method,
+        donor.method,
         template.conformance_trait_name,
         template.source_file,
         template.module_path,
         template.package_id,
-        checked_body,
-        template.checked_parameters,
-        template.checked_return_type,
+        donor.checked_body,
+        donor.checked_parameters,
+        donor.checked_return_type,
     ))
 }
 
@@ -846,6 +846,10 @@ public let instantiate_extension_method_from_entry(
     }
 
     bind_trait_extension_template_type_args(mono, base_type, template, substitution.ref)
+    when template.conformance_trait_name in {
+        .Some(trait_name) then substitution.insert(trait_name, base_type),
+        .None() then {},
+    }
 
     // template.type_params[i].name → type_args[i]
     let mut tp_idx = 0(UInt)
@@ -1446,7 +1450,7 @@ public let instantiate_trait_vtable_methods(
                                 if extension_type_args_satisfy_constraints(mono, tool_template_ref, trait_type_args) then {
                                     effective_template_ref = patched_extension_template_with_body(
                                         template_ref,
-                                        tool_template_ref.checked_body,
+                                        tool_template_ref,
                                     )
                                 } else {
                                     should_instantiate = false
@@ -1880,7 +1884,7 @@ public let instantiate_trait_placeholder_method(
                             .Some(tool_template_ref) then {
                                 let patched_template = patched_extension_template_with_body(
                                     matched_template,
-                                    tool_template_ref.checked_body,
+                                    tool_template_ref,
                                 )
                                 let _ = mono.instantiate_extension_method_impl(
                                     resolved_base_type,
@@ -1923,7 +1927,7 @@ public let instantiate_trait_placeholder_method(
                                 .Some(tool_template_ref) then {
                                     let patched_template = patched_extension_template_with_body(
                                         matched_template,
-                                        tool_template_ref.checked_body,
+                                        tool_template_ref,
                                     )
                                     let _ = mono.instantiate_extension_method_impl(
                                         resolved_base_type,
