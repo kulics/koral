@@ -2438,9 +2438,16 @@ given MIRFunctionBuilder {
     }
 
     private capture_place(self mut ref, symbol ref Symbol) MIRPlace = {
+        let name = self.context.symbol_name(symbol)
         return when self.local_by_def_id.get(symbol.def_id.id) in {
             .Some(local_id) then MIRPlace.Local(local_id),
-            .None() then MIRPlace.Global(symbol.def_id),
+            .None() then when self.parameter_local_by_name.get(name) in {
+                .Some(local_id) then {
+                    self.local_by_def_id.insert(symbol.def_id.id, local_id)
+                    yield MIRPlace.Local(local_id)
+                },
+                .None() then MIRPlace.Global(symbol.def_id),
+            },
         }
     }
 
@@ -2454,7 +2461,16 @@ given MIRFunctionBuilder {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 let name = self.context.symbol_name(symbol)
-                if not param_names.contains(name) and self.local_by_def_id.get(symbol.def_id.id) is .Some(_) then {
+                let is_local_capture = if self.local_by_def_id.get(symbol.def_id.id) is .Some(_)
+                    then true
+                    else when self.parameter_local_by_name.get(name) in {
+                        .Some(local_id) then {
+                            self.local_by_def_id.insert(symbol.def_id.id, local_id)
+                            yield true
+                        },
+                        .None() then false,
+                    }
+                if not param_names.contains(name) and is_local_capture then {
                     let mut seen = false
                     let mut capture_index UInt = 0
                     while capture_index < out.count() then {
