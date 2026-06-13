@@ -259,7 +259,9 @@ given MIRLowerer {
             body,
             self.context,
         )
-        return builder.lower()
+        let lowered = builder.lower()
+        let mut promoter = MIRLocalReferenceAllocationPromoter.new(lowered, self.context)
+        return promoter.promote()
     }
 
     private should_lower_function(self, identifier ref Symbol) Bool = {
@@ -436,5 +438,390 @@ given MIRLowerer {
             first = false
         }
         return MIRTraitVTableMethod(member.name, Option[Type].Some(member.return_type), params, self_by_value)
+    }
+}
+
+type MIRLocalReferenceAllocationPromoter(
+    function ref MIRFunction,
+    context CompilerContext,
+    local_types_by_id Dict[UInt, Type],
+    mut escaping_local_ids Set[UInt],
+    mut escaping_worklist List[MIRLocalID],
+    mut dependencies_by_local_id Dict[UInt, List[MIRLocalID]],
+)
+
+given MIRLocalReferenceAllocationPromoter {
+    public new(function ref MIRFunction, context CompilerContext) MIRLocalReferenceAllocationPromoter = {
+        let mut local_types_by_id = Dict[UInt, Type].new()
+        for local in function.locals then {
+            local_types_by_id.insert(local.id.raw_value, local.local_type)
+        }
+        return MIRLocalReferenceAllocationPromoter(
+            function,
+            context,
+            local_types_by_id,
+            Set[UInt].new(),
+            List[MIRLocalID].new(),
+            Dict[UInt, List[MIRLocalID]].new(),
+        )
+    }
+
+    public promote(self mut ref) ref MIRFunction = {
+        self.collect_escaping_locals()
+        let mut blocks = List[ref MIRBasicBlock].new()
+        for block in self.function.blocks then {
+            let mut statements = List[ref MIRStatement].new()
+            for statement in block.statements then {
+                statements.push(box(self.promote_statement(statement.val)))
+            }
+            blocks.push(box(MIRBasicBlock(block.id, statements, block.terminator)))
+        }
+        return box(MIRFunction(
+            self.function.identifier,
+            self.function.params,
+            self.function.return_type,
+            self.function.kind,
+            self.function.entry_block,
+            self.function.locals,
+            blocks,
+        ))
+    }
+
+    private collect_escaping_locals(self mut ref) Void = {
+        for block in self.function.blocks then {
+            for statement in block.statements then {
+                when statement.val in {
+                    .Assign(place, value) then when place in {
+                        .Local(local) then {
+                            if self.type_contains_escaping_references(self.local_type(local)) then {
+                                self.add_dependencies(local, self.reference_dependencies_in_value(value))
+                            }
+                        },
+                        _ then self.mark_escaping_dependencies(value),
+                    },
+                    .CompoundAssign(assignment) then when assignment.target in {
+                        .Local(_) then {},
+                        _ then self.mark_escaping_dependencies(assignment.value),
+                    },
+                    _ then {},
+                }
+            }
+            when block.terminator in {
+                .ReturnValue(operand) then {
+                    if self.type_contains_escaping_references(self.function.return_type) then {
+                        when operand in {
+                            .Some(op) then self.mark_escaping_dependencies(MIRValue.Operand(op)),
+                            .None() then {},
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        while not self.escaping_worklist.is_empty() then {
+            let local = self.escaping_worklist.pop() or else { break }
+            let deps = self.dependencies_by_local_id.get(local.raw_value) or else { continue }
+            for dep in deps then {
+                self.mark_escaping_local(dep)
+            }
+        }
+    }
+
+    private promote_statement(self mut ref, statement MIRStatement) MIRStatement = {
+        return when statement in {
+            .Assign(place, value) then when place in {
+                .Local(local) then {
+                    let new_value = if self.escaping_local_ids.contains(local.raw_value)
+                        then self.promote_direct_references(value)
+                        else value
+                    yield MIRStatement.Assign(place, new_value)
+                },
+                _ then MIRStatement.Assign(place, self.promote_direct_references(value)),
+            },
+            .CompoundAssign(assignment) then {
+                let new_value = when assignment.target in {
+                    .Local(_) then assignment.value,
+                    _ then self.promote_direct_references(assignment.value),
+                }
+                yield MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, new_value))
+            },
+            _ then statement,
+        }
+    }
+
+    private promote_direct_references(self mut ref, value MIRValue) MIRValue = {
+        return when value in {
+            .Ref(place, kind, allocation) then when allocation in {
+                .StackBorrow() then MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned()),
+                .HeapOwned() then value,
+            },
+            .Aggregate(aggregate) then {
+                let mut fields = List[ref MIRValue].new()
+                for field in aggregate.fields then {
+                    fields.push(box(self.promote_direct_references(field.val)))
+                }
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+            },
+            .EnumCase(construction) then {
+                let mut args = List[ref MIRValue].new()
+                for arg in construction.arguments then {
+                    args.push(box(self.promote_direct_references(arg.val)))
+                }
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+            },
+            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_direct_references(conversion.inner.val)), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
+            .TraitMethodCall(call) then {
+                let mut args = List[ref MIRValue].new()
+                for arg in call.arguments then {
+                    args.push(box(self.promote_direct_references(arg.val)))
+                }
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(call.receiver.val)), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+            },
+            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_direct_references(tag.subject.val)), tag.enum_type)),
+            _ then value,
+        }
+    }
+
+    private mark_escaping_dependencies(self mut ref, value MIRValue) Void = {
+        let deps = self.reference_dependencies_in_value(value)
+        for dep in deps then {
+            self.mark_escaping_local(dep)
+        }
+    }
+
+    private mark_escaping_local(self mut ref, local MIRLocalID) Void = {
+        if not self.escaping_local_ids.contains(local.raw_value) then {
+            self.escaping_local_ids.insert(local.raw_value)
+            self.escaping_worklist.push(local)
+        }
+    }
+
+    private add_dependencies(self mut ref, local MIRLocalID, deps List[MIRLocalID]) Void = {
+        let mut existing = self.dependencies_by_local_id.get(local.raw_value) or else List[MIRLocalID].new()
+        for dep in deps then {
+            if not self.local_list_contains(existing, dep) then {
+                existing.push(dep)
+            }
+        }
+        self.dependencies_by_local_id.insert(local.raw_value, existing)
+    }
+
+    private reference_dependencies_in_value(self mut ref, value MIRValue) List[MIRLocalID] = {
+        if not self.type_contains_escaping_references(self.type_of_value(value)) then {
+            return when value in {
+                .Lambda(lambda) then self.lambda_capture_dependencies(lambda),
+                _ then List[MIRLocalID].new(),
+            }
+        }
+
+        return when value in {
+            .Operand(operand) then when operand in {
+                .Local(local) then self.local_list_single(local),
+                _ then List[MIRLocalID].new(),
+            },
+            .PlaceRead(place, _) then when self.root_local_of_place(place) in {
+                .Some(local) then self.local_list_single(local),
+                .None() then List[MIRLocalID].new(),
+            },
+            .Aggregate(aggregate) then {
+                let mut deps = List[MIRLocalID].new()
+                for field in aggregate.fields then {
+                    self.local_list_union_into(deps, self.reference_dependencies_in_value(field.val))
+                }
+                yield deps
+            },
+            .EnumCase(construction) then {
+                let mut deps = List[MIRLocalID].new()
+                for arg in construction.arguments then {
+                    self.local_list_union_into(deps, self.reference_dependencies_in_value(arg.val))
+                }
+                yield deps
+            },
+            .TraitObjectConversion(conversion) then self.reference_dependencies_in_value(conversion.inner.val),
+            .TraitMethodCall(call) then {
+                let mut deps = self.reference_dependencies_in_value(call.receiver.val)
+                for arg in call.arguments then {
+                    self.local_list_union_into(deps, self.reference_dependencies_in_value(arg.val))
+                }
+                yield deps
+            },
+            .Lambda(lambda) then self.lambda_capture_dependencies(lambda),
+            .Cast(operand, _) then self.reference_dependencies_in_value(MIRValue.Operand(operand)),
+            .EnumTag(tag) then self.reference_dependencies_in_value(tag.subject.val),
+            _ then List[MIRLocalID].new(),
+        }
+    }
+
+    private lambda_capture_dependencies(self mut ref, lambda MIRLambda) List[MIRLocalID] = {
+        let mut deps = List[MIRLocalID].new()
+        for capture_source in lambda.capture_sources then {
+            when self.root_local_of_place(capture_source) in {
+                .Some(local) then {
+                    if self.type_contains_escaping_references(self.local_type(local)) and not self.local_list_contains(deps, local) then {
+                        deps.push(local)
+                    }
+                },
+                .None() then {},
+            }
+        }
+        return deps
+    }
+
+    private type_contains_escaping_references(self ref, t Type) Bool = {
+        return when t in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            .FunctionType(_, _) then true,
+            .TraitObject(_, _) then true,
+            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if self.type_contains_escaping_references(field.field_type) then { return true }
+                    }
+                    yield false
+                },
+                .None() then false,
+            },
+            .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    for case_info in cases then {
+                        for param in case_info.params then {
+                            if self.type_contains_escaping_references(param.param_type) then { return true }
+                        }
+                    }
+                    yield false
+                },
+                .None() then false,
+            },
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    if self.type_contains_escaping_references(arg.val) then { return true }
+                }
+                yield false
+            },
+            .GenericEnum(_, args) then {
+                for arg in args then {
+                    if self.type_contains_escaping_references(arg.val) then { return true }
+                }
+                yield false
+            },
+            _ then false,
+        }
+    }
+
+    private root_local_of_place(self ref, place MIRPlace) Option[MIRLocalID] = {
+        return when place in {
+            .Local(local) then Option[MIRLocalID].Some(local),
+            .Field(base, _) then self.root_local_of_place(base.val),
+            .EnumPayload(base, _, _, _, _) then self.root_local_of_place(base.val),
+            _ then Option[MIRLocalID].None(),
+        }
+    }
+
+    private type_of_value(self ref, value MIRValue) Type = {
+        return when value in {
+            .Operand(operand) then self.type_of_operand(operand),
+            .PlaceRead(place, _) then self.type_of_place(place),
+            .Binary(operation) then operation.result_type,
+            .Unary(operation) then operation.result_type,
+            .Call(call) then call.result_type,
+            .Aggregate(aggregate) then aggregate.aggregate_type,
+            .EnumCase(construction) then construction.enum_type,
+            .EnumTag(_) then Type.IntType(),
+            .TraitObjectConversion(conversion) then conversion.result_type,
+            .TraitMethodCall(call) then call.result_type,
+            .Ref(place, kind, _) then self.type_of_ref(place, kind),
+            .Pointer(place) then Type.PointerType(box(self.type_of_place(place))),
+            .Cast(_, target_type) then target_type,
+            .Intrinsic(node) then when node in {
+                .AllocMemory(_, result_type) then result_type,
+                .IsUniqueMutable(_) then Type.BoolType(),
+                .RefCount(_) then Type.UIntType(),
+                .MakeRef(_, _, result_type) then result_type,
+                .MakeMutRef(_, _, result_type) then result_type,
+                .DowngradeRef(_, result_type) then result_type,
+                .DowngradeMutRef(_, result_type) then result_type,
+                .UpgradeRef(_, result_type) then result_type,
+                .UpgradeMutRef(_, result_type) then result_type,
+                .TakeMemory(_, result_type) then result_type,
+                .NullPtr(result_type) then result_type,
+                .SpawnThread(_, _, _, _) then Type.Int32Type(),
+                _ then Type.VoidType(),
+            },
+            .Lambda(lambda) then lambda.lambda_type,
+        }
+    }
+
+    private type_of_place(self ref, place MIRPlace) Type = {
+        return when place in {
+            .Local(local) then self.local_type(local),
+            .Global(def_id) then self.context.get_symbol_type(def_id) or else Type.Unknown(),
+            .Field(_, field) then field.symbol_type,
+            .EnumPayload(_, _, _, _, field_type) then field_type,
+            .Deref(_, pointee) then pointee,
+            .PointerElement(_, element) then element,
+        }
+    }
+
+    private type_of_operand(self ref, operand MIROperand) Type = {
+        return when operand in {
+            .Local(local) then self.local_type(local),
+            .Function(symbol) then symbol.symbol_type,
+            .Constant(constant) then when constant in {
+                .Integer(_, t) then t,
+                .Float(_, t) then t,
+                .StringLiteral(_, t) then t,
+                .Boolean(_) then Type.BoolType(),
+                .Void() then Type.VoidType(),
+            },
+        }
+    }
+
+    private type_of_ref(self ref, place MIRPlace, kind MIRReferenceKind) Type = {
+        let inner = self.type_of_place(place)
+        return when kind in {
+            .Mutable() then Type.MutableReferenceType(box(inner)),
+            .Weak() then Type.WeakReferenceType(box(inner)),
+            .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
+            .Shared() then Type.ReferenceType(box(inner)),
+        }
+    }
+
+    private local_type(self ref, local MIRLocalID) Type = {
+        return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
+    }
+
+    private local_list_single(self ref, local MIRLocalID) List[MIRLocalID] = {
+        let mut out = List[MIRLocalID].new()
+        out.push(local)
+        return out
+    }
+
+    private local_list_contains(self ref, values List[MIRLocalID], target MIRLocalID) Bool = {
+        let _ = self
+        for value in values then {
+            if value.raw_value == target.raw_value then { return true }
+        }
+        return false
+    }
+
+    private local_list_union_into(self ref, dest mut ref List[MIRLocalID], source List[MIRLocalID]) Void = {
+        let _ = self
+        for value in source then {
+            let mut present = false
+            let mut index UInt = 0
+            while index < dest.count() then {
+                if dest[index].raw_value == value.raw_value then {
+                    present = true
+                }
+                index += 1
+            }
+            if not present then {
+                dest.push(value)
+            }
+        }
     }
 }
