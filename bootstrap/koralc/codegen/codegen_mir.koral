@@ -84,144 +84,154 @@ private let compute_non_owning_mir_locals(function ref MIRFunction) ref Dict[UIn
     return box(result)
 }
 
-private let mir_record_local_use_block(
-    first_use_block_by_local mut ref Dict[UInt, MIRBlockID],
-    multi_use_blocks_by_local mut ref Dict[UInt, Bool],
-    local MIRLocalID,
-    block MIRBlockID,
-) Void = {
-    when first_use_block_by_local.get(local.raw_value) in {
-        .Some(first_block) then {
-            if first_block.raw_value <> block.raw_value then {
-                multi_use_blocks_by_local.insert(local.raw_value, true)
-            }
-        },
-        .None() then first_use_block_by_local.insert(local.raw_value, block),
-    }
+private let mir_current_scope_set(active_scopes ref List[MIRScopeID]) Set[UInt] = {
+    let mut scope_set = Set[UInt].new()
+    for scope in active_scopes then { scope_set.insert(scope.raw_value) }
+    return scope_set
 }
 
-private let mir_walk_operand_use_blocks(
-    first_use_block_by_local mut ref Dict[UInt, MIRBlockID],
-    multi_use_blocks_by_local mut ref Dict[UInt, Bool],
+private let mir_record_local_use(
+    use_scopes_by_local mut ref Dict[UInt, List[Set[UInt]]],
+    use_blocks_by_local mut ref Dict[UInt, Set[UInt]],
+    local MIRLocalID,
+    block MIRBlockID,
+    active_scopes ref List[MIRScopeID],
+) Void = {
+    let mut use_scopes = use_scopes_by_local.get(local.raw_value) or else List[Set[UInt]].new()
+    use_scopes.push(mir_current_scope_set(active_scopes))
+    use_scopes_by_local.insert(local.raw_value, use_scopes)
+
+    let mut use_blocks = use_blocks_by_local.get(local.raw_value) or else Set[UInt].new()
+    use_blocks.insert(block.raw_value)
+    use_blocks_by_local.insert(local.raw_value, use_blocks)
+}
+
+private let mir_walk_operand_uses(
+    use_scopes_by_local mut ref Dict[UInt, List[Set[UInt]]],
+    use_blocks_by_local mut ref Dict[UInt, Set[UInt]],
     operand MIROperand,
     block MIRBlockID,
+    active_scopes ref List[MIRScopeID],
 ) Void = {
     when operand in {
-        .Local(local) then mir_record_local_use_block(first_use_block_by_local, multi_use_blocks_by_local, local, block),
+        .Local(local) then mir_record_local_use(use_scopes_by_local, use_blocks_by_local, local, block, active_scopes),
         _ then {},
     }
 }
 
-private let mir_walk_place_use_blocks(
-    first_use_block_by_local mut ref Dict[UInt, MIRBlockID],
-    multi_use_blocks_by_local mut ref Dict[UInt, Bool],
+private let mir_walk_place_uses(
+    use_scopes_by_local mut ref Dict[UInt, List[Set[UInt]]],
+    use_blocks_by_local mut ref Dict[UInt, Set[UInt]],
     place MIRPlace,
     block MIRBlockID,
+    active_scopes ref List[MIRScopeID],
 ) Void = {
     when place in {
-        .Local(local) then mir_record_local_use_block(first_use_block_by_local, multi_use_blocks_by_local, local, block),
+        .Local(local) then mir_record_local_use(use_scopes_by_local, use_blocks_by_local, local, block, active_scopes),
         .Global(_) then {},
-        .Field(base, _) then mir_walk_place_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, base.val, block),
-        .EnumPayload(base, _, _, _, _) then mir_walk_place_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, base.val, block),
-        .Deref(base, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, base.val, block),
-        .PointerElement(base, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, base.val, block),
+        .Field(base, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
+        .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
+        .Deref(base, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
+        .PointerElement(base, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
     }
 }
 
-private let mir_walk_intrinsic_use_blocks(
-    first_use_block_by_local mut ref Dict[UInt, MIRBlockID],
-    multi_use_blocks_by_local mut ref Dict[UInt, Bool],
+private let mir_walk_intrinsic_uses(
+    use_scopes_by_local mut ref Dict[UInt, List[Set[UInt]]],
+    use_blocks_by_local mut ref Dict[UInt, Set[UInt]],
     intrinsic_node MIRIntrinsic,
     block MIRBlockID,
+    active_scopes ref List[MIRScopeID],
 ) Void = {
     when intrinsic_node in {
-        .AllocMemory(count, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, count.val, block),
-        .DeallocMemory(pointer) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, pointer.val, block),
+        .AllocMemory(count, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, count.val, block, active_scopes),
+        .DeallocMemory(pointer) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes),
         .CopyMemory(dest, source, count) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, dest.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, source.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, count.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, dest.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, source.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, count.val, block, active_scopes)
         },
         .MoveMemory(dest, source, count) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, dest.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, source.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, count.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, dest.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, source.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, count.val, block, active_scopes)
         },
-        .IsUniqueMutable(value) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block),
-        .RefCount(value) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block),
+        .IsUniqueMutable(value) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
+        .RefCount(value) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
         .MakeRef(pointer, owner, _) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, pointer.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, owner.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, owner.val, block, active_scopes)
         },
         .MakeMutRef(pointer, owner, _) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, pointer.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, owner.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, owner.val, block, active_scopes)
         },
-        .DowngradeRef(value, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block),
-        .DowngradeMutRef(value, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block),
-        .UpgradeRef(value, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block),
-        .UpgradeMutRef(value, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block),
+        .DowngradeRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
+        .DowngradeMutRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
+        .UpgradeRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
+        .UpgradeMutRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
         .InitMemory(pointer, value) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, pointer.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, value.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes)
         },
-        .DeinitMemory(pointer) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, pointer.val, block),
-        .TakeMemory(pointer, _) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, pointer.val, block),
+        .DeinitMemory(pointer) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes),
+        .TakeMemory(pointer, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes),
         .NullPtr(_) then {},
         .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, out_handle.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, out_tid.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, closure.val, block)
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, stack_size.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, out_handle.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, out_tid.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, closure.val, block, active_scopes)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, stack_size.val, block, active_scopes)
         },
     }
 }
 
-private let mir_walk_value_use_blocks(
-    first_use_block_by_local mut ref Dict[UInt, MIRBlockID],
-    multi_use_blocks_by_local mut ref Dict[UInt, Bool],
+private let mir_walk_value_uses(
+    use_scopes_by_local mut ref Dict[UInt, List[Set[UInt]]],
+    use_blocks_by_local mut ref Dict[UInt, Set[UInt]],
     value MIRValue,
     block MIRBlockID,
+    active_scopes ref List[MIRScopeID],
 ) Void = {
     when value in {
-        .Operand(operand) then mir_walk_operand_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, operand, block),
-        .PlaceRead(place, _) then mir_walk_place_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, place, block),
+        .Operand(operand) then mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operand, block, active_scopes),
+        .PlaceRead(place, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, place, block, active_scopes),
         .Binary(operation) then {
-            mir_walk_operand_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, operation.left, block)
-            mir_walk_operand_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, operation.right, block)
+            mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operation.left, block, active_scopes)
+            mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operation.right, block, active_scopes)
         },
-        .Unary(operation) then mir_walk_operand_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, operation.operand, block),
+        .Unary(operation) then mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operation.operand, block, active_scopes),
         .Call(call) then {
-            mir_walk_operand_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, call.callee, block)
+            mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, call.callee, block, active_scopes)
             for argument in call.arguments then {
-                mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, argument.val, block)
+                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, argument.val, block, active_scopes)
             }
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
-                mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, field.val, block)
+                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, field.val, block, active_scopes)
             }
         },
         .EnumCase(construction) then {
             for argument in construction.arguments then {
-                mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, argument.val, block)
+                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, argument.val, block, active_scopes)
             }
         },
-        .EnumTag(tag) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, tag.subject.val, block),
-        .TraitObjectConversion(conversion) then mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, conversion.inner.val, block),
+        .EnumTag(tag) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, tag.subject.val, block, active_scopes),
+        .TraitObjectConversion(conversion) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, conversion.inner.val, block, active_scopes),
         .TraitMethodCall(call) then {
-            mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, call.receiver.val, block)
+            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, call.receiver.val, block, active_scopes)
             for argument in call.arguments then {
-                mir_walk_value_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, argument.val, block)
+                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, argument.val, block, active_scopes)
             }
         },
-        .Ref(place, _, _) then mir_walk_place_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, place, block),
-        .Pointer(place) then mir_walk_place_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, place, block),
-        .Cast(operand, _) then mir_walk_operand_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, operand, block),
-        .Intrinsic(node) then mir_walk_intrinsic_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, node, block),
+        .Ref(place, _, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, place, block, active_scopes),
+        .Pointer(place) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, place, block, active_scopes),
+        .Cast(operand, _) then mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operand, block, active_scopes),
+        .Intrinsic(node) then mir_walk_intrinsic_uses(use_scopes_by_local, use_blocks_by_local, node, block, active_scopes),
         .Lambda(lambda) then {
             for source in lambda.capture_sources then {
-                mir_walk_place_use_blocks(first_use_block_by_local, multi_use_blocks_by_local, source, block)
+                mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, source, block, active_scopes)
             }
         },
     }
@@ -778,19 +788,16 @@ given MIRFunctionCodeEmitter {
     }
 
     private emit_root_cleanup(self mut ref, preserved Option[MIRLocalID]) Void = {
-        let mut i = self.lifetime_plan.root_locals.count()
+        let mut i = self.function.locals.count()
         while i > 0 then {
             i -= 1
-            let local_id = self.lifetime_plan.root_locals[i]
+            let local = self.function.locals[i]
+            let local_id = local.id
             let skip = when preserved in { .Some(p) then p.raw_value == local_id.raw_value, .None() then false }
-            if not skip then {
-                when self.init_flag(local_id) in {
-                    .Some(flag) then when self.local_info(local_id) in {
-                        .Some(local) then self.emit_guarded_drop(flag, local.local_type, self.local_name(local_id)),
-                        .None() then {},
-                    },
-                    .None() then {},
-                }
+            if skip then { continue }
+            when self.init_flag(local_id) in {
+                .Some(flag) then self.emit_guarded_drop(flag, local.local_type, self.local_name(local_id)),
+                .None() then {},
             }
         }
     }
@@ -2505,14 +2512,21 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
     let mut hoisted_declaration_locals = List[MIRLocalID].new()
     let mut block_local_declarations_by_block = Dict[UInt, List[MIRLocalID]].new()
     let mut block_local_declaration_locals = Dict[UInt, Bool].new()
+    let mut parent_scope_by_scope = Dict[UInt, MIRScopeID].new()
+    let mut declared_scope_by_local = Dict[UInt, MIRScopeID].new()
     let mut active_scopes = List[MIRScopeID].new()
     let mut declared_block_by_local = Dict[UInt, MIRBlockID].new()
-    let mut first_use_block_by_local = Dict[UInt, MIRBlockID].new()
-    let mut multi_use_blocks_by_local = Dict[UInt, Bool].new()
+    let mut use_scopes_by_local = Dict[UInt, List[Set[UInt]]].new()
+    let mut use_blocks_by_local = Dict[UInt, Set[UInt]].new()
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
-                .ScopeEnter(scope) then active_scopes.push(scope),
+                .ScopeEnter(scope) then {
+                    if not active_scopes.is_empty() then {
+                        parent_scope_by_scope.insert(scope.raw_value, active_scopes[active_scopes.count() - 1(UInt)])
+                    }
+                    active_scopes.push(scope)
+                },
                 .ScopeExit(scope) then {
                     let mut idx = active_scopes.count()
                     while idx > 0 then {
@@ -2524,58 +2538,79 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
                     }
                 },
                 .Declare(local_id) then {
-                    mir_record_local_use_block(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, local_id, block.id)
                     if declared_block_by_local.get(local_id.raw_value) is .None() then {
                         declared_block_by_local.insert(local_id.raw_value, block.id)
                     }
-                    if local_id.raw_value < function.locals.count() then {
-                        let local = function.locals[local_id.raw_value]
-                        let is_block_result_local = local.name.starts_with("block_result")
-                        if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
-                            if is_block_result_local or active_scopes.is_empty() then {
-                                root_locals.push(local_id)
-                            } else {
-                                let scope = active_scopes[active_scopes.count() - 1(UInt)]
-                                let mut list = locals_by_scope.get(scope.raw_value) or else List[MIRLocalID].new()
-                                list.push(local_id)
-                                locals_by_scope.insert(scope.raw_value, list)
-                            }
-                        } else if local.storage is .Parameter() and codegen.needs_drop(local.local_type) then {
-                            root_locals.push(local_id)
-                        }
+                    if not active_scopes.is_empty() then {
+                        declared_scope_by_local.insert(local_id.raw_value, active_scopes[active_scopes.count() - 1(UInt)])
                     }
+                    mir_record_local_use(use_scopes_by_local.ref, use_blocks_by_local.ref, local_id, block.id, active_scopes.ref)
                 },
                 .Assign(place, value) then {
-                    mir_walk_place_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, place, block.id)
-                    mir_walk_value_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, value, block.id)
+                    mir_walk_place_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, place, block.id, active_scopes.ref)
+                    mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref)
                 },
                 .CompoundAssign(assignment) then {
-                    mir_walk_place_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, assignment.target, block.id)
-                    mir_walk_value_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, assignment.value, block.id)
+                    mir_walk_place_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, assignment.target, block.id, active_scopes.ref)
+                    mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, assignment.value, block.id, active_scopes.ref)
                 },
-                .Drop(place) then mir_walk_place_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, place, block.id),
-                .Retain(value) then mir_walk_value_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, value, block.id),
-                .Release(value) then mir_walk_value_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, value, block.id),
-                .Evaluate(value) then mir_walk_value_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, value, block.id),
+                .Drop(place) then mir_walk_place_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, place, block.id, active_scopes.ref),
+                .Retain(value) then mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref),
+                .Release(value) then mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref),
+                .Evaluate(value) then mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref),
                 .DebugSource(_) then {},
             }
         }
         when block.terminator in {
-            .Branch(condition, _, _) then mir_walk_operand_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, condition, block.id),
-            .SwitchValue(operand, _, _) then mir_walk_operand_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, operand, block.id),
+            .Branch(condition, _, _) then mir_walk_operand_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, condition, block.id, active_scopes.ref),
+            .SwitchValue(operand, _, _) then mir_walk_operand_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, operand, block.id, active_scopes.ref),
             .ReturnValue(operand) then when operand in {
-                .Some(op) then mir_walk_operand_use_blocks(first_use_block_by_local.ref, multi_use_blocks_by_local.ref, op, block.id),
+                .Some(op) then mir_walk_operand_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, op, block.id, active_scopes.ref),
                 .None() then {},
             },
             _ then {},
         }
     }
     for local in function.locals then {
+        if not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
+            let mut scope = when declared_scope_by_local.get(local.id.raw_value) in {
+                .Some(scope_id) then Option[MIRScopeID].Some(scope_id),
+                .None() then Option[MIRScopeID].None(),
+            }
+            let use_scopes = use_scopes_by_local.get(local.id.raw_value) or else List[Set[UInt]].new()
+            while scope is .Some(_) then {
+                let scope_id = when scope in {
+                    .Some(existing) then existing,
+                    .None() then MIRScopeID(0(UInt)),
+                }
+                let mut used_outside = false
+                for use_scope in use_scopes then {
+                    if not use_scope.contains(scope_id.raw_value) then {
+                        used_outside = true
+                    }
+                }
+                if not used_outside then { break }
+                scope = when parent_scope_by_scope.get(scope_id.raw_value) in {
+                    .Some(parent_scope) then Option[MIRScopeID].Some(parent_scope),
+                    .None() then Option[MIRScopeID].None(),
+                }
+            }
+            when scope in {
+                .Some(scope_id) then {
+                    let mut scoped_locals = locals_by_scope.get(scope_id.raw_value) or else List[MIRLocalID].new()
+                    scoped_locals.push(local.id)
+                    locals_by_scope.insert(scope_id.raw_value, scoped_locals)
+                },
+                .None() then root_locals.push(local.id),
+            }
+        }
+    }
+    for local in function.locals then {
         if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) then {
             let has_init_flag = local.id.raw_value < init_flags.count() and not init_flags[local.id.raw_value].is_empty()
             let can_block_local = if not has_init_flag then when declared_block_by_local.get(local.id.raw_value) in {
-                .Some(declaration_block) then when first_use_block_by_local.get(local.id.raw_value) in {
-                    .Some(use_block) then use_block.raw_value == declaration_block.raw_value and multi_use_blocks_by_local.get(local.id.raw_value) is .None(),
+                .Some(declaration_block) then when use_blocks_by_local.get(local.id.raw_value) in {
+                    .Some(use_blocks) then use_blocks.count() == 1(UInt) and use_blocks.contains(declaration_block.raw_value),
                     .None() then false,
                 },
                 .None() then false,
@@ -2583,9 +2618,9 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
             if can_block_local then {
                 when declared_block_by_local.get(local.id.raw_value) in {
                     .Some(declaration_block) then {
-                        let mut list = block_local_declarations_by_block.get(declaration_block.raw_value) or else List[MIRLocalID].new()
-                        list.push(local.id)
-                        block_local_declarations_by_block.insert(declaration_block.raw_value, list)
+                        let mut block_locals = block_local_declarations_by_block.get(declaration_block.raw_value) or else List[MIRLocalID].new()
+                        block_locals.push(local.id)
+                        block_local_declarations_by_block.insert(declaration_block.raw_value, block_locals)
                         block_local_declaration_locals.insert(local.id.raw_value, true)
                     },
                     .None() then hoisted_declaration_locals.push(local.id),
