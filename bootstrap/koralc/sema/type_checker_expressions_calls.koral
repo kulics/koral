@@ -130,9 +130,27 @@ given TypeChecker {
                 .Some(t) then t,
                 .None() then Type.Unknown(),
             },
-            .GenericInstantiation(base, _, _) then when self.try_resolve_named_type_in_scope_without_diag(base, scope) in {
-                .Some(t) then t,
-                .None() then Type.Unknown(),
+            .GenericInstantiation(base, type_args, _) then {
+                let resolved_base = self.try_resolve_named_type_in_scope_without_diag(base, scope) or else {
+                    return Type.Unknown()
+                }
+                let mut resolved_args = List[ref Type].new()
+                for type_arg in type_args then {
+                    resolved_args.push(box(self.resolve_type_in_scope(type_arg.val, scope)))
+                }
+                yield when resolved_base in {
+                    .StructureType(def_id) then {
+                        let template_name = self.context().get_template_name(def_id) or else base
+                        yield Type.GenericStruct(template_name, resolved_args)
+                    },
+                    .EnumType(def_id) then {
+                        let template_name = self.context().get_template_name(def_id) or else base
+                        yield Type.GenericEnum(template_name, resolved_args)
+                    },
+                    .GenericStruct(template_name, _) then Type.GenericStruct(template_name, resolved_args),
+                    .GenericEnum(template_name, _) then Type.GenericEnum(template_name, resolved_args),
+                    _ then resolved_base,
+                }
             },
             _ then Type.Unknown(),
         }

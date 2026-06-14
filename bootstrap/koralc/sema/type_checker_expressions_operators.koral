@@ -343,7 +343,7 @@ given TypeChecker {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
             },
-            .PairLetStmt(_, _, value_ref, _) then {
+            .PairLetStmt(_, _, _, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
             },
             .AssignmentStmt(target_ref, value_ref, _) then {
@@ -417,7 +417,7 @@ given TypeChecker {
                             block_local_names.insert(self.context().symbol_name(symbol))
                             block_local_ids.insert(symbol.def_id.id)
                         },
-                        .PairLetStmt(first_symbol, second_symbol, value_ref, _) then {
+                        .PairLetStmt(_, first_symbol, second_symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
                             when first_symbol in {
                                 .Some(symbol) then {
@@ -743,6 +743,9 @@ given TypeChecker {
     }
 
     private build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
+        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "operator 'equals'") then {
+            return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
+        }
         self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "equals")
         let method_symbol = self.make_method_symbol("equals", ret_type)
@@ -760,6 +763,9 @@ given TypeChecker {
     }
 
     private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
+        if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "operator 'compare'") then {
+            return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
+        }
         self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "compare")
         let method_symbol = self.make_method_symbol("compare", ret_type)

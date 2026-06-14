@@ -932,6 +932,7 @@ given TypeChecker {
             .GenericEnum(_, _) then true,
             _ then false,
         }
+        let mut recorded = false
         if self.storage.generic_templates.lookup_extension_methods(template_name) is .Some(ext_templates) then {
             if select_extension_template(
                 ext_templates,
@@ -957,11 +958,65 @@ given TypeChecker {
                         box(request_template),
                         extension_type_args,
                         method_type_args_ref,
-                    ),
+                        ),
                     0,
                     self.storage.file_path,
                 ))
+                recorded = true
             }
+        }
+        if recorded then { return }
+
+        let conformance_key = self.conformance_template_key(normalized_base)
+        when self.storage.conformance_index.get(conformance_key) in {
+            .Some(conformances) then {
+                for conformance in conformances then {
+                    let mut conformance_bindings = Dict[String, Type].new()
+                    if not self.conformance_type_key_matches(conformance.target_type, normalized_base, conformance_bindings.ref) then {
+                        continue
+                    }
+                    let trait_name = conformance.trait_name
+                    let trait_templates = self.storage.generic_templates.lookup_extension_methods(trait_name) or else {
+                        continue
+                    }
+                    let matched_template = select_extension_template(
+                        trait_templates,
+                        method_name,
+                        Option[UInt].Some(method_type_args_ref.count()),
+                        Option[UInt].Some(conformance.trait_arg_types.count()),
+                    ) or else {
+                        continue
+                    }
+                    let mut concrete_trait_args = List[ref Type].new()
+                    for trait_arg in conformance.trait_arg_types then {
+                        concrete_trait_args.push(box(self.apply_type_bindings(trait_arg, conformance_bindings)))
+                    }
+                    let request_template = self.copied_extension_method_template(
+                        matched_template.type_params,
+                        matched_template.method,
+                        matched_template.conformance_trait_name,
+                        matched_template.source_file,
+                        matched_template.module_path,
+                        matched_template.package_id,
+                        Option[ref TypedExpr].None(),
+                        Option[List[Symbol]].None(),
+                        Option[Type].None(),
+                    )
+                    self.record_instantiation_request(InstantiationRequest(
+                        InstantiationKind.ExtensionMethod(
+                            trait_name,
+                            normalized_base,
+                            box(request_template),
+                            concrete_trait_args,
+                            method_type_args_ref,
+                        ),
+                        0,
+                        self.storage.file_path,
+                    ))
+                    return
+                }
+            },
+            .None() then {},
         }
     }
 

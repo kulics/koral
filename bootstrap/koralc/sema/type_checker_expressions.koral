@@ -918,15 +918,11 @@ given TypeChecker {
         return when source_type in {
             .ReferenceType(inner) then when inner.val in {
                 .TraitObject(_, _) then inner.val,
-                .ReferenceType(nested) then if nested.val is .TraitObject(_, _) then inner.val else source_type,
-                .MutableReferenceType(nested) then if nested.val is .TraitObject(_, _) then inner.val else source_type,
-                _ then source_type,
+                _ then inner.val,
             },
             .MutableReferenceType(inner) then when inner.val in {
                 .TraitObject(_, _) then inner.val,
-                .ReferenceType(nested) then if nested.val is .TraitObject(_, _) then inner.val else source_type,
-                .MutableReferenceType(nested) then if nested.val is .TraitObject(_, _) then inner.val else source_type,
-                _ then source_type,
+                _ then inner.val,
             },
             _ then source_type,
         }
@@ -937,8 +933,19 @@ given TypeChecker {
             .TraitObject(_, _) then { return expr },
             _ then result_type,
         }
+        let erased_trait_type = when trait_type in {
+            .ReferenceType(inner) then when inner.val in {
+                .TraitObject(_, _) then inner.val,
+                _ then trait_type,
+            },
+            .MutableReferenceType(inner) then when inner.val in {
+                .TraitObject(_, _) then inner.val,
+                _ then trait_type,
+            },
+            _ then trait_type,
+        }
         return make_typed_expr(
-            TypedExprKind.TraitObjectConversion(box(expr), trait_type, self.trait_object_concrete_type(expr.expr_type)),
+            TypedExprKind.TraitObjectConversion(box(expr), erased_trait_type, self.trait_object_concrete_type(expr.expr_type)),
             converted_result_type,
         )
     }
@@ -964,24 +971,10 @@ given TypeChecker {
                     if self.is_numeric_type(expected_type) then {
                         return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected_type)
                     }
-                    // Also coerce integer literals to generic parameters (like Swift's coerceLiteral)
-                    when expected_type in {
-                        .GenericParameter(_) then {
-                            return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected_type)
-                        },
-                        _ then {},
-                    }
                 },
                 .FloatLiteral(value) then {
                     if self.is_numeric_type(expected_type) then {
                         return make_typed_expr(TypedExprKind.FloatLiteral(value), expected_type)
-                    }
-                    // Also coerce float literals to generic parameters
-                    when expected_type in {
-                        .GenericParameter(_) then {
-                            return make_typed_expr(TypedExprKind.FloatLiteral(value), expected_type)
-                        },
-                        _ then {},
                     }
                 },
                 _ then {},

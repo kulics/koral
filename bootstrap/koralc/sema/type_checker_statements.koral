@@ -206,7 +206,7 @@ given TypeChecker {
                             lower_steps += 1
                             if lower_steps > 1024(UInt) then {
                                 self.push_diagnostic_at_span("Condition lowering exceeded maximum rewrite steps", current_span)
-                                let typed_expr = self.check_expr_core_ref(current, .None(), scope)
+                                let typed_expr = self.check_statement_body_expr(current, scope)
                                 return TypedStatement.ExprStmt(box(typed_expr), current_span)
                             }
                             current = lowered
@@ -227,13 +227,13 @@ given TypeChecker {
                     }
                 },
                 _ then {
-                    let typed_expr = self.check_expr_core_ref(current, .None(), scope)
+                    let typed_expr = self.check_statement_body_expr(current, scope)
                     return TypedStatement.ExprStmt(box(typed_expr), current_span)
                 },
             }
         }
 
-        let fallback_expr = self.check_expr_core_ref(current, .None(), scope)
+        let fallback_expr = self.check_statement_body_expr(current, scope)
         return TypedStatement.ExprStmt(box(fallback_expr), current_span)
     }
 
@@ -680,24 +680,32 @@ given TypeChecker {
                         _ then typed_val,
                     }
                 else typed_val
-                let binding_type = when val_expected in {
+                let initial_binding_type = when val_expected in {
                     .Some(t) then t,
                     .None() then when inferred_value_expected in {
                         .Some(inferred_t) then inferred_t,
                         .None() then self.concretize_default_literal_type(typed_val.expr_type),
                     },
                 }
+                let binding_type = self.concretize_pair_constructor_binding_type(initial_binding_type, value, scope)
+                let typed_binding_value = if binding_type == typed_val.expr_type
+                    then typed_val
+                    else retype_typed_expr(box(typed_val), binding_type)
                 let kind = SymbolKind.Variable(self.variable_kind_for_param_type(binding_type, mutable))
                 let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
                 let mut context = self.context()
                 context.set_span(def_id, span)
                 let sym = Symbol(def_id, binding_type, kind)
                 scope.define(self.context(), sym)
-                return TypedStatement.LetStmt(box(sym), box(typed_val), span)
+                return TypedStatement.LetStmt(box(sym), box(typed_binding_value), span)
             },
             .PairLetStmt(first, second, value, span) then {
-                let typed_val = self.check_expr_scoped_ref(value, .None(), scope)
-                let pair_type = self.concretize_default_literal_type(typed_val.expr_type)
+                let raw_typed_val = self.check_expr_scoped_ref(value, .None(), scope)
+                let initial_pair_type = self.concretize_default_literal_type(raw_typed_val.expr_type)
+                let pair_type = self.concretize_pair_constructor_binding_type(initial_pair_type, value, scope)
+                let typed_val = if pair_type == raw_typed_val.expr_type
+                    then raw_typed_val
+                    else retype_typed_expr(box(raw_typed_val), pair_type)
 
                 let mut first_type = self.get_pair_binding_type(pair_type, "first")
                 let mut second_type = self.get_pair_binding_type(pair_type, "second")
@@ -717,7 +725,7 @@ given TypeChecker {
 
                 let first_symbol = self.bind_pair_let_symbol(first, first_type or else Type.Unknown(), scope)
                 let second_symbol = self.bind_pair_let_symbol(second, second_type or else Type.Unknown(), scope)
-                return TypedStatement.PairLetStmt(first_symbol, second_symbol, box(typed_val), span)
+                return TypedStatement.PairLetStmt(pair_type, first_symbol, second_symbol, box(typed_val), span)
             },
             .AssignmentStmt(target, op, value, span) then {
                 let typed_target = self.check_assignment_target_expr_ref(target, scope)

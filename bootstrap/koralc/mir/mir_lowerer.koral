@@ -1099,8 +1099,8 @@ given MIRReferenceEscapeAnalyzer {
             .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
             .None() then {},
         }
-        let argument_types = self.value_types(arguments)
-        for identity_key in self.callable_identity_keys(symbol, argument_types, result_type) then {
+        let param_types = self.callable_param_types(symbol, arguments)
+        for identity_key in self.callable_identity_keys(symbol, param_types, result_type) then {
             when self.summary_def_id_by_identity_key.get(identity_key) in {
                 .Some(def_id) then when self.escaping_parameter_summaries.get(def_id) in {
                     .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
@@ -1183,6 +1183,21 @@ given MIRReferenceEscapeAnalyzer {
             types.push(self.type_of_value(value.val))
         }
         return types
+    }
+
+    private callable_param_types(self ref, symbol ref Symbol, arguments List[ref MIRValue]) List[Type] = {
+        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
+        when function_type in {
+            .FunctionType(params, _) then {
+                let mut types = List[Type].new()
+                for param in params then {
+                    types.push(param.val.param_type)
+                }
+                return types
+            },
+            _ then {},
+        }
+        return self.value_types(arguments)
     }
 
     private add_dependencies(self mut ref, local MIRLocalID, deps List[MIRLocalID]) Void = {
@@ -1319,6 +1334,7 @@ given MIRReferenceEscapeAnalyzer {
             }
         }
     }
+
 }
 
 given MIRReferenceAllocationFunctionPromoter {
@@ -1481,8 +1497,8 @@ given MIRReferenceAllocationFunctionPromoter {
             .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
             .None() then {},
         }
-        let argument_types = self.value_types(arguments)
-        for identity_key in self.callable_identity_keys(symbol, argument_types, result_type) then {
+        let param_types = self.callable_param_types(symbol, arguments)
+        for identity_key in self.callable_identity_keys(symbol, param_types, result_type) then {
             when self.summary_def_id_by_identity_key.get(identity_key) in {
                 .Some(def_id) then when self.escaping_parameter_summaries.get(def_id) in {
                     .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
@@ -1567,6 +1583,21 @@ given MIRReferenceAllocationFunctionPromoter {
         return types
     }
 
+    private callable_param_types(self ref, symbol ref Symbol, arguments List[ref MIRValue]) List[Type] = {
+        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
+        when function_type in {
+            .FunctionType(params, _) then {
+                let mut types = List[Type].new()
+                for param in params then {
+                    types.push(param.val.param_type)
+                }
+                return types
+            },
+            _ then {},
+        }
+        return self.value_types(arguments)
+    }
+
     private type_of_value(self ref, value MIRValue) Type = {
         return when value in {
             .Operand(operand) then self.type_of_operand(operand),
@@ -1639,4 +1670,5 @@ given MIRReferenceAllocationFunctionPromoter {
     private local_type(self ref, local MIRLocalID) Type = {
         return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
     }
+
 }

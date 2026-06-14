@@ -108,9 +108,19 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(box(count), result_type)), result_type))
     }
 
-    private check_null_ptr_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr]) Option[TypedExpr] = {
+    private check_null_ptr_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], expected Option[Type]) Option[TypedExpr] = {
         if args.count() <> 0 then { return Option[TypedExpr].None() }
-        let elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
+        let mut elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
+        if self.is_unresolved_expr_type(elem_type) or self.contains_generic_parameter(elem_type) then {
+            when expected in {
+                .Some(expected_type) then when expected_type in {
+                    .PointerType(inner) then { elem_type = inner.val },
+                    .MutablePointerType(inner) then { elem_type = inner.val },
+                    _ then {},
+                },
+                .None() then {},
+            }
+        }
         when elem_type in {
             .Unknown() then { return Option[TypedExpr].None() },
             _ then {},
@@ -513,7 +523,7 @@ given TypeChecker {
         }
     }
 
-    private check_intrinsic_call_ref(self, callee ref Expr, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    private check_intrinsic_call_ref(self, callee ref Expr, args ref List[ref Expr], expected Option[Type], scope Scope) Option[TypedExpr] = {
         let mut intrinsic_name = ""
         let mut intrinsic_type_args = List[Type].new()
 
@@ -537,7 +547,7 @@ given TypeChecker {
         }
 
         if intrinsic_name == "null_ptr" then {
-            return self.check_null_ptr_intrinsic(intrinsic_type_args, args)
+            return self.check_null_ptr_intrinsic(intrinsic_type_args, args, expected)
         }
 
         if intrinsic_name == "is_unique_mutable" or intrinsic_name == "ref_count" then {
@@ -612,7 +622,7 @@ given TypeChecker {
             _ then {},
         }
 
-        if self.check_intrinsic_call_ref(callee, call_args.ref, scope) is .Some(intrinsic_expr) then {
+        if self.check_intrinsic_call_ref(callee, call_args.ref, expected, scope) is .Some(intrinsic_expr) then {
             if trace_lerp then {
                 println("[lerp-trace] call-intrinsic result=\(self.display_type_name(intrinsic_expr.expr_type))")
             }
@@ -926,6 +936,7 @@ given TypeChecker {
             .Some(_) then self.resolve_generic_function_call_return_type(callee, typed_callee_ref, typed_args, expected, scope, generic_function_bindings),
             .None() then Option[Type].None(),
         }
+        let generic_struct_constructor_return_type = self.infer_generic_struct_constructor_return_type(callee, typed_args)
         let mut has_direct_generic_instantiation_return_type = false
         let mut direct_generic_instantiation_return_type = Type.Unknown()
         when typed_callee.expr_kind in {
@@ -938,9 +949,12 @@ given TypeChecker {
         let resolved_ret_type = if has_direct_generic_instantiation_return_type then direct_generic_instantiation_return_type else when typed_callee.expr_kind in {
                 .Variable(_) then when generic_return_type in {
                     .Some(ret_type) then ret_type,
-                    .None() then when inferred_method_call_info in {
-                        .Some(info) then info.first,
-                        .None() then self.resolve_call_return_type(typed_callee_ref),
+                    .None() then when generic_struct_constructor_return_type in {
+                        .Some(ret_type) then ret_type,
+                        .None() then when inferred_method_call_info in {
+                            .Some(info) then info.first,
+                            .None() then self.resolve_call_return_type(typed_callee_ref),
+                        },
                     },
                 },
                 _ then when generic_return_type in {
@@ -957,6 +971,10 @@ given TypeChecker {
                 .None() then resolved_ret_type,
             },
             _ then resolved_ret_type,
+        }
+        let inferred_method_type_args_for_call = when inferred_method_call_info in {
+            .Some(info) then info.second,
+            .None() then List[Type].new(),
         }
         let skip_zero_arg_member_expected_refine = args.is_empty() and when typed_callee.expr_kind in {
             .MethodReference(_, _, _, _, _, _) then true,
@@ -1037,7 +1055,9 @@ given TypeChecker {
                 }
                 let prepared_base = self.prepare_call_receiver(base, expected_self_type)
                 let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
-                let inferred_method_type_args = if callee_method_type_args.is_empty() then method_type_args else callee_method_type_args
+                let inferred_method_type_args = if not callee_method_type_args.is_empty()
+                    then callee_method_type_args
+                    else inferred_method_type_args_for_call
                 let method_ret_type = when ret_type in {
                     .Unknown() then when direct_method_signature_opt in {
                         .Some(method_symbol) then when method_symbol.symbol_type in {
@@ -1143,7 +1163,7 @@ given TypeChecker {
                 }
                 let prepared_base = self.prepare_call_receiver(base, expected_self_type)
                 let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
-                let inferred_method_type_args = List[Type].new()
+                let inferred_method_type_args = inferred_method_type_args_for_call
                 let method_ret_type = when ret_type in {
                     .Unknown() then when direct_method_signature_opt in {
                         .Some(method_symbol) then when method_symbol.symbol_type in {
@@ -1285,8 +1305,8 @@ given TypeChecker {
                     let mut inferred = Option[Type].None()
                     if name == "Pair" and typed_args.count() == 2 then {
                         let mut resolved_args = List[ref Type].new()
-                        resolved_args.push(box(typed_args[0(UInt)].expr_type))
-                        resolved_args.push(box(typed_args[1(UInt)].expr_type))
+                        resolved_args.push(box(self.concretize_default_literal_type(typed_args[0(UInt)].expr_type)))
+                        resolved_args.push(box(self.concretize_default_literal_type(typed_args[1(UInt)].expr_type)))
                         inferred = Option[Type].Some(Type.GenericStruct(name, resolved_args))
                     }
                     yield inferred

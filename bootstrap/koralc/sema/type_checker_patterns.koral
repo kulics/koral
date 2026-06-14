@@ -490,13 +490,48 @@ given TypeChecker {
                 let actual_name = self.context().get_name(def_id) or else self.context().type_display_name(inner_type)
                 let mut result = List[Type].new()
                 if actual_name == type_name then {
-                    when self.context().get_struct_fields(def_id) in {
-                        .Some(fields) then {
-                            for field in fields then {
-                                result.push(field.field_type)
-                            }
+                    let template_name_opt = self.context().get_template_name(def_id)
+                    let type_args_opt = self.context().get_type_arguments(def_id)
+                    when template_name_opt in {
+                        .Some(template_name) then when type_args_opt in {
+                            .Some(type_args) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
+                                    .Some(fields) then {
+                                        let mut bindings = Dict[String, Type].new()
+                                        let mut i UInt = 0
+                                        let param_count = struct_template.type_parameters.count()
+                                        let arg_count = type_args.count()
+                                        let n = if param_count < arg_count then param_count else arg_count
+                                        while i < n then {
+                                            let tp = struct_template.type_parameters[i]
+                                            bindings.insert(tp.name, type_args[i])
+                                            i += 1
+                                        }
+                                        for field in fields then {
+                                            result.push(self.apply_type_bindings(field.field_type, bindings))
+                                        }
+                                    },
+                                    .None() then {},
+                                },
+                                .None() then {},
+                            },
+                            .None() then when self.context().get_struct_fields(def_id) in {
+                                .Some(fields) then {
+                                    for field in fields then {
+                                        result.push(field.field_type)
+                                    }
+                                },
+                                .None() then {},
+                            },
                         },
-                        .None() then {},
+                        .None() then when self.context().get_struct_fields(def_id) in {
+                            .Some(fields) then {
+                                for field in fields then {
+                                    result.push(field.field_type)
+                                }
+                            },
+                            .None() then {},
+                        },
                     }
                 }
                 yield result

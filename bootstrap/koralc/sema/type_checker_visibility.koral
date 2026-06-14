@@ -70,6 +70,19 @@ given TypeChecker {
         return msg
     }
 
+    private trait_requirement_missing_blanket_given_message(self, target_type Type, trait_name String, modifier_name String) String = {
+        let mut msg = "Type '"
+        msg.push_string(self.context().type_display_name(target_type))
+        msg.push_string("' does not satisfy trait '")
+        msg.push_string(trait_name)
+        msg.push_string("'. No blanket given exists for '")
+        msg.push_string(modifier_name)
+        msg.push_string("' and '")
+        msg.push_string(trait_name)
+        msg.push_string("'")
+        return msg
+    }
+
     private is_upper_first_char(self, s String) Bool = {
         if s.is_empty() then { return false }
         when s.get(0) in {
@@ -470,6 +483,21 @@ given TypeChecker {
             }
             let mut bindings = Dict[String, Type].new()
             if self.conformance_type_key_matches(template.target_type, target_type, bindings) then {
+                let mut satisfies_owner_constraints = true
+                for tp in template.owner_type_params then {
+                    if bindings.get(tp.name) is .Some(bound_type) then {
+                        for constraint in tp.constraints then {
+                            let required_trait_name = self.type_node_name(constraint)
+                            let required_trait_args = self.trait_type_args_with_bindings(constraint, bindings)
+                            if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
+                                satisfies_owner_constraints = false
+                            }
+                        }
+                    }
+                }
+                if not satisfies_owner_constraints then {
+                    continue
+                }
                 return true
             }
         }
@@ -541,6 +569,87 @@ given TypeChecker {
             .TraitObject(name, _) then "TraitObject:\(name)",
             _ then self.context().type_display_name(target_type),
         }
+    }
+
+    private type_modifier_inner_type(self, target_type Type) Option[Type] = {
+        let _ = self
+        return when target_type in {
+            .ReferenceType(inner) then Option[Type].Some(inner.val),
+            .MutableReferenceType(inner) then Option[Type].Some(inner.val),
+            .PointerType(inner) then Option[Type].Some(inner.val),
+            .MutablePointerType(inner) then Option[Type].Some(inner.val),
+            .WeakReferenceType(inner) then Option[Type].Some(inner.val),
+            .MutableWeakReferenceType(inner) then Option[Type].Some(inner.val),
+            _ then Option[Type].None(),
+        }
+    }
+
+    private modifier_blanket_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) Option[GenericTraitConformanceStatus] = {
+        if trait_name == "Deref" then {
+            return Option[GenericTraitConformanceStatus].None()
+        }
+        let inner_type = self.type_modifier_inner_type(target_type) or else {
+            return Option[GenericTraitConformanceStatus].None()
+        }
+        when inner_type in {
+            .GenericParameter(_) then {
+                return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.Satisfied())
+            },
+            _ then {},
+        }
+        let modifier_base_name = self.conformance_template_key(target_type)
+        let modifier_display_name = modifier_base_name.to_ascii_lowercase()
+        let templates = when self.storage.conformance_index.get(modifier_base_name) in {
+            .Some(list) then list,
+            .None() then {
+                return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name))
+            },
+        }
+        let mut matched_template = false
+        for template in templates then {
+            if not (template.trait_name == trait_name) then {
+                continue
+            }
+            let mut bindings = Dict[String, Type].new()
+            if not self.conformance_type_key_matches(template.target_type, target_type, bindings.ref) then {
+                continue
+            }
+            if not (template.trait_arg_types.count() == trait_args.count()) then {
+                continue
+            }
+            let mut i UInt = 0
+            let mut trait_args_match = true
+            while i < trait_args.count() then {
+                let expected_arg = self.apply_type_bindings(template.trait_arg_types[i], bindings)
+                if not self.same_expr_type(expected_arg, trait_args[i]) then {
+                    trait_args_match = false
+                    break
+                }
+                i += 1
+            }
+            if not trait_args_match then {
+                continue
+            }
+            matched_template = true
+            for tp in template.owner_type_params then {
+                if bindings.get(tp.name) is .Some(bound_type) then {
+                    for constraint in tp.constraints then {
+                        let required_trait_name = self.type_node_name(constraint)
+                        let required_trait_args = self.trait_type_args_with_bindings(constraint, bindings)
+                        if not self.satisfies_trait_requirement_with_args(bound_type, required_trait_name, required_trait_args) then {
+                            return Option[GenericTraitConformanceStatus].Some(
+                                GenericTraitConformanceStatus.MissingConstraint(bound_type, tp.name, required_trait_name)
+                            )
+                        }
+                    }
+                }
+            }
+            return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.Satisfied())
+        }
+        if matched_template then {
+            return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingConformance())
+        }
+        return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name))
     }
 
     private conformance_type_key_matches(self, pattern Type, actual Type, bindings mut ref Dict[String, Type]) Bool = {
@@ -672,6 +781,10 @@ given TypeChecker {
     }
 
     private compute_generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
+        when self.modifier_blanket_trait_conformance_status(target_type, trait_name, trait_args) in {
+            .Some(status) then { return status },
+            .None() then {},
+        }
         let mut matched_template = false
         let mut result = GenericTraitConformanceStatus.MissingConformance()
         // Use the type-keyed index for O(1) lookup instead of O(N) scan
@@ -748,6 +861,16 @@ given TypeChecker {
                 )
                 yield false
             },
+            .MissingBlanketGiven(modifier_name) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name)
+                    )
+                )
+                yield false
+            },
             .MissingConformance() then {
                 let message = self.trait_missing_conformance_message(target_type, trait_name, trait_args)
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
@@ -794,6 +917,16 @@ given TypeChecker {
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
                         self.trait_requirement_missing_constraint_message(target_type, trait_name, bound_type, constraint)
+                    )
+                )
+                yield false
+            },
+            .MissingBlanketGiven(modifier_name) then {
+                self.storage.diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        self.storage.file_path,
+                        self.trait_requirement_missing_blanket_given_message(target_type, trait_name, modifier_name)
                     )
                 )
                 yield false

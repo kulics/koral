@@ -485,7 +485,7 @@ given MIRFunctionBuilder {
         if self.current_block_is_terminated() then { return }
         when statement in {
             .LetStmt(symbol, value, _) then self.lower_variable_declaration(symbol, value),
-            .PairLetStmt(first_symbol, second_symbol, value, _) then self.lower_pair_variable_declaration(first_symbol, second_symbol, value),
+            .PairLetStmt(pair_type, first_symbol, second_symbol, value, _) then self.lower_pair_variable_declaration(pair_type, first_symbol, second_symbol, value),
             .AssignmentStmt(target, value, _) then self.lower_assignment(target, value),
             .ExprStmt(expr, _) then {
                 when self.lower_expression(expr) in {
@@ -530,25 +530,58 @@ given MIRFunctionBuilder {
         self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), self.lower_value(value)))
     }
 
-    private lower_pair_variable_declaration(self mut ref, first_symbol Option[ref Symbol], second_symbol Option[ref Symbol], value ref TypedExpr) Void = {
-        let operand = self.materialize(self.lower_value(value), value.expr_type)
-        when first_symbol in {
-            .Some(symbol) then self.lower_pair_binding(symbol, operand, value.expr_type, "first"),
-            .None() then {},
-        }
-        when second_symbol in {
-            .Some(symbol) then self.lower_pair_binding(symbol, operand, value.expr_type, "second"),
-            .None() then {},
+    private lower_pair_variable_declaration(self mut ref, pair_type Type, first_symbol Option[ref Symbol], second_symbol Option[ref Symbol], value ref TypedExpr) Void = {
+        let pair_local = self.make_temporary(pair_type, "pair")
+        self.append_statement(MIRStatement.Declare(pair_local.id))
+        self.append_statement(MIRStatement.Assign(MIRPlace.Local(pair_local.id), self.lower_value(value)))
+        let pair_place = MIRPlace.Local(pair_local.id)
+        self.lower_pair_binding(first_symbol, pair_place, pair_type, "first")
+        self.lower_pair_binding(second_symbol, pair_place, pair_type, "second")
+    }
+
+    private pair_field_type(self ref, pair_type Type, field_name String) Type = {
+        return when pair_type in {
+            .GenericStruct(template_name, args) then {
+                if template_name == "Pair" and args.count() == 2(UInt) then {
+                    yield if field_name == "first" then args[0(UInt)].val else args[1(UInt)].val
+                }
+                yield Type.Unknown()
+            },
+            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if field.name == field_name then {
+                            return field.field_type
+                        }
+                    }
+                    yield Type.Unknown()
+                },
+                .None() then Type.Unknown(),
+            },
+            _ then Type.Unknown(),
         }
     }
 
-    private lower_pair_binding(self mut ref, symbol ref Symbol, pair_operand MIROperand, pair_type Type, field_name String) Void = {
-        let local = self.make_local(self.context.symbol_name(symbol), symbol.symbol_type, if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(symbol))
-        self.local_by_def_id.insert(symbol.def_id.id, local.id)
-        self.append_statement(MIRStatement.Declare(local.id))
-        let field_symbol = self.make_synthetic_symbol(field_name, symbol.symbol_type)
-        let pair_local = self.materialize(MIRValue.Operand(pair_operand), pair_type)
-        self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), MIRValue.PlaceRead(MIRPlace.Field(box(MIRPlace.Local(when pair_local in { .Local(id) then id, _ then MIRLocalID(0(UInt)) })), box(field_symbol)), MIROwnershipUse.Copy())))
+    private lower_pair_binding(self mut ref, symbol Option[ref Symbol], pair_place MIRPlace, pair_type Type, field_name String) Void = {
+        let field_type = when symbol in {
+            .Some(sym) then sym.symbol_type,
+            .None() then self.pair_field_type(pair_type, field_name),
+        }
+        let field_symbol = self.make_synthetic_symbol(field_name, field_type)
+        let field_place = MIRPlace.Field(box(pair_place), box(field_symbol))
+        when symbol in {
+            .Some(sym) then {
+                let local = self.make_local(self.context.symbol_name(sym), sym.symbol_type, if sym.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(sym))
+                self.local_by_def_id.insert(sym.def_id.id, local.id)
+                self.append_statement(MIRStatement.Declare(local.id))
+                self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), MIRValue.PlaceRead(field_place, MIROwnershipUse.Move())))
+            },
+            .None() then {
+                if type_needs_drop(field_type) then {
+                    self.append_statement(MIRStatement.Drop(field_place))
+                }
+            },
+        }
     }
 
     private lower_assignment(self mut ref, target ref TypedExpr, value ref TypedExpr) Void = {
@@ -1016,7 +1049,20 @@ given MIRFunctionBuilder {
     private lower_pattern_test(self mut ref, subject ref TypedExpr, pattern ref TypedPattern, negated Bool, result_type Type) MIRExprResult = {
         let subject_value = self.lower_value(subject)
         let subject_operand = self.materialize(subject_value, subject.expr_type)
-        let condition = self.lower_pattern_condition(MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) }), subject.expr_type, pattern, negated)
+        let subject_place = MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) })
+        let saved_pattern_subject = self.pattern_subject_operand
+        let saved_pattern_tag = self.pattern_subject_tag
+        let saved_comparison_local = self.pattern_comparison_local
+        self.pattern_subject_operand = when subject_operand in {
+            .Local(_) then Option[MIROperand].Some(subject_operand),
+            _ then Option[MIROperand].None(),
+        }
+        self.pattern_subject_tag = Option[MIROperand].None()
+        self.pattern_comparison_local = Option[MIRLocalID].None()
+        let condition = self.lower_pattern_condition(subject_place, subject.expr_type, pattern, negated)
+        self.pattern_subject_operand = saved_pattern_subject
+        self.pattern_subject_tag = saved_pattern_tag
+        self.pattern_comparison_local = saved_comparison_local
         let result = self.materialize(MIRValue.Operand(condition), result_type)
         return MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None())
     }
@@ -1054,7 +1100,7 @@ given MIRFunctionBuilder {
                 let right_condition = self.lower_pattern_condition(subject_place, subject_type, right, false)
                 yield self.pattern_binary(left_condition, MIRBinaryOperator.LogicalOr(), right_condition)
             },
-            .StringLiteral(_) then self.pattern_bool(false),
+            .StringLiteral(value) then self.pattern_string_compare(subject_place, subject_type, value),
             .RuneLiteral(_) then self.pattern_bool(false),
             .NotPattern(_) then self.pattern_bool(false),
         }
@@ -1083,6 +1129,38 @@ given MIRFunctionBuilder {
             .None() then {
                 return self.materialize(comparison_value, Type.BoolType())
             },
+        }
+    }
+
+    private pattern_string_equals_symbol(self ref, subject_type Type) Option[Symbol] = {
+        let receiver_type = self.normalized_method_lookup_receiver_type(subject_type)
+        let mut param_types = List[ref Type].new()
+        param_types.push(box(receiver_type))
+        param_types.push(box(receiver_type))
+        let expected_type = Type.FunctionType(types_to_param_entries(param_types), box(Type.BoolType()))
+        return self.lookup_concrete_method_symbol(receiver_type, "equals", expected_type)
+    }
+
+    private pattern_string_compare(self mut ref, subject_place MIRPlace, subject_type Type, value String) MIROperand = {
+        let matched_type = self.receiver_lookup_type(subject_type)
+        return when self.pattern_string_equals_symbol(matched_type) in {
+            .Some(equals_symbol) then {
+                let subject_value = when self.pattern_subject_operand in {
+                    .Some(op) then MIRValue.Operand(op),
+                    .None() then MIRValue.PlaceRead(subject_place, MIROwnershipUse.Copy()),
+                }
+                let mut args = List[ref MIRValue].new()
+                args.push(box(subject_value))
+                args.push(box(MIRValue.Operand(MIROperand.Constant(MIRConstant.StringLiteral(value, matched_type)))))
+                let mut ownerships = List[MIROwnershipUse].new()
+                ownerships.push(MIROwnershipUse.Copy())
+                ownerships.push(MIROwnershipUse.Move())
+                yield self.materialize(
+                    MIRValue.Call(MIRCall(MIROperand.Function(box(equals_symbol)), args, ownerships, Type.BoolType())),
+                    Type.BoolType()
+                )
+            },
+            .None() then self.pattern_bool(false),
         }
     }
 
@@ -1280,8 +1358,9 @@ given MIRFunctionBuilder {
         let matched_type = matched.second
         when pattern in {
             .Variable(symbol) then {
-                if symbol.symbol_type is not .VoidType() then {
-                    let place = if symbol.symbol_type == subject_type then subject_place else matched_place
+                let binding_type = self.pattern_binding_type(symbol, subject_type)
+                if binding_type is not .VoidType() then {
+                    let place = if binding_type == subject_type then subject_place else matched_place
                     self.pattern_place_by_def_id.insert(symbol.def_id.id, place)
                     self.pattern_place_by_name.insert(self.context.symbol_name(symbol), place)
                 }
@@ -1431,7 +1510,7 @@ given MIRFunctionBuilder {
     private lower_call(self mut ref, callee ref TypedExpr, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         when callee.expr_kind in {
             .MethodReference(base, _, method, _, _, _) then {
-                when self.concrete_method_symbol(method, base.expr_type, callee.expr_type, result_type) in {
+                when self.concrete_method_symbol(method, base.expr_type, callee.expr_type, args, result_type) in {
                     .Some(callable_method) then {
                         let mut values = List[ref MIRValue].new()
                         let mut ownerships = List[MIROwnershipUse].new()
@@ -1711,7 +1790,21 @@ given MIRFunctionBuilder {
         }
     }
 
-    private concrete_method_symbol(self ref, method ref Symbol, receiver_type Type, callee_type Type, result_type Type) Option[Symbol] = {
+    private concrete_method_symbol(self ref, method ref Symbol, receiver_type Type, callee_type Type, args ref List[ref TypedExpr], result_type Type) Option[Symbol] = {
+        when self.program.concrete_callables_by_def_id.get(method.def_id) in {
+            .Some(_) then {
+                when self.context.get_function_type(method.def_id) in {
+                    .Some(function_type) then {
+                        if not self.context.contains_generic_parameter(function_type) then {
+                            return Option[Symbol].Some(Symbol(method.def_id, function_type, method.kind))
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
         let method_name = self.semantic_method_name(method)
         let raw_receiver_type = when receiver_type in {
             .Unknown() then when callee_type in {
@@ -1721,41 +1814,37 @@ given MIRFunctionBuilder {
             _ then receiver_type,
         }
         let effective_receiver_type = self.normalized_method_lookup_receiver_type(raw_receiver_type)
-        when self.lookup_concrete_method_symbol(effective_receiver_type, method_name, result_type) in {
-            .Some(symbol) then { return Option[Symbol].Some(symbol) },
-            .None() then {},
+
+        let mut concrete_param_types = List[ref Type].new()
+        let expected_receiver_type = self.concrete_call_receiver_type(raw_receiver_type, method.symbol_type)
+        concrete_param_types.push(box(expected_receiver_type))
+        for arg in args then {
+            concrete_param_types.push(box(arg.expr_type))
+        }
+        let concrete_type = Type.FunctionType(types_to_param_entries(concrete_param_types), box(result_type))
+        if self.context.contains_generic_parameter(concrete_type) then {
+            return when callee_type in {
+                .FunctionType(params, _) then {
+                    let fallback_type = Type.FunctionType(params, box(result_type))
+                    yield if self.context.contains_generic_parameter(fallback_type)
+                        then Option[Symbol].None()
+                        else Option[Symbol].Some(Symbol(method.def_id, fallback_type, method.kind))
+                },
+                _ then Option[Symbol].None(),
+            }
         }
 
-        when self.context.get_function_type(method.def_id) in {
-            .Some(function_type) then { return Option[Symbol].Some(Symbol(method.def_id, function_type, method.kind)) },
-            .None() then {},
-        }
-
-        return when callee_type in {
-            .FunctionType(params, _) then {
-                let mut concrete_params = List[ref FunctionParamEntry].new()
-                let expected_receiver_type = self.concrete_call_receiver_type(raw_receiver_type, method.symbol_type)
-                let mut idx UInt = 0
-                while idx < params.count() then {
-                    let param_type = if idx == 0(UInt) then expected_receiver_type else params[idx].val.param_type
-                    concrete_params.push(box(FunctionParamEntry(param_type, params[idx].val.pass_kind)))
-                    idx += 1
-                }
-                let concrete_type = Type.FunctionType(concrete_params, box(result_type))
-                if self.context.contains_generic_parameter(concrete_type) then {
-                    yield Option[Symbol].None()
-                } else {
-                    yield Option[Symbol].Some(Symbol(method.def_id, concrete_type, method.kind))
-                }
-            },
-            _ then Option[Symbol].None(),
+        return when self.lookup_concrete_method_symbol(effective_receiver_type, method_name, concrete_type) in {
+            .Some(symbol) then Option[Symbol].Some(symbol),
+            .None() then Option[Symbol].Some(Symbol(method.def_id, concrete_type, method.kind)),
         }
     }
 
-    private lookup_concrete_method_symbol(self ref, receiver_type Type, method_name String, result_type Type) Option[Symbol] = {
+    private lookup_concrete_method_symbol(self ref, receiver_type Type, method_name String, expected_type Type) Option[Symbol] = {
         if receiver_type is .Unknown() then {
             return Option[Symbol].None()
         }
+        let mut fallback_by_type = Option[Symbol].None()
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
             let def_id = entry.first
             let info = entry.second
@@ -1777,28 +1866,52 @@ given MIRFunctionBuilder {
             }
             when info.owner_type in {
                 .Some(owner_type) then {
-                    if not self.method_owner_matches_receiver(owner_type, receiver_type) then {
-                        continue
-                    }
                     when self.context.get_function_type(def_id) in {
-                        .Some(function_type) then { return Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function())) },
-                        .None() then {
-                            let mut param_types = List[ref Type].new()
-                            when receiver_type in {
-                                .Unknown() then {},
-                                _ then param_types.push(box(receiver_type)),
+                        .Some(function_type) then {
+                            if not self.method_signature_matches_call(function_type, expected_type) then {
+                                continue
                             }
-                            let concrete_type = Type.FunctionType(types_to_param_entries(param_types), box(result_type))
-                            if not self.context.contains_generic_parameter(concrete_type) then {
-                                return Option[Symbol].Some(Symbol(def_id, concrete_type, SymbolKind.Function()))
+                            if self.method_owner_matches_receiver(owner_type, receiver_type) then {
+                                return Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
+                            }
+                            if fallback_by_type is .None() then {
+                                fallback_by_type = Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
                             }
                         },
+                        .None() then {},
                     }
                 },
                 .None() then {},
             }
         }
-        return Option[Symbol].None()
+        return fallback_by_type
+    }
+
+    private method_signature_matches_call(self ref, function_type Type, expected_type Type) Bool = {
+        return when function_type in {
+            .FunctionType(actual_params, actual_return) then when expected_type in {
+                .FunctionType(expected_params, expected_return) then {
+                    if actual_params.count() <> expected_params.count() then {
+                        return false
+                    }
+                    if self.concrete_layout_key_for_type(actual_return.val) <> self.concrete_layout_key_for_type(expected_return.val) then {
+                        return false
+                    }
+                    let mut idx UInt = 1
+                    while idx < actual_params.count() then {
+                        let actual_param_type = actual_params[idx].val.param_type
+                        let expected_param_type = expected_params[idx].val.param_type
+                        if self.concrete_layout_key_for_type(actual_param_type) <> self.concrete_layout_key_for_type(expected_param_type) then {
+                            return false
+                        }
+                        idx += 1
+                    }
+                    yield true
+                },
+                _ then false,
+            },
+            _ then false,
+        }
     }
 
     private lower_call_arguments(self mut ref, callee MIROperand, args ref List[ref TypedExpr]) Pair[List[ref MIRValue], List[MIROwnershipUse]] = {
@@ -2439,6 +2552,14 @@ given MIRFunctionBuilder {
 
     private capture_place(self mut ref, symbol ref Symbol) MIRPlace = {
         let name = self.context.symbol_name(symbol)
+        when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
+            .Some(place) then { return place },
+            .None() then {},
+        }
+        when self.pattern_place_by_name.get(name) in {
+            .Some(place) then { return place },
+            .None() then {},
+        }
         return when self.local_by_def_id.get(symbol.def_id.id) in {
             .Some(local_id) then MIRPlace.Local(local_id),
             .None() then when self.parameter_local_by_name.get(name) in {
@@ -2461,7 +2582,11 @@ given MIRFunctionBuilder {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 let name = self.context.symbol_name(symbol)
-                let is_local_capture = if self.local_by_def_id.get(symbol.def_id.id) is .Some(_)
+                let is_local_capture = if self.pattern_place_by_def_id.get(symbol.def_id.id) is .Some(_)
+                    then true
+                    else if self.pattern_place_by_name.get(name) is .Some(_)
+                    then true
+                    else if self.local_by_def_id.get(symbol.def_id.id) is .Some(_)
                     then true
                     else when self.parameter_local_by_name.get(name) in {
                         .Some(local_id) then {
@@ -2538,7 +2663,7 @@ given MIRFunctionBuilder {
                 self.collect_captures_expr(r, param_names, out)
             },
             .IsExpr(subject, _, _) then self.collect_captures_expr(subject, param_names, out),
-            .LambdaExpr(_, _, _) then {},
+            .LambdaExpr(_, _, body) then self.collect_captures_expr(body, param_names, out),
             .IntrinsicCall(_) then {},
             _ then {},
         }
@@ -2547,7 +2672,7 @@ given MIRFunctionBuilder {
     private collect_captures_stmt(self mut ref, stmt ref TypedStatement, param_names Set[String], out mut ref List[ref Symbol]) Void = {
         when stmt in {
             .LetStmt(_, value, _) then self.collect_captures_expr(value, param_names, out),
-            .PairLetStmt(_, _, value, _) then self.collect_captures_expr(value, param_names, out),
+            .PairLetStmt(_, _, _, value, _) then self.collect_captures_expr(value, param_names, out),
             .AssignmentStmt(target, value, _) then {
                 self.collect_captures_expr(target, param_names, out)
                 self.collect_captures_expr(value, param_names, out)
@@ -2613,12 +2738,25 @@ given MIRFunctionBuilder {
         }
         if args.count() == 2(UInt) and (type_name == "Pair" or type_name.ends_with(".Pair")) then {
             let mut pair_args = List[ref Type].new()
-            pair_args.push(box(args[0(UInt)].expr_type))
-            pair_args.push(box(args[1(UInt)].expr_type))
+            pair_args.push(box(self.concretize_pair_constructor_arg_type(args[0(UInt)].expr_type)))
+            pair_args.push(box(self.concretize_pair_constructor_arg_type(args[1(UInt)].expr_type)))
             return Type.GenericStruct("Pair", pair_args)
         }
 
         return fallback
+    }
+
+    private concretize_pair_constructor_arg_type(self ref, t Type) Type = {
+        return when t in {
+            .TypeVar(tv) then when tv.literal_default_kind in {
+                .Some(kind) then when kind in {
+                    .Int() then Type.IntType(),
+                    .Float() then Type.Float64Type(),
+                },
+                .None() then t,
+            },
+            _ then t,
+        }
     }
 
     private trait_object_type_args(self ref, t Type) List[Type] = {

@@ -208,7 +208,13 @@ given TypeChecker {
         for tp in method_type_params then {
             scope.define_generic_param(tp.name)
         }
-        scope.define_type("Self", self_type)
+        when self_type in {
+            .TraitObject(_, _) then {
+                scope.define_generic_param("Self")
+                scope.define_type("Self", Type.GenericParameter("Self"))
+            },
+            _ then scope.define_type("Self", self_type),
+        }
         return scope
     }
 
@@ -474,6 +480,34 @@ given TypeChecker {
             .TraitObject(_, _) then true,
             _ then self.contains_generic_parameter(target_type),
         }
+        let self_constraint_snapshot = when target_type in {
+            .TraitObject(trait_name, trait_args) then {
+                let previous = when self.storage.generic_param_constraints.get("Self") in {
+                    .Some(existing) then {
+                        let mut copied = List[GenericConstraintBound].with_capacity(existing.count())
+                        for constraint in existing then { copied.push(constraint) }
+                        yield Option[List[GenericConstraintBound]].Some(copied)
+                    },
+                    .None() then Option[List[GenericConstraintBound]].None(),
+                }
+                let mut args = List[Type].new()
+                for trait_arg in trait_args then { args.push(trait_arg.val) }
+                let mut constraints = List[GenericConstraintBound].new()
+                constraints.push(GenericConstraintBound(trait_name, args))
+                self.storage.generic_param_constraints.insert("Self", constraints)
+                yield previous
+            },
+            _ then Option[List[GenericConstraintBound]].None(),
+        }
+        finally {
+            when self_constraint_snapshot in {
+                .Some(previous) then self.storage.generic_param_constraints.insert("Self", previous),
+                .None() then when target_type in {
+                    .TraitObject(_, _) then self.storage.generic_param_constraints.remove("Self"),
+                    _ then {},
+                },
+            }
+        }
         for m in members then {
             let method_constraint_snapshot = self.snapshot_generic_constraints(m.type_params)
             self.register_generic_constraints(m.type_params)
@@ -602,7 +636,13 @@ given TypeChecker {
         for tp in type_params then {
             scope.define_generic_param(tp.name)
         }
-        scope.define_type("Self", self_type)
+        when self_type in {
+            .TraitObject(_, _) then {
+                scope.define_generic_param("Self")
+                scope.define_type("Self", Type.GenericParameter("Self"))
+            },
+            _ then scope.define_type("Self", self_type),
+        }
         let mut first = true
         for p in params then {
             if first and p.name == "self" then {

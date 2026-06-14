@@ -116,7 +116,7 @@ given TypeChecker {
             .LetStmt(symbol, value, span) then {
                 yield TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), self.apply_subst_to_expr(subst, value), span)
             },
-            .PairLetStmt(first_symbol, second_symbol, value, span) then {
+            .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
                 let new_first_symbol = when first_symbol in {
                     .Some(symbol) then Option[ref Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
                     .None() then Option[ref Symbol].None(),
@@ -125,7 +125,7 @@ given TypeChecker {
                     .Some(symbol) then Option[ref Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
                     .None() then Option[ref Symbol].None(),
                 }
-                yield TypedStatement.PairLetStmt(new_first_symbol, new_second_symbol, self.apply_subst_to_expr(subst, value), span)
+                yield TypedStatement.PairLetStmt(subst.apply(pair_type), new_first_symbol, new_second_symbol, self.apply_subst_to_expr(subst, value), span)
             },
             .AssignmentStmt(target, value, span) then {
                 yield TypedStatement.AssignmentStmt(self.apply_subst_to_expr(subst, target), self.apply_subst_to_expr(subst, value), span)
@@ -255,6 +255,45 @@ given TypeChecker {
                 _ then Option[Type].None(),
             },
             _ then Option[Type].None(),
+        }
+    }
+
+    private concretize_pair_constructor_binding_type(self, binding_type Type, value ref Expr, scope Scope) Type = {
+        let needs_pair_args = when binding_type in {
+            .StructureType(def_id) then (self.context().get_name(def_id) or else "") == "Pair",
+            .GenericStruct(template_name, args) then {
+                if template_name <> "Pair" or args.count() <> 2(UInt) then {
+                    yield false
+                }
+                let mut unresolved = false
+                for arg in args then {
+                    if self.is_unresolved_expr_type(arg.val) or arg.val is .GenericParameter(_) then {
+                        unresolved = true
+                    }
+                }
+                yield unresolved
+            },
+            _ then false,
+        }
+        if not needs_pair_args then {
+            return binding_type
+        }
+        return when value in {
+            .Call(callee, args, _) then when callee in {
+                .Identifier(name, _) then {
+                    if name <> "Pair" or args.count() <> 2(UInt) then {
+                        yield binding_type
+                    }
+                    let first_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(args[0(UInt)], .None(), scope).expr_type)
+                    let second_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(args[1(UInt)], .None(), scope).expr_type)
+                    let mut pair_args = List[ref Type].new()
+                    pair_args.push(box(first_type))
+                    pair_args.push(box(second_type))
+                    yield Type.GenericStruct("Pair", pair_args)
+                },
+                _ then binding_type,
+            },
+            _ then binding_type,
         }
     }
 

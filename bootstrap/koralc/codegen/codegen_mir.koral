@@ -1658,8 +1658,8 @@ given MIRFunctionCodeEmitter {
             .RefCount(value) then self.emit_ref_count(value.val),
             .MakeRef(pointer, owner, result_type) then self.emit_make_ref(pointer.val, owner.val, result_type),
             .MakeMutRef(pointer, owner, result_type) then self.emit_make_ref(pointer.val, owner.val, result_type),
-            .DowngradeRef(value, result_type) then self.emit_runtime_unary_ref("__koral_downgrade_ref", value.val, result_type),
-            .DowngradeMutRef(value, result_type) then self.emit_runtime_unary_ref("__koral_downgrade_ref", value.val, result_type),
+            .DowngradeRef(value, result_type) then self.emit_downgrade_ref(value.val, result_type),
+            .DowngradeMutRef(value, result_type) then self.emit_downgrade_ref(value.val, result_type),
             .UpgradeRef(value, result_type) then self.emit_upgrade_ref(value.val, result_type),
             .UpgradeMutRef(value, result_type) then self.emit_upgrade_ref(value.val, result_type),
             .InitMemory(pointer, value) then {
@@ -2300,9 +2300,162 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
     }
 
+    private emit_downgrade_ref(self mut ref, value MIRValue, result_type Type) MIRValueEmission = {
+        let emission = self.emit_value_source(value)
+        return when self.type_of_value(value) in {
+            .ReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
+                let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
+                let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".ptr, ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".control});\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".control = ")
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(".control;\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".vtable = ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".vtable;\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+            } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
+            .MutableReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
+                let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
+                let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".ptr, ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".control});\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".control = ")
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(".control;\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".vtable = ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".vtable;\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+            } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
+            _ then self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
+        }
+    }
+
+    private emit_runtime_unary_ref_from_emission(
+        self mut ref,
+        function_name String,
+        emission MIRValueEmission,
+        result_type Type,
+    ) MIRValueEmission = {
+        let result = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "\(function_name)(\(emission.expression))")
+        self.emit_cleanup(emission.cleanup)
+        return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+    }
+
     private emit_upgrade_ref(self mut ref, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let success = self.codegen.next_temp_with_decl("int")
+        return when self.type_of_value(value) in {
+            .WeakReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
+                let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))")
+                let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("if (")
+                self.codegen.buffer.push_string(success)
+                self.codegen.buffer.push_string(") {\n")
+                self.codegen.with_indent(() -> {
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".tag = 1;\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".data.Some.value.ptr = ")
+                    self.codegen.buffer.push_string(upgraded)
+                    self.codegen.buffer.push_string(".ptr;\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".data.Some.value.control = ")
+                    self.codegen.buffer.push_string(upgraded)
+                    self.codegen.buffer.push_string(".control;\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".data.Some.value.vtable = ")
+                    self.codegen.buffer.push_string(emission.expression)
+                    self.codegen.buffer.push_string(".vtable;\n")
+                })
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("} else {\n")
+                self.codegen.with_indent(() -> {
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".tag = 0;\n")
+                })
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("}\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+            } else self.emit_plain_upgrade_ref(emission, success, result_type),
+            .MutableWeakReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
+                let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))")
+                let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("if (")
+                self.codegen.buffer.push_string(success)
+                self.codegen.buffer.push_string(") {\n")
+                self.codegen.with_indent(() -> {
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".tag = 1;\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".data.Some.value.ptr = ")
+                    self.codegen.buffer.push_string(upgraded)
+                    self.codegen.buffer.push_string(".ptr;\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".data.Some.value.control = ")
+                    self.codegen.buffer.push_string(upgraded)
+                    self.codegen.buffer.push_string(".control;\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".data.Some.value.vtable = ")
+                    self.codegen.buffer.push_string(emission.expression)
+                    self.codegen.buffer.push_string(".vtable;\n")
+                })
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("} else {\n")
+                self.codegen.with_indent(() -> {
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(result)
+                    self.codegen.buffer.push_string(".tag = 0;\n")
+                })
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("}\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+            } else self.emit_plain_upgrade_ref(emission, success, result_type),
+            _ then self.emit_plain_upgrade_ref(emission, success, result_type),
+        }
+    }
+
+    private emit_plain_upgrade_ref(
+        self mut ref,
+        emission MIRValueEmission,
+        success String,
+        result_type Type,
+    ) MIRValueEmission = {
         let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref(\(emission.expression), &\(success))")
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
         self.codegen.add_indent()

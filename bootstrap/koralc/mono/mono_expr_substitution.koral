@@ -545,6 +545,58 @@ private let substitute_expr_kind(
                 },
                 _ then {},
             }
+            when new_callee.expr_kind in {
+                .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
+                    let mut trait_object_type_opt Option[Type] = Option[Type].None()
+                    let base_type = resolve_parameterized_type(mono, base.expr_type)
+                    when base_type in {
+                        .TraitObject(trait_name, trait_type_args) then {
+                            trait_object_type_opt = Option[Type].Some(Type.TraitObject(trait_name, trait_type_args))
+                        },
+                        .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                            .TraitObject(trait_name, trait_type_args) then {
+                                trait_object_type_opt = Option[Type].Some(Type.TraitObject(trait_name, trait_type_args))
+                            },
+                            _ then {},
+                        },
+                        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                            .TraitObject(trait_name, trait_type_args) then {
+                                trait_object_type_opt = Option[Type].Some(Type.TraitObject(trait_name, trait_type_args))
+                            },
+                            _ then {},
+                        },
+                        _ then {},
+                    }
+                    when trait_object_type_opt in {
+                        .Some(trait_object_type) then when trait_object_type in {
+                            .TraitObject(trait_name, _) then {
+                                let method_name = substitution_semantic_method_name(mono, method.val)
+                                let method_index = substitution_vtable_method_index(mono, trait_name, method_name)
+                                if method_index >= 0 then {
+                                    let receiver = when base.expr_kind in {
+                                        .DerefExpr(inner) then when resolve_parameterized_type(mono, inner.expr_type) in {
+                                            .ReferenceType(ref_inner) then when resolve_parameterized_type(mono, ref_inner.val) in {
+                                                .TraitObject(_, _) then inner,
+                                                _ then base,
+                                            },
+                                            .MutableReferenceType(ref_inner) then when resolve_parameterized_type(mono, ref_inner.val) in {
+                                                .TraitObject(_, _) then inner,
+                                                _ then base,
+                                            },
+                                            _ then base,
+                                        },
+                                        _ then base,
+                                    }
+                                    return box(TypedExprKind.TraitMethodCall(receiver, trait_object_type, method_name, method_index, new_args))
+                                }
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
+                },
+                _ then {},
+            }
             yield box(TypedExprKind.Call(new_callee, new_args))
         },
         .GenericCall(function_symbol, type_args, args) then {
@@ -583,6 +635,24 @@ private let substitute_expr_kind(
                 new_method = bind_receiver_method_symbol(mono, binding_receiver_type, new_method, Option[Type].Some(substituted_expr_type))
                 new_base = align_method_reference_base_for_bound_method(mono, new_base, new_method)
                 new_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
+            }
+            let trait_object_type_opt = when resolve_parameterized_type(mono, new_base.expr_type) in {
+                .TraitObject(trait_name, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_type_args)),
+                .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                    .TraitObject(trait_name, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_type_args)),
+                    _ then Option[Type].None(),
+                },
+                .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+                    .TraitObject(trait_name, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_type_args)),
+                    _ then Option[Type].None(),
+                },
+                _ then Option[Type].None(),
+            }
+            when trait_object_type_opt in {
+                .Some(trait_object_type) then {
+                    yield box(TypedExprKind.TraitMethodPlaceholder(new_base, trait_object_type, box(new_method), new_method_type_args, dispatch_callsite))
+                },
+                .None() then {},
             }
             yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, new_method_type_args, dispatch_callsite))
         },
@@ -1222,6 +1292,73 @@ let bind_receiver_method_symbol(
     }
 }
 
+private let substitution_semantic_method_name(
+    mono ref Monomorphizer,
+    method Symbol,
+) String = {
+    if method.def_id.id > 0 then {
+        when mono.receiver_method_dispatch_info(method.def_id) in {
+            .Some(info) then { return info.method_name },
+            .None() then {},
+        }
+        when mono.concrete_callable_info(method.def_id) in {
+            .Some(info) then { return info.logical_name },
+            .None() then {},
+        }
+        when mono.storage.context.get_name(method.def_id) in {
+            .Some(name) then { return name },
+            .None() then {},
+        }
+    }
+    return mono.storage.context.symbol_name(method)
+}
+
+private let substitution_ordered_trait_method_names_helper(
+    mono ref Monomorphizer,
+    trait_name String,
+    visited mut ref Set[String],
+    ordered mut ref List[String],
+    seen mut ref Set[String],
+) Void = {
+    if visited.contains(trait_name) then {
+        return
+    }
+    visited.insert(trait_name)
+    when mono.storage.generic_templates.traits.get(trait_name) in {
+        .Some(info) then {
+            for parent in info.parent_traits then {
+                substitution_ordered_trait_method_names_helper(mono, parent.name, visited, ordered, seen)
+            }
+            for member in info.raw_members then {
+                if not seen.contains(member.name) then {
+                    seen.insert(member.name)
+                    ordered.push(member.name)
+                }
+            }
+        },
+        .None() then {},
+    }
+}
+
+private let substitution_vtable_method_index(
+    mono ref Monomorphizer,
+    trait_name String,
+    method_name String,
+) Int = {
+    let mut visited = Set[String].new()
+    let mut ordered = List[String].new()
+    let mut seen = Set[String].new()
+    substitution_ordered_trait_method_names_helper(mono, trait_name, visited.ref, ordered.ref, seen.ref)
+    let mut idx UInt = 0
+    while idx < ordered.count() then {
+        if ordered[idx] == method_name then {
+            return idx(Int)
+        }
+        idx += 1
+    }
+    return -1
+}
+
 let align_method_reference_base_for_bound_method(
     mono ref Monomorphizer,
     receiver_expr ref TypedExpr,
@@ -1340,7 +1477,7 @@ public let substitute_statement(
             yield TypedStatement.LetStmt(box(new_sym), new_val, span)
         },
 
-        .PairLetStmt(first_symbol, second_symbol, value, span) then {
+        .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
             let new_first_symbol = when first_symbol in {
                 .Some(symbol) then Option[ref Symbol].Some(box(substitute_symbol(mono, symbol, substitution))),
                 .None() then Option[ref Symbol].None(),
@@ -1350,7 +1487,7 @@ public let substitute_statement(
                 .None() then Option[ref Symbol].None(),
             }
             let new_val = substitute_types_in_expression(mono, value, substitution)
-            yield TypedStatement.PairLetStmt(new_first_symbol, new_second_symbol, new_val, span)
+            yield TypedStatement.PairLetStmt(mono.substitute_type_impl(pair_type, substitution), new_first_symbol, new_second_symbol, new_val, span)
         },
 
         // AssignmentStmt: substitute target and value expressions.

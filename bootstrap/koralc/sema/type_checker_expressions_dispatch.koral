@@ -476,12 +476,18 @@ given TypeChecker {
     private resolve_implicit_static_receiver_type(self, expected Option[Type], member_name String) Option[Type] = {
         return when expected in {
             .Some(et) then when et in {
-                .GenericStruct(template_name, _) then if self.lookup_method_signature(template_name, member_name) is .Some(_)
-                    then Option[Type].Some(et)
-                    else Option[Type].None(),
+                .GenericStruct(template_name, type_args) then {
+                    let declared_receiver_type = self.resolve_static_declared_receiver_type(template_name, self.type_ref_list_to_value_list(type_args))
+                    yield if self.resolve_static_method_signature_for_receiver(template_name, declared_receiver_type, member_name) is .Some(_)
+                        then Option[Type].Some(et)
+                        else Option[Type].None()
+                },
                 .StructureType(def_id) then {
-                    let type_name = self.context().get_name(def_id) or else ""
-                    yield if self.lookup_method_signature(type_name, member_name) is .Some(_)
+                    let receiver_info = self.implicit_static_receiver_info_for_def_id(def_id)
+                    let type_name = receiver_info.first
+                    let receiver_type_args = receiver_info.second
+                    let declared_receiver_type = self.resolve_static_declared_receiver_type(type_name, receiver_type_args)
+                    yield if self.resolve_static_method_signature_for_receiver(type_name, declared_receiver_type, member_name) is .Some(_)
                         then Option[Type].Some(et)
                         else Option[Type].None()
                 },
@@ -498,8 +504,21 @@ given TypeChecker {
                 .Float32Type() then if self.lookup_method_signature("Float32", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
                 .Float64Type() then if self.lookup_method_signature("Float64", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
                 .BoolType() then if self.lookup_method_signature("Bool", member_name) is .Some(_) then Option[Type].Some(et) else Option[Type].None(),
-                .EnumType(_) then Option[Type].None(),
-                .GenericEnum(_, _) then Option[Type].None(),
+                .EnumType(def_id) then {
+                    let receiver_info = self.implicit_static_receiver_info_for_def_id(def_id)
+                    let type_name = receiver_info.first
+                    let receiver_type_args = receiver_info.second
+                    let declared_receiver_type = self.resolve_static_declared_receiver_type(type_name, receiver_type_args)
+                    yield if self.resolve_static_method_signature_for_receiver(type_name, declared_receiver_type, member_name) is .Some(_)
+                        then Option[Type].Some(et)
+                        else Option[Type].None()
+                },
+                .GenericEnum(template_name, type_args) then {
+                    let declared_receiver_type = self.resolve_static_declared_receiver_type(template_name, self.type_ref_list_to_value_list(type_args))
+                    yield if self.resolve_static_method_signature_for_receiver(template_name, declared_receiver_type, member_name) is .Some(_)
+                        then Option[Type].Some(et)
+                        else Option[Type].None()
+                },
                 _ then {
                     let implicit_type_name = if self.is_string_type(et) then "String" else if self.is_rune_type(et) then "Rune" else ""
                     yield if implicit_type_name.is_empty() then Option[Type].None()
@@ -509,6 +528,50 @@ given TypeChecker {
                 },
             },
             .None() then Option[Type].None(),
+        }
+    }
+
+    private type_ref_list_to_value_list(self, type_args List[ref Type]) List[Type] = {
+        let _ = self
+        let mut out = List[Type].new()
+        for type_arg in type_args then {
+            out.push(type_arg.val)
+        }
+        return out
+    }
+
+    private implicit_static_receiver_info_for_def_id(self, def_id DefId) Pair[String, List[Type]] = {
+        return when self.context().lookup_type(def_id) in {
+            .Some(mapped_type) then when mapped_type in {
+                .GenericStruct(template_name, type_args) then {
+                    yield Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args))
+                },
+                .GenericEnum(template_name, type_args) then {
+                    yield Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args))
+                },
+                _ then {
+                    let type_name = when self.context().get_template_name(def_id) in {
+                        .Some(template_name) then template_name,
+                        .None() then self.context().get_name(def_id) or else "",
+                    }
+                    let receiver_type_args = when self.context().get_type_arguments(def_id) in {
+                        .Some(type_args) then type_args,
+                        .None() then List[Type].new(),
+                    }
+                    yield Pair[String, List[Type]](type_name, receiver_type_args)
+                },
+            },
+            .None() then {
+                let type_name = when self.context().get_template_name(def_id) in {
+                    .Some(template_name) then template_name,
+                    .None() then self.context().get_name(def_id) or else "",
+                }
+                let receiver_type_args = when self.context().get_type_arguments(def_id) in {
+                    .Some(type_args) then type_args,
+                    .None() then List[Type].new(),
+                }
+                yield Pair[String, List[Type]](type_name, receiver_type_args)
+            },
         }
     }
 
@@ -544,7 +607,7 @@ given TypeChecker {
         member_name String
     ) List[Type] = {
         return when implicit_static_receiver_opt in {
-            .Some(_) then self.resolve_static_method_param_types(implicit_static_type_name, member_name),
+            .Some(receiver_type) then self.resolve_static_method_param_types_for_receiver(implicit_static_type_name, receiver_type, member_name),
             .None() then when expected in {
                 .Some(et) then self.get_enum_case_field_types(et, member_name),
                 .None() then List[Type].new(),

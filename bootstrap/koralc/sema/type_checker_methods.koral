@@ -1111,6 +1111,97 @@ given TypeChecker {
         return Option[Symbol].None()
     }
 
+    private resolve_conformance_extension_template_signature(self, base_type Type, receiver_type Type, method_name String) Option[Symbol] = {
+        let normalized_receiver = when receiver_type in {
+            .MutableReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then inner.val,
+            .WeakReferenceType(inner) then inner.val,
+            .MutableWeakReferenceType(inner) then inner.val,
+            _ then receiver_type,
+        }
+        let key = self.conformance_template_key(normalized_receiver)
+        let conformances = when self.storage.conformance_index.get(key) in {
+            .Some(list) then list,
+            .None() then {
+                return Option[Symbol].None()
+            },
+        }
+        for conformance in conformances then {
+            let mut conformance_bindings = Dict[String, Type].new()
+            if not self.conformance_type_key_matches(conformance.target_type, normalized_receiver, conformance_bindings.ref) then {
+                continue
+            }
+
+            let trait_name = conformance.trait_name
+            let template_opt = self.storage.generic_templates.lookup_extension_method(
+                trait_name,
+                method_name,
+                Option[UInt].None(),
+                Option[UInt].Some(conformance.trait_arg_types.count()),
+            )
+            let template = when template_opt in {
+                .Some(found) then found,
+                .None() then {
+                    continue
+                },
+            }
+
+            let mut bindings = Dict[String, Type].new()
+            for entry in conformance_bindings then {
+                bindings.insert(entry.first, entry.second)
+            }
+            when self.storage.trait_registry.get(trait_name) in {
+                .Some(info) then {
+                    let param_count = info.type_params.count()
+                    let arg_count = conformance.trait_arg_types.count()
+                    let n = if param_count < arg_count then param_count else arg_count
+                    let mut trait_i UInt = 0
+                    while trait_i < n then {
+                        let bound_trait_arg = self.apply_type_bindings(conformance.trait_arg_types[trait_i], conformance_bindings)
+                        bindings.insert(info.type_params[trait_i], bound_trait_arg)
+                        trait_i += 1
+                    }
+                },
+                .None() then {},
+            }
+            for mtp in template.method.type_params then {
+                if not bindings.contains_key(mtp.name) then {
+                    bindings.insert(mtp.name, Type.GenericParameter(mtp.name))
+                }
+            }
+            bindings.insert("Self", base_type)
+
+            let mut typed_params = List[TypedParam].new()
+            for param in template.method.params then {
+                typed_params.push(
+                    TypedParam(
+                        param.name,
+                        param.mutable,
+                        self.resolve_template_type_node_with_bindings(param.param_type, bindings),
+                        param.named,
+                    )
+                )
+            }
+            let return_type = when template.checked_return_type in {
+                .Some(ret) then self.apply_type_bindings(ret, bindings),
+                .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
+            }
+            return Option[Symbol].Some(
+                self.make_method_callable_symbol_with_visibility(
+                    method_name,
+                    typed_params,
+                    return_type,
+                    template.method.access,
+                    template.module_path,
+                    template.source_file,
+                    template.package_id,
+                )
+            )
+        }
+
+        return Option[Symbol].None()
+    }
+
     private resolve_conformance_trait_method_signature(self, receiver_type Type, trait_name String, method_name String) Option[Symbol] = {
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
@@ -1473,10 +1564,79 @@ given TypeChecker {
         }
     }
 
+    private extension_template_is_receiver_style(self, template ref GenericExtensionMethodTemplate) Bool = {
+        let _ = self
+        return if template.method.params.is_empty() then false else template.method.params[0(UInt)].name == "self"
+    }
+
+    private resolve_static_extension_template_signature(self, receiver_type Type, method_name String) Option[Symbol] = {
+        let template_key = self.generic_extension_lookup_key(receiver_type)
+        return when template_key in {
+            .Some(key) then {
+                let actual_type_args = self.receiver_type_args(receiver_type)
+                yield when self.storage.generic_templates.lookup_extension_method(
+                    key,
+                    method_name,
+                    Option[UInt].None(),
+                    Option[UInt].Some(actual_type_args.count()),
+                ) in {
+                    .Some(template) then {
+                        yield if self.extension_template_is_receiver_style(template) then Option[Symbol].None() else {
+                            let mut bindings = Dict[String, Type].new()
+                            let mut i UInt = 0
+                            while i < template.type_params.count() and i < actual_type_args.count() then {
+                                bindings.insert(template.type_params[i].name, actual_type_args[i])
+                                i += 1
+                            }
+                            for mtp in template.method.type_params then {
+                                if not bindings.contains_key(mtp.name) then {
+                                    bindings.insert(mtp.name, Type.GenericParameter(mtp.name))
+                                }
+                            }
+                            bindings.insert("Self", receiver_type)
+                            self.bind_extension_template_conformance_trait_args(receiver_type, template.val, bindings.ref)
+                            let mut typed_params = List[TypedParam].new()
+                            for param in template.method.params then {
+                                typed_params.push(
+                                    TypedParam(
+                                        param.name,
+                                        param.mutable,
+                                        self.resolve_template_type_node_with_bindings(param.param_type, bindings),
+                                        param.named,
+                                    )
+                                )
+                            }
+                            let return_type = when template.checked_return_type in {
+                                .Some(ret) then self.apply_type_bindings(ret, bindings),
+                                .None() then self.resolve_template_type_node_with_bindings(template.method.return_type, bindings),
+                            }
+                            yield Option[Symbol].Some(
+                                self.make_method_callable_symbol_with_visibility(
+                                    method_name,
+                                    typed_params,
+                                    return_type,
+                                    template.method.access,
+                                    template.module_path,
+                                    template.source_file,
+                                    template.package_id,
+                                )
+                            )
+                        }
+                    },
+                    .None() then Option[Symbol].None(),
+                }
+            },
+            .None() then Option[Symbol].None(),
+        }
+    }
+
     protected resolve_static_method_signature_for_receiver(self, type_name String, receiver_type Type, method_name String) Option[Symbol] = {
         return when self.lookup_method_signature(type_name, method_name) in {
             .Some(method) then Option[Symbol].Some(method),
-            .None() then self.resolve_conformance_method_signature(receiver_type, method_name),
+            .None() then when self.resolve_static_extension_template_signature(receiver_type, method_name) in {
+                .Some(method) then Option[Symbol].Some(method),
+                .None() then self.resolve_conformance_method_signature(receiver_type, method_name),
+            },
         }
     }
 
@@ -1538,6 +1698,20 @@ given TypeChecker {
         }
     }
 
+    private collect_method_generic_param_names_from_params(self, method Symbol, receiver_bindings Dict[String, Type], ordered mut ref List[String], seen mut ref Set[String]) Void = {
+        let mut i UInt = 1
+        while i < self.method_param_count(method) then {
+            let param_type = self.method_param_type(method, i) or else Type.Unknown()
+            self.collect_unbound_method_generic_param_names(param_type, receiver_bindings, ordered, seen)
+            i += 1
+        }
+    }
+
+    private collect_method_generic_param_names(self, method Symbol, receiver_bindings Dict[String, Type], ordered mut ref List[String], seen mut ref Set[String]) Void = {
+        self.collect_method_generic_param_names_from_params(method, receiver_bindings, ordered, seen)
+        self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, ordered, seen)
+    }
+
     private resolve_signature_method_type_bindings(self, receiver_type Type, method Symbol, method_type_args List[Type]) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         if self.method_param_count(method) > 0 then {
@@ -1549,13 +1723,7 @@ given TypeChecker {
 
         let mut ordered = List[String].new()
         let mut seen = Set[String].new()
-        let mut i UInt = 1
-        while i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, i) or else Type.Unknown()
-            self.collect_unbound_method_generic_param_names(param_type, bindings, ordered, seen)
-            i += 1
-        }
-        self.collect_unbound_method_generic_param_names(self.method_return_type(method), bindings, ordered, seen)
+        self.collect_method_generic_param_names(method, bindings, ordered.ref, seen.ref)
 
         let mut arg_i UInt = 0
         while arg_i < method_type_args.count() and arg_i < ordered.count() then {
@@ -1657,13 +1825,24 @@ given TypeChecker {
         self.collect_unbound_method_generic_param_names(self.method_return_type(method), bindings, ordered, seen)
     }
 
+    private collect_static_generic_param_names_from_params(self, method Symbol, receiver_bindings Dict[String, Type], ordered mut ref List[String], seen mut ref Set[String]) Void = {
+        for parameter_type in self.method_param_types(method) then {
+            self.collect_unbound_method_generic_param_names(parameter_type, receiver_bindings, ordered, seen)
+        }
+    }
+
+    private collect_static_generic_param_names(self, method Symbol, receiver_bindings Dict[String, Type], ordered mut ref List[String], seen mut ref Set[String]) Void = {
+        self.collect_static_generic_param_names_from_params(method, receiver_bindings, ordered, seen)
+        self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, ordered, seen)
+    }
+
     protected resolve_static_call_type_bindings(self, type_name String, receiver_type_args List[Type], method Symbol, args List[ref TypedExpr], method_type_args List[Type], expected Option[Type]) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         self.bind_static_receiver_type_args(type_name, receiver_type_args, bindings.ref)
 
         let mut ordered = List[String].new()
         let mut seen = Set[String].new()
-        self.collect_unbound_static_generic_param_names(method, bindings, ordered.ref, seen.ref)
+        self.collect_static_generic_param_names(method, bindings, ordered.ref, seen.ref)
 
         let mut type_arg_i UInt = 0
         while type_arg_i < method_type_args.count() and type_arg_i < ordered.count() then {
@@ -1687,9 +1866,11 @@ given TypeChecker {
 
     protected resolve_static_method_type_args_for_call(self, type_name String, receiver_type_args List[Type], method Symbol, args List[ref TypedExpr], method_type_args List[Type], expected Option[Type]) List[Type] = {
         let bindings = self.resolve_static_call_type_bindings(type_name, receiver_type_args, method, args, method_type_args, expected)
+        let mut receiver_bindings = Dict[String, Type].new()
+        self.bind_static_receiver_type_args(type_name, receiver_type_args, receiver_bindings.ref)
         let mut ordered = List[String].new()
         let mut seen = Set[String].new()
-        self.collect_unbound_static_generic_param_names(method, bindings, ordered.ref, seen.ref)
+        self.collect_static_generic_param_names(method, receiver_bindings, ordered.ref, seen.ref)
 
         let mut resolved = List[Type].new()
         for name in ordered then {
@@ -1714,16 +1895,12 @@ given TypeChecker {
     }
 
     protected resolve_method_type_args_for_call(self, base_type Type, method Symbol, args List[ref TypedExpr], method_type_args List[Type]) List[Type] = {
+        let receiver_type = self.concrete_receiver_for_method(base_type, method)
+        let receiver_bindings = self.resolve_signature_method_type_bindings(receiver_type, method, List[Type].new())
         let bindings = self.resolve_signature_call_type_bindings(base_type, method, args, method_type_args)
         let mut ordered = List[String].new()
         let mut seen = Set[String].new()
-        let mut i UInt = 1
-        while i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, i) or else Type.Unknown()
-            self.collect_unbound_method_generic_param_names(param_type, bindings, ordered, seen)
-            i += 1
-        }
-        self.collect_unbound_method_generic_param_names(self.method_return_type(method), bindings, ordered, seen)
+        self.collect_method_generic_param_names(method, receiver_bindings, ordered.ref, seen.ref)
 
         let mut resolved = List[Type].new()
         for name in ordered then {
@@ -1743,25 +1920,24 @@ given TypeChecker {
     }
 
     protected resolve_method_type_args_for_call_with_expected(self, base_type Type, method Symbol, args List[ref TypedExpr], method_type_args List[Type], expected Option[Type]) List[Type] = {
+        let receiver_type = self.concrete_receiver_for_method(base_type, method)
+        let receiver_bindings = self.resolve_signature_method_type_bindings(receiver_type, method, List[Type].new())
         let mut bindings = self.resolve_signature_call_type_bindings(base_type, method, args, method_type_args)
-        let mut ordered = List[String].new()
-        let mut seen = Set[String].new()
-        let mut i UInt = 1
-        while i < self.method_param_count(method) then {
-            let param_type = self.method_param_type(method, i) or else Type.Unknown()
-            self.collect_unbound_method_generic_param_names(param_type, bindings, ordered, seen)
-            i += 1
-        }
+        let mut ordered_from_params = List[String].new()
+        let mut seen_from_params = Set[String].new()
+        self.collect_method_generic_param_names_from_params(method, receiver_bindings, ordered_from_params.ref, seen_from_params.ref)
         if args.is_empty() and method_type_args.is_empty() and self.method_param_count(method) == 1(UInt) and expected is .None() then {
             return List[Type].new()
         }
         // Align with Swift sema: if arguments produced no method-level bindings and
         // there is no expected return type or explicit method type args, we do not
         // infer method generics from return position alone.
-        if ordered.is_empty() and method_type_args.is_empty() and expected is .None() then {
+        if ordered_from_params.is_empty() and method_type_args.is_empty() and expected is .None() then {
             return List[Type].new()
         }
-        self.collect_unbound_method_generic_param_names(self.method_return_type(method), bindings, ordered, seen)
+        let mut ordered = ordered_from_params
+        let mut seen = seen_from_params
+        self.collect_unbound_method_generic_param_names(self.method_return_type(method), receiver_bindings, ordered.ref, seen.ref)
         if ordered.is_empty() then {
             return List[Type].new()
         }
@@ -1880,6 +2056,11 @@ given TypeChecker {
         }
 
         when self.resolve_conformance_method_signature(inner_type, method_name) in {
+            .Some(method) then { return Option[Symbol].Some(method) },
+            .None() then {},
+        }
+
+        when self.resolve_conformance_extension_template_signature(normalized_base_type, inner_type, method_name) in {
             .Some(method) then { return Option[Symbol].Some(method) },
             .None() then {},
         }
@@ -2071,6 +2252,19 @@ given TypeChecker {
                     .Some(t) then self.get_enum_case_field_types(t, method_name),
                     .None() then List[Type].new(),
                 },
+        }
+    }
+
+    protected resolve_static_method_param_types_for_receiver(self, type_name String, receiver_type Type, method_name String) List[Type] = {
+        return when self.resolve_static_method_signature_for_receiver(type_name, receiver_type, method_name) in {
+            .Some(method) then {
+                let mut out = List[Type].new()
+                for parameter_type in self.method_param_types(method) then {
+                    out.push(parameter_type)
+                }
+                yield out
+            },
+            .None() then self.resolve_static_method_param_types(type_name, method_name),
         }
     }
 
