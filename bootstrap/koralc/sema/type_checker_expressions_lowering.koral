@@ -183,12 +183,13 @@ given TypeChecker {
             receiver_type_arg_refs.push(box(arg))
         }
 
+        let mut resolved_method_type_args = List[Type].new()
         let resolved_return_type = if effective_type_name.is_empty() then {
             yield self.resolve_method_return_type(receiver_type, method_name)
         } else {
             let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
             let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
-            let resolved_method_type_args = when static_sig_opt in {
+            resolved_method_type_args = when static_sig_opt in {
                 .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, args, List[Type].new(), Option[Type].Some(fallback_return_type)),
                 .None() then List[Type].new(),
             }
@@ -210,7 +211,17 @@ given TypeChecker {
         }
         let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type else resolved_return_type
         let method_symbol = self.make_method_symbol(method_name, return_type)
-        return make_typed_expr(TypedExprKind.StaticMethodCall(resolved_receiver_type, method_name, box(method_symbol), List[Type].new(), List[Type].new(), args), return_type)
+        return make_typed_expr(
+            TypedExprKind.StaticMethodCall(
+                resolved_receiver_type,
+                method_name,
+                box(method_symbol),
+                receiver_type_args,
+                resolved_method_type_args,
+                args,
+            ),
+            return_type,
+        )
     }
 
     private lower_enum_constructor_expr(self, enum_type Type, case_name String, args List[ref TypedExpr]) TypedExpr = {

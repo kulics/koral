@@ -372,7 +372,7 @@ given TypeChecker {
     }
 
     private make_typed_member_path_expr(self, typed_base TypedExpr, member String, member_type Type) TypedExpr = {
-        return when typed_base.expr_kind in {
+        let member_access = when typed_base.expr_kind in {
             .MemberPath(path_base, path) then {
                 if self.is_ref_like_assignment_type(typed_base.expr_type) then {
                     let mut nested_path = List[String].new()
@@ -391,6 +391,21 @@ given TypeChecker {
                 path.push(member)
                 yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type)
             },
+        }
+        if self.receiver_is_addressable_without_temp(typed_base) then {
+            return member_access
+        }
+        return when member_access.expr_kind in {
+            .MemberPath(_, path) then {
+                let temp_symbol = self.make_expr_temp_symbol("__member_base", typed_base.expr_type, VariableKind.Value())
+                let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+                let temp_member_access = make_typed_expr(TypedExprKind.MemberPath(box(temp_var), path), member_type)
+                let mut block_statements = List[ref TypedStatement].new()
+                block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span())))
+                block_statements.push(box(TypedStatement.ExprStmt(box(temp_member_access), unknown_span())))
+                yield make_typed_expr(TypedExprKind.Block(block_statements), member_type)
+            },
+            _ then member_access,
         }
     }
 

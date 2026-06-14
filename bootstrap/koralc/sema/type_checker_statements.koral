@@ -819,7 +819,9 @@ given TypeChecker {
                         let checked = self.adapt_expr_to_expected_type_at(raw_checked, value_expected, Option[SourceSpan].Some(expr_span(v)))
                         when expected_return in {
                             .Some(return_t) then {
-                                if checked.expr_type is not .NeverType()
+                                if self.storage.function_return_context.is_inferring and self.contains_generic_parameter(return_t) then {
+                                    self.merge_inferred_function_return_type(checked.expr_type)
+                                } else if checked.expr_type is not .NeverType()
                                     and not self.same_expr_type(checked.expr_type, return_t)
                                     and not self.is_unresolved_expr_type(checked.expr_type)
                                     and not self.is_unresolved_expr_type(return_t)
@@ -839,7 +841,11 @@ given TypeChecker {
                         yield Option[ref TypedExpr].Some(box(checked))
                     },
                     .None() then {
-                        if expected_return is .None() then {
+                        let should_note_void = when expected_return in {
+                            .None() then true,
+                            .Some(return_t) then self.storage.function_return_context.is_inferring and self.contains_generic_parameter(return_t),
+                        }
+                        if should_note_void then {
                             self.note_inferred_void_return(span)
                         }
                         yield Option[ref TypedExpr].None()

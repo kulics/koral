@@ -1198,7 +1198,24 @@ given TypeChecker {
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 if not type_params.is_empty() then {
-                    self.register_generic_function_template(name, type_params, params, return_type, Option[ref TypedExpr].None(), Option[Type].None())
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    let mut checked_param_types = List[Type].new()
+                    for p in params then {
+                        checked_param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
+                    }
+                    let checked_params = self.typed_params_to_checked_symbols(
+                        self.build_typed_params_from_resolved(params, checked_param_types)
+                    )
+                    let checked_return_type = self.resolve_type_with_bindings(return_type, bindings)
+                    self.register_generic_function_template(
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        Option[ref TypedExpr].None(),
+                        Option[List[Symbol]].Some(checked_params),
+                        Option[Type].Some(checked_return_type),
+                    )
                 }
                 let mut param_types = List[Type].new()
                 let resolved_ret = if type_params.is_empty() then {
@@ -1231,7 +1248,24 @@ given TypeChecker {
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 if not type_params.is_empty() then {
                     // Generic intrinsic: only register template, defer type resolution to instantiation (Swift alignment)
-                    self.register_generic_function_template(name, type_params, params, return_type, Option[ref TypedExpr].None(), Option[Type].None())
+                    let bindings = self.generic_type_param_bindings(type_params)
+                    let mut checked_param_types = List[Type].new()
+                    for p in params then {
+                        checked_param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
+                    }
+                    let checked_params = self.typed_params_to_checked_symbols(
+                        self.build_typed_params_from_resolved(params, checked_param_types)
+                    )
+                    let checked_return_type = self.resolve_type_with_bindings(return_type, bindings)
+                    self.register_generic_function_template(
+                        name,
+                        type_params,
+                        params,
+                        return_type,
+                        Option[ref TypedExpr].None(),
+                        Option[List[Symbol]].Some(checked_params),
+                        Option[Type].Some(checked_return_type),
+                    )
                 } else {
                     // Non-generic intrinsic: resolve types eagerly
                     let mut param_types = List[Type].new()
@@ -1294,6 +1328,10 @@ given TypeChecker {
                     let resolved_target = if type_params.is_empty()
                         then self.resolve_type(target_type)
                         else self.resolve_type_with_bindings(target_type, bindings)
+                    let template_target_type = when resolved_target in {
+                        .TraitObject(_, _) then Type.GenericParameter("Self"),
+                        _ then resolved_target,
+                    }
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     let target_type_name = self.type_node_name(target_type)
                     let trait_tool_target_name = if type_params.is_empty() and self.storage.trait_registry.get(target_type_name) is .Some(_) then Option[String].Some(target_type_name) else Option[String].None()
@@ -1304,6 +1342,11 @@ given TypeChecker {
                         let method_type_params = member.type_params
                         let method_params = member.params
                         let method_return_type_node = member.return_type
+                        let member_bindings = self.merged_type_param_bindings(type_params, method_type_params)
+                        let checked_return_type = self.resolve_given_member_type_with_bindings(method_return_type_node, template_target_type, member_bindings)
+                        let checked_params = self.typed_params_to_checked_symbols(
+                            self.check_given_member_params_with_bindings(method_params, template_target_type, member_bindings)
+                        )
                         let no_checked_body = Option[ref TypedExpr].None()
                         let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
                             .TraitObject(_, _) then true,
@@ -1320,7 +1363,8 @@ given TypeChecker {
                                 method_return_type_node,
                                 Option[String].None(),
                                 no_checked_body,
-                                Option[Type].None(),
+                                Option[List[Symbol]].Some(checked_params),
+                                Option[Type].Some(checked_return_type),
                             )
                         }
                         when trait_tool_target_name in {
@@ -1333,7 +1377,7 @@ given TypeChecker {
                                     method_type_params,
                                     method_params,
                                     method_return_type_node,
-                                    self.resolve_given_member_type_with_bindings(member.return_type, resolved_target, all_bindings),
+                                    self.resolve_given_member_type_with_bindings(member.return_type, template_target_type, all_bindings),
                                 )
                             },
                             .None() then {
@@ -1349,6 +1393,10 @@ given TypeChecker {
                     let resolved_target = if type_params.is_empty()
                         then self.resolve_type(target_type)
                         else self.resolve_type_with_bindings(target_type, bindings)
+                    let template_target_type = when resolved_target in {
+                        .TraitObject(_, _) then Type.GenericParameter("Self"),
+                        _ then resolved_target,
+                    }
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     let trait_name = self.type_node_name(trait_type)
                     let resolved_trait_args = self.trait_type_args_with_bindings(trait_type, bindings)
@@ -1406,6 +1454,11 @@ given TypeChecker {
                             let method_type_params = member.type_params
                             let method_params = member.params
                             let method_return_type_node = member.return_type
+                            let member_bindings = self.merged_type_param_bindings(type_params, method_type_params)
+                            let checked_return_type = self.resolve_given_member_type_with_bindings(method_return_type_node, template_target_type, member_bindings)
+                            let checked_params = self.typed_params_to_checked_symbols(
+                                self.check_given_member_params_with_bindings(method_params, template_target_type, member_bindings)
+                            )
                             let no_checked_body = Option[ref TypedExpr].None()
                             self.register_extension_method_template(
                                 extension_type_key,
@@ -1417,7 +1470,8 @@ given TypeChecker {
                                 method_return_type_node,
                                 Option[String].Some(trait_name),
                                 no_checked_body,
-                                Option[Type].None(),
+                                Option[List[Symbol]].Some(checked_params),
+                                Option[Type].Some(checked_return_type),
                             )
                         }
                     }
@@ -1433,6 +1487,10 @@ given TypeChecker {
                     let resolved_target = if type_params.is_empty()
                         then self.resolve_type(target_type)
                         else self.resolve_type_with_bindings(target_type, bindings)
+                    let template_target_type = when resolved_target in {
+                        .TraitObject(_, _) then Type.GenericParameter("Self"),
+                        _ then resolved_target,
+                    }
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     // For non-generic intrinsic given, resolve member signatures eagerly.
                     // For generic intrinsic given, defer to instantiation (Swift alignment).
@@ -1452,6 +1510,11 @@ given TypeChecker {
                         let method_type_params = member.type_params
                         let method_params = member.params
                         let method_return_type_node = member.return_type
+                        let member_bindings = self.merged_type_param_bindings(type_params, method_type_params)
+                        let checked_return_type = self.resolve_given_member_type_with_bindings(method_return_type_node, template_target_type, member_bindings)
+                        let checked_params = self.typed_params_to_checked_symbols(
+                            self.check_given_member_params_with_bindings(method_params, template_target_type, member_bindings)
+                        )
                         let no_checked_body = Option[ref TypedExpr].None()
                         self.register_extension_method_template(
                             extension_type_key,
@@ -1463,7 +1526,8 @@ given TypeChecker {
                             method_return_type_node,
                             Option[String].None(),
                             no_checked_body,
-                            Option[Type].None(),
+                            Option[List[Symbol]].Some(checked_params),
+                            Option[Type].Some(checked_return_type),
                         )
                     }
                 }

@@ -864,19 +864,11 @@ given TypeChecker {
     }
 
     private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        self.maybe_record_extension_method_instantiation(operand.expr_type, method_name, List[Type].new())
-        let ret_type = self.resolve_method_return_type(operand.expr_type, method_name)
-        let method_symbol = self.make_method_symbol(method_name, ret_type)
-        let args = List[ref TypedExpr].new()
-        let call_ret_type = when ret_type in {
-            .Unknown() then fallback_type,
-            _ then ret_type,
+        let call_expr = self.lower_receiver_method_call_expr(operand, method_name, List[ref TypedExpr].new())
+        return when call_expr.expr_type in {
+            .Unknown() then make_typed_expr(call_expr.expr_kind, fallback_type),
+            _ then call_expr,
         }
-        let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(operand), operand.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
-            method_symbol.symbol_type,
-        )
-        return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
     private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
@@ -889,16 +881,11 @@ given TypeChecker {
                         let _ = self.enforce_explicit_trait_requirement(typed.expr_type, "ToString")
                         self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", List[Type].new())
                         let ret_type = self.resolve_method_return_type(typed.expr_type, "to_string")
-                        let method_symbol = self.make_method_symbol("to_string", ret_type)
-                        let call_ret_type = when ret_type in {
-                            .Unknown() then self.builtin_string_type(),
-                            _ then ret_type,
+                        let call_expr = self.lower_receiver_method_call_expr(typed, "to_string", List[ref TypedExpr].new())
+                        yield when call_expr.expr_type in {
+                            .Unknown() then make_typed_expr(call_expr.expr_kind, self.builtin_string_type()),
+                            _ then call_expr,
                         }
-                        let callee = make_typed_expr(
-                            TypedExprKind.MethodReference(box(typed), typed.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
-                            method_symbol.symbol_type,
-                        )
-                        yield make_typed_expr(TypedExprKind.Call(box(callee), List[ref TypedExpr].new()), call_ret_type)
                     },
                 }
             },

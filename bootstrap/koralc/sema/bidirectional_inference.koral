@@ -214,6 +214,7 @@ given TypeChecker {
         self.storage.in_finally = false
         self.storage.yield_targets = List[mut ref YieldTarget].new()
         let infer_return_type_from_block_returns = return_type is .None() and resolved_ret is .Unknown() and fn_info is .None() and body is .Block(_, _)
+        let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(ret_type) and body is .Block(_, _)
         if infer_return_type_from_block_returns then {
             self.storage.function_return_context.expected_return_type = Option[Type].None()
             self.storage.function_return_context.inferred_return_type = Option[Type].None()
@@ -224,7 +225,7 @@ given TypeChecker {
                 else ret_type
             self.storage.function_return_context.expected_return_type = Option[Type].Some(lambda_return_type_for_body_check)
             self.storage.function_return_context.inferred_return_type = Option[Type].None()
-            self.storage.function_return_context.is_inferring = false
+            self.storage.function_return_context.is_inferring = infer_return_type_from_generic_block_returns
         }
         let body_expected = if body is .Block(_, _)
             then Option[Type].None()
@@ -245,6 +246,8 @@ given TypeChecker {
             yield if infer_return_type_from_block_returns
                 then inferred_return_type or else Type.VoidType()
                 else typed_body.expr_type
+        } else if self.contains_generic_parameter(ret_type) and body is .Block(_, _) then {
+            yield inferred_return_type or else typed_body.expr_type
         } else if self.contains_generic_parameter(ret_type) and not self.is_unresolved_expr_type(typed_body.expr_type) then {
             yield typed_body.expr_type
         } else ret_type

@@ -739,6 +739,82 @@ given TypeChecker {
                     .None() then Option[String].None(),
                 }
             },
+            .ReferenceType(_) then when self.storage.generic_templates.lookup_extension_methods("Ref") in {
+                .Some(_) then Option[String].Some("Ref"),
+                .None() then Option[String].None(),
+            },
+            .MutableReferenceType(_) then when self.storage.generic_templates.lookup_extension_methods("MutRef") in {
+                .Some(_) then Option[String].Some("MutRef"),
+                .None() then Option[String].None(),
+            },
+            .WeakReferenceType(_) then when self.storage.generic_templates.lookup_extension_methods("WeakRef") in {
+                .Some(_) then Option[String].Some("WeakRef"),
+                .None() then Option[String].None(),
+            },
+            .MutableWeakReferenceType(_) then when self.storage.generic_templates.lookup_extension_methods("MutWeakRef") in {
+                .Some(_) then Option[String].Some("MutWeakRef"),
+                .None() then Option[String].None(),
+            },
+            .PointerType(_) then when self.storage.generic_templates.lookup_extension_methods("Ptr") in {
+                .Some(_) then Option[String].Some("Ptr"),
+                .None() then Option[String].None(),
+            },
+            .MutablePointerType(_) then when self.storage.generic_templates.lookup_extension_methods("MutPtr") in {
+                .Some(_) then Option[String].Some("MutPtr"),
+                .None() then Option[String].None(),
+            },
+            .IntType() then when self.storage.generic_templates.lookup_extension_methods("Int") in {
+                .Some(_) then Option[String].Some("Int"),
+                .None() then Option[String].None(),
+            },
+            .Int8Type() then when self.storage.generic_templates.lookup_extension_methods("Int8") in {
+                .Some(_) then Option[String].Some("Int8"),
+                .None() then Option[String].None(),
+            },
+            .Int16Type() then when self.storage.generic_templates.lookup_extension_methods("Int16") in {
+                .Some(_) then Option[String].Some("Int16"),
+                .None() then Option[String].None(),
+            },
+            .Int32Type() then when self.storage.generic_templates.lookup_extension_methods("Int32") in {
+                .Some(_) then Option[String].Some("Int32"),
+                .None() then Option[String].None(),
+            },
+            .Int64Type() then when self.storage.generic_templates.lookup_extension_methods("Int64") in {
+                .Some(_) then Option[String].Some("Int64"),
+                .None() then Option[String].None(),
+            },
+            .UIntType() then when self.storage.generic_templates.lookup_extension_methods("UInt") in {
+                .Some(_) then Option[String].Some("UInt"),
+                .None() then Option[String].None(),
+            },
+            .UInt8Type() then when self.storage.generic_templates.lookup_extension_methods("UInt8") in {
+                .Some(_) then Option[String].Some("UInt8"),
+                .None() then Option[String].None(),
+            },
+            .UInt16Type() then when self.storage.generic_templates.lookup_extension_methods("UInt16") in {
+                .Some(_) then Option[String].Some("UInt16"),
+                .None() then Option[String].None(),
+            },
+            .UInt32Type() then when self.storage.generic_templates.lookup_extension_methods("UInt32") in {
+                .Some(_) then Option[String].Some("UInt32"),
+                .None() then Option[String].None(),
+            },
+            .UInt64Type() then when self.storage.generic_templates.lookup_extension_methods("UInt64") in {
+                .Some(_) then Option[String].Some("UInt64"),
+                .None() then Option[String].None(),
+            },
+            .Float32Type() then when self.storage.generic_templates.lookup_extension_methods("Float32") in {
+                .Some(_) then Option[String].Some("Float32"),
+                .None() then Option[String].None(),
+            },
+            .Float64Type() then when self.storage.generic_templates.lookup_extension_methods("Float64") in {
+                .Some(_) then Option[String].Some("Float64"),
+                .None() then Option[String].None(),
+            },
+            .BoolType() then when self.storage.generic_templates.lookup_extension_methods("Bool") in {
+                .Some(_) then Option[String].Some("Bool"),
+                .None() then Option[String].None(),
+            },
             _ then Option[String].None(),
         }
     }
@@ -2410,18 +2486,11 @@ given TypeChecker {
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
                 let method_name = self.context().symbol_name(method)
-                when self.storage.trait_registry.flatten_methods(trait_name) in {
-                    .Ok(methods) then {
-                        if methods.get(method_name) is .Some(member) then {
-                            if member.return_type is .Unknown() then {
-                                return trait_type
-                            }
-                            return member.return_type
-                        }
-                    },
-                    .Error(_) then {},
+                let qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type)
+                return when qualified_return_type in {
+                    .Unknown() then self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method)),
+                    _ then qualified_return_type,
                 }
-                return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method))
             },
             .StaticMethodCall(receiver_type, _, method, _, _, _) then {
                 when method.symbol_type in {
@@ -2443,18 +2512,11 @@ given TypeChecker {
             },
             .TraitMethodCall(base, trait_type, method_name, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                when self.storage.trait_registry.flatten_methods(trait_name) in {
-                    .Ok(methods) then {
-                        if methods.get(method_name) is .Some(member) then {
-                            if member.return_type is .Unknown() then {
-                                return trait_type
-                            }
-                            return member.return_type
-                        }
-                    },
-                    .Error(_) then {},
+                let qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type)
+                return when qualified_return_type in {
+                    .Unknown() then self.resolve_method_return_type(base.expr_type, method_name),
+                    _ then qualified_return_type,
                 }
-                return self.resolve_method_return_type(base.expr_type, method_name)
             },
             _ then {},
         }

@@ -348,9 +348,39 @@ given TypeChecker {
             receiver_type_arg_refs.push(box(rt))
         }
 
-        // 从 method_table 或 enum case 中提取参数类型，用于向调用参数传播期望类型
-        let raw_static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
-        let static_param_types = self.bind_static_method_param_types(effective_type_name, receiver_type_arg_refs, raw_static_param_types)
+        let raw_declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
+        let declared_receiver_type = when raw_declared_receiver_type in {
+            .Unknown() then when scoped_receiver_type_opt in {
+                .Some(scoped_receiver_type) then scoped_receiver_type,
+                .None() then raw_declared_receiver_type,
+            },
+            _ then raw_declared_receiver_type,
+        }
+        let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
+        let static_param_types = when static_sig_opt in {
+            .Some(sig) then {
+                let bindings = self.resolve_static_call_type_bindings(
+                    effective_type_name,
+                    receiver_type_args,
+                    sig,
+                    List[ref TypedExpr].new(),
+                    method_type_args,
+                    expected,
+                )
+                let mut bound_params = List[Type].new()
+                let mut param_i UInt = 0
+                while param_i < self.method_param_count(sig) then {
+                    let param_type = self.method_param_type(sig, param_i) or else Type.Unknown()
+                    bound_params.push(self.apply_type_bindings(param_type, bindings))
+                    param_i += 1
+                }
+                yield bound_params
+            },
+            .None() then {
+                let raw_static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
+                yield self.bind_static_method_param_types(effective_type_name, receiver_type_arg_refs, raw_static_param_types)
+            },
+        }
         let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
         let mut typed_args = List[ref TypedExpr].new()
         let mut static_arg_idx UInt = 0
@@ -467,15 +497,6 @@ given TypeChecker {
                 return self.lower_enum_constructor_expr(enum_type, method_name, typed_args)
             },
             .None() then {
-                let raw_declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
-                let declared_receiver_type = when raw_declared_receiver_type in {
-                    .Unknown() then when scoped_receiver_type_opt in {
-                        .Some(scoped_receiver_type) then scoped_receiver_type,
-                        .None() then raw_declared_receiver_type,
-                    },
-                    _ then raw_declared_receiver_type,
-                }
-                let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
                 let resolved_method_type_args = when static_sig_opt in {
                     .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, typed_args, method_type_args, expected),
                     .None() then method_type_args,
@@ -518,7 +539,17 @@ given TypeChecker {
                     _ then with_type_args,
                 }
                 let method_symbol = self.make_method_symbol(method_name, ret_type)
-                return make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(method_symbol), List[Type].new(), List[Type].new(), typed_args), ret_type)
+                return make_typed_expr(
+                    TypedExprKind.StaticMethodCall(
+                        receiver_type,
+                        method_name,
+                        box(method_symbol),
+                        receiver_type_args,
+                        resolved_method_type_args,
+                        typed_args,
+                    ),
+                    ret_type,
+                )
             },
         }
     }
@@ -1085,7 +1116,19 @@ given TypeChecker {
                             for arg in typed_args then {
                                 static_args.push(arg)
                             }
-                            structured_call = Option[TypedExpr].Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(lowered_method_symbol), List[Type].new(), List[Type].new(), static_args), method_ret_type))
+                            structured_call = Option[TypedExpr].Some(
+                                make_typed_expr(
+                                    TypedExprKind.StaticMethodCall(
+                                        receiver_type,
+                                        method_name,
+                                        box(lowered_method_symbol),
+                                        List[Type].new(),
+                                        inferred_method_type_args,
+                                        static_args,
+                                    ),
+                                    method_ret_type,
+                                )
+                            )
                         },
                         .None() then {
                             let callee = make_typed_expr(
@@ -1191,7 +1234,19 @@ given TypeChecker {
                             for arg in typed_args then {
                                 static_args.push(arg)
                             }
-                            structured_call = Option[TypedExpr].Some(make_typed_expr(TypedExprKind.StaticMethodCall(receiver_type, method_name, box(lowered_method_symbol), List[Type].new(), List[Type].new(), static_args), method_ret_type))
+                            structured_call = Option[TypedExpr].Some(
+                                make_typed_expr(
+                                    TypedExprKind.StaticMethodCall(
+                                        receiver_type,
+                                        method_name,
+                                        box(lowered_method_symbol),
+                                        List[Type].new(),
+                                        inferred_method_type_args,
+                                        static_args,
+                                    ),
+                                    method_ret_type,
+                                )
+                            )
                         },
                         .None() then {
                             let callee = make_typed_expr(

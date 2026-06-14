@@ -293,6 +293,42 @@ private let resolve_def_id_backed_type(
     return reconstructed
 }
 
+private let resolve_types_in_pattern(mono ref Monomorphizer, pattern ref TypedPattern) TypedPattern = {
+    return when pattern in {
+        .Wildcard() then TypedPattern.Wildcard(),
+        .Variable(symbol) then TypedPattern.Variable(box(resolve_symbol_type(mono, symbol))),
+        .BoolLiteral(value) then TypedPattern.BoolLiteral(value),
+        .IntegerLiteral(value) then TypedPattern.IntegerLiteral(value),
+        .NegativeIntegerLiteral(value) then TypedPattern.NegativeIntegerLiteral(value),
+        .StringLiteral(value) then TypedPattern.StringLiteral(value),
+        .RuneLiteral(value) then TypedPattern.RuneLiteral(value),
+        .ComparisonPattern(op, value) then TypedPattern.ComparisonPattern(op, value),
+        .EnumCase(case_name, tag_index, elements) then {
+            let mut new_elements = List[ref TypedPatternElement].new()
+            for element in elements then {
+                new_elements.push(box(TypedPatternElement(element.label, box(resolve_types_in_pattern(mono, element.pattern)))))
+            }
+            yield TypedPattern.EnumCase(case_name, tag_index, new_elements)
+        },
+        .StructPattern(type_name, elements) then {
+            let mut new_elements = List[ref TypedPatternElement].new()
+            for element in elements then {
+                new_elements.push(box(TypedPatternElement(element.label, box(resolve_types_in_pattern(mono, element.pattern)))))
+            }
+            yield TypedPattern.StructPattern(type_name, new_elements)
+        },
+        .AndPattern(left, right) then {
+            yield TypedPattern.AndPattern(box(resolve_types_in_pattern(mono, left)), box(resolve_types_in_pattern(mono, right)))
+        },
+        .OrPattern(left, right) then {
+            yield TypedPattern.OrPattern(box(resolve_types_in_pattern(mono, left)), box(resolve_types_in_pattern(mono, right)))
+        },
+        .NotPattern(inner) then {
+            yield TypedPattern.NotPattern(box(resolve_types_in_pattern(mono, inner)))
+        },
+    }
+}
+
 public let resolve_parameterized_type(mono ref Monomorphizer, t Type) Type = {
     when t in {
         .IntType() then { return t },
@@ -920,6 +956,24 @@ private let expr_is_type_symbol(expr ref TypedExpr) Bool = {
     }
 }
 
+private let method_lookup_base_type(
+    mono ref Monomorphizer,
+    base ref TypedExpr,
+) Type = {
+    return when base.expr_kind in {
+        .Variable(_) then resolve_parameterized_type(mono, base.expr_type),
+        .RefExpr(inner) then when inner.expr_kind in {
+            .Variable(_) then resolve_parameterized_type(mono, base.expr_type),
+            _ then resolve_parameterized_type(mono, inner.expr_type),
+        },
+        _ then when resolve_parameterized_type(mono, base.expr_type) in {
+            .ReferenceType(inner) then resolve_parameterized_type(mono, inner.val),
+            .MutableReferenceType(inner) then resolve_parameterized_type(mono, inner.val),
+            _ then resolve_parameterized_type(mono, base.expr_type),
+        },
+    }
+}
+
 private let static_dispatch_receiver_expr(expr ref TypedExpr) ref TypedExpr = {
     return when expr.expr_kind in {
         .TraitObjectConversion(inner, _, _) then inner,
@@ -1024,6 +1078,51 @@ private let adapt_receiver_expr_for_method(
         },
         .None() then current_expr,
     }
+}
+
+private let adapt_call_arg_for_expected_param(
+    mono ref Monomorphizer,
+    arg ref TypedExpr,
+    expected_param_type Type,
+) ref TypedExpr = {
+    let resolved_expected_type = resolve_parameterized_type(mono, expected_param_type)
+    return when arg.expr_kind in {
+        .TraitObjectConversion(inner, _, concrete_type) then {
+            let resolved_inner_type = resolve_parameterized_type(mono, inner.expr_type)
+            let resolved_concrete_type = resolve_parameterized_type(mono, concrete_type)
+            yield if layout_key(resolved_expected_type) == layout_key(resolved_concrete_type)
+                or layout_key(resolved_expected_type) == layout_key(resolved_inner_type)
+                then inner
+                else arg
+        },
+        _ then arg,
+    }
+}
+
+private let adapt_call_args_for_method(
+    mono ref Monomorphizer,
+    method Symbol,
+    args List[ref TypedExpr],
+) List[ref TypedExpr] = {
+    let mut adapted_args = List[ref TypedExpr].new()
+    let method_type = resolved_method_symbol_type(mono, method.def_id, method.symbol_type)
+    let mut param_types = List[ref Type].new()
+    when method_type in {
+        .FunctionType(fn_params, _) then {
+            param_types = param_entry_types(fn_params)
+        },
+        _ then {},
+    }
+    let param_offset = if param_types.count() == args.count() + 1(UInt) then 1(UInt) else 0(UInt)
+    let mut arg_index UInt = 0
+    while arg_index < args.count() then {
+        let expected_param_type = if arg_index + param_offset < param_types.count()
+            then param_types[arg_index + param_offset].val
+            else args[arg_index].expr_type
+        adapted_args.push(adapt_call_arg_for_expected_param(mono, args[arg_index], expected_param_type))
+        arg_index += 1(UInt)
+    }
+    return adapted_args
 }
 
 private let receiver_param_matches_actual_receiver(
@@ -1644,20 +1743,46 @@ private let collect_receiver_lookup_keys(
     keys mut ref List[String],
 ) Void = {
     let resolved = resolve_parameterized_type(mono, receiver_type)
-    push_receiver_lookup_key(keys, layout_key(resolved))
-    push_receiver_lookup_key(keys, mono.storage.context.type_display_name(resolved))
     when resolved in {
-        .ReferenceType(inner) then collect_receiver_lookup_keys(mono, inner.val, keys),
-        .MutableReferenceType(inner) then collect_receiver_lookup_keys(mono, inner.val, keys),
-        .WeakReferenceType(inner) then collect_receiver_lookup_keys(mono, inner.val, keys),
-        .MutableWeakReferenceType(inner) then collect_receiver_lookup_keys(mono, inner.val, keys),
-        .PointerType(inner) then collect_receiver_lookup_keys(mono, inner.val, keys),
-        .MutablePointerType(inner) then collect_receiver_lookup_keys(mono, inner.val, keys),
+        .ReferenceType(_) then {
+            push_receiver_lookup_key(keys, "Ref")
+        },
+        .MutableReferenceType(_) then {
+            push_receiver_lookup_key(keys, "MutRef")
+            push_receiver_lookup_key(keys, "Ref")
+        },
+        .WeakReferenceType(_) then {
+            push_receiver_lookup_key(keys, "WeakRef")
+        },
+        .MutableWeakReferenceType(_) then {
+            push_receiver_lookup_key(keys, "MutWeakRef")
+            push_receiver_lookup_key(keys, "WeakRef")
+        },
+        .PointerType(_) then {
+            push_receiver_lookup_key(keys, "Ptr")
+        },
+        .MutablePointerType(_) then {
+            push_receiver_lookup_key(keys, "MutPtr")
+            push_receiver_lookup_key(keys, "Ptr")
+        },
         .GenericStruct(template, _) then push_receiver_lookup_key(keys, template),
         .GenericEnum(template, _) then push_receiver_lookup_key(keys, template),
-        .StructureType(def_id) then push_receiver_lookup_key(keys, mono.storage.context.get_name(def_id) or else ""),
-        .EnumType(def_id) then push_receiver_lookup_key(keys, mono.storage.context.get_name(def_id) or else ""),
-        _ then {},
+        .StructureType(def_id) then {
+            let concrete_name = mono.storage.context.get_name(def_id) or else ""
+            let template_name = mono.storage.context.get_template_name(def_id) or else concrete_name
+            push_receiver_lookup_key(keys, concrete_name)
+            push_receiver_lookup_key(keys, template_name)
+        },
+        .EnumType(def_id) then {
+            let concrete_name = mono.storage.context.get_name(def_id) or else ""
+            let template_name = mono.storage.context.get_template_name(def_id) or else concrete_name
+            push_receiver_lookup_key(keys, concrete_name)
+            push_receiver_lookup_key(keys, template_name)
+        },
+        _ then {
+            push_receiver_lookup_key(keys, layout_key(resolved))
+            push_receiver_lookup_key(keys, mono.storage.context.type_display_name(resolved))
+        },
     }
 }
 
@@ -1773,14 +1898,14 @@ private let try_lower_to_ref_method_call(
             let ref_type = Type.ReferenceType(inner)
             let mut option_args = List[ref Type].new()
             option_args.push(box(ref_type))
-            let option_type = Type.GenericEnum("Option", option_args)
+            let option_type = resolve_parameterized_type(mono, Type.GenericEnum("Option", option_args))
             yield Option[ref TypedExpr].Some(box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(base, option_type))), option_type)))
         },
         .MutableWeakReferenceType(inner) then {
             let ref_type = Type.MutableReferenceType(inner)
             let mut option_args = List[ref Type].new()
             option_args.push(box(ref_type))
-            let option_type = Type.GenericEnum("Option", option_args)
+            let option_type = resolve_parameterized_type(mono, Type.GenericEnum("Option", option_args))
             yield Option[ref TypedExpr].Some(box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeMutRef(base, option_type))), option_type)))
         },
         _ then Option[ref TypedExpr].None(),
@@ -2038,8 +2163,9 @@ private let resolve_types_in_statement(mono ref Monomorphizer, stmt ref TypedSta
             let new_subject = resolve_types_in_expression(mono, subject)
             let mut new_arms = List[ref TypedWhenArm].new()
             for arm_ref in arms then {
+                let new_pattern = resolve_types_in_pattern(mono, arm_ref.pattern)
                 let new_body = resolve_types_in_expression(mono, arm_ref.body)
-                new_arms.push(box(TypedWhenArm(arm_ref.pattern, new_body, resolve_parameterized_type(mono, arm_ref.arm_type))))
+                new_arms.push(box(TypedWhenArm(box(new_pattern), new_body, resolve_parameterized_type(mono, arm_ref.arm_type))))
             }
             yield TypedStatement.WhenStmt(new_subject, new_arms, span)
         },
@@ -2294,14 +2420,25 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                                     resolved_method_type_args_ref.push(box(resolve_parameterized_type(mono, method_type_arg)))
                                 }
                                 instantiate_trait_placeholder_method(mono, base_type, method_name, resolved_method_type_args_ref)
-                                let rebound_method = try_bind_generic_method_call(
+                                let mut expected_call_param_types = List[ref Type].new()
+                                expected_call_param_types.push(box(base_type))
+                                for arg in new_args then {
+                                    expected_call_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
+                                }
+                                let expected_call_type = Type.FunctionType(
+                                    types_to_param_entries(expected_call_param_types),
+                                    box(resolved_call_type)
+                                )
+                                let rebound_method = bind_receiver_method_symbol(
                                     mono,
                                     base_type,
                                     method.val,
-                                    new_args,
-                                    resolved_call_type,
-                                ).val
-                                if rebound_method.def_id.id <> method.def_id.id then {
+                                    Option[Type].Some(expected_call_type),
+                                )
+                                if rebound_method.def_id.id > 0 and (
+                                    rebound_method.def_id.id <> method.def_id.id
+                                    or not has_generic_parameter(resolve_parameterized_type(mono, rebound_method.symbol_type))
+                                ) then {
                                     let adapted_base = align_method_reference_base_for_bound_method(mono, base_expr, rebound_method)
                                     let rebound_callee = box(TypedExpr(
                                         box(TypedExprKind.MethodReference(
@@ -2345,20 +2482,152 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                     for method_type_arg in method_type_args then {
                         resolved_method_type_args.push(resolve_parameterized_type(mono, method_type_arg))
                     }
-                    let method_name_for_lookup = get_semantic_method_name(mono, method)
-                    let template_name_for_lookup = resolve_static_call_template_name(mono, effective_receiver_type)
-                    let bound_method = resolve_concrete_method_call(
-                        mono,
-                        effective_receiver_type,
-                        method,
-                        method_name_for_lookup,
-                        template_name_for_lookup,
-                        resolved_method_type_args,
-                        new_args,
-                        resolved_call_type,
-                        new_callee,
+                    let expected_method_type = resolve_parameterized_type(mono, method.symbol_type)
+                    let mut expected_call_param_types = List[ref Type].new()
+                    expected_call_param_types.push(box(effective_receiver_type))
+                    for arg in new_args then {
+                        expected_call_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
+                    }
+                    let expected_call_type_with_receiver = Type.FunctionType(
+                        types_to_param_entries(expected_call_param_types),
+                        box(resolved_call_type)
                     )
+                    let mut expected_call_arg_types = List[ref Type].new()
+                    for arg in new_args then {
+                        expected_call_arg_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
+                    }
+                    let expected_call_type_without_receiver = Type.FunctionType(
+                        types_to_param_entries(expected_call_arg_types),
+                        box(resolved_call_type)
+                    )
+                    let preferred_expected_types = if resolved_method_type_args.is_empty() and has_generic_parameter(expected_method_type) then {
+                        let mut expected_types = List[Type].new()
+                        expected_types.push(expected_call_type_with_receiver)
+                        expected_types.push(expected_method_type)
+                        expected_types.push(expected_call_type_without_receiver)
+                        yield expected_types
+                    } else {
+                        let mut expected_types = List[Type].new()
+                        expected_types.push(expected_method_type)
+                        expected_types.push(expected_call_type_with_receiver)
+                        expected_types.push(expected_call_type_without_receiver)
+                        yield expected_types
+                    }
+                    let mut bound_method = method.val
+                    if not resolved_method_type_args.is_empty() then {
+                        let method_name_for_lookup = get_semantic_method_name(mono, method)
+                        let mut explicit_lookup_receiver_types = List[Type].new()
+                        explicit_lookup_receiver_types.push(effective_receiver_type)
+                        when effective_receiver_type in {
+                            .ReferenceType(inner) then explicit_lookup_receiver_types.push(resolve_parameterized_type(mono, inner.val)),
+                            .MutableReferenceType(inner) then explicit_lookup_receiver_types.push(resolve_parameterized_type(mono, inner.val)),
+                            _ then {},
+                        }
+                        for lookup_receiver_type in explicit_lookup_receiver_types then {
+                            let template_name_for_lookup = resolve_static_call_template_name(mono, lookup_receiver_type)
+                            when lookup_concrete_method_for_static_call(
+                                mono,
+                                lookup_receiver_type,
+                                method_name_for_lookup,
+                                resolved_method_type_args,
+                                new_args,
+                                resolved_call_type,
+                            ) in {
+                                .Some(concrete_method) then {
+                                    bound_method = concrete_method
+                                    break
+                                },
+                                .None() then when enqueue_extension_method_for_static_call(
+                                    mono,
+                                    lookup_receiver_type,
+                                    method_name_for_lookup,
+                                    template_name_for_lookup,
+                                    resolved_method_type_args,
+                                    new_args,
+                                    resolved_call_type,
+                                ) in {
+                                    .Some(instantiated_method) then {
+                                        bound_method = instantiated_method
+                                        break
+                                    },
+                                    .None() then {},
+                                },
+                            }
+                        }
+                    }
+                    if bound_method.def_id.id == method.def_id.id and not should_preserve_resolved_method_reference(mono, method, effective_receiver_type) then {
+                        for expected_type in preferred_expected_types then {
+                            let candidate = bind_receiver_method_symbol(
+                                mono,
+                                effective_receiver_type,
+                                method.val,
+                                Option[Type].Some(expected_type),
+                            )
+                            if candidate.def_id.id > 0 and (candidate.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, candidate.symbol_type))) then {
+                                bound_method = candidate
+                                break
+                            }
+                        }
+                    }
+                    if not should_preserve_resolved_method_reference(mono, method, effective_receiver_type) then {
+                        let method_name_for_lookup = get_semantic_method_name(mono, method)
+                        let template_name_for_lookup = resolve_static_call_template_name(mono, effective_receiver_type)
+                        let resolved_method = resolve_concrete_method_call(
+                            mono,
+                            effective_receiver_type,
+                            method.val,
+                            method_name_for_lookup,
+                            template_name_for_lookup,
+                            resolved_method_type_args,
+                            new_args,
+                            resolved_call_type,
+                            new_callee,
+                        )
+                        if resolved_method.def_id.id > 0 and (resolved_method.def_id.id <> method.def_id.id or mono.storage.context.symbol_name(resolved_method) <> mono.storage.context.symbol_name(method)) then {
+                            bound_method = resolved_method
+                        }
+                        if bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(bound_method) == mono.storage.context.symbol_name(method) then {
+                            when try_bind_generic_method_call_by_name(
+                                mono,
+                                effective_receiver_type,
+                                method_name_for_lookup,
+                                new_args,
+                                resolved_call_type,
+                            ) in {
+                                .Some(rebound_method) then {
+                                    bound_method = rebound_method
+                                },
+                                .None() then {},
+                            }
+                        }
+                        if bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(bound_method) == mono.storage.context.symbol_name(method) then {
+                            let mut resolved_method_type_arg_refs = List[ref Type].new()
+                            for method_type_arg in resolved_method_type_args then {
+                                resolved_method_type_arg_refs.push(box(method_type_arg))
+                            }
+                            instantiate_trait_placeholder_method(
+                                mono,
+                                effective_receiver_type,
+                                method_name_for_lookup,
+                                resolved_method_type_arg_refs,
+                            )
+                            when lookup_concrete_method_for_static_call(
+                                mono,
+                                effective_receiver_type,
+                                method_name_for_lookup,
+                                resolved_method_type_args,
+                                new_args,
+                                resolved_call_type,
+                            ) in {
+                                .Some(rebound_method) then {
+                                    bound_method = rebound_method
+                                },
+                                .None() then {},
+                            }
+                        }
+                    }
                     let adapted_base = adapt_receiver_expr_for_method(mono, resolved_base, bound_method)
+                    let adapted_args = adapt_call_args_for_method(mono, bound_method, new_args)
                     let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, bound_method)
                     let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(
                         mono,
@@ -2367,11 +2636,11 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                         bound_method,
                         Option[String].Some(mono.storage.context.symbol_name(method)),
                     )
-                    when try_lower_wrapping_generic_method_call(mono, adapted_base, bound_method, new_args, resolved_type, effective_dispatch_callsite) in {
+                    when try_lower_wrapping_generic_method_call(mono, adapted_base, bound_method, adapted_args, resolved_type, effective_dispatch_callsite) in {
                         .Some(lowered_expr) then { return lowered_expr },
                         .None() then {},
                     }
-                    when try_lower_to_ref_method_call(mono, adapted_base, bound_method, new_args, resolved_type, effective_dispatch_callsite) in {
+                    when try_lower_to_ref_method_call(mono, adapted_base, bound_method, adapted_args, resolved_type, effective_dispatch_callsite) in {
                         .Some(lowered_expr) then { return lowered_expr },
                         .None() then {},
                     }
@@ -2411,7 +2680,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                                 ))
                                 let mut direct_args = List[ref TypedExpr].new()
                                 direct_args.push(adapted_base)
-                                for arg in new_args then {
+                                for arg in adapted_args then {
                                     direct_args.push(arg)
                                 }
                                 return box(TypedExpr(box(TypedExprKind.Call(callee_expr, direct_args)), resolved_type))
@@ -2424,7 +2693,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                         bound_method.symbol_type,
                     ))
                     return box(TypedExpr(
-                        box(TypedExprKind.Call(rebound_callee, new_args)),
+                        box(TypedExprKind.Call(rebound_callee, adapted_args)),
                         resolved_type
                     ))
                 },
@@ -2443,13 +2712,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                             yield box(TypedExpr(box(TypedExprKind.MemberPath(resolved_base, receiver_path)), receiver_type))
                         }
                         let receiver_type = resolve_parameterized_type(mono, receiver_expr.expr_type)
-                        let binding_receiver_type = when receiver_type in {
-                            .ReferenceType(inner) then inner.val,
-                            .MutableReferenceType(inner) then inner.val,
-                            .WeakReferenceType(inner) then inner.val,
-                            .MutableWeakReferenceType(inner) then inner.val,
-                            _ then receiver_type,
-                        }
+                        let binding_receiver_type = receiver_type
                         when try_lower_wrapping_method_name_call(mono, receiver_expr, member_name, new_args, resolve_parameterized_type(mono, expr.expr_type)) in {
                             .Some(lowered_expr) then { return lowered_expr },
                             .None() then {},
@@ -2462,14 +2725,14 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                                     let ref_type = Type.ReferenceType(inner)
                                     let mut option_args = List[ref Type].new()
                                     option_args.push(box(ref_type))
-                                    let option_type = Type.GenericEnum("Option", option_args)
+                                    let option_type = resolve_parameterized_type(mono, Type.GenericEnum("Option", option_args))
                                     return box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(receiver_expr, option_type))), option_type))
                                 },
                                 .MutableWeakReferenceType(inner) then {
                                     let ref_type = Type.MutableReferenceType(inner)
                                     let mut option_args = List[ref Type].new()
                                     option_args.push(box(ref_type))
-                                    let option_type = Type.GenericEnum("Option", option_args)
+                                    let option_type = resolve_parameterized_type(mono, Type.GenericEnum("Option", option_args))
                                     return box(TypedExpr(box(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeMutRef(receiver_expr, option_type))), option_type))
                                 },
                                 _ then {},
@@ -2482,7 +2745,32 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                             new_args,
                             resolve_parameterized_type(mono, expr.expr_type),
                         )
-                        when bound_method_opt in {
+                        let effective_bound_method_opt = when bound_method_opt in {
+                            .Some(bound_method) then Option[Symbol].Some(bound_method),
+                            .None() then {
+                                let template_name_for_lookup = resolve_static_call_template_name(mono, binding_receiver_type)
+                                yield when lookup_concrete_method_for_static_call(
+                                    mono,
+                                    binding_receiver_type,
+                                    member_name,
+                                    List[Type].new(),
+                                    new_args,
+                                    resolve_parameterized_type(mono, expr.expr_type),
+                                ) in {
+                                    .Some(bound_method) then Option[Symbol].Some(bound_method),
+                                    .None() then enqueue_extension_method_for_static_call(
+                                        mono,
+                                        binding_receiver_type,
+                                        member_name,
+                                        template_name_for_lookup,
+                                        List[Type].new(),
+                                        new_args,
+                                        resolve_parameterized_type(mono, expr.expr_type),
+                                    ),
+                                }
+                            },
+                        }
+                        when effective_bound_method_opt in {
                         .Some(bound_method) then {
                             let adapted_receiver = adapt_receiver_expr_for_method(mono, receiver_expr, bound_method)
                             let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, bound_method)
@@ -2519,13 +2807,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                     if symbol.def_id.id == 0 and new_args.count() > 0(UInt) then {
                         let normalized_name = get_semantic_method_name(mono, symbol)
                         let receiver_type = resolve_parameterized_type(mono, new_args[0(UInt)].expr_type)
-                        let binding_receiver_type = when receiver_type in {
-                            .ReferenceType(inner) then inner.val,
-                            .MutableReferenceType(inner) then inner.val,
-                            .WeakReferenceType(inner) then inner.val,
-                            .MutableWeakReferenceType(inner) then inner.val,
-                            _ then receiver_type,
-                        }
+                        let binding_receiver_type = receiver_type
                         if not has_generic_parameter(binding_receiver_type) then {
                             let mut method_args = List[ref TypedExpr].new()
                             let mut method_arg_index UInt = 1(UInt)
@@ -2541,7 +2823,32 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
                                 method_args,
                                 resolve_parameterized_type(mono, expr.expr_type),
                             )
-                            when rebound_method_opt in {
+                            let effective_rebound_method_opt = when rebound_method_opt in {
+                                .Some(rebound_method) then Option[Symbol].Some(rebound_method),
+                                .None() then {
+                                    let template_name_for_lookup = resolve_static_call_template_name(mono, binding_receiver_type)
+                                    yield when lookup_concrete_method_for_static_call(
+                                        mono,
+                                        binding_receiver_type,
+                                        normalized_name,
+                                        List[Type].new(),
+                                        method_args,
+                                        resolve_parameterized_type(mono, expr.expr_type),
+                                    ) in {
+                                        .Some(rebound_method) then Option[Symbol].Some(rebound_method),
+                                        .None() then enqueue_extension_method_for_static_call(
+                                            mono,
+                                            binding_receiver_type,
+                                            normalized_name,
+                                            template_name_for_lookup,
+                                            List[Type].new(),
+                                            method_args,
+                                            resolve_parameterized_type(mono, expr.expr_type),
+                                        ),
+                                    }
+                                },
+                            }
+                            when effective_rebound_method_opt in {
                             .Some(rebound_method) then {
                                 let resolved_type = resolved_callsite_result_type(mono, expr.expr_type, rebound_method)
                                 let receiver_trait_name_opt = when binding_receiver_type in {
@@ -2715,6 +3022,7 @@ public let resolve_types_in_expression(mono ref Monomorphizer, expr ref TypedExp
         },
         .WrappingArithmeticExpr(_, _, _) then resolve_parameterized_type(mono, expr.expr_type),
         .WrappingShiftExpr(_, _, _) then resolve_parameterized_type(mono, expr.expr_type),
+        .MethodReference(_, _, method, _, _, _) then resolve_parameterized_type(mono, method.symbol_type),
         .MemberPath(base, path) then resolve_member_path_type(mono, base.expr_type, path, expr.expr_type),
         .TypeConstruction(identifier, type_args, args) then {
             let declared_type = resolve_parameterized_type(mono, expr.expr_type)
@@ -2764,6 +3072,213 @@ private let mono_debug_expr_kind(expr ref TypedExpr) String = {
         .FloatLiteral(_) then "float",
         .StringLiteral(_) then "string",
         .BoolLiteral(_) then "bool",
+    }
+}
+
+private let instantiated_extension_method_type_matches_expected_pattern(
+    mono ref Monomorphizer,
+    actual Type,
+    expected Type,
+) Bool = {
+    if layout_key(resolve_parameterized_type(mono, actual)) == layout_key(resolve_parameterized_type(mono, expected)) then {
+        return true
+    }
+    return when expected in {
+        .GenericParameter(_) then true,
+        .ReferenceType(expected_inner) then when actual in {
+            .ReferenceType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            _ then false,
+        },
+        .MutableReferenceType(expected_inner) then when actual in {
+            .MutableReferenceType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            _ then false,
+        },
+        .WeakReferenceType(expected_inner) then when actual in {
+            .WeakReferenceType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            .MutableWeakReferenceType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            _ then false,
+        },
+        .MutableWeakReferenceType(expected_inner) then when actual in {
+            .MutableWeakReferenceType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            _ then false,
+        },
+        .PointerType(expected_inner) then when actual in {
+            .PointerType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            .MutablePointerType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            _ then false,
+        },
+        .MutablePointerType(expected_inner) then when actual in {
+            .MutablePointerType(actual_inner) then instantiated_extension_method_type_matches_expected_pattern(mono, actual_inner.val, expected_inner.val),
+            _ then false,
+        },
+        .FunctionType(expected_params, expected_return) then when actual in {
+            .FunctionType(actual_params, actual_return) then {
+                if actual_params.count() <> expected_params.count() then {
+                    return false
+                }
+                let mut idx UInt = 0
+                while idx < actual_params.count() then {
+                    if not instantiated_extension_method_type_matches_expected_pattern(mono, actual_params[idx].val.param_type, expected_params[idx].val.param_type) then {
+                        return false
+                    }
+                    idx += 1(UInt)
+                }
+                yield instantiated_extension_method_type_matches_expected_pattern(mono, actual_return.val, expected_return.val)
+            },
+            _ then false,
+        },
+        .GenericStruct(expected_template, expected_args) then {
+            let actual_args = when actual in {
+                .GenericStruct(actual_template, actual_generic_args) then {
+                    if actual_template <> expected_template then { return false }
+                    yield actual_generic_args
+                },
+                .StructureType(def_id) then {
+                    if (mono.storage.context.get_template_name(def_id) or else "") <> expected_template then {
+                        return false
+                    }
+                    yield when mono.storage.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut boxed_args = List[ref Type].new()
+                            for type_arg in type_args then {
+                                boxed_args.push(box(type_arg))
+                            }
+                            yield boxed_args
+                        },
+                        .None() then List[ref Type].new(),
+                    }
+                },
+                _ then { return false },
+            }
+            if actual_args.count() <> expected_args.count() then {
+                return false
+            }
+            let mut idx UInt = 0
+            while idx < actual_args.count() then {
+                if not instantiated_extension_method_type_matches_expected_pattern(mono, actual_args[idx].val, expected_args[idx].val) then {
+                    return false
+                }
+                idx += 1(UInt)
+            }
+            return true
+        },
+        .GenericEnum(expected_template, expected_args) then {
+            let actual_args = when actual in {
+                .GenericEnum(actual_template, actual_generic_args) then {
+                    if actual_template <> expected_template then { return false }
+                    yield actual_generic_args
+                },
+                .EnumType(def_id) then {
+                    if (mono.storage.context.get_template_name(def_id) or else "") <> expected_template then {
+                        return false
+                    }
+                    yield when mono.storage.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mut boxed_args = List[ref Type].new()
+                            for type_arg in type_args then {
+                                boxed_args.push(box(type_arg))
+                            }
+                            yield boxed_args
+                        },
+                        .None() then List[ref Type].new(),
+                    }
+                },
+                _ then { return false },
+            }
+            if actual_args.count() <> expected_args.count() then {
+                return false
+            }
+            let mut idx UInt = 0
+            while idx < actual_args.count() then {
+                if not instantiated_extension_method_type_matches_expected_pattern(mono, actual_args[idx].val, expected_args[idx].val) then {
+                    return false
+                }
+                idx += 1(UInt)
+            }
+            return true
+        },
+        _ then false,
+    }
+}
+
+private let instantiated_extension_method_type_matches_expected(
+    mono ref Monomorphizer,
+    candidate Type,
+    expected_method_type_opt Option[Type],
+) Bool = {
+    return when expected_method_type_opt in {
+        .None() then true,
+        .Some(expected_method_type) then {
+            let normalized_candidate = resolve_parameterized_type(mono, candidate)
+            let normalized_expected = resolve_parameterized_type(mono, expected_method_type)
+            if layout_key(normalized_candidate) == layout_key(normalized_expected) then {
+                return true
+            }
+            if not has_generic_parameter(normalized_expected) then {
+                return false
+            }
+            yield instantiated_extension_method_type_matches_expected_pattern(mono, normalized_candidate, normalized_expected)
+        },
+    }
+}
+
+private let lookup_instantiated_extension_method_symbol(
+    mono ref Monomorphizer,
+    base_type Type,
+    method_name String,
+    expected_method_type_opt Option[Type],
+) Option[Symbol] = {
+    let mut candidate_lookup_keys = List[String].new()
+    collect_receiver_lookup_keys(mono, base_type, candidate_lookup_keys.ref)
+
+    let mut candidate_def_ids = List[DefId].new()
+    for receiver_key in candidate_lookup_keys then {
+        let lookup_key = make_extension_method_lookup_key(mono, receiver_key, method_name, List[ref Type].new())
+        when mono.storage.extension_method_def_ids.get(lookup_key) in {
+            .Some(def_id) then {
+                if not candidate_def_ids.contains(def_id) then {
+                    candidate_def_ids.push(def_id)
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    let mut matched_def_ids = List[DefId].new()
+    for def_id in candidate_def_ids then {
+        if not declared_static_receiver_method_is_materialized(mono, def_id) then {
+            continue
+        }
+        let symbol_type = when mono.storage.context.get_function_type(def_id) in {
+            .Some(function_type) then function_type,
+            .None() then when expected_method_type_opt in {
+                .Some(expected_method_type) then expected_method_type,
+                .None() then Type.VoidType(),
+            },
+        }
+        if instantiated_extension_method_type_matches_expected(mono, symbol_type, expected_method_type_opt) then {
+            matched_def_ids.push(def_id)
+        }
+    }
+
+    let resolved_def_id = if matched_def_ids.count() == 1(UInt) then {
+        yield Option[DefId].Some(matched_def_ids[0(UInt)])
+    } else when expected_method_type_opt in {
+        .None() then if not matched_def_ids.is_empty() then Option[DefId].Some(matched_def_ids[0(UInt)]) else Option[DefId].None(),
+        .Some(_) then Option[DefId].None(),
+    }
+    return when resolved_def_id in {
+        .Some(def_id) then {
+            let symbol_type = when mono.storage.context.get_function_type(def_id) in {
+                .Some(function_type) then function_type,
+                .None() then when expected_method_type_opt in {
+                    .Some(expected_method_type) then expected_method_type,
+                    .None() then Type.VoidType(),
+                },
+            }
+            yield Option[Symbol].Some(Symbol(def_id, symbol_type, SymbolKind.Function()))
+        },
+        .None() then Option[Symbol].None(),
     }
 }
 
@@ -3635,7 +4150,19 @@ private let canonical_type_for_generic_binding(mono ref Monomorphizer, t Type) T
                         .None() then Option[Type].None(),
                     }
                 },
-                .None() then Option[Type].None(),
+                .None() then when mono.storage.context.get_name(def_id) in {
+                    .Some(type_name) then when mono.storage.layout_to_template_info.get(type_name) in {
+                        .Some(info) then {
+                            let mut canonical_args = List[ref Type].new()
+                            for type_arg in info.args then {
+                                canonical_args.push(box(canonical_type_for_generic_binding(mono, type_arg.val)))
+                            }
+                            yield Option[Type].Some(Type.GenericStruct(info.base_name, canonical_args))
+                        },
+                        .None() then Option[Type].None(),
+                    },
+                    .None() then Option[Type].None(),
+                },
             }
             yield when reconstructed in {
                 .Some(reconstructed_type) then reconstructed_type,
@@ -3659,7 +4186,19 @@ private let canonical_type_for_generic_binding(mono ref Monomorphizer, t Type) T
                         .None() then Option[Type].None(),
                     }
                 },
-                .None() then Option[Type].None(),
+                .None() then when mono.storage.context.get_name(def_id) in {
+                    .Some(type_name) then when mono.storage.layout_to_template_info.get(type_name) in {
+                        .Some(info) then {
+                            let mut canonical_args = List[ref Type].new()
+                            for type_arg in info.args then {
+                                canonical_args.push(box(canonical_type_for_generic_binding(mono, type_arg.val)))
+                            }
+                            yield Option[Type].Some(Type.GenericEnum(info.base_name, canonical_args))
+                        },
+                        .None() then Option[Type].None(),
+                    },
+                    .None() then Option[Type].None(),
+                },
             }
             yield when reconstructed in {
                 .Some(reconstructed_type) then reconstructed_type,
@@ -3721,10 +4260,11 @@ private let unify_generic_type_pattern(
     type_param_names List[String],
     inferred mut ref Dict[String, Type],
 ) Bool = {
+    let normalized_pattern = canonical_type_for_generic_binding(mono, pattern)
     let normalized_actual = canonical_type_for_generic_binding(mono, actual)
-    return when pattern in {
+    return when normalized_pattern in {
         .GenericParameter(name) then {
-            yield if not is_generic_type_param_name(name, type_param_names) then layout_key(pattern) == layout_key(normalized_actual) else when normalized_actual in {
+            yield if not is_generic_type_param_name(name, type_param_names) then layout_key(normalized_pattern) == layout_key(normalized_actual) else when normalized_actual in {
                 .GenericParameter(actual_name) then {
                     yield if is_generic_type_param_name(actual_name, type_param_names) then true else when inferred.get(name) in {
                         .Some(existing) then layout_key(existing) == layout_key(normalized_actual),
@@ -3944,7 +4484,7 @@ private let unify_generic_type_pattern(
                 _ then false,
             }
         },
-        _ then layout_key(pattern) == layout_key(normalized_actual),
+        _ then layout_key(normalized_pattern) == layout_key(normalized_actual),
     }
 }
 
@@ -4122,7 +4662,7 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
         },
         .IsExpr(subject, pattern, negated) then {
             let new_subject = resolve_types_in_expression(mono, subject)
-            yield box(TypedExprKind.IsExpr(new_subject, pattern, negated))
+            yield box(TypedExprKind.IsExpr(new_subject, box(resolve_types_in_pattern(mono, pattern)), negated))
         },
         .Call(callee, args) then {
             let new_callee = resolve_types_in_expression(mono, callee)
@@ -4181,19 +4721,49 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
             for method_type_arg in method_type_args then {
                 new_method_type_args.push(resolve_parameterized_type(mono, method_type_arg))
             }
-            let binding_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
-            let resolved_method_symbol_type = resolve_parameterized_type(mono, new_method.symbol_type)
-            let should_delay_method_binding = new_method_type_args.is_empty() and has_generic_parameter(resolved_method_symbol_type)
-            if not has_generic_parameter(binding_receiver_type) and not should_delay_method_binding then {
-                if should_preserve_resolved_method_reference(mono, box(new_method), binding_receiver_type) then {
-                    new_method = resolve_symbol_type(mono, new_method)
+            let effective_method_type_args = new_method_type_args
+            let mut adjusted_base = new_base
+            let mut resolved_expression_type = resolve_parameterized_type(mono, method.symbol_type)
+
+            if not has_generic_parameter(adjusted_base.expr_type) then {
+                let resolved_method_type = resolve_parameterized_type(mono, method.symbol_type)
+                resolved_expression_type = resolved_method_type
+                if should_preserve_resolved_method_reference(mono, method, adjusted_base.expr_type) then {
+                    new_method = resolve_symbol_type(mono, method)
                 } else {
-                    let rebound_method = bind_receiver_method_symbol(mono, binding_receiver_type, new_method, Option[Type].Some(resolve_parameterized_type(mono, expr.expr_type)))
-                    new_method = resolve_symbol_type(mono, rebound_method)
-                    new_base = align_method_reference_base_for_bound_method(mono, new_base, new_method)
-                    new_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
+                    let binding_receiver_type = method_lookup_base_type(mono, adjusted_base)
+                    let rebound_method = bind_receiver_method_symbol(
+                        mono,
+                        binding_receiver_type,
+                        new_method,
+                        Option[Type].Some(resolved_method_type),
+                    )
+                    if rebound_method.def_id.id > 0 then {
+                        let resolved_rebound_method = resolve_symbol_type(mono, rebound_method)
+                        adjusted_base = align_method_reference_base_for_bound_method(mono, adjusted_base, resolved_rebound_method)
+                        new_method = resolved_rebound_method
+                        resolved_expression_type = resolve_parameterized_type(mono, resolved_rebound_method.symbol_type)
+                    } else {
+                        let logical_method_name = get_semantic_method_name(mono, method)
+                        when lookup_instantiated_extension_method_symbol(
+                            mono,
+                            adjusted_base.expr_type,
+                            logical_method_name,
+                            Option[Type].Some(resolved_method_type),
+                        ) in {
+                            .Some(concrete_method) then {
+                                let resolved_concrete_method = resolve_symbol_type(mono, concrete_method)
+                                adjusted_base = align_method_reference_base_for_bound_method(mono, adjusted_base, resolved_concrete_method)
+                                new_method = resolved_concrete_method
+                                resolved_expression_type = resolve_parameterized_type(mono, resolved_concrete_method.symbol_type)
+                            },
+                            .None() then {},
+                        }
+                    }
                 }
             }
+            new_base = adjusted_base
+            new_receiver_type = resolve_parameterized_type(mono, new_base.expr_type)
             let trait_object_type_opt = when resolve_parameterized_type(mono, new_base.expr_type) in {
                 .TraitObject(trait_name, trait_type_args) then Option[Type].Some(Type.TraitObject(trait_name, trait_type_args)),
                 .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
@@ -4212,7 +4782,7 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
                 },
                 .None() then {},
             }
-            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, new_method_type_args, dispatch_callsite))
+            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, effective_method_type_args, dispatch_callsite))
         },
         .Block(statements) then {
             let mut new_statements = List[ref TypedStatement].new()
@@ -4239,7 +4809,8 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
                 mono_register_pattern_binding_types_in_expr(mono, arm_ref.body, pattern_bindings)
                 let new_body = resolve_types_in_expression(mono, arm_ref.body)
                 let new_arm_type = resolve_parameterized_type(mono, arm_ref.arm_type)
-                new_arms.push(box(TypedWhenArm(arm_ref.pattern, new_body, new_arm_type)))
+                let new_pattern = resolve_types_in_pattern(mono, arm_ref.pattern)
+                new_arms.push(box(TypedWhenArm(box(new_pattern), new_body, new_arm_type)))
             }
             yield box(TypedExprKind.WhenExpr(new_subject, new_arms))
         },
@@ -4346,99 +4917,7 @@ private let resolve_expr_kind(mono ref Monomorphizer, expr ref TypedExpr) ref Ty
             for arg in args then {
                 new_args.push(resolve_types_in_expression(mono, arg))
             }
-            let concrete_receiver_type = concrete_trait_receiver_type(mono, new_receiver)
-            let receiver_requires_dynamic_trait_dispatch = when concrete_receiver_type in {
-                .TraitObject(_, _) then true,
-                .ReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
-                .MutableReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
-                .WeakReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
-                .MutableWeakReferenceType(inner_ref) then resolve_parameterized_type(mono, inner_ref.val) is .TraitObject(_, _),
-                _ then false,
-            }
-            let can_use_static_dispatch = when concrete_receiver_type in {
-                _ then not receiver_requires_dynamic_trait_dispatch and not has_generic_parameter(concrete_receiver_type) and not expr_is_type_symbol(new_receiver),
-            }
-            let mut rebound_static_kind Option[ref TypedExprKind] = Option[ref TypedExprKind].None()
-            if can_use_static_dispatch then {
-                let resolved_result_type = resolve_parameterized_type(mono, expr.expr_type)
-                let method_symbol = make_trait_method_symbol(mono, method_name, resolved_result_type)
-                let rebound_method = try_bind_generic_method_call(mono, concrete_receiver_type, method_symbol, new_args, resolved_result_type).val
-                let static_receiver_base = when new_receiver.expr_kind in {
-                    .TraitObjectConversion(inner, _, concrete_type) then {
-                        let resolved_inner = resolve_types_in_expression(mono, inner)
-                        let resolved_concrete_type = resolve_parameterized_type(mono, concrete_type)
-                        yield box(TypedExpr(resolved_inner.expr_kind, resolved_concrete_type))
-                    },
-                    _ then new_receiver,
-                }
-                let static_receiver = adapt_receiver_expr_for_method(mono, static_receiver_base, rebound_method)
-                let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(
-                    mono,
-                    Option[DefId].None(),
-                    concrete_receiver_type,
-                    rebound_method,
-                    Option[String].Some(method_name),
-                )
-                rebound_static_kind = Option[ref TypedExprKind].Some(
-                    when try_lower_wrapping_generic_method_call(
-                        mono,
-                        static_receiver,
-                        rebound_method,
-                        new_args,
-                        resolved_result_type,
-                        effective_dispatch_callsite,
-                    ) in {
-                        .Some(lowered_expr) then lowered_expr.expr_kind,
-                        .None() then {
-                                    yield when try_lower_to_ref_method_call(
-                                mono,
-                                static_receiver,
-                                rebound_method,
-                                new_args,
-                                resolved_result_type,
-                                effective_dispatch_callsite,
-                            ) in {
-                                .Some(lowered_expr) then lowered_expr.expr_kind,
-                                .None() then {
-                                    let rebound_callee = box(TypedExpr(
-                                        box(TypedExprKind.MethodReference(static_receiver, static_receiver.expr_type, box(rebound_method), List[Type].new(), List[Type].new(), effective_dispatch_callsite)),
-                                        rebound_method.symbol_type,
-                                    ))
-                                    yield box(TypedExprKind.Call(rebound_callee, new_args))
-                                },
-                            }
-                        },
-                    }
-                )
-            }
-            yield when rebound_static_kind in {
-                .Some(kind) then kind,
-                .None() then {
-                    let mut trait_method_index Int = -1
-                    let mut logical_method_name = method_name
-                    when new_trait_type in {
-                        .TraitObject(trait_name, _) then {
-                            logical_method_name = method_name
-                            trait_method_index = if method_index >= 0 then method_index else vtable_method_index(mono, trait_name, logical_method_name)
-                            if trait_method_index >= 0 then {
-                                collect_qualified_method_vtable_requests(mono, trait_name, logical_method_name, new_receiver, new_args)
-                            }
-                        },
-                        _ then {},
-                    }
-                    let lowered_kind = if trait_method_index >= 0 then {
-                        yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, logical_method_name, trait_method_index, new_args))
-                    } else {
-                        let method_symbol = make_trait_method_symbol(mono, method_name, resolve_parameterized_type(mono, expr.expr_type))
-                        let direct_callee = box(TypedExpr(
-                            box(TypedExprKind.MethodReference(new_receiver, new_receiver.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), Option[DefId].None())),
-                            method_symbol.symbol_type,
-                        ))
-                        yield box(TypedExprKind.Call(direct_callee, new_args))
-                    }
-                    yield lowered_kind
-                },
-            }
+            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, method_name, method_index, new_args))
         },
         .GenericInstantiation(base_type, type_args) then {
             let new_base_type = resolve_parameterized_type(mono, base_type)
@@ -4529,22 +5008,29 @@ private let infer_extension_method_type_args(
     }
 
     let mut pattern_param_types = List[ref Type].new()
-    let pattern_return_type = when ext.checked_return_type in {
-        .Some(ret_type) then resolve_parameterized_type(mono, substitute_type(mono, ret_type, substitution)),
-        .None() then resolve_parameterized_type(mono, mono.resolve_type_node_impl(ext.method.return_type, substitution)),
+    let use_checked_signature = when ext.checked_parameters in {
+        .Some(_) then ext.checked_return_type is .Some(_),
+        .None() then false,
+    }
+    let pattern_return_type = if use_checked_signature then {
+        yield resolve_parameterized_type(mono, substitute_type(mono, ext.checked_return_type or else Type.Unknown(), substitution))
+    } else {
+        yield resolve_parameterized_type(mono, mono.resolve_type_node_impl(ext.method.return_type, substitution))
     }
 
-    when ext.checked_parameters in {
-        .Some(checked_params) then {
-            for checked_param in checked_params then {
-                pattern_param_types.push(box(resolve_parameterized_type(mono, substitute_type(mono, checked_param.symbol_type, substitution))))
-            }
-        },
-        .None() then {
-            for method_param in ext.method.params then {
-                pattern_param_types.push(box(resolve_parameterized_type(mono, mono.resolve_type_node_impl(method_param.param_type, substitution))))
-            }
-        },
+    if use_checked_signature then {
+        when ext.checked_parameters in {
+            .Some(checked_params) then {
+                for checked_param in checked_params then {
+                    pattern_param_types.push(box(resolve_parameterized_type(mono, substitute_type(mono, checked_param.symbol_type, substitution))))
+                }
+            },
+            .None() then {},
+        }
+    } else {
+        for method_param in ext.method.params then {
+            pattern_param_types.push(box(resolve_parameterized_type(mono, mono.resolve_type_node_impl(method_param.param_type, substitution))))
+        }
     }
 
     let mut actual_param_types = List[ref Type].new()
@@ -4629,6 +5115,93 @@ private let infer_extension_method_type_args(
         }
     }
 
+    return Option[List[ref Type]].Some(method_type_args)
+}
+
+private let infer_method_type_args_from_symbol_type(
+    mono ref Monomorphizer,
+    method_type Type,
+    actual_receiver_type Type,
+    args List[ref TypedExpr],
+    expected_return_type Type,
+    type_param_names List[String],
+) Option[List[ref Type]] = {
+    let resolved_method_type = resolve_parameterized_type(mono, method_type)
+    let mut pattern_param_types = List[ref Type].new()
+    let pattern_return_type = when resolved_method_type in {
+        .FunctionType(fn_params, return_type_ref) then {
+            let param_types = param_entry_types(fn_params)
+            for param_type in param_types then {
+                pattern_param_types.push(box(resolve_parameterized_type(mono, param_type.val)))
+            }
+            yield resolve_parameterized_type(mono, return_type_ref.val)
+        },
+        _ then { return Option[List[ref Type]].None() },
+    }
+
+    let mut actual_param_types = List[ref Type].new()
+    actual_param_types.push(box(resolve_parameterized_type(mono, actual_receiver_type)))
+    for arg in args then {
+        actual_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
+    }
+    if pattern_param_types.count() <> actual_param_types.count() then {
+        return Option[List[ref Type]].None()
+    }
+
+    let mut method_bindings = Dict[String, Type].new()
+    let mut i UInt = 0
+    while i < pattern_param_types.count() then {
+        let pattern_type = pattern_param_types[i].val
+        let actual_type = actual_param_types[i].val
+        let adapted_actual = when pattern_type in {
+            .ReferenceType(_) then when actual_type in {
+                .ReferenceType(_) then actual_type,
+                _ then Type.ReferenceType(box(actual_type)),
+            },
+            .MutableReferenceType(_) then when actual_type in {
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableReferenceType(box(actual_type)),
+            },
+            _ then actual_type,
+        }
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_type,
+            adapted_actual,
+            type_param_names,
+            method_bindings.ref,
+        ) then {
+            return Option[List[ref Type]].None()
+        }
+        i += 1
+    }
+
+    let concrete_expected = resolve_parameterized_type(mono, expected_return_type)
+    if not has_generic_parameter(concrete_expected) and not is_placeholder_inferred_type(concrete_expected) then {
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_return_type,
+            concrete_expected,
+            type_param_names,
+            method_bindings.ref,
+        ) then {
+            return Option[List[ref Type]].None()
+        }
+    }
+
+    let mut method_type_args = List[ref Type].new()
+    for method_type_name in type_param_names then {
+        when method_bindings.get(method_type_name) in {
+            .Some(bound) then {
+                let concrete_bound = resolve_parameterized_type(mono, bound)
+                if has_generic_parameter(concrete_bound) or is_placeholder_inferred_type(concrete_bound) then {
+                    return Option[List[ref Type]].None()
+                }
+                method_type_args.push(box(concrete_bound))
+            },
+            .None() then { return Option[List[ref Type]].None() },
+        }
+    }
     return Option[List[ref Type]].Some(method_type_args)
 }
 
@@ -4999,15 +5572,30 @@ public let try_bind_generic_method_call(
                     if owned_effective_ext_ref.method.type_params.count() > 0 then {
                         has_generic_method_template = true
                     }
-                    when infer_extension_method_type_args(
+                    let mut method_type_param_names = List[String].new()
+                    for method_tp in owned_effective_ext_ref.method.type_params then {
+                        method_type_param_names.push(method_tp.name)
+                    }
+                    let inferred_method_type_args_opt = when infer_method_type_args_from_symbol_type(
                         mono,
-                        owned_effective_ext_ref,
+                        method.symbol_type,
                         concrete_receiver_type,
-                        type_args,
-                        List[ref Type].new(),
                         args,
                         expected_return_type,
+                        method_type_param_names,
                     ) in {
+                        .Some(bound_from_method_type) then Option[List[ref Type]].Some(bound_from_method_type),
+                        .None() then infer_extension_method_type_args(
+                            mono,
+                            owned_effective_ext_ref,
+                            concrete_receiver_type,
+                            type_args,
+                            List[ref Type].new(),
+                            args,
+                            expected_return_type,
+                        ),
+                    }
+                    when inferred_method_type_args_opt in {
                         .Some(method_type_args) then {
                             let concrete_lookup_key = make_extension_method_lookup_key(mono, type_key, effective_method_name, method_type_args)
                             when mono.storage.extension_method_def_ids.get(concrete_lookup_key) in {
@@ -5746,15 +6334,6 @@ private let resolve_static_method_call_to_call(
                 for method_type_arg in new_method_type_args then {
                     trait_method_type_args.push(box(method_type_arg))
                 }
-            } else if not new_args.is_empty() then {
-                let first_arg_type = resolve_parameterized_type(mono, new_args[0(UInt)].expr_type)
-                let inferred_trait_method_arg = when first_arg_type in {
-                    .FunctionType(_, return_type_ref) then resolve_parameterized_type(mono, return_type_ref.val),
-                    _ then first_arg_type,
-                }
-                if not has_generic_parameter(inferred_trait_method_arg) then {
-                    trait_method_type_args.push(box(inferred_trait_method_arg))
-                }
             }
 
             instantiate_trait_placeholder_method(mono, new_receiver_type, method_name, trait_method_type_args)
@@ -5797,7 +6376,6 @@ private let resolve_static_method_call_to_call(
             }
         },
     }
-
     // If the return type is still Unknown/Void, try to recover from the method signature.
     // This happens when the type checker couldn't resolve the return type at call sites
     // (e.g. recursive calls within a given block).
@@ -5970,6 +6548,10 @@ private let resolve_static_call_template_name(mono ref Monomorphizer, t Type) St
         },
         .GenericStruct(name, _) then name,
         .GenericEnum(name, _) then name,
+        .ReferenceType(_) then "Ref",
+        .MutableReferenceType(_) then "MutRef",
+        .WeakReferenceType(_) then "WeakRef",
+        .MutableWeakReferenceType(_) then "MutWeakRef",
         .OpaqueType(def_id) then {
             // Resolve opaque types to their underlying type's template name
             yield when mono.storage.context.lookup_type(def_id) in {
@@ -6105,9 +6687,23 @@ private let instantiate_trait_target_static_method(
                             Option[UInt].Some(effective_trait_args.count()),
                         ) in {
                             .Some(tool_template_ref) then {
+                                let effective_tool_template_ref = if tool_template_ref.checked_body is .Some(_) then
+                                        tool_template_ref
+                                    else when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
+                                        .Some(body_templates) then when select_extension_template(
+                                            body_templates,
+                                            method_name,
+                                            method_type_arg_count,
+                                            Option[UInt].Some(effective_trait_args.count()),
+                                        ) in {
+                                            .Some(body_template_ref) then patched_extension_template_for_type_resolution(tool_template_ref, body_template_ref),
+                                            .None() then tool_template_ref,
+                                        },
+                                        .None() then tool_template_ref,
+                                    }
                                 when infer_extension_method_type_args(
                                     mono,
-                                    tool_template_ref,
+                                    effective_tool_template_ref,
                                     resolved_base_type,
                                     effective_trait_args,
                                     provided_method_type_arg_refs,
@@ -6118,7 +6714,7 @@ private let instantiate_trait_target_static_method(
                                         let sym = mono.instantiate_extension_method_impl(
                                             resolved_base_type,
                                             structure_name,
-                                            tool_template_ref,
+                                            effective_tool_template_ref,
                                             effective_trait_args,
                                             resolved_method_type_args,
                                         )
@@ -6228,6 +6824,9 @@ private let lookup_concrete_method_for_static_call(
         }
     }
     for def_id in candidate_def_ids then {
+        if not declared_static_receiver_method_is_materialized(mono, def_id) then {
+            continue
+        }
         let concrete = mono.storage.concrete_callables_by_def_id.get(def_id) or else { continue }
         let symbol_type = when mono.storage.context.get_function_type(def_id) in {
             .Some(function_type) then function_type,
@@ -6309,6 +6908,9 @@ private let lookup_concrete_method_for_static_call(
     for key in exact_lookup_keys then {
         when mono.storage.extension_method_def_ids.get(key) in {
             .Some(def_id) then {
+                if not declared_static_receiver_method_is_materialized(mono, def_id) then {
+                    continue
+                }
                 let symbol_type = when mono.storage.context.get_function_type(def_id) in {
                     .Some(function_type) then function_type,
                     .None() then Type.Unknown(),
@@ -6327,6 +6929,9 @@ private let lookup_concrete_method_for_static_call(
         let key = "\(type_name).\(method_name)"
         when mono.storage.extension_method_def_ids.get(key) in {
             .Some(def_id) then {
+                if not declared_static_receiver_method_is_materialized(mono, def_id) then {
+                    continue
+                }
                 let owner_matches_receiver = when mono.concrete_callable_info(def_id) in {
                     .Some(info) then when info.owner_type in {
                         .Some(owner_type) then layout_key(resolve_parameterized_type(mono, owner_type)) == resolved_base_key,
@@ -6354,6 +6959,9 @@ private let lookup_concrete_method_for_static_call(
             .Some(method_map) then {
                 when method_map.get(method_name) in {
                     .Some(entry) then {
+                        if not declared_static_receiver_method_is_materialized(mono, entry.symbol.def_id) then {
+                            continue
+                        }
                         let owner_matches_receiver = when mono.concrete_callable_info(entry.symbol.def_id) in {
                             .Some(info) then when info.owner_type in {
                                 .Some(owner_type) then layout_key(resolve_parameterized_type(mono, owner_type)) == resolved_base_key,
@@ -6435,6 +7043,23 @@ private let find_declared_static_receiver_method(
     }
 
     return Option[Symbol].None()
+}
+
+private let declared_static_receiver_method_is_materialized(
+    mono ref Monomorphizer,
+    def_id DefId,
+) Bool = {
+    for node_ref in mono.storage.generated_nodes then {
+        when node_ref in {
+            .FunctionDecl(_, _, _, _, _, _, id) then {
+                if id.def_id.id == def_id.id then {
+                    return true
+                }
+            },
+            _ then {},
+        }
+    }
+    return false
 }
 
 private let match_declared_static_receiver_member(
@@ -6527,6 +7152,9 @@ private let match_declared_static_receiver_member(
         }
 
         let symbol_name = mono.storage.context.get_name(member_ref.def_id) or else member_ref.name
+        if not declared_static_receiver_method_is_materialized(mono, member_ref.def_id) then {
+            continue
+        }
         return Option[Symbol].Some(Symbol(member_ref.def_id, symbol_type, SymbolKind.Function()))
     }
     return Option[Symbol].None()
@@ -6661,6 +7289,7 @@ private let enqueue_extension_method_for_static_call(
                                     },
                                     .None() then {},
                                 }
+                                continue
                             }
 
                             let sym = mono.instantiate_extension_method_impl(

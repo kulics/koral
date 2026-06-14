@@ -431,6 +431,7 @@ given TypeChecker {
                     self.storage.in_finally = false
                     self.storage.yield_targets = List[mut ref YieldTarget].new()
                     let infer_return_type_from_block_returns = return_type is .None() and body is .Block(_, _)
+                    let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(ret) and body is .Block(_, _)
                     if infer_return_type_from_block_returns then {
                         self.storage.function_return_context.expected_return_type = Option[Type].None()
                         self.storage.function_return_context.inferred_return_type = Option[Type].None()
@@ -441,7 +442,7 @@ given TypeChecker {
                             else ret
                         self.storage.function_return_context.expected_return_type = Option[Type].Some(lambda_return_type_for_body_check)
                         self.storage.function_return_context.inferred_return_type = Option[Type].None()
-                        self.storage.function_return_context.is_inferring = false
+                        self.storage.function_return_context.is_inferring = infer_return_type_from_generic_block_returns
                     }
                     let body_expected = if body is .Block(_, _)
                         then Option[Type].None()
@@ -462,6 +463,8 @@ given TypeChecker {
                         yield if infer_return_type_from_block_returns
                             then inferred_return_type or else Type.VoidType()
                             else typed_body.expr_type
+                    } else if self.contains_generic_parameter(ret) and body is .Block(_, _) then {
+                        yield inferred_return_type or else typed_body.expr_type
                     } else if self.contains_generic_parameter(ret) and not self.is_unresolved_expr_type(typed_body.expr_type) then {
                         yield typed_body.expr_type
                     } else ret
@@ -1113,7 +1116,9 @@ given TypeChecker {
                 if inaccessible_method_member then {
                     yield self.empty_typed_block(Type.Unknown())
                 }
-                let member_expr = make_typed_expr(TypedExprKind.MemberPath(box(typed_base), copied_path), current_type)
+                let member_expr = if copied_path.count() == 1(UInt)
+                    then self.make_typed_member_path_expr(typed_base, copied_path[0(UInt)], current_type)
+                    else make_typed_expr(TypedExprKind.MemberPath(box(typed_base), copied_path), current_type)
                 yield self.adapt_expr_to_expected_type_at(
                     member_expr,
                     expected,
@@ -1210,7 +1215,17 @@ given TypeChecker {
                     for arg in typed_args then {
                         static_args.push(arg)
                     }
-                    yield make_typed_expr(TypedExprKind.StaticMethodCall(typed_base.expr_type, self.context().symbol_name(method_symbol), box(method_symbol), List[Type].new(), List[Type].new(), static_args), final_ret_type)
+                    yield make_typed_expr(
+                        TypedExprKind.StaticMethodCall(
+                            typed_base.expr_type,
+                            self.context().symbol_name(method_symbol),
+                            box(method_symbol),
+                            List[Type].new(),
+                            effective_method_type_args,
+                            static_args,
+                        ),
+                        final_ret_type,
+                    )
                 } else {
                     let callee = when trait_constraint_opt in {
                         .Some(trait_name) then if trait_dispatch_requires_object then {
@@ -1246,6 +1261,17 @@ given TypeChecker {
                 }
             },
             .QualifiedMethodCall(base, trait_name, method_name, args, span) then {
+                when base in {
+                    .Identifier(base_name, _) then {
+                        when self.try_resolve_named_type_in_scope_without_diag(base_name, scope) in {
+                            .Some(_) then {
+                                yield self.check_static_method_call_ref(base_name, List[ref TypeNode].new(), method_name, args, expected, scope)
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
                 let initial_typed_base = self.check_expr_scoped_ref(base, .None(), scope)
                 if not self.dispatches_via_trait_object(initial_typed_base.expr_type)
                     and initial_typed_base.expr_type is not .GenericParameter(_)

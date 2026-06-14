@@ -775,6 +775,21 @@ public let instantiate_extension_method_from_entry(
     method_type_args List[ref Type],
     template ref GenericExtensionMethodTemplate,
 ) Symbol = {
+    let resolved_template = if template.checked_body is .Some(_) then template else when template.conformance_trait_name in {
+            .Some(trait_name) then when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
+                .Some(tool_templates) then when select_extension_template(
+                    tool_templates,
+                    template.method.name,
+                    Option[UInt].Some(template.method.type_params.count()),
+                    Option[UInt].Some(template.type_params.count()),
+                ) in {
+                    .Some(tool_template_ref) then patched_extension_template_with_body(template, tool_template_ref),
+                    .None() then template,
+                },
+                .None() then template,
+            },
+            .None() then template,
+    }
     // Compute concrete_lookup_type_name matching Swift's logic:
     //   StructureType(defId) → context.getName(defId)
     //   EnumType(defId)      → context.getName(defId)
@@ -784,7 +799,7 @@ public let instantiate_extension_method_from_entry(
         .EnumType(did) then mono.storage.context.get_name(did) or else structure_name,
         _ then structure_name,
     }
-    let mangle_template_name = when template.conformance_trait_name in {
+    let mangle_template_name = when resolved_template.conformance_trait_name in {
         .Some(_) then concrete_lookup_type_name,
         .None() then effective_template_name,
     }
@@ -793,35 +808,13 @@ public let instantiate_extension_method_from_entry(
         mono,
         mangle_template_name,
         type_args,
-        template.method.name,
+        resolved_template.method.name,
         method_type_args,
     )
-    let lookup_key = make_extension_method_lookup_key(mono, concrete_lookup_type_name, template.method.name, method_type_args)
+    let lookup_key = make_extension_method_lookup_key(mono, concrete_lookup_type_name, resolved_template.method.name, method_type_args)
     let cache_key = "ext:\(mangled_name)"
     when mono.storage.instantiated_function_symbols.get(cache_key) in {
         .Some(cached_symbol) then { return cached_symbol },
-        .None() then {},
-    }
-    when mono.storage.instantiated_functions.get(mangled_name) in {
-        .Some(cached_function) then {
-            when mono.storage.extension_method_def_ids.get(lookup_key) in {
-                .Some(existing_def_id) then {
-                    return Symbol(existing_def_id, cached_function.function_type, SymbolKind.Function())
-                },
-                .None() then {},
-            }
-        },
-        .None() then {},
-    }
-    // b. Check extension_method_def_ids cache.
-    when mono.storage.extension_method_def_ids.get(lookup_key) in {
-        .Some(existing_def_id) then {
-            if concrete_extension_def_id_is_materialized(mono, existing_def_id) then {
-                // Already instantiated — return the cached symbol.
-                let existing_type = Type.FunctionType(types_to_param_entries(List[ref Type].new()), box(Type.Unknown()))
-                return Symbol(existing_def_id, existing_type, SymbolKind.Function())
-            }
-        },
         .None() then {},
     }
 
@@ -831,30 +824,30 @@ public let instantiate_extension_method_from_entry(
     // Self → base_type
     substitution.insert("Self", base_type)
 
-    when template.checked_parameters in {
+    when resolved_template.checked_parameters in {
         .Some(checked_params) then {
             let _ = checked_params
         },
         .None() then {},
     }
 
-    if type_args.count() <> template.type_params.count() then {
-        panic("Monomorphization error: extension type arg arity mismatch for \(structure_name).\(template.method.name) - expected \(template.type_params.count()), got \(type_args.count())")
+    if type_args.count() <> resolved_template.type_params.count() then {
+        panic("Monomorphization error: extension type arg arity mismatch for \(structure_name).\(resolved_template.method.name) - expected \(resolved_template.type_params.count()), got \(type_args.count())")
     }
-    if method_type_args.count() <> template.method.type_params.count() then {
-        panic("Monomorphization error: extension method type arg arity mismatch for \(structure_name).\(template.method.name) - expected \(template.method.type_params.count()), got \(method_type_args.count())")
+    if method_type_args.count() <> resolved_template.method.type_params.count() then {
+        panic("Monomorphization error: extension method type arg arity mismatch for \(structure_name).\(resolved_template.method.name) - expected \(resolved_template.method.type_params.count()), got \(method_type_args.count())")
     }
 
-    bind_trait_extension_template_type_args(mono, base_type, template, substitution.ref)
-    when template.conformance_trait_name in {
+    bind_trait_extension_template_type_args(mono, base_type, resolved_template, substitution.ref)
+    when resolved_template.conformance_trait_name in {
         .Some(trait_name) then substitution.insert(trait_name, base_type),
         .None() then {},
     }
 
     // template.type_params[i].name → type_args[i]
     let mut tp_idx = 0(UInt)
-    while tp_idx < template.type_params.count() then {
-        let tp = template.type_params[tp_idx]
+    while tp_idx < resolved_template.type_params.count() then {
+        let tp = resolved_template.type_params[tp_idx]
         let arg = type_args[tp_idx]
         if not substitution.contains_key(tp.name) then {
             substitution.insert(tp.name, arg.val)
@@ -864,8 +857,8 @@ public let instantiate_extension_method_from_entry(
 
     // template.method.type_params[i].name → method_type_args[i]
     let mut mtp_idx = 0(UInt)
-    while mtp_idx < template.method.type_params.count() then {
-        let mtp = template.method.type_params[mtp_idx]
+    while mtp_idx < resolved_template.method.type_params.count() then {
+        let mtp = resolved_template.method.type_params[mtp_idx]
         let marg = method_type_args[mtp_idx]
         substitution.insert(mtp.name, marg.val)
         mtp_idx += 1(UInt)
@@ -874,7 +867,7 @@ public let instantiate_extension_method_from_entry(
     let mut concrete_params = List[TypedParam].new()
     let mut concrete_param_types = List[ref Type].new()
 
-    when template.checked_parameters in {
+    when resolved_template.checked_parameters in {
         .Some(checked_params_list) then {
             for sym in checked_params_list then {
                 let substituted_type = mono.substitute_type_impl(sym.symbol_type, substitution)
@@ -884,7 +877,7 @@ public let instantiate_extension_method_from_entry(
             }
         },
         .None() then {
-            for p in template.method.params then {
+            for p in resolved_template.method.params then {
                 let resolved_type = resolve_parameterized_type(mono, mono.resolve_type_node_impl(p.param_type, substitution))
                 concrete_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
                 concrete_param_types.push(box(resolved_type))
@@ -892,18 +885,18 @@ public let instantiate_extension_method_from_entry(
         },
     }
 
-    let concrete_return_type = when template.checked_return_type in {
+    let concrete_return_type = when resolved_template.checked_return_type in {
         .Some(checked_return_type) then {
             let substituted_return_type = mono.substitute_type_impl(checked_return_type, substitution)
             yield resolve_parameterized_type(mono, substituted_return_type)
         },
         .None() then {
-            let resolved_node_type = mono.resolve_type_node_impl(template.method.return_type, substitution)
+            let resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, substitution)
             yield resolve_parameterized_type(mono, resolved_node_type)
         },
     }
     let function_type = make_function_type(concrete_param_types, concrete_return_type)
-    let method_span = template.method.span
+    let method_span = resolved_template.method.span
 
     // e. Allocate a new DefId for the concrete method with full metadata so
     // codegen can bind the emitted FunctionDecl back to this symbol.
@@ -912,7 +905,7 @@ public let instantiate_extension_method_from_entry(
         DefKind.Function(),
         List[String].new(),
         "",
-        template.method.access,
+        resolved_template.method.access,
         method_span,
     )
 
@@ -927,7 +920,7 @@ public let instantiate_extension_method_from_entry(
     // Build the result symbol.
     let result_symbol = Symbol(def_id, function_type, SymbolKind.Function())
     mono.register_concrete_callable_if_absent(
-        ConcreteCallableInfo(def_id, template.method.name, Option[Type].Some(base_type), template.conformance_trait_name)
+        ConcreteCallableInfo(def_id, resolved_template.method.name, Option[Type].Some(base_type), resolved_template.conformance_trait_name)
     )
 
     // f. Register in extension_method_def_ids with dual keys.
@@ -937,7 +930,7 @@ public let instantiate_extension_method_from_entry(
     //    Alias key (only when genericArgs is empty AND structureName != concreteLookupTypeName):
     //    "structureName.methodName"
     if type_args.is_empty() and structure_name <> concrete_lookup_type_name then {
-        let alias_key = make_extension_method_lookup_key(mono, structure_name, template.method.name, method_type_args)
+        let alias_key = make_extension_method_lookup_key(mono, structure_name, resolved_template.method.name, method_type_args)
         mono.storage.extension_method_def_ids.insert(alias_key, def_id)
     }
 
@@ -947,12 +940,12 @@ public let instantiate_extension_method_from_entry(
         when mono.storage.extension_methods.get(concrete_lookup_type_name) in {
             .Some(method_map) then {
                 let mut updated_map = method_map
-                updated_map.insert(template.method.name, method_entry)
+                updated_map.insert(resolved_template.method.name, method_entry)
                 mono.storage.extension_methods.insert(concrete_lookup_type_name, updated_map)
             },
             .None() then {
                 let mut new_map = Dict[String, ConcreteMethodEntry].new()
-                new_map.insert(template.method.name, method_entry)
+                new_map.insert(resolved_template.method.name, method_entry)
                 mono.storage.extension_methods.insert(concrete_lookup_type_name, new_map)
             },
         }
@@ -964,7 +957,7 @@ public let instantiate_extension_method_from_entry(
     mono.storage.instantiated_function_symbols.insert(cache_key, result_symbol)
 
     // h. Emit the declaration node.
-    when lookup_extension_template_checked_body(mono, template) in {
+    when lookup_extension_template_checked_body(mono, resolved_template) in {
         .Some(body) then {
             // Substitute generic params with concrete types and emit a FunctionDecl.
             mono.storage.extension_body_resolution_depth += 1
@@ -973,7 +966,7 @@ public let instantiate_extension_method_from_entry(
             let mut fn_param_type_refs2 = List[ref Type].new()
             for cp in concrete_params then { fn_param_type_refs2.push(box(cp.param_type)) }
             let decl = TypedDecl.FunctionDecl(
-                template.method.access,
+                resolved_template.method.access,
                 mangled_name,
                 concrete_params,
                 concrete_return_type,
@@ -987,7 +980,7 @@ public let instantiate_extension_method_from_entry(
         .None() then {
             // Intrinsic extension method — emit an IntrinsicFunctionDecl.
             let decl = TypedDecl.IntrinsicFunctionDecl(
-                template.method.access,
+                resolved_template.method.access,
                 mangled_name,
                 concrete_params,
                 concrete_return_type,

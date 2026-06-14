@@ -66,6 +66,19 @@ given TypeChecker {
         }
     }
 
+    private typed_params_to_checked_symbols(self, params List[TypedParam]) List[Symbol] = {
+        let mut symbols = List[Symbol].with_capacity(params.count())
+        for param in params then {
+            let variable_kind = if param.mutable then VariableKind.MutableValue() else VariableKind.Value()
+            symbols.push(Symbol(
+                self.allocate_unindexed_def_id(param.name, DefKind.Variable()),
+                param.param_type,
+                SymbolKind.Variable(variable_kind),
+            ))
+        }
+        return symbols
+    }
+
     private copied_extension_method_template(
         self,
         type_params List[TypeParameterDecl],
@@ -337,6 +350,7 @@ given TypeChecker {
         method_return_type TypeNode,
         conformance_trait_name Option[String],
         checked_body Option[ref TypedExpr],
+        checked_parameters Option[List[Symbol]],
         checked_return_type Option[Type],
     ) Void = {
         let copied_method_type_params = self.to_template_type_params(method_type_params)
@@ -362,7 +376,7 @@ given TypeChecker {
             self.storage.module_path,
             self.storage.package_id,
             checked_body,
-            Option[List[Symbol]].None(),
+            checked_parameters,
             template_checked_return_type,
         ))
         self.upsert_extension_template(type_key, primary_template)
@@ -376,6 +390,7 @@ given TypeChecker {
         method_type_param_count UInt,
         conformance_trait_name Option[String],
         checked_body ref Option[ref TypedExpr],
+        checked_parameters Option[List[Symbol]],
         checked_return_type Type,
     ) Void = {
         let type_key = self.extension_template_key(target_type)
@@ -391,6 +406,7 @@ given TypeChecker {
                         if checked_body.val is .Some(_) then {
                             current_ref.checked_body = checked_body.val
                         }
+                        current_ref.checked_parameters = checked_parameters
                         current_ref.checked_return_type = Option[Type].Some(checked_return_type)
                         return
                     }
@@ -712,6 +728,7 @@ given TypeChecker {
         params List[Param],
         return_type TypeNode,
         checked_body Option[ref TypedExpr],
+        checked_parameters Option[List[Symbol]],
         checked_return_type Option[Type],
     ) Void = {
         if self.storage.global_scope.lookup(name) is .Some(sym) then {
@@ -721,7 +738,7 @@ given TypeChecker {
                     if checked_body is .Some(_) then {
                         existing_ref.checked_body = checked_body
                     }
-                    existing_ref.checked_parameters = Option[List[Symbol]].None()
+                    existing_ref.checked_parameters = checked_parameters
                     if checked_return_type is .Some(_) then {
                         existing_ref.checked_return_type = checked_return_type
                     }
@@ -734,7 +751,7 @@ given TypeChecker {
                         self.to_template_params(params),
                         self.copy_type_node(return_type),
                         checked_body,
-                        Option[List[Symbol]].None(),
+                        checked_parameters,
                         checked_return_type,
                     )
                     self.storage.generic_templates.function_templates.insert(name, box(template))
