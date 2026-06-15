@@ -2,6 +2,7 @@ private type BuiltinSubscriptKind {
     String(),
     List(element Type),
     Deque(element Type),
+    Dict(key Type, value Type),
     Pointer(element Type, mutable Bool),
 }
 
@@ -93,6 +94,9 @@ given TypeChecker {
                             if type_args.count() == 1(UInt) and template_name == "Deque" then {
                                 return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(type_args[0(UInt)]))
                             }
+                            if type_args.count() == 2(UInt) and template_name == "Dict" then {
+                                return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict(type_args[0(UInt)], type_args[1(UInt)]))
+                            }
                             yield Option[BuiltinSubscriptKind].None()
                         },
                         .None() then Option[BuiltinSubscriptKind].None(),
@@ -106,6 +110,9 @@ given TypeChecker {
                 }
                 if template_name == "Deque" and type_args.count() == 1(UInt) then {
                     return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Deque(type_args[0(UInt)].val))
+                }
+                if template_name == "Dict" and type_args.count() == 2(UInt) then {
+                    return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.Dict(type_args[0(UInt)].val, type_args[1(UInt)].val))
                 }
                 yield Option[BuiltinSubscriptKind].None()
             },
@@ -151,7 +158,7 @@ given TypeChecker {
                     self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(base)))
                     yield make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
                 },
-                .List(_) or .Deque(_) then {
+                .Dict(_, _) or .List(_) or .Deque(_) then {
                     let helper_name = if mutable then "__index_mut_ref" else "__index_ref"
                     yield self.build_builtin_subscript_helper_call(base, args, helper_name)
                 },
@@ -178,7 +185,7 @@ given TypeChecker {
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, and pointer types",
                     self.typed_expr_span(box(base))
                 )
                 yield make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())

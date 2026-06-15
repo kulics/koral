@@ -7,11 +7,17 @@
 // ============================================================================
 // Dict Storage and Type Definition
 // ============================================================================
-type DictBucket[K Hash, V Any] {
-    Empty(),
-    Occupied(entry Pair[K, V]),
-    Deleted(),
-}
+// DictBucket uses a struct+tag layout (not enum) so that key/value fields are
+// directly addressable by pointer — enabling ref/ptr subscript helpers.
+// Only Occupied buckets have initialized key/value. Empty and Deleted buckets
+// have raw (uninitialized) key/value memory; only the tag is valid.
+protected type DictBucket[K Hash, V Any](
+    mut tag UInt,
+    mut key K,
+    mut value V,
+)
+
+// Bucket tag constants (inlined as 0(UInt), 1(UInt), 2(UInt))
 
 protected type DictStorage[K Hash, V Any](
     mut buckets mut ptr DictBucket[K, V],
@@ -23,7 +29,9 @@ given[K Hash, V Any] DictStorage[K, V] as Drop {
 
     drop(source mut ptr Self) Void = {
         for i in 0..<source.capacity then {
-            deinit_memory(source.buckets + i)
+            if (source.buckets + i).tag == 1(UInt) then {
+                deinit_memory(source.buckets + i)
+            }
         }
         dealloc_memory(source.buckets)
     }
@@ -42,7 +50,7 @@ given[K Hash, V Any] Dict[K, V] {
         let capacity UInt = 16
         let buckets = alloc_memory[DictBucket[K, V]](capacity)
         for i in 0..<capacity then {
-            init_memory(buckets + i, DictBucket[K, V].Empty())
+            (buckets + i).tag = 0(UInt)
         }
         let storage = box(DictStorage[K, V](buckets, 0, capacity))
         return Dict[K, V](storage)
@@ -53,7 +61,7 @@ given[K Hash, V Any] Dict[K, V] {
         let cap = if capacity < 4 then 4 else capacity * 2
         let buckets = alloc_memory[DictBucket[K, V]](cap)
         for i in 0..<cap then {
-            init_memory(buckets + i, DictBucket[K, V].Empty())
+            (buckets + i).tag = 0(UInt)
         }
         let storage = box(DictStorage[K, V](buckets, 0, cap))
         return Dict[K, V](storage)
@@ -68,8 +76,12 @@ given[K Hash, V Any] Dict[K, V] {
             let old = self.storage
             let new_buckets = alloc_memory[DictBucket[K, V]](old.capacity)
             for i in 0..<old.capacity then {
-                let bucket = old.buckets[i]
-                init_memory(new_buckets + i, bucket)
+                if (old.buckets + i).tag == 1(UInt) then {
+                    let moved = take_memory(old.buckets + i)
+                    init_memory(new_buckets + i, moved)
+                } else {
+                    (new_buckets + i).tag = (old.buckets + i).tag
+                }
             }
             let new_storage = box(DictStorage[K, V](new_buckets, old.count, old.capacity))
             self.storage = new_storage
@@ -83,31 +95,28 @@ given[K Hash, V Any] Dict[K, V] {
         let mut first_deleted = Option[UInt].None()
         let mut probes UInt = 0
         while probes < self.storage.capacity then {
-            let bucket = self.storage.buckets[idx]
-            when bucket in {
-                .Empty then {
-                    when first_deleted in {
-                        .Some(_) then {
-                            return first_deleted
-                        },
-                        .None then {
-                            return Option[UInt].Some(idx)
-                        },
-                    }
-                },
-                .Deleted then {
-                    when first_deleted in {
-                        .None then {
-                            first_deleted = Option[UInt].Some(idx)
-                        },
-                        _ then {},
-                    }
-                },
-                .Occupied(e) then {
-                    if e.first == key then {
+            let bucket_tag = (self.storage.buckets + idx).tag
+            if bucket_tag == 0(UInt) then {
+                when first_deleted in {
+                    .Some(_) then {
+                        return first_deleted
+                    },
+                    .None then {
                         return Option[UInt].Some(idx)
-                    }
-                },
+                    },
+                }
+            } else if bucket_tag == 2(UInt) then {
+                when first_deleted in {
+                    .None then {
+                        first_deleted = Option[UInt].Some(idx)
+                    },
+                    _ then {},
+                }
+            } else {
+                // Occupied
+                if (self.storage.buckets + idx).key == key then {
+                    return Option[UInt].Some(idx)
+                }
             }
             idx = (idx + 1) % self.storage.capacity
             probes += 1
@@ -121,18 +130,19 @@ given[K Hash, V Any] Dict[K, V] {
         let new_cap = old_cap * 2
         let new_buckets = alloc_memory[DictBucket[K, V]](new_cap)
         for i in 0..<new_cap then {
-            init_memory(new_buckets + i, DictBucket[K, V].Empty())
+            (new_buckets + i).tag = 0(UInt)
         }
         self.storage.buckets = new_buckets
         self.storage.capacity = new_cap
         self.storage.count = 0
         for i in 0..<old_cap then {
-            let bucket = take_memory(old_buckets + i)
-            when bucket in {
-                .Occupied(e) then {
-                    self.insert_internal(e.first, e.second);
-                },
-                _ then {},
+            let old_tag = (old_buckets + i).tag
+            if old_tag == 1(UInt) then {
+                let moved = take_memory(old_buckets + i)
+                self.insert_internal(moved.key, moved.value)
+            } else if old_tag == 2(UInt) then {
+                // Drop the key/value that were stored in this deleted bucket
+                deinit_memory(old_buckets + i)
             }
         }
         dealloc_memory(old_buckets)
@@ -145,15 +155,14 @@ given[K Hash, V Any] Dict[K, V] {
                 panic("Dict insert failed");
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx]
-                when bucket in {
-                    .Occupied(_) then {
-                        self.storage.buckets[idx] = DictBucket[K, V].Occupied(Pair[K, V](key, value))
-                    },
-                    .Empty or .Deleted then {
-                        self.storage.buckets[idx] = DictBucket[K, V].Occupied(Pair[K, V](key, value))
-                        self.storage.count = self.storage.count + 1
-                    },
+                let bucket_ptr = self.storage.buckets + idx
+                let was_occupied = bucket_ptr.tag == 1(UInt)
+                if was_occupied then {
+                    deinit_memory(bucket_ptr)
+                }
+                init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value))
+                if not was_occupied then {
+                    self.storage.count = self.storage.count + 1
                 }
             },
         }
@@ -169,15 +178,14 @@ given[K Hash, V Any] Dict[K, V] {
                 panic("Dict insert failed")
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx]
-                when bucket in {
-                    .Occupied(_) then {
-                        self.storage.buckets[idx] = DictBucket[K, V].Occupied(Pair[K, V](key, value))
-                    },
-                    .Empty or .Deleted then {
-                        self.storage.buckets[idx] = DictBucket[K, V].Occupied(Pair[K, V](key, value))
-                        self.storage.count = self.storage.count + 1
-                    },
+                let bucket_ptr = self.storage.buckets + idx
+                let was_occupied = bucket_ptr.tag == 1(UInt)
+                if was_occupied then {
+                    deinit_memory(bucket_ptr)
+                }
+                init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value))
+                if not was_occupied then {
+                    self.storage.count = self.storage.count + 1
                 }
             },
         }
@@ -193,14 +201,13 @@ given[K Hash, V Any] Dict[K, V] {
                 panic("Dict try_insert failed")
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx]
-                return when bucket in {
-                    .Occupied(_) then false,
-                    .Empty or .Deleted then {
-                        self.storage.buckets[idx] = DictBucket[K, V].Occupied(Pair[K, V](key, value))
-                        self.storage.count = self.storage.count + 1
-                        return true
-                    },
+                let bucket_ptr = self.storage.buckets + idx
+                if bucket_ptr.tag == 1(UInt) then {
+                    return false
+                } else {
+                    init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value))
+                    self.storage.count = self.storage.count + 1
+                    return true
                 }
             },
         }
@@ -218,14 +225,11 @@ given[K Hash, V Any] Dict[K, V] {
                 return Option[V].None()
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx]
-                when bucket in {
-                    .Occupied(e) then {
-                        return Option[V].Some(e.second)
-                    },
-                    _ then {
-                        return Option[V].None()
-                    },
+                let bucket_ptr = self.storage.buckets + idx
+                if bucket_ptr.tag == 1(UInt) then {
+                    return Option[V].Some(bucket_ptr.value)
+                } else {
+                    return Option[V].None()
                 }
             },
         }
@@ -264,16 +268,15 @@ given[K Hash, V Any] Dict[K, V] {
                 return Option[V].None()
             },
             .Some(idx) then {
-                let bucket = self.storage.buckets[idx]
-                when bucket in {
-                    .Occupied(e) then {
-                        self.storage.buckets[idx] = DictBucket[K, V].Deleted()
-                        self.storage.count = self.storage.count - 1
-                        return Option[V].Some(e.second)
-                    },
-                    _ then {
-                        return Option[V].None()
-                    },
+                let bucket_ptr = self.storage.buckets + idx
+                if bucket_ptr.tag == 1(UInt) then {
+                    let v = bucket_ptr.value
+                    deinit_memory(bucket_ptr)
+                    bucket_ptr.tag = 2(UInt)
+                    self.storage.count = self.storage.count - 1
+                    return Option[V].Some(v)
+                } else {
+                    return Option[V].None()
                 }
             },
         }
@@ -284,7 +287,11 @@ given[K Hash, V Any] Dict[K, V] {
     public clear(self mut ref) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.capacity then {
-            self.storage.buckets[i] = DictBucket[K, V].Empty()
+            let bucket_ptr = self.storage.buckets + i
+            if bucket_ptr.tag == 1(UInt) then {
+                deinit_memory(bucket_ptr)
+            }
+            bucket_ptr.tag = 0(UInt)
         }
         self.storage.count = 0
     }
@@ -293,17 +300,86 @@ given[K Hash, V Any] Dict[K, V] {
     public retain(self mut ref, predicate Func[K, V, Bool]) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.capacity then {
-            let bucket = self.storage.buckets[i]
-            when bucket in {
-                .Occupied(e) then {
-                    if not predicate(e.first, e.second) then {
-                        self.storage.buckets[i] = DictBucket[K, V].Deleted()
-                        self.storage.count = self.storage.count - 1
-                    }
-                },
-                _ then {},
+            let bucket_ptr = self.storage.buckets + i
+            if bucket_ptr.tag == 1(UInt) then {
+                if not predicate(bucket_ptr.key, bucket_ptr.value) then {
+                    deinit_memory(bucket_ptr)
+                    bucket_ptr.tag = 2(UInt)
+                    self.storage.count = self.storage.count - 1
+                }
             }
         }
+    }
+
+    // Builtin subscript helpers for d[key] syntax
+    private __index_get(self ref, key K) V = {
+        when self.get(key) in {
+            .Some(v) then { return v },
+            .None then { panic("Dict key not found") },
+        }
+    }
+
+    private __index_set(self mut ref, key K, value V) Void = {
+        when self.get(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(_) then {},
+        }
+        self.ensure_unique()
+        let final_idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        let bucket_ptr = self.storage.buckets + final_idx
+        deinit_memory(bucket_ptr)
+        init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value))
+    }
+
+    private __index_ptr(self ref, key K) ptr V = {
+        let idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        // self.storage.buckets is mut ptr DictBucket; +idx gives ptr to bucket[idx]
+        let bucket_ptr = self.storage.buckets + idx
+        // .val dereferences to the DictBucket, .value accesses the field, .ptr takes address
+        return bucket_ptr.val.value.ptr
+    }
+
+    private __index_mut_ptr(self mut ref, key K) mut ptr V = {
+        let idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        self.ensure_unique()
+        let final_idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        let bucket_ptr = self.storage.buckets + final_idx
+        return bucket_ptr.val.value.ptr
+    }
+
+    private __index_ref(self ref, key K) ref V = {
+        let idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        let bucket_ptr = self.storage.buckets + idx
+        return make_ref[V, DictStorage[K, V]](bucket_ptr.val.value.ptr, self.storage)
+    }
+
+    private __index_mut_ref(self mut ref, key K) mut ref V = {
+        let idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        self.ensure_unique()
+        let final_idx = when self.find_slot(key) in {
+            .None then { panic("Dict key not found") },
+            .Some(i) then i,
+        }
+        let bucket_ptr = self.storage.buckets + final_idx
+        return make_mut_ref[V, DictStorage[K, V]](bucket_ptr.val.value.ptr, self.storage)
     }
 }
 
@@ -314,13 +390,10 @@ given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
 
     public next(self mut ref) Option[Pair[K, V]] = {
         while self.index < self.storage.capacity then {
-            let bucket = self.storage.buckets[self.index]
+            let bucket_ptr = self.storage.buckets + self.index
             self.index = self.index + 1
-            when bucket in {
-                .Occupied(e) then {
-                    return Option[Pair[K, V]].Some(e)
-                },
-                _ then {},
+            if bucket_ptr.tag == 1(UInt) then {
+                return Option[Pair[K, V]].Some(Pair[K, V](bucket_ptr.key, bucket_ptr.value))
             }
         }
         return Option[Pair[K, V]].None()
@@ -341,13 +414,10 @@ given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
 
     public next(self mut ref) Option[K] = {
         while self.index < self.storage.capacity then {
-            let bucket = self.storage.buckets[self.index]
+            let bucket_ptr = self.storage.buckets + self.index
             self.index = self.index + 1
-            when bucket in {
-                .Occupied(e) then {
-                    return Option[K].Some(e.first)
-                },
-                _ then {},
+            if bucket_ptr.tag == 1(UInt) then {
+                return Option[K].Some(bucket_ptr.key)
             }
         }
         return Option[K].None()
@@ -364,13 +434,10 @@ given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
 
     public next(self mut ref) Option[V] = {
         while self.index < self.storage.capacity then {
-            let bucket = self.storage.buckets[self.index]
+            let bucket_ptr = self.storage.buckets + self.index
             self.index = self.index + 1
-            when bucket in {
-                .Occupied(e) then {
-                    return Option[V].Some(e.second)
-                },
-                _ then {},
+            if bucket_ptr.tag == 1(UInt) then {
+                return Option[V].Some(bucket_ptr.value)
             }
         }
         return Option[V].None()

@@ -6772,7 +6772,7 @@ extension TypeChecker {
           switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
           case .string:
             throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
-          case .list, .deque:
+          case .dict, .list, .deque:
             let ptrExpr = try buildBuiltinSubscriptHelperCall(
               base: typedOuterBase,
               args: typedOuterArgs,
@@ -6786,7 +6786,7 @@ extension TypeChecker {
             return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
           case .none:
             throw SemanticError(.generic(
-              "subscript is only supported for String, List, Deque, and pointer types"
+              "subscript is only supported for String, List, Deque, Dict, and pointer types"
             ), span: currentSpan)
           }
         }

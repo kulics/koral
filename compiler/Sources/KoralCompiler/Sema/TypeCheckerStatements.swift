@@ -152,7 +152,7 @@ extension TypeChecker {
       switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
       case .string:
         throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
-      case .list, .deque:
+      case .dict, .list, .deque:
         let ptrExpr = try buildBuiltinSubscriptHelperCall(
           base: typedOuterBase,
           args: typedOuterArgs,
@@ -166,7 +166,7 @@ extension TypeChecker {
         return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
       case .none:
         throw SemanticError(.generic(
-          "subscript is only supported for String, List, Deque, and pointer types"
+          "subscript is only supported for String, List, Deque, Dict, and pointer types"
         ), span: currentSpan)
       }
     }
@@ -555,11 +555,13 @@ extension TypeChecker {
           throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
         case .list(let element), .deque(let element):
           expectedValueType = element
+        case .dict(_, let element):
+          expectedValueType = element
         case .pointer:
           fatalError("pointer case should have returned above")
         case .none:
           throw SemanticError(.generic(
-            "subscript is only supported for String, List, Deque, and pointer types"
+            "subscript is only supported for String, List, Deque, Dict, and pointer types"
           ), span: span)
         }
 

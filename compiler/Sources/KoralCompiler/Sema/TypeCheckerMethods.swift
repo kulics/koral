@@ -951,6 +951,7 @@ extension TypeChecker {
     case string
     case list(element: Type)
     case deque(element: Type)
+    case dict(key: Type, value: Type)
     case pointer(element: Type, mutable: Bool)
   }
 
@@ -980,6 +981,9 @@ extension TypeChecker {
         if template == "Deque" {
           return .deque(element: typeArgs[0])
         }
+        if template == "Dict", typeArgs.count == 2 {
+          return .dict(key: typeArgs[0], value: typeArgs[1])
+        }
       }
       return nil
     case .genericStruct(let template, let args):
@@ -988,6 +992,9 @@ extension TypeChecker {
       }
       if template == "Deque", args.count == 1 {
         return .deque(element: args[0])
+      }
+      if template == "Dict", args.count == 2 {
+        return .dict(key: args[0], value: args[1])
       }
       return nil
     case .pointer(let element):
@@ -1103,14 +1110,14 @@ extension TypeChecker {
     switch resolveBuiltinSubscriptKind(baseType: base.type) {
     case .string:
       throw SemanticError(.generic("String subscript is not addressable"), span: currentSpan)
-    case .list, .deque:
+    case .dict, .list, .deque:
       let helperName = mutable ? "__index_mut_ref" : "__index_ref"
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: helperName)
     case .pointer:
       return try resolveSubscript(base: base, args: args, expectedType: mutable ? .mutableReference(inner: .void) : .reference(inner: .void))
     case .none:
       throw SemanticError(.generic(
-        "subscript is only supported for String, List, Deque, and pointer types"
+        "subscript is only supported for String, List, Deque, Dict, and pointer types"
       ), span: currentSpan)
     }
   }
@@ -1164,7 +1171,7 @@ extension TypeChecker {
 
     guard let builtinKind = resolveBuiltinSubscriptKind(baseType: base.type) else {
       throw SemanticError(.generic(
-        "subscript is only supported for String, List, Deque, and pointer types"
+        "subscript is only supported for String, List, Deque, Dict, and pointer types"
       ), span: currentSpan)
     }
 
@@ -1181,6 +1188,8 @@ extension TypeChecker {
 
     switch builtinKind {
     case .string, .list, .deque:
+      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
+    case .dict:
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
     case .pointer:
       fatalError("pointer subscript should have returned above")
