@@ -3593,7 +3593,7 @@ extension TypeChecker {
       }
     }
 
-    let typedCallee = try inferTypedExpression(callee)
+    var typedCallee = try inferTypedExpression(callee)
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
     if case .traitMethodPlaceholder(let traitName, let methodName, _, _, _) = typedCallee,
@@ -5025,6 +5025,35 @@ extension TypeChecker {
             }
           }
           if let methodResult = try inferMethodOnType(typeToLookup: typeToLookup, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
+            // When a subscript expression is used as a mutable method receiver
+            // (e.g. d[key].push(v)), use __index_mut_ref to get a proper
+            // mut ref V with lifetime bound to the collection's storage.
+            if case .methodReference(let methodBase, let method, _, _, let methodType) = methodResult,
+               case .function(let params, _) = method.type,
+               let selfParam = params.first,
+               case .mutableReference = selfParam.type,
+               methodBase.valueCategory == .rvalue,
+               case .subscriptExpression(let subBase, let subArgs) = baseExpr {
+              let typedSubBase = try inferTypedExpression(subBase)
+              var typedSubArgs = try subArgs.map { try inferTypedExpression($0) }
+              if typedSubArgs.count == 1 {
+                typedSubArgs[0] = try coerceLiteral(typedSubArgs[0], to: .uint)
+              }
+              if let builtinKind = resolveBuiltinSubscriptKind(baseType: typedSubBase.type) {
+                switch builtinKind {
+                case .list, .deque, .dict:
+                  // Build __index_mut_ref call → mut ref V
+                  let refResult = try buildBuiltinSubscriptHelperCall(
+                    base: typedSubBase, args: typedSubArgs, helperName: "__index_mut_ref")
+                  if case .mutableReference = refResult.type {
+                    return .methodReference(
+                      base: refResult, method: method, typeArgs: nil, methodTypeArgs: nil, type: methodType)
+                  }
+                default:
+                  break
+                }
+              }
+            }
             return methodResult
           }
         }

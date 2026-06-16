@@ -624,6 +624,26 @@ given TypeChecker {
         return Option[TypedExpr].None()
     }
 
+    private method_requires_mut_ref(self, self_type Type, method_name String) Bool = {
+        let method_opt = self.resolve_method_signature(self_type, method_name)
+        return when method_opt in {
+            .Some(method) then when method.symbol_type in {
+                .FunctionType(params, _) then {
+                    if params.count() > 0(UInt) then {
+                        yield when params[0(UInt)].val.param_type in {
+                            .MutableReferenceType(_) then true,
+                            _ then false,
+                        }
+                    } else {
+                        yield false
+                    }
+                },
+                _ then false,
+            },
+            .None() then false,
+        }
+    }
+
     private check_call_expr_ref(self, callee ref Expr, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
         let trace_lerp = self.lerp_trace_debug_enabled()
             and self.storage.file_path.ends_with("\\std\\math\\float.koral")
@@ -658,6 +678,97 @@ given TypeChecker {
                 println("[lerp-trace] call-intrinsic result=\(self.display_type_name(intrinsic_expr.expr_type))")
             }
             return intrinsic_expr
+        }
+
+        // When a subscript expression is used as a mutable method receiver
+        // (e.g. d[key].push(v)), re-evaluate with __index_mut_ptr so the
+        // method can mutate the value in-place.
+        when callee in {
+            .MemberPath(base_expr, path, _) then {
+                if path.count() == 1(UInt) then {
+                    when base_expr in {
+                        .SubscriptExpr(sub_base, sub_args, _) then {
+                            let typed_sub_base = self.check_expr_scoped_ref(sub_base, .None(), scope)
+                            let member_name = path[0(UInt)]
+                            let subscript_kind = self.resolve_builtin_subscript_kind(typed_sub_base.expr_type)
+                            when subscript_kind in {
+                                .Some(kind) then when kind in {
+                                    .List(element_type) or .Deque(element_type) then {
+                                        if self.method_requires_mut_ref(element_type, member_name) then {
+                                            let mut typed_sub_args = List[ref TypedExpr].new()
+                                            for a in sub_args then {
+                                                typed_sub_args.push(box(self.check_expr_scoped_ref(a, Option[Type].Some(Type.UIntType()), scope)))
+                                            }
+                                            // Use __index_mut_ref to get mut ref V directly
+                                            let ref_result = self.build_builtin_subscript_helper_call(typed_sub_base, typed_sub_args, "__index_mut_ref")
+                                            when ref_result.expr_type in {
+                                                .MutableReferenceType(ref_el) then {
+                                                    let method_sym_opt = self.resolve_method_signature(ref_el.val, member_name)
+                                                    when method_sym_opt in {
+                                                        .Some(method_sym) then {
+                                                            let sym_type = method_sym.symbol_type
+                                                            let typed_method_ref = make_typed_expr(TypedExprKind.MethodReference(box(ref_result), ref_el.val, box(method_sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type)
+                                                            let mut typed_call_args = List[ref TypedExpr].new()
+                                                            let param_types = self.resolve_method_param_types(ref_el.val, member_name)
+                                                            let expected_count = if param_types.count() > 0(UInt) then param_types.count() - 1(UInt) else 0(UInt)
+                                                            let mut a_idx UInt = 0
+                                                            for a in call_args then {
+                                                                let arg_expected = if a_idx < expected_count then Option[Type].Some(param_types[a_idx + 1(UInt)]) else Option[Type].None()
+                                                                typed_call_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
+                                                                a_idx += 1
+                                                            }
+                                                            return make_typed_expr(TypedExprKind.Call(box(typed_method_ref), typed_call_args), self.method_return_type(method_sym))
+                                                        },
+                                                        .None() then {},
+                                                    }
+                                                },
+                                                _ then {},
+                                            }
+                                        }
+                                    },
+                                    .Dict(_, value_type) then {
+                                        if self.method_requires_mut_ref(value_type, member_name) then {
+                                            let mut typed_sub_args = List[ref TypedExpr].new()
+                                            for a in sub_args then {
+                                                typed_sub_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
+                                            }
+                                            // Use __index_mut_ref to get mut ref V directly
+                                            let ref_result = self.build_builtin_subscript_helper_call(typed_sub_base, typed_sub_args, "__index_mut_ref")
+                                            when ref_result.expr_type in {
+                                                .MutableReferenceType(ref_el) then {
+                                                    let method_sym_opt = self.resolve_method_signature(ref_el.val, member_name)
+                                                    when method_sym_opt in {
+                                                        .Some(method_sym) then {
+                                                            let sym_type = method_sym.symbol_type
+                                                            let typed_method_ref = make_typed_expr(TypedExprKind.MethodReference(box(ref_result), ref_el.val, box(method_sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type)
+                                                            let mut typed_call_args = List[ref TypedExpr].new()
+                                                            let param_types = self.resolve_method_param_types(ref_el.val, member_name)
+                                                            let expected_count = if param_types.count() > 0(UInt) then param_types.count() - 1(UInt) else 0(UInt)
+                                                            let mut a_idx UInt = 0
+                                                            for a in call_args then {
+                                                                let arg_expected = if a_idx < expected_count then Option[Type].Some(param_types[a_idx + 1(UInt)]) else Option[Type].None()
+                                                                typed_call_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
+                                                                a_idx += 1
+                                                            }
+                                                            return make_typed_expr(TypedExprKind.Call(box(typed_method_ref), typed_call_args), self.method_return_type(method_sym))
+                                                        },
+                                                        .None() then {},
+                                                    }
+                                                },
+                                                _ then {},
+                                            }
+                                        }
+                                    },
+                                    _ then {},
+                                },
+                                .None() then {},
+                            }
+                        },
+                        _ then {},
+                    }
+                }
+            },
+            _ then {},
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
