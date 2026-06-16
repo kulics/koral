@@ -1394,8 +1394,17 @@ final class MIRFunctionCodeEmitter {
     let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
     let shouldTransfer = allocation == .heapOwned && canTransferOwnedHeapReference(place: place)
 
+    // Merged layout: allocate control block + payload in one malloc
     codeGen.addIndent()
-    codeGen.appendToBuffer("\(result).ptr = malloc(sizeof(\(pointeeCType)));\n")
+    codeGen.appendToBuffer("\(result).control = malloc(sizeof(struct __koral_Control) + sizeof(\(pointeeCType)));\n")
+    codeGen.addIndent()
+    codeGen.appendToBuffer("\(result).ptr = (char*)\(result).control + sizeof(struct __koral_Control);\n")
+    codeGen.addIndent()
+    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
+    codeGen.addIndent()
+    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
+    codeGen.addIndent()
+    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
     codeGen.emitCopyOrMove(
       type: pointeeType,
       source: access.path,
@@ -1405,15 +1414,6 @@ final class MIRFunctionCodeEmitter {
     if shouldTransfer {
       consumeMovedPlace(place)
     }
-
-    codeGen.addIndent()
-    codeGen.appendToBuffer("\(result).control = malloc(sizeof(struct __koral_Control));\n")
-    codeGen.addIndent()
-    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->strong_count = 1;\n")
-    codeGen.addIndent()
-    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
-    codeGen.addIndent()
-    codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
     switch pointeeType {
     case .structure(let defId):
       let typeName = codeGen.cIdentifierByDefId[codeGen.defIdKey(defId)] ?? codeGen.context.getCIdentifier(defId) ?? "T_\(defId.id)"

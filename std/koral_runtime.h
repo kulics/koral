@@ -39,11 +39,18 @@ struct __koral_Closure {
     void (*drop)(void*);
 };
 
+// Merged layout convention: the control block and payload are allocated as one
+// contiguous block via a single malloc(sizeof(Control) + sizeof(T)).
+// Memory: [ __koral_Control | payload data ... ]
+//          ^                 ^
+//          control           control->ptr  (points to payload right after)
+// Sub-refs created via make_ref/make_mut_ref share the same control block
+// but have their own ptr pointing into the owner's payload.
 struct __koral_Control {
     _Atomic int strong_count;
     _Atomic int weak_count;
     __koral_Dtor dtor;
-    void* ptr;
+    void* ptr;  // points to the payload (may be inside a merged allocation)
 };
 
 void __koral_set_args(int32_t argc, uint8_t** argv);

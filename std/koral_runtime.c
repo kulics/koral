@@ -53,7 +53,9 @@ void __koral_release(void* raw_control) {
         if (control->dtor) {
             control->dtor(control->ptr);
         }
-        free(control->ptr);
+        // Merged layout: control block and payload are in the same allocation.
+        // Don't free(control->ptr) — the payload is freed together with the
+        // control block when the last weak reference is released.
         int weak_prev = atomic_fetch_sub(&control->weak_count, 1);
         if (weak_prev == 1) {
             free(control);

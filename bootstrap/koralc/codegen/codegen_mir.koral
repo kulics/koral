@@ -1257,19 +1257,19 @@ given MIRFunctionCodeEmitter {
         }
         let mut ref_expression = inner.expression
         if not is_ref_type then {
-            // Heap-allocate the scalar value and create a ref
+            // Merged layout: allocate control block + payload in one malloc
             let pointee_c_type = self.codegen.c_type_name(inner_type)
             let ref_temp = self.codegen.next_temp_with_decl("struct __koral_Ref")
             self.codegen.add_indent()
             self.codegen.buffer.push_string(ref_temp)
-            self.codegen.buffer.push_string(".ptr = malloc(sizeof(")
+            self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(")
             self.codegen.buffer.push_string(pointee_c_type)
             self.codegen.buffer.push_string("));\n")
-            let dest_expr = "*(" + pointee_c_type + "*)" + ref_temp + ".ptr"
-            self.codegen.append_copy_or_move_assignment(inner_type, inner.expression, dest_expr, false)
             self.codegen.add_indent()
             self.codegen.buffer.push_string(ref_temp)
-            self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control));\n")
+            self.codegen.buffer.push_string(".ptr = (char*)")
+            self.codegen.buffer.push_string(ref_temp)
+            self.codegen.buffer.push_string(".control + sizeof(struct __koral_Control);\n")
             self.codegen.add_indent()
             self.codegen.buffer.push_string("((struct __koral_Control*)")
             self.codegen.buffer.push_string(ref_temp)
@@ -1284,8 +1284,6 @@ given MIRFunctionCodeEmitter {
             self.codegen.buffer.push_string(".control)->ptr = ")
             self.codegen.buffer.push_string(ref_temp)
             self.codegen.buffer.push_string(".ptr;\n")
-            // Set dtor to the type's drop function for struct/enum types,
-            // so resources inside the value are properly released.
             self.codegen.add_indent()
             self.codegen.buffer.push_string("((struct __koral_Control*)")
             self.codegen.buffer.push_string(ref_temp)
@@ -1301,6 +1299,8 @@ given MIRFunctionCodeEmitter {
                     self.codegen.buffer.push_string("NULL;\n")
                 },
             }
+            let dest_expr = "*(" + pointee_c_type + "*)" + ref_temp + ".ptr"
+            self.codegen.append_copy_or_move_assignment(inner_type, inner.expression, dest_expr, false)
             ref_expression = ref_temp
         }
         let expression = self.codegen.generate_trait_object_conversion_from_ref_value(ref_expression, conversion.trait_name, conversion.concrete_type, should_retain)
@@ -1501,18 +1501,17 @@ given MIRFunctionCodeEmitter {
         let pointee_c_type = self.codegen.c_type_name(pointee_type)
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
         let should_transfer = self.can_transfer_owned_heap_reference(place)
+        // Merged layout: allocate control block + payload in one malloc
         self.codegen.add_indent()
         self.codegen.buffer.push_string(result)
-        self.codegen.buffer.push_string(".ptr = malloc(sizeof(")
+        self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(")
         self.codegen.buffer.push_string(pointee_c_type)
         self.codegen.buffer.push_string("));\n")
-        self.codegen.append_copy_or_move_assignment(pointee_type, access.path, "*(\(pointee_c_type)*)\(result).ptr", not should_transfer)
-        if should_transfer then {
-            self.consume_moved_place(place)
-        }
         self.codegen.add_indent()
         self.codegen.buffer.push_string(result)
-        self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control));\n")
+        self.codegen.buffer.push_string(".ptr = (char*)")
+        self.codegen.buffer.push_string(result)
+        self.codegen.buffer.push_string(".control + sizeof(struct __koral_Control);\n")
         self.codegen.add_indent()
         self.codegen.buffer.push_string("((struct __koral_Control*)")
         self.codegen.buffer.push_string(result)
@@ -1541,6 +1540,10 @@ given MIRFunctionCodeEmitter {
             _ then {
                 self.codegen.buffer.push_string("NULL;\n")
             },
+        }
+        self.codegen.append_copy_or_move_assignment(pointee_type, access.path, "*(\(pointee_c_type)*)\(result).ptr", not should_transfer)
+        if should_transfer then {
+            self.consume_moved_place(place)
         }
         self.emit_cleanup(access.cleanup)
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
