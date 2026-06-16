@@ -318,7 +318,9 @@ extension TypeChecker {
         if case .subscriptExpression(let baseExpr, let argExprs) = target {
           let typedBase = try inferWritableSubscriptBase(baseExpr)
           var typedArgs = try argExprs.map { try inferTypedExpression($0) }
-          if typedArgs.count == 1 {
+          // Coerce single arg to UInt for list/deque/pointer; dict uses its own key type.
+          let isDict = if case .dict = resolveBuiltinSubscriptKind(baseType: typedBase.type) { true } else { false }
+          if typedArgs.count == 1, !isDict {
             typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
           }
 
@@ -502,7 +504,9 @@ extension TypeChecker {
       if case .subscriptExpression(let baseExpr, let argExprs) = target {
         let typedBase = try inferWritableSubscriptBase(baseExpr)
         var typedArgs = try argExprs.map { try inferTypedExpression($0) }
-        if typedArgs.count == 1 {
+        // Coerce single arg to UInt for list/deque/pointer; dict uses its own key type.
+        let isDict = if case .dict = resolveBuiltinSubscriptKind(baseType: typedBase.type) { true } else { false }
+        if typedArgs.count == 1, !isDict {
           typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
         }
 
