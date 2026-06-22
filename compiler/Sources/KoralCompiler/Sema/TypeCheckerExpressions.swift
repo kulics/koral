@@ -449,7 +449,7 @@ extension TypeChecker {
       )
     case .mutableReference(let inner) where implicitReferenceInnerMatches(inner, actualType: base.type):
       throw SemanticError(
-        .generic("Cannot call 'self mut ref' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"),
+        .generic("Cannot call 'self ref mut' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"),
         span: currentSpan
       )
     default:
@@ -498,9 +498,9 @@ extension TypeChecker {
 
   /// Checks whether `expr` has a mutable reference type that can be widened
   /// to the expected (read-only) reference type.  Returns `true` when
-  /// `expr.type` is `T mut ref` and `expectedType` is `T ref` with the same
-  /// inner type.  Also handles `T mut ptr → T ptr` and
-  /// `T mut weakref → T weakref`.
+  /// `expr.type` is `T ref mut` and `expectedType` is `T ref` with the same
+  /// inner type.  Also handles `T ptr mut → T ptr` and
+  /// `T weakref mut → T weakref`.
   func canWidenMutableReference(_ expr: TypedExpressionNode, expectedType: Type) -> Bool {
     switch (expr.type, expectedType) {
     case (.mutableReference(let fromInner), .reference(let toInner)):
@@ -1936,13 +1936,13 @@ extension TypeChecker {
         try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref")
         return .derefExpression(expression: typedInner, type: innerType)
       } else if case .mutableReference(let innerType) = typedInner.type {
-        try requireDerefablePointee(innerType, operation: ".val", spelledType: "mut ref")
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref mut")
         return .derefExpression(expression: typedInner, type: innerType)
       } else if case .pointer(let elementType) = typedInner.type {
         try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr")
         return .derefExpression(expression: typedInner, type: elementType)
       } else if case .mutablePointer(let elementType) = typedInner.type {
-        try requireDerefablePointee(elementType, operation: ".val", spelledType: "mut ptr")
+        try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr mut")
         return .derefExpression(expression: typedInner, type: elementType)
       } else {
         throw SemanticError.typeMismatch(
@@ -2009,7 +2009,7 @@ extension TypeChecker {
         let weakType: Type = .mutableWeakReference(inner: innerType)
         return .intrinsicCall(.downgradeMutRef(val: typedInner, resultType: weakType))
       default:
-        throw SemanticError(.generic("'.weakref' can only be used on reference types (T ref or T mut ref), got \(typedInner.type)"))
+        throw SemanticError(.generic("'.weakref' can only be used on reference types (T ref or T ref mut), got \(typedInner.type)"))
       }
 
     case .ptrExpression(let inner):
@@ -3684,7 +3684,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(adjustedBase, expectedType: firstParam.type) {
           adjustedBase = implicitDeref
         } else if canWidenMutableReference(adjustedBase, expectedType: firstParam.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
@@ -3787,7 +3787,7 @@ extension TypeChecker {
           } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
             typedArg = implicitDeref
           } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-            // mut ref → ref widening: pass through unchanged
+            // ref mut → ref widening: pass through unchanged
           } else {
             throw SemanticError.typeMismatch(
               expected: param.type.description,
@@ -4002,7 +4002,7 @@ extension TypeChecker {
         guard case .mutablePointer(let elementType) = ptrExpr.type else {
           throw SemanticError(.generic("cannot use .val on non-pointer type"))
         }
-        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "mut ptr")
+        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "ptr mut")
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
 
@@ -4030,7 +4030,7 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(
             function: base, expected: 1, got: arguments.count)
         }
-        // Signature is ptr mut ref T — accept any ref/ptr type, infer freely
+        // Signature is ptr ref mut T — accept any ref/ptr type, infer freely
         let val = try inferTypedExpression(arguments[0])
         return .intrinsicCall(.isUniqueMutable(val: val))
       }
@@ -4095,10 +4095,10 @@ extension TypeChecker {
           expectedType: .mutableReference(inner: resolvedArgs[1])
         )
         guard case .mutablePointer(let elementType) = ptr.type else {
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) mut ptr", got: ptr.type.description)
+          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) ptr mut", got: ptr.type.description)
         }
         guard case .mutableReference = owner.type else {
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[1]) mut ref", got: owner.type.description)
+          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[1]) ref mut", got: owner.type.description)
         }
         let resultType = Type.mutableReference(inner: elementType)
         return .intrinsicCall(.makeMutRef(ptr: ptr, owner: owner, resultType: resultType))
@@ -4312,7 +4312,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = typedArguments[0].type else {
         throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "mut ptr")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "ptr mut")
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
     }
     if templateName == "null_ptr" {
@@ -4362,10 +4362,10 @@ extension TypeChecker {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]
       guard case .mutablePointer(let elementType) = ptr.type else {
-        throw SemanticError.typeMismatch(expected: "T mut ptr", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "T ptr mut", got: ptr.type.description)
       }
       guard case .mutableReference = owner.type else {
-        throw SemanticError.typeMismatch(expected: "O mut ref", got: owner.type.description)
+        throw SemanticError.typeMismatch(expected: "O ref mut", got: owner.type.description)
       }
       return .intrinsicCall(.makeMutRef(ptr: ptr, owner: owner, resultType: .mutableReference(inner: elementType)))
     }
@@ -4464,7 +4464,7 @@ extension TypeChecker {
             // Only safe for Copy types (otherwise this would implicitly move).
             finalBase = implicitDeref
           } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-            // mut ref → ref widening: pass through unchanged
+            // ref mut → ref widening: pass through unchanged
           } else {
             throw SemanticError.typeMismatch(
               expected: firstParam.type.description,
@@ -4758,7 +4758,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
         } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
@@ -4798,7 +4798,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -5027,7 +5027,7 @@ extension TypeChecker {
           if let methodResult = try inferMethodOnType(typeToLookup: typeToLookup, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
             // When a subscript expression is used as a mutable method receiver
             // (e.g. d[key].push(v)), use __index_mut_ref to get a proper
-            // mut ref V with lifetime bound to the collection's storage.
+            // ref mut V with lifetime bound to the collection's storage.
             if case .methodReference(let methodBase, let method, _, _, let methodType) = methodResult,
                case .function(let params, _) = method.type,
                let selfParam = params.first,
@@ -5042,7 +5042,7 @@ extension TypeChecker {
               if let builtinKind = resolveBuiltinSubscriptKind(baseType: typedSubBase.type) {
                 switch builtinKind {
                 case .list, .deque, .dict:
-                  // Build __index_mut_ref call → mut ref V
+                  // Build __index_mut_ref call → ref mut V
                   let refResult = try buildBuiltinSubscriptHelperCall(
                     base: typedSubBase, args: typedSubArgs, helperName: "__index_mut_ref")
                   if case .mutableReference = refResult.type {
@@ -6047,7 +6047,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -6690,7 +6690,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -6736,7 +6736,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
         } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
@@ -6758,7 +6758,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -6808,7 +6808,7 @@ extension TypeChecker {
               helperName: "__index_mut_ptr"
             )
             guard case .mutablePointer(let valueType) = ptrExpr.type else {
-              throw SemanticError.typeMismatch(expected: "mut ptr return", got: ptrExpr.type.description)
+              throw SemanticError.typeMismatch(expected: "ptr mut return", got: ptrExpr.type.description)
             }
             return .derefExpression(expression: ptrExpr, type: valueType)
           case .pointer:
@@ -7041,10 +7041,10 @@ extension TypeChecker {
           "Cannot assign through read-only pointer of type '\(typedInner.type)'"
         ), span: currentSpan)
       case .mutableReference(let innerType):
-        try requireDerefablePointee(innerType, operation: ".val", spelledType: "mut ref")
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref mut")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutablePointer(let elementType):
-        try requireDerefablePointee(elementType, operation: ".val", spelledType: "mut ptr")
+        try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr mut")
         return .derefExpression(expression: typedInner, type: elementType)
       default:
         throw SemanticError.typeMismatch(
@@ -7460,7 +7460,7 @@ extension TypeChecker {
     }
     
     // 2. First check if the expression type itself is an iterator
-    //    (has a next(self mut ref) [T]Option method)
+    //    (has a next(self ref mut) [T]Option method)
     if let elementType = try? extractIteratorElementType(iterableType) {
       try enforceGenericTraitConformance(
         iterableType,
@@ -7524,7 +7524,7 @@ extension TypeChecker {
   }
 
   /// Extracts the element type T from an iterator type.
-  /// The iterator must have a next(self mut ref) [T]Option method.
+  /// The iterator must have a next(self ref mut) [T]Option method.
   private func extractIteratorElementType(_ iteratorType: Type) throws -> Type {
     // Look up the next method on the iterator type
     guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
@@ -7676,7 +7676,7 @@ extension TypeChecker {
     iterRef: TypedExpressionNode,
     elementType: Type
   ) throws -> TypedExpressionNode {
-    // Get the iterator type from the reference (ref or mut ref)
+    // Get the iterator type from the reference (ref or ref mut)
     let iteratorType: Type
     switch iterRef.type {
     case .reference(let inner):

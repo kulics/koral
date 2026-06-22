@@ -181,31 +181,31 @@ let (_, g) = (1, 2)                   // 丢弃第一个元素
 
 #### 引用创建规则（`.ref` / `box`）
 
-Koral 将 `ref` 和 `mut ref` 作为受语言管理的引用类型。`ref T` 是只读引用，`mut ref T` 是可变引用，支持 `.val = expr` 赋值：
+Koral 将 `ref` 和 `ref mut` 作为受语言管理的引用类型。`ref T` 是只读引用，`ref mut T` 是可变引用，支持 `.val = expr` 赋值：
 
 - `x.ref` 表示从已有左值形成受管理引用。结果类型由源的可变性决定：
-  - `let mut` 绑定 → `.ref` 产出 `mut ref T`
+  - `let mut` 绑定 → `.ref` 产出 `ref mut T`
   - `let`（不可变）绑定 → `.ref` 产出 `ref T`
-  - 可变路径（如 `mut ref` 的 `mut` 字段）→ `.ref` 产出 `mut ref T`
-- `mut ref T` 可隐式转换为 `ref T`（宽化）。反向转换不允许。
+  - 可变路径（如 `ref mut` 的 `mut` 字段）→ `.ref` 产出 `ref mut T`
+- `ref mut T` 可隐式转换为 `ref T`（宽化）。反向转换不允许。
 - 对右值使用 `.ref` 会报错。
-- 若要从字面量/临时值形成受管理引用，请使用 `box(expr)`，它返回 `mut ref T`。
+- 若要从字面量/临时值形成受管理引用，请使用 `box(expr)`，它返回 `ref mut T`。
 
 方法与下标的接收者调整还有一条额外规则：
 
 - 若某个调用的接收者声明为 `self ref`，则该调用可以接受右值接收者表达式。编译器会为这次调用物化一个稳定临时值。
 - 这个特例只适用于接收者调整，不会让右值上的 `expr.ref` 变为合法。
-- `self mut ref` 仍然要求可写左值接收者；右值会被拒绝。
+- `self ref mut` 仍然要求可写左值接收者；右值会被拒绝。
 - 因为右值上的 `self ref` 调用可能触发临时物化，这类调用可能带来隐藏的 retain/分配成本。
 
 ```koral
 let mut x = 10
-let rx mut ref Int = x.ref   // let mut → mut ref T
+let rx ref mut Int = x.ref   // let mut → ref mut T
 
 let y = 10
 let ry ref Int = y.ref       // let → ref T
 
-let owned mut ref Int = box(42) // box() 返回 mut ref T
+let owned ref mut Int = box(42) // box() 返回 ref mut T
 
 // let rz = 42.ref           // 错误：右值不能借用
 ```
@@ -492,16 +492,16 @@ let empty List[Int] = []             // 空字面量必须有类型上下文
 引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用。Koral 区分只读引用和可变引用：
 
 - `ref T` — 只读引用。支持 `.val` 读取，但不支持 `.val = expr` 赋值。
-- `mut ref T` — 可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
-- `mut ref T` 可隐式转换为 `ref T`（宽化）。反向转换不允许。
+- `ref mut T` — 可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
+- `ref mut T` 可隐式转换为 `ref T`（宽化）。反向转换不允许。
 
 使用 `.ref` 后缀表达式可以创建一个引用。结果类型由源的可变性决定：
 
 ```koral
 let mut n = 42
-let a = n.ref            // let mut → mut ref T
+let a = n.ref            // let mut → ref mut T
 let b = a.val            // 解引用，得到 42
-a.val = 100              // 解引用赋值（mut ref 支持 .val = expr）
+a.val = 100              // 解引用赋值（ref mut 支持 .val = expr）
 println(is_unique_mutable(a)) // 仅当引用拥有所有权且唯一时为 true
 
 let m = 42
@@ -510,26 +510,26 @@ let d = c.val            // 解引用读取，得到 42
 // c.val = 100           // 错误：ref 不支持 .val 赋值
 ```
 
-`ref` 和 `mut ref` 表示受语言管理的引用类型。`x.ref` 会从左值形成引用，结果的可变性由源决定。编译器会优先将它保持为栈安全的借用形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。`box(expr)` 返回 `mut ref T`，通过显式地产生逃逸引用来构造。可以把它理解成 `box(mut v T) -> v.ref`：一旦该引用逃逸，析构责任会转移给引用 owner，不会再对原局部额外执行一次值 drop。
+`ref` 和 `ref mut` 表示受语言管理的引用类型。`x.ref` 会从左值形成引用，结果的可变性由源决定。编译器会优先将它保持为栈安全的借用形式；当引用逃逸出作用域时，才会提升为基于堆的引用计数对象。`box(expr)` 返回 `ref mut T`，通过显式地产生逃逸引用来构造。可以把它理解成 `box(mut v T) -> v.ref`：一旦该引用逃逸，析构责任会转移给引用 owner，不会再对原局部额外执行一次值 drop。
 
 指针类型同样区分只读和可变：
 
 - `ptr T` — 只读指针。支持 `.val` 读取，但不支持 `.val` 赋值和 `p[i]` 赋值。
-- `mut ptr T` — 可变指针。支持 `.val` 读取、`.val = expr` 赋值、`p[i]` 读取和 `p[i] = expr` 赋值。
-- `mut ptr T` 可隐式转换为 `ptr T`。反向转换不允许。
+- `ptr mut T` — 可变指针。支持 `.val` 读取、`.val = expr` 赋值、`p[i]` 读取和 `p[i] = expr` 赋值。
+- `ptr mut T` 可隐式转换为 `ptr T`。反向转换不允许。
 
 #### 弱引用
 
-弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`mut ref` 一样，弱引用也区分可变性：`weakref T`（只读）和 `mut weakref T`（可变）。
+弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`ref mut` 一样，弱引用也区分可变性：`weakref T`（只读）和 `weakref mut T`（可变）。
 
 使用 `.weakref` 后缀表达式从 ref 类型创建弱引用，使用 `.to_ref()` 方法尝试将弱引用升级回强引用（返回 `Option` 类型）。
 
 ```koral
-let strong mut ref Int = box(42)
+let strong ref mut Int = box(42)
 
-// 可变路径：mut ref → mut weakref → Option[mut ref T]
-let weak = strong.weakref              // mut ref T → mut weakref T
-let upgraded = weak.to_ref()           // mut weakref T → Option[mut ref T]
+// 可变路径：ref mut → weakref mut → Option[ref mut T]
+let weak = strong.weakref              // ref mut T → weakref mut T
+let upgraded = weak.to_ref()           // weakref mut T → Option[ref mut T]
 
 // 只读路径：ref → weakref → Option[ref T]
 let ro ref Int = strong                // 隐式宽化
@@ -542,7 +542,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`ref` 和 `mut ref` 是 Koral 的受管理引用类型。`ref T` 是只读的，`mut ref T` 是可变的。它们既可以从左值形成（可变性由源决定），也可以通过 `box(expr)` 这类方式显式构造逃逸引用（返回 `mut ref T`）。当某个局部值被提升为逃逸托管引用后，析构责任会转移到该引用 owner，而不是再对源局部执行第二次值 drop。方法/下标接收者调整还允许在 `self ref` 调用中对右值接收者进行临时物化；这个特例仅限接收者位置，不会让右值上的 `.ref` 合法化，而 `self mut ref` 仍然要求可写左值。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
+- **引用（Reference）**：`ref` 和 `ref mut` 是 Koral 的受管理引用类型。`ref T` 是只读的，`ref mut T` 是可变的。它们既可以从左值形成（可变性由源决定），也可以通过 `box(expr)` 这类方式显式构造逃逸引用（返回 `ref mut T`）。当某个局部值被提升为逃逸托管引用后，析构责任会转移到该引用 owner，而不是再对源局部执行第二次值 drop。方法/下标接收者调整还允许在 `self ref` 调用中对右值接收者进行临时物化；这个特例仅限接收者位置，不会让右值上的 `.ref` 合法化，而 `self ref mut` 仍然要求可写左值。Koral 结合所有权分析与逃逸分析决定采用栈安全借用还是堆上引用计数对象，从而避免悬垂指针和内存泄漏。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -701,16 +701,16 @@ list[1] = 99
 let text = "abc"
 let b UInt8 = text[1]
 
-let p mut ptr Int = alloc_memory[Int](2)
+let p ptr mut Int = alloc_memory[Int](2)
 p[0] = list[0]
 let first = p[0]
 dealloc_memory(p)
 ```
 
-- `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`ptr T`、`mut ptr T`。
+- `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`ptr T`、`ptr mut T`。
 - `String[key]` 返回 `UInt8` 字节值，只读且不可取地址。
-- `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `ref` / `mut ref` 上下文。
-- `ptr T` 只支持读取；`mut ptr T` 同时支持读取和写入。
+- `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `ref` / `ref mut` 上下文。
+- `ptr T` 只支持读取；`ptr mut T` 同时支持读取和写入。
 - 用户自定义类型不能通过 Trait 获得 `[]` 能力，泛型约束也不能为类型添加下标能力。
 
 ### 值合并与可选链
@@ -1543,7 +1543,7 @@ println(a.not_equals(b))
 
 ```koral
 trait Iterator[T Any] {
-    next(self mut ref) Option[T]
+    next(self ref mut) Option[T]
 }
 
 given[T Ord] Iterator[T] {
@@ -1619,30 +1619,30 @@ let p = Point.origin()
 - `Eq` / `Ord`：相等性与排序比较。
 - `Hash`：Dict/Set 键的哈希支持。
 - `ToString`：字符串转换。
-- `Iterator[T]`：迭代协议（`next(self mut ref) Option[T]`）。
+- `Iterator[T]`：迭代协议（`next(self ref mut) Option[T]`）。
 - `Error`：错误消息接口（`message(self ref) String`）。
-- `Drop`：析构钩子（`drop(source mut ptr Self) Void`）。
+- `Drop`：析构钩子（`drop(source ptr mut Self) Void`）。
 
 算术和比较操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`）。下标访问由编译器内建规则处理，不属于公开 trait 系统。
 
-`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source mut ptr Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
+`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source ptr mut Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
 
 ### Trait Object
 
-Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `ref TraitName` 或 `mut ref TraitName` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
+Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `ref TraitName` 或 `ref mut TraitName` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
 
 #### 基本语法
 
 Trait object 构造遵循以下规则：
 
-- 目标类型写作 `ref TraitName` 或 `mut ref TraitName`。
+- 目标类型写作 `ref TraitName` 或 `ref mut TraitName`。
 - 源值必须实现该 Trait，并在期望该 trait object 类型的上下文中发生转换。
 - `box(...)` 是提供拥有值并完成此类转换的标准方式。
 
 ```koral
 trait Drawable {
     draw(self ref) String
-    reset(self mut ref) Void
+    reset(self ref mut) Void
 }
 
 type Circle(mut radius Int)
@@ -1650,20 +1650,20 @@ type Square(mut side Int)
 
 given Circle as Drawable {
     public draw(self ref) String = "Drawing circle"
-    public reset(self mut ref) Void = {
+    public reset(self ref mut) Void = {
         self.radius = 0
     }
 }
 given Square as Drawable {
     public draw(self ref) String = "Drawing square"
-    public reset(self mut ref) Void = {
+    public reset(self ref mut) Void = {
         self.side = 0
     }
 }
 
 // 创建 trait object
 let shape ref Drawable = box(Circle(10))
-let mutable_shape mut ref Drawable = box(Square(4))
+let mutable_shape ref mut Drawable = box(Square(4))
 
 // 通过 trait object 调用方法（动态派发）
 shape.draw()  // "Drawing circle"
@@ -1674,15 +1674,15 @@ mutable_shape.draw()
 通过 trait object 调用时，接收者可变性规则与普通引用一致：
 
 - `ref TraitName` 只能调用声明为 `self ref` 的 requirement。
-- `mut ref TraitName` 可以调用 `self mut ref` 和 `self ref` 的 requirement。
-- `ref TraitName` 不能调用 `self mut ref` 的 requirement。
+- `ref mut TraitName` 可以调用 `self ref mut` 和 `self ref` 的 requirement。
+- `ref TraitName` 不能调用 `self ref mut` 的 requirement。
 
 #### 对象安全性
 
 只有满足以下条件的 Trait 才能用作 trait object：
 
 - 方法不能有泛型参数
-- 若存在接收者，则接收者必须是 `self ref` 或 `self mut ref`
+- 若存在接收者，则接收者必须是 `self ref` 或 `self ref mut`
 - 方法的参数和返回值中不能出现 `Self` 类型（仅接收者中的该用法例外）
 
 ```koral
@@ -1701,7 +1701,7 @@ trait Resettable {
 }
 ```
 
-Trait object（`ref TraitName`、`mut ref TraitName`）不支持直接 `.val`，应通过动态派发调用 trait 方法。
+Trait object（`ref TraitName`、`ref mut TraitName`）不支持直接 `.val`，应通过动态派发调用 trait 方法。
 
 ## 泛型
 

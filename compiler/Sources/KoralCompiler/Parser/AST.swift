@@ -87,11 +87,11 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .identifier(let name):
       return name
     case .reference(let inner, let mutable):
-      return mutable ? "mut ref \(inner)" : "ref \(inner)"
+      return mutable ? "ref mut \(inner)" : "ref \(inner)"
     case .pointer(let inner, let mutable):
-      return mutable ? "mut ptr \(inner)" : "ptr \(inner)"
+      return mutable ? "ptr mut \(inner)" : "ptr \(inner)"
     case .weakReference(let inner, let mutable):
-      return mutable ? "mut weakref \(inner)" : "weakref \(inner)"
+      return mutable ? "weakref mut \(inner)" : "weakref \(inner)"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(base)[\(argsStr)]"

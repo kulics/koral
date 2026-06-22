@@ -144,11 +144,11 @@ given DirEntry as ToString {
 }
 
 given DirIterator as Iterator[DirEntry] {
-    public next(self mut ref) Option[DirEntry]
+    public next(self ref mut) Option[DirEntry]
 }
 
 given WalkDirIterator as Iterator[DirEntry] {
-    public next(self mut ref) Option[DirEntry]
+    public next(self ref mut) Option[DirEntry]
 }
 
 given File {
@@ -164,7 +164,7 @@ given File {
 }
 
 given File as Reader {
-    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given File as Writer {

@@ -30,9 +30,9 @@ let local_point = Point(1, 2)
 let heap_point = box(Point(3, 4))
 
 // The 'ref' keyword borrows from an existing lvalue.
-// Result mutability depends on the source: let mut → mut ref, let → ref.
+// Result mutability depends on the source: let mut → ref mut, let → ref.
 let mut local_point2 = Point(3, 4)
-let heap_point_ref = local_point2.ref  // mut ref (from let mut)
+let heap_point_ref = local_point2.ref  // ref mut (from let mut)
 
 // Bumping the refcount, no deep copy
 let shared_point = heap_point 
@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
-- Reference types: `ref` (read-only), `mut ref` (mutable), `ptr` (read-only), `mut ptr` (mutable), `weakref` (read-only weak), `mut weakref` (mutable weak)
+- Reference types: `ref` (read-only), `ref mut` (mutable), `ptr` (read-only), `ptr mut` (mutable), `weakref` (read-only weak), `weakref mut` (mutable weak)
 
 ### Control Flow
 
@@ -207,7 +207,7 @@ let result = list.iterator()
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
 - Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
-- Trait objects for runtime polymorphism: `ref Greet`, `mut ref Greet`
+- Trait objects for runtime polymorphism: `ref Greet`, `ref mut Greet`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Mul`, `Div`, `Index`, etc.)
 
 ### Functions and Lambdas
@@ -232,33 +232,33 @@ let result = list.iterator()
 
 - Automatic reference counting with copy-on-write semantics
 - Escape analysis for stack vs. heap allocation decisions
-- Weak references (`weakref` / `mut weakref`) for breaking reference cycles
+- Weak references (`weakref` / `weakref mut`) for breaking reference cycles
 - `finally` for deterministic resource cleanup
 
 Reference creation rules:
-- `.ref` result type depends on the source's mutability: `let mut` binding → `mut ref T`, `let` binding → `ref T`, mutable path → `mut ref T`.
-- `mut ref T` implicitly converts to `ref T` (widening). The reverse is not allowed.
+- `.ref` result type depends on the source's mutability: `let mut` binding → `ref mut T`, `let` binding → `ref T`, mutable path → `ref mut T`.
+- `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected by the compiler.
 - Method/subscript receiver adjustment is a special case: a call whose receiver is declared as `self ref` may use an rvalue receiver. The compiler materializes a stable temporary for the duration of that call.
 - This receiver-only rule does **not** make `expr.ref` on rvalues legal.
-- `self mut ref` still requires a writable lvalue receiver; rvalues are rejected.
+- `self ref mut` still requires a writable lvalue receiver; rvalues are rejected.
 - Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
-- Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `mut ref Trait` can call both `self mut ref` and `self ref` requirements.
-- `ref T` is read-only: `.val` read only. `mut ref T` supports `.val` read and `.val = expr` assignment.
-- `ptr T` is read-only: `.val` read only. `mut ptr T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
-- Use `box(expr)` for owned escaping references from literals/temporaries — returns `mut ref T`.
+- Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `ref mut Trait` can call both `self ref mut` and `self ref` requirements.
+- `ref T` is read-only: `.val` read only. `ref mut T` supports `.val` read and `.val = expr` assignment.
+- `ptr T` is read-only: `.val` read only. `ptr mut T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
+- Use `box(expr)` for owned escaping references from literals/temporaries — returns `ref mut T`.
 - `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
 - Ordinary parameter `mut` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
-- `Drop` uses `drop(source mut ptr Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
+- `Drop` uses `drop(source ptr mut Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
 
 Weak reference rules:
-- `.weakref` on a `ref T` produces `weakref T`; on a `mut ref T` produces `mut weakref T`. It is only valid on ref types.
-- `.to_ref()` on a `weakref T` returns `Option[ref T]`; on a `mut weakref T` returns `Option[mut ref T]`.
-- `mut weakref T` implicitly converts to `weakref T` (widening).
+- `.weakref` on a `ref T` produces `weakref T`; on a `ref mut T` produces `weakref mut T`. It is only valid on ref types.
+- `.to_ref()` on a `weakref T` returns `Option[ref T]`; on a `weakref mut T` returns `Option[ref mut T]`.
+- `weakref mut T` implicitly converts to `weakref T` (widening).
 
 ```koral
-let strong mut ref Int = box(42)
-let weak mut weakref Int = strong.weakref   // mut ref → mut weakref
+let strong ref mut Int = box(42)
+let weak weakref mut Int = strong.weakref   // ref mut → weakref mut
 
 when weak.to_ref() in {
     .Some(r) then println(r.val),

@@ -33,7 +33,7 @@ given[R RandomSource] Random[R] {
     public next[T Randomizable](self ref) T
     public next_int(self ref, range Range[Int]) Int
     public next_uint(self ref, range Range[UInt]) UInt
-    public shuffle[T Deref](self ref, list mut ref List[T]) Void
+    public shuffle[T Deref](self ref, list ref mut List[T]) Void
     public choose[T Deref](self ref, list List[T]) Option[T]
 }
 

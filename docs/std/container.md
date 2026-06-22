@@ -31,9 +31,9 @@ given[T Ord and Deref] PriorityQueue[T] {
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
     public is_empty(self ref) Bool
-    public clear(self mut ref) Void
-    public push(self mut ref, value T) Void
-    public pop(self mut ref) Option[T]
+    public clear(self ref mut) Void
+    public push(self ref mut, value T) Void
+    public pop(self ref mut) Option[T]
     public peek(self ref) Option[T]
 }
 
@@ -42,7 +42,7 @@ given[T Ord and Deref] PriorityQueue[T] as Iterable[T, PriorityQueueIterator[T]]
 }
 
 given[T Ord and Deref] PriorityQueueIterator[T] as Iterator[T] {
-    public next(self mut ref) Option[T]
+    public next(self ref mut) Option[T]
 }
 
 given[T Deref] Queue[T] {
@@ -50,9 +50,9 @@ given[T Deref] Queue[T] {
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
     public is_empty(self ref) Bool
-    public clear(self mut ref) Void
-    public push(self mut ref, value T) Void
-    public pop(self mut ref) Option[T]
+    public clear(self ref mut) Void
+    public push(self ref mut, value T) Void
+    public pop(self ref mut) Option[T]
     public peek(self ref) Option[T]
 }
 
@@ -61,7 +61,7 @@ given[T Deref] Queue[T] as Iterable[T, QueueIterator[T]] {
 }
 
 given[T Deref] QueueIterator[T] as Iterator[T] {
-    public next(self mut ref) Option[T]
+    public next(self ref mut) Option[T]
 }
 
 given[T Deref] Stack[T] {
@@ -69,9 +69,9 @@ given[T Deref] Stack[T] {
     public with_capacity(capacity UInt) Self
     public count(self ref) UInt
     public is_empty(self ref) Bool
-    public clear(self mut ref) Void
-    public push(self mut ref, value T) Void
-    public pop(self mut ref) Option[T]
+    public clear(self ref mut) Void
+    public push(self ref mut, value T) Void
+    public pop(self ref mut) Option[T]
     public peek(self ref) Option[T]
 }
 
@@ -80,6 +80,6 @@ given[T Deref] Stack[T] as Iterable[T, StackIterator[T]] {
 }
 
 given[T Deref] StackIterator[T] as Iterator[T] {
-    public next(self mut ref) Option[T]
+    public next(self ref mut) Option[T]
 }
 ```

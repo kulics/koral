@@ -9,7 +9,7 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 public trait Writer {
@@ -50,13 +50,13 @@ given[R Reader] BufReader[R] {
     public with_capacity(cap UInt, r R) BufReader[R]
     public read_byte(self ref) Result[Option[UInt8]]
     public read_rune(self ref) Result[Option[Rune]]
-    public read_until(self ref, delim UInt8, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read_until(self ref, delim UInt8, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
     public read_line(self ref) Result[Option[String]]
     public skip(self ref, n UInt) Result[UInt]
 }
 
 given[R Reader] BufReader[R] as Reader {
-    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given[R Reader and Seeker] BufReader[R] as Seeker {
@@ -89,7 +89,7 @@ given ByteBuffer {
 }
 
 given ByteBuffer as Reader {
-    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given ByteBuffer as Writer {

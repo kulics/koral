@@ -80,7 +80,7 @@ given MIRFunctionBuilder {
         )
     }
 
-    public lower(self mut ref) ref MIRFunction = {
+    public lower(self ref mut) ref MIRFunction = {
         let entry = self.append_block()
         let _ = entry
         for param in self.params then {
@@ -112,7 +112,7 @@ given MIRFunctionBuilder {
         ))
     }
 
-    private append_block(self mut ref) MIRBlockID = {
+    private append_block(self ref mut) MIRBlockID = {
         let id = MIRBlockID(self.next_block_id)
         self.next_block_id += 1
         self.blocks.push(MIRBasicBlock(id, List[ref MIRStatement].new(), MIRTerminator.Unreachable()))
@@ -120,13 +120,13 @@ given MIRFunctionBuilder {
         return id
     }
 
-    private make_block(self mut ref) MIRBlockID = self.append_block()
+    private make_block(self ref mut) MIRBlockID = self.append_block()
 
     private current_block_id(self ref) MIRBlockID = self.blocks[self.current_block_index].id
 
     private current_block_is_terminated(self ref) Bool = self.terminated_blocks.contains(self.current_block_id().raw_value)
 
-    private set_current_block(self mut ref, id MIRBlockID) Void = {
+    private set_current_block(self ref mut, id MIRBlockID) Void = {
         let mut index UInt = 0
         while index < self.blocks.count() then {
             if self.blocks[index].id.raw_value == id.raw_value then {
@@ -137,30 +137,30 @@ given MIRFunctionBuilder {
         }
     }
 
-    private append_statement(self mut ref, statement MIRStatement) Void = {
+    private append_statement(self ref mut, statement MIRStatement) Void = {
         if self.current_block_is_terminated() then { return }
         self.append_statement_to_block(self.blocks[self.current_block_index], statement)
     }
 
-    private terminate(self mut ref, terminator MIRTerminator) Void = {
+    private terminate(self ref mut, terminator MIRTerminator) Void = {
         if self.current_block_is_terminated() then { return }
         let block_id = self.current_block_id()
         self.set_block_terminator(self.blocks[self.current_block_index], terminator)
         self.terminated_blocks.insert(block_id.raw_value)
     }
 
-    private append_statement_to_block(self mut ref, block mut ref MIRBasicBlock, statement MIRStatement) Void = {
+    private append_statement_to_block(self ref mut, block ref mut MIRBasicBlock, statement MIRStatement) Void = {
         let _ = self
         block.statements.push(box(statement))
     }
 
-    private set_block_terminator(self mut ref, block mut ref MIRBasicBlock, terminator MIRTerminator) Void = {
+    private set_block_terminator(self ref mut, block ref mut MIRBasicBlock, terminator MIRTerminator) Void = {
         let _ = self
         block.terminator = terminator
     }
 
     private make_local(
-        self mut ref,
+        self ref mut,
         name String,
         local_type Type,
         mutability MIRMutability,
@@ -173,7 +173,7 @@ given MIRFunctionBuilder {
         return local
     }
 
-    private make_temporary(self mut ref, local_type Type, name_hint String) MIRLocal = {
+    private make_temporary(self ref mut, local_type Type, name_hint String) MIRLocal = {
         return self.make_local("\(name_hint)_\(self.next_local_id)", local_type, MIRMutability.Mutable(), MIRStorage.Temporary(), Option[ref Symbol].None())
     }
 
@@ -193,13 +193,13 @@ given MIRFunctionBuilder {
         return boxed
     }
 
-    private make_scope_id(self mut ref) MIRScopeID = {
+    private make_scope_id(self ref mut) MIRScopeID = {
         let scope = MIRScopeID(self.next_scope_id)
         self.next_scope_id += 1
         return scope
     }
 
-    private finish_implicit_return(self mut ref, result Option[MIRExprResult]) Void = {
+    private finish_implicit_return(self ref mut, result Option[MIRExprResult]) Void = {
         if self.current_block_is_terminated() then { return }
         if self.type_is_never(self.body.expr_type) or self.type_is_never(self.return_type) then {
             self.terminate(MIRTerminator.Unreachable())
@@ -215,7 +215,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private return_operand(self mut ref, result Option[MIRExprResult]) Option[MIROperand] = {
+    private return_operand(self ref mut, result Option[MIRExprResult]) Option[MIROperand] = {
         return when result in {
             .Some(value) then when value.operand in {
                 .Some(operand) then Option[MIROperand].Some(self.adapt_operand_to_expected_type(operand, value.result_type, self.return_type)),
@@ -256,7 +256,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private read_place_for_expected_type(self mut ref, place MIRPlace, actual_type Type, expected_type Type) MIRValue = {
+    private read_place_for_expected_type(self ref mut, place MIRPlace, actual_type Type, expected_type Type) MIRValue = {
         return when self.deref_expected_type(actual_type, expected_type) in {
             .Some(pointee_type) then {
                 let deref_place = MIRPlace.Deref(box(MIRValue.PlaceRead(place, MIROwnershipUse.Borrow())), pointee_type)
@@ -266,7 +266,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private adapt_operand_to_expected_type(self mut ref, operand MIROperand, actual_type Type, expected_type Type) MIROperand = {
+    private adapt_operand_to_expected_type(self ref mut, operand MIROperand, actual_type Type, expected_type Type) MIROperand = {
         return when self.deref_expected_type(actual_type, expected_type) in {
             .Some(pointee_type) then {
                 yield when operand in {
@@ -281,7 +281,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_expression(self mut ref, expression ref TypedExpr) Option[MIRExprResult] = {
+    private lower_expression(self ref mut, expression ref TypedExpr) Option[MIRExprResult] = {
         if self.current_block_is_terminated() then { return Option[MIRExprResult].None() }
         return when expression.expr_kind in {
             .IntegerLiteral(value) then Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Constant(MIRConstant.Integer(value, expression.expr_type))), Option[MIRPlace].None())),
@@ -545,7 +545,7 @@ given MIRFunctionBuilder {
         return false
     }
 
-    private lower_block(self mut ref, statements ref List[ref TypedStatement], block_type Type) Option[MIRExprResult] = {
+    private lower_block(self ref mut, statements ref List[ref TypedStatement], block_type Type) Option[MIRExprResult] = {
         let scope = self.make_scope_id()
         self.scope_stack.push(scope)
         self.append_statement(MIRStatement.ScopeEnter(scope))
@@ -645,7 +645,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_statement(self mut ref, statement ref TypedStatement) Void = {
+    private lower_statement(self ref mut, statement ref TypedStatement) Void = {
         if self.current_block_is_terminated() then { return }
         when statement in {
             .LetStmt(symbol, value, _) then self.lower_variable_declaration(symbol, value),
@@ -683,7 +683,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_variable_declaration(self mut ref, symbol ref Symbol, value ref TypedExpr) Void = {
+    private lower_variable_declaration(self ref mut, symbol ref Symbol, value ref TypedExpr) Void = {
         if self.type_is_void_or_never(value.expr_type) then {
             let _ = self.lower_expression(value)
             return
@@ -694,7 +694,7 @@ given MIRFunctionBuilder {
         self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), self.lower_value(value)))
     }
 
-    private lower_pair_variable_declaration(self mut ref, pair_type Type, first_symbol Option[ref Symbol], second_symbol Option[ref Symbol], value ref TypedExpr) Void = {
+    private lower_pair_variable_declaration(self ref mut, pair_type Type, first_symbol Option[ref Symbol], second_symbol Option[ref Symbol], value ref TypedExpr) Void = {
         let pair_local = self.make_temporary(pair_type, "pair")
         self.append_statement(MIRStatement.Declare(pair_local.id))
         self.append_statement(MIRStatement.Assign(MIRPlace.Local(pair_local.id), self.lower_value(value)))
@@ -726,7 +726,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_pair_binding(self mut ref, symbol Option[ref Symbol], pair_place MIRPlace, pair_type Type, field_name String) Void = {
+    private lower_pair_binding(self ref mut, symbol Option[ref Symbol], pair_place MIRPlace, pair_type Type, field_name String) Void = {
         let field_type = when symbol in {
             .Some(sym) then sym.symbol_type,
             .None() then self.pair_field_type(pair_type, field_name),
@@ -748,14 +748,14 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_assignment(self mut ref, target ref TypedExpr, value ref TypedExpr) Void = {
+    private lower_assignment(self ref mut, target ref TypedExpr, value ref TypedExpr) Void = {
         when self.lower_place(target) in {
             .Some(place) then self.append_statement(MIRStatement.Assign(place, self.lower_value(value))),
             .None() then { let _ = self.lower_expression(value) },
         }
     }
 
-    private lower_return(self mut ref, value Option[ref TypedExpr]) Void = {
+    private lower_return(self ref mut, value Option[ref TypedExpr]) Void = {
         when value in {
             .Some(expr) then {
                 if self.type_is_never(expr.expr_type) then {
@@ -793,21 +793,21 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_break(self mut ref) Void = {
+    private lower_break(self ref mut) Void = {
         if self.loop_stack.is_empty() then { return }
         let loop = self.loop_stack[self.loop_stack.count() - 1(UInt)]
         self.emit_scope_exits(loop.scope_depth)
         self.terminate(MIRTerminator.Goto(loop.break_block))
     }
 
-    private lower_continue(self mut ref) Void = {
+    private lower_continue(self ref mut) Void = {
         if self.loop_stack.is_empty() then { return }
         let loop = self.loop_stack[self.loop_stack.count() - 1(UInt)]
         self.emit_scope_exits(loop.scope_depth)
         self.terminate(MIRTerminator.Goto(loop.continue_block))
     }
 
-    private lower_yield(self mut ref, value ref TypedExpr) Void = {
+    private lower_yield(self ref mut, value ref TypedExpr) Void = {
         if self.yield_target_stack.is_empty() then { return }
         let target = self.yield_target_stack[self.yield_target_stack.count() - 1(UInt)]
         when target.result_local in {
@@ -818,7 +818,7 @@ given MIRFunctionBuilder {
         self.terminate(MIRTerminator.Goto(target.join_block))
     }
 
-    private emit_scope_exits(self mut ref, base_scope_depth UInt) Void = {
+    private emit_scope_exits(self ref mut, base_scope_depth UInt) Void = {
         let mut depth = self.scope_stack.count()
         while depth > base_scope_depth then {
             let scope = self.scope_stack[depth - 1(UInt)]
@@ -829,7 +829,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private emit_finalies(self mut ref, scope MIRScopeID) Void = {
+    private emit_finalies(self ref mut, scope MIRScopeID) Void = {
         let finalies = self.finalies_by_scope.get(scope.raw_value) or else { return }
         let mut index = finalies.count()
         while index > 0(UInt) then {
@@ -839,7 +839,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private assign_branch_result(self mut ref, result MIRExprResult, local_id MIRLocalID) Void = {
+    private assign_branch_result(self ref mut, result MIRExprResult, local_id MIRLocalID) Void = {
         when result.operand in {
             .Some(operand) then self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), MIRValue.Operand(operand))),
             .None() then when result.place in {
@@ -849,7 +849,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_if_expression(self mut ref, condition ref TypedExpr, then_branch ref TypedExpr, else_branch Option[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
+    private lower_if_expression(self ref mut, condition ref TypedExpr, then_branch ref TypedExpr, else_branch Option[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         let condition_operand = self.lower_operand_for_expected_type(condition, Type.BoolType())
         let condition_block = self.current_block_id()
         let has_result = not self.type_is_void_or_never(result_type)
@@ -880,7 +880,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private prepare_pattern_subject(self mut ref, subject ref TypedExpr, name_hint String) Option[Pair[MIRPlace, Option[MIRScopeID]]] = {
+    private prepare_pattern_subject(self ref mut, subject ref TypedExpr, name_hint String) Option[Pair[MIRPlace, Option[MIRScopeID]]] = {
         return when self.lower_expression(subject) in {
             .Some(result) then when result.place in {
                 .Some(place) then Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(Pair[MIRPlace, Option[MIRScopeID]](place, Option[MIRScopeID].None())),
@@ -903,7 +903,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_branch_body(self mut ref, expression ref TypedExpr, result_local Option[MIRLocalID]) Void = {
+    private lower_branch_body(self ref mut, expression ref TypedExpr, result_local Option[MIRLocalID]) Void = {
         when result_local in {
             .Some(local_id) then {
                 // Direct value assignment avoids creating intermediate temporaries,
@@ -917,7 +917,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_while(self mut ref, condition ref TypedExpr, body ref TypedExpr) Void = {
+    private lower_while(self ref mut, condition ref TypedExpr, body ref TypedExpr) Void = {
         let predecessor_block = self.current_block_id()
         let condition_block = self.make_block()
         let body_block = self.make_block()
@@ -1002,7 +1002,7 @@ given MIRFunctionBuilder {
     /// Lower a when expression with simple enum/literal patterns to SwitchValue.
     /// This replaces a linear chain of branch checks with a single switch dispatch,
     /// significantly reducing the number of MIR locals and C stack frame size.
-    private lower_switch_when_expression(self mut ref, subject ref TypedExpr, arms ref List[ref TypedWhenArm], result_type Type) Option[MIRExprResult] = {
+    private lower_switch_when_expression(self ref mut, subject ref TypedExpr, arms ref List[ref TypedWhenArm], result_type Type) Option[MIRExprResult] = {
         let has_result = not self.type_is_void_or_never(result_type)
         let mut result_local = Option[MIRLocalID].None()
         if has_result then {
@@ -1148,7 +1148,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_when_expression(self mut ref, subject ref TypedExpr, arms ref List[ref TypedWhenArm], result_type Type) Option[MIRExprResult] = {
+    private lower_when_expression(self ref mut, subject ref TypedExpr, arms ref List[ref TypedWhenArm], result_type Type) Option[MIRExprResult] = {
         // Use SwitchValue lowering for simple enum/literal patterns
         if self.can_lower_to_switch_value(subject, arms) then {
             return self.lower_switch_when_expression(subject, arms, result_type)
@@ -1218,7 +1218,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_pattern_test(self mut ref, subject ref TypedExpr, pattern ref TypedPattern, negated Bool, result_type Type) MIRExprResult = {
+    private lower_pattern_test(self ref mut, subject ref TypedExpr, pattern ref TypedPattern, negated Bool, result_type Type) MIRExprResult = {
         let subject_value = self.lower_value(subject)
         let subject_operand = self.materialize(subject_value, subject.expr_type)
         let subject_place = MIRPlace.Local(when subject_operand in { .Local(id) then id, _ then MIRLocalID(0(UInt)) })
@@ -1239,7 +1239,7 @@ given MIRFunctionBuilder {
         return MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None())
     }
 
-    private lower_pattern_condition(self mut ref, subject_place MIRPlace, subject_type Type, pattern ref TypedPattern, negated Bool) MIROperand = {
+    private lower_pattern_condition(self ref mut, subject_place MIRPlace, subject_type Type, pattern ref TypedPattern, negated Bool) MIROperand = {
         when pattern in {
             .NotPattern(inner) then { return self.lower_pattern_condition(subject_place, subject_type, inner, not negated) },
             _ then {},
@@ -1286,7 +1286,7 @@ given MIRFunctionBuilder {
         return MIROperand.Constant(MIRConstant.Boolean(value))
     }
 
-    private pattern_compare(self mut ref, subject_place MIRPlace, subject_type Type, expected MIROperand, op ComparisonOperator) MIROperand = {
+    private pattern_compare(self ref mut, subject_place MIRPlace, subject_type Type, expected MIROperand, op ComparisonOperator) MIROperand = {
         let subject_operand = self.materialize(MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow()), subject_type)
         let comparison_value = MIRValue.Binary(MIRBinaryOperation(subject_operand, MIRBinaryOperator.Comparison(op), expected, Type.BoolType()))
         // Reuse a single comparison result local across all arms when available.
@@ -1311,7 +1311,7 @@ given MIRFunctionBuilder {
         return self.lookup_concrete_method_symbol(receiver_type, "equals", expected_type)
     }
 
-    private rune_pattern_value_access(self mut ref, subject_place MIRPlace, subject_type Type) Option[Pair[MIRPlace, Type]] = {
+    private rune_pattern_value_access(self ref mut, subject_place MIRPlace, subject_type Type) Option[Pair[MIRPlace, Type]] = {
         return when subject_type in {
             .StructureType(def_id) then {
                 let type_name = self.context.get_name(def_id) or else ""
@@ -1335,7 +1335,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private pattern_string_compare(self mut ref, subject_place MIRPlace, subject_type Type, value String) MIROperand = {
+    private pattern_string_compare(self ref mut, subject_place MIRPlace, subject_type Type, value String) MIROperand = {
         let matched_type = self.receiver_lookup_type(subject_type)
         return when self.pattern_string_equals_symbol(matched_type) in {
             .Some(equals_symbol) then {
@@ -1355,7 +1355,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private pattern_binary(self mut ref, left MIROperand, op MIRBinaryOperator, right MIROperand) MIROperand = {
+    private pattern_binary(self ref mut, left MIROperand, op MIRBinaryOperator, right MIROperand) MIROperand = {
         let value = MIRValue.Binary(MIRBinaryOperation(left, op, right, Type.BoolType()))
         if self.pattern_comparison_local is .Some(local_id) then {
             self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), value))
@@ -1364,7 +1364,7 @@ given MIRFunctionBuilder {
         return self.materialize(value, Type.BoolType())
     }
 
-    private pattern_maybe_negate(self mut ref, operand MIROperand, negated Bool) MIROperand = {
+    private pattern_maybe_negate(self ref mut, operand MIROperand, negated Bool) MIROperand = {
         if negated then {
             let value = MIRValue.Unary(MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, Type.BoolType()))
             if self.pattern_comparison_local is .Some(local_id) then {
@@ -1377,7 +1377,7 @@ given MIRFunctionBuilder {
     }
 
     private lower_enum_case_pattern_condition(
-        self mut ref,
+        self ref mut,
         subject_place MIRPlace,
         subject_type Type,
         case_name String,
@@ -1479,7 +1479,7 @@ given MIRFunctionBuilder {
         return true
     }
 
-    private lower_struct_pattern_condition(self mut ref, subject_place MIRPlace, subject_type Type, elements ref List[ref TypedPatternElement]) MIROperand = {
+    private lower_struct_pattern_condition(self ref mut, subject_place MIRPlace, subject_type Type, elements ref List[ref TypedPatternElement]) MIROperand = {
         let matched = self.pattern_match_place(subject_place, subject_type)
         let matched_place = matched.first
         let matched_type = matched.second
@@ -1509,7 +1509,7 @@ given MIRFunctionBuilder {
     }
 
     private with_pattern_bindings(
-        self mut ref,
+        self ref mut,
         pattern ref TypedPattern,
         subject_place MIRPlace,
         subject_type Type,
@@ -1546,7 +1546,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private bind_pattern_variables(self mut ref, pattern ref TypedPattern, subject_place MIRPlace, subject_type Type) Void = {
+    private bind_pattern_variables(self ref mut, pattern ref TypedPattern, subject_place MIRPlace, subject_type Type) Void = {
         let matched = self.pattern_match_place(subject_place, subject_type)
         let matched_place = matched.first
         let matched_type = matched.second
@@ -1635,7 +1635,7 @@ given MIRFunctionBuilder {
         then subject_type else symbol.symbol_type
     }
 
-    private lower_binary(self mut ref, left ref TypedExpr, right ref TypedExpr, result_type Type, operator_kind MIRBinaryOperator) MIRExprResult = {
+    private lower_binary(self ref mut, left ref TypedExpr, right ref TypedExpr, result_type Type, operator_kind MIRBinaryOperator) MIRExprResult = {
         let left_expected = when left.expr_type in {
             .ReferenceType(inner_ref) then right.expr_type,
             .MutableReferenceType(inner_ref) then right.expr_type,
@@ -1656,7 +1656,7 @@ given MIRFunctionBuilder {
         return MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None())
     }
 
-    private lower_short_circuit(self mut ref, left ref TypedExpr, right ref TypedExpr, result_type Type, short_circuit_value Bool) Option[MIRExprResult] = {
+    private lower_short_circuit(self ref mut, left ref TypedExpr, right ref TypedExpr, result_type Type, short_circuit_value Bool) Option[MIRExprResult] = {
         let result_local = self.make_temporary(result_type, "logic_result")
         self.append_statement(MIRStatement.Declare(result_local.id))
         let left_operand = self.lower_operand(left)
@@ -1691,7 +1691,7 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Local(result_local.id)), Option[MIRPlace].None()))
     }
 
-    private lower_unary_or_negate(self mut ref, op UnaryOperator, inner ref TypedExpr, result_type Type) MIRExprResult = {
+    private lower_unary_or_negate(self ref mut, op UnaryOperator, inner ref TypedExpr, result_type Type) MIRExprResult = {
         let operand = if op is .Not() then self.lower_operand_for_expected_type(inner, Type.BoolType()) else self.lower_operand(inner)
         let value = when op in {
             .Not() then MIRValue.Unary(MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, result_type)),
@@ -1702,7 +1702,7 @@ given MIRFunctionBuilder {
         return MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None())
     }
 
-    private lower_call(self mut ref, callee ref TypedExpr, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
+    private lower_call(self ref mut, callee ref TypedExpr, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         when callee.expr_kind in {
             .MethodReference(base, _, method, _, _, _) then {
                 when self.concrete_method_symbol(method, base.expr_type, callee.expr_type, args, result_type) in {
@@ -2105,7 +2105,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_call_arguments(self mut ref, callee MIROperand, args ref List[ref TypedExpr]) Pair[List[ref MIRValue], List[MIROwnershipUse]] = {
+    private lower_call_arguments(self ref mut, callee MIROperand, args ref List[ref TypedExpr]) Pair[List[ref MIRValue], List[MIROwnershipUse]] = {
         let param_types = self.function_parameter_types(callee)
         let mut values = List[ref MIRValue].new()
         let mut ownerships = List[MIROwnershipUse].new()
@@ -2119,7 +2119,7 @@ given MIRFunctionBuilder {
         return Pair[List[ref MIRValue], List[MIROwnershipUse]](values, ownerships)
     }
 
-    private lower_call_argument(self mut ref, arg ref TypedExpr, expected_type Option[Type]) MIRValue = {
+    private lower_call_argument(self ref mut, arg ref TypedExpr, expected_type Option[Type]) MIRValue = {
         when self.lower_borrowed_reference_argument(arg, expected_type) in {
             .Some(borrowed) then { return borrowed },
             .None() then {},
@@ -2127,7 +2127,7 @@ given MIRFunctionBuilder {
         return self.lower_value(arg)
     }
 
-    private lower_method_receiver_argument(self mut ref, base ref TypedExpr, method Symbol) MIRValue = {
+    private lower_method_receiver_argument(self ref mut, base ref TypedExpr, method Symbol) MIRValue = {
         let method_type = self.context.get_function_type(method.def_id) or else method.symbol_type
         return when method_type in {
             .FunctionType(params, _) then {
@@ -2167,7 +2167,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_borrowed_reference_argument(self mut ref, arg ref TypedExpr, expected_type Option[Type]) Option[MIRValue] = {
+    private lower_borrowed_reference_argument(self ref mut, arg ref TypedExpr, expected_type Option[Type]) Option[MIRValue] = {
         return when expected_type in {
             .Some(t) then {
                 when arg.expr_kind in {
@@ -2252,7 +2252,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private finish_call(self mut ref, callee MIROperand, values List[ref MIRValue], ownerships List[MIROwnershipUse], result_type Type) Option[MIRExprResult] = {
+    private finish_call(self ref mut, callee MIROperand, values List[ref MIRValue], ownerships List[MIROwnershipUse], result_type Type) Option[MIRExprResult] = {
         let value = MIRValue.Call(MIRCall(callee, values, ownerships, result_type))
         if self.type_is_never(result_type) then {
             self.append_statement(MIRStatement.Evaluate(value))
@@ -2267,12 +2267,12 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
-    private finish_call_from_typed_args(self mut ref, callee MIROperand, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
+    private finish_call_from_typed_args(self ref mut, callee MIROperand, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         let lowered = self.lower_call_arguments(callee, args)
         return self.finish_call(callee, lowered.first, lowered.second, result_type)
     }
 
-    private lower_type_construction(self mut ref, identifier ref Symbol, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
+    private lower_type_construction(self ref mut, identifier ref Symbol, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         let mut values = List[ref MIRValue].new()
         let mut ownerships = List[MIROwnershipUse].new()
         for arg in args then {
@@ -2284,14 +2284,14 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(aggregate_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
-    private lower_enum_construction(self mut ref, enum_type Type, case_name String, args ref List[ref TypedExpr]) Option[MIRExprResult] = {
+    private lower_enum_construction(self ref mut, enum_type Type, case_name String, args ref List[ref TypedExpr]) Option[MIRExprResult] = {
         let mut values = List[ref MIRValue].new()
         for arg in args then { values.push(box(self.lower_value(arg))) }
         let result = self.materialize(MIRValue.EnumCase(MIREnumConstruction(enum_type, case_name, values)), enum_type)
         return Option[MIRExprResult].Some(MIRExprResult(enum_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
-    private lower_ref_expression(self mut ref, inner ref TypedExpr, result_type Type) Option[MIRExprResult] = {
+    private lower_ref_expression(self ref mut, inner ref TypedExpr, result_type Type) Option[MIRExprResult] = {
         return when self.lower_place(inner) in {
             .Some(place) then {
                 let result = self.materialize(MIRValue.Ref(place, self.reference_kind(result_type), MIRReferenceAllocation.StackBorrow()), result_type)
@@ -2307,7 +2307,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_trait_object_conversion(self mut ref, inner ref TypedExpr, trait_type Type, concrete_type Type, result_type Type) Option[MIRExprResult] = {
+    private lower_trait_object_conversion(self ref mut, inner ref TypedExpr, trait_type Type, concrete_type Type, result_type Type) Option[MIRExprResult] = {
         let trait_name = when trait_type in { .TraitObject(name, _) then name, .ReferenceType(inner_ref) then when inner_ref in { .TraitObject(name, _) then name, _ then "" }, _ then "" }
         let trait_args = self.trait_object_type_args(trait_type)
         let value = MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.lower_value(inner)), self.ownership_use(inner), trait_name, trait_args, concrete_type, result_type))
@@ -2315,7 +2315,7 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
-    private lower_trait_method_call(self mut ref, receiver ref TypedExpr, trait_type Type, method_name String, method_index Int, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
+    private lower_trait_method_call(self ref mut, receiver ref TypedExpr, trait_type Type, method_name String, method_index Int, args ref List[ref TypedExpr], result_type Type) Option[MIRExprResult] = {
         let trait_name = when trait_type in { .TraitObject(name, _) then name, .ReferenceType(inner_ref) then when inner_ref in { .TraitObject(name, _) then name, _ then "" }, _ then "" }
         let trait_args = self.trait_object_type_args(trait_type)
         let mut values = List[ref MIRValue].new()
@@ -2333,7 +2333,7 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
-    private lower_intrinsic_call(self mut ref, intrinsic_node TypedIntrinsic) Option[MIRExprResult] = {
+    private lower_intrinsic_call(self ref mut, intrinsic_node TypedIntrinsic) Option[MIRExprResult] = {
         let node = self.lower_intrinsic(intrinsic_node)
         let result_type = self.intrinsic_result_type(intrinsic_node)
         if self.type_is_void(result_type) then {
@@ -2344,7 +2344,7 @@ given MIRFunctionBuilder {
         return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
 
-    private lower_intrinsic(self mut ref, intrinsic_node TypedIntrinsic) MIRIntrinsic = {
+    private lower_intrinsic(self ref mut, intrinsic_node TypedIntrinsic) MIRIntrinsic = {
         return when intrinsic_node in {
             .AllocMemory(count, result_type) then MIRIntrinsic.AllocMemory(box(self.lower_value(count)), result_type),
             .DeallocMemory(pointer_expr) then MIRIntrinsic.DeallocMemory(box(self.lower_value(pointer_expr))),
@@ -2384,7 +2384,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_lambda_expression(self mut ref, params List[TypedParam], return_type Type, body ref TypedExpr, lambda_type Type) Option[MIRExprResult] = {
+    private lower_lambda_expression(self ref mut, params List[TypedParam], return_type Type, body ref TypedExpr, lambda_type Type) Option[MIRExprResult] = {
         let mut captures = List[ref Symbol].new()
         let mut capture_sources = List[MIRPlace].new()
         self.collect_captures(body, params, captures.ref)
@@ -2413,7 +2413,7 @@ given MIRFunctionBuilder {
         return out
     }
 
-    private lower_value(self mut ref, expression ref TypedExpr) MIRValue = {
+    private lower_value(self ref mut, expression ref TypedExpr) MIRValue = {
         when expression.expr_kind in {
             .RefExpr(inner) then when self.lower_place(inner) in {
                 .Some(place) then { return MIRValue.Ref(place, self.reference_kind(expression.expr_type), MIRReferenceAllocation.StackBorrow()) },
@@ -2437,7 +2437,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_borrowed_source_value(self mut ref, expression ref TypedExpr) MIRValue = {
+    private lower_borrowed_source_value(self ref mut, expression ref TypedExpr) MIRValue = {
         if expression.expr_kind is .CastExpr(_, inner) and self.is_ownership_preserving_place_cast(inner.expr_type, expression.expr_type) then {
             return self.lower_borrowed_source_value(inner)
         }
@@ -2456,11 +2456,11 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_uniqueness_probe_value(self mut ref, expression ref TypedExpr) MIRValue = {
+    private lower_uniqueness_probe_value(self ref mut, expression ref TypedExpr) MIRValue = {
         return self.lower_borrowed_source_value(expression)
     }
 
-    private lower_operand(self mut ref, expression ref TypedExpr) MIROperand = {
+    private lower_operand(self ref mut, expression ref TypedExpr) MIROperand = {
         return when self.lower_expression(expression) in {
             .Some(result) then when result.operand in {
                 .Some(operand) then operand,
@@ -2473,7 +2473,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_operand_for_expected_type(self mut ref, expression ref TypedExpr, expected_type Type) MIROperand = {
+    private lower_operand_for_expected_type(self ref mut, expression ref TypedExpr, expected_type Type) MIROperand = {
         return when self.lower_expression(expression) in {
             .Some(result) then when result.operand in {
                 .Some(operand) then self.adapt_operand_to_expected_type(operand, result.result_type, expected_type),
@@ -2486,7 +2486,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private materialize(self mut ref, value MIRValue, result_type Type) MIROperand = {
+    private materialize(self ref mut, value MIRValue, result_type Type) MIROperand = {
         if self.type_is_void_or_never(result_type) then { return MIROperand.Constant(MIRConstant.Void()) }
         let local = self.make_temporary(result_type, "tmp")
         self.append_statement(MIRStatement.Declare(local.id))
@@ -2494,7 +2494,7 @@ given MIRFunctionBuilder {
         return MIROperand.Local(local.id)
     }
 
-    private lower_place(self mut ref, expression ref TypedExpr) Option[MIRPlace] = {
+    private lower_place(self ref mut, expression ref TypedExpr) Option[MIRPlace] = {
         return when expression.expr_kind in {
             .Variable(symbol) then {
                 when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
@@ -2608,7 +2608,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private lower_materialized_member_path_place(self mut ref, expression ref TypedExpr) Option[MIRPlace] = {
+    private lower_materialized_member_path_place(self ref mut, expression ref TypedExpr) Option[MIRPlace] = {
         return when expression.expr_kind in {
             .MemberPath(base, path) then {
                 let lowered_base = self.lower_expression(base)
@@ -2675,11 +2675,11 @@ given MIRFunctionBuilder {
         }
     }
 
-    private make_synthetic_symbol(self mut ref, name String, symbol_type Type) Symbol = {
+    private make_synthetic_symbol(self ref mut, name String, symbol_type Type) Symbol = {
         return Symbol(self.context.allocate_unindexed(name, DefKind.Variable()), symbol_type, SymbolKind.Variable(VariableKind.Value()))
     }
 
-    private capture_place(self mut ref, symbol ref Symbol) MIRPlace = {
+    private capture_place(self ref mut, symbol ref Symbol) MIRPlace = {
         let name = self.context.symbol_name(symbol)
         when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
             .Some(place) then { return place },
@@ -2701,13 +2701,13 @@ given MIRFunctionBuilder {
         }
     }
 
-    private collect_captures(self mut ref, expr ref TypedExpr, params List[TypedParam], out mut ref List[ref Symbol]) Void = {
+    private collect_captures(self ref mut, expr ref TypedExpr, params List[TypedParam], out ref mut List[ref Symbol]) Void = {
         let mut param_names = Set[String].new()
         for p in params then { param_names.insert(p.name) }
         self.collect_captures_expr(expr, param_names, out)
     }
 
-    private collect_captures_expr(self mut ref, expr ref TypedExpr, param_names Set[String], out mut ref List[ref Symbol]) Void = {
+    private collect_captures_expr(self ref mut, expr ref TypedExpr, param_names Set[String], out ref mut List[ref Symbol]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 let name = self.context.symbol_name(symbol)
@@ -2798,7 +2798,7 @@ given MIRFunctionBuilder {
         }
     }
 
-    private collect_captures_stmt(self mut ref, stmt ref TypedStatement, param_names Set[String], out mut ref List[ref Symbol]) Void = {
+    private collect_captures_stmt(self ref mut, stmt ref TypedStatement, param_names Set[String], out ref mut List[ref Symbol]) Void = {
         when stmt in {
             .LetStmt(_, value, _) then self.collect_captures_expr(value, param_names, out),
             .PairLetStmt(_, _, _, value, _) then self.collect_captures_expr(value, param_names, out),

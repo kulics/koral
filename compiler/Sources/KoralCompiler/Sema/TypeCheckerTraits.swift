@@ -256,7 +256,7 @@ extension TypeChecker {
       if let receiver = method.parameters.first, receiver.name == "self",
          !isObjectSafeReceiverType(receiver.type)
       {
-        reasons.append("method '\(name)' receiver must be 'self ref' or 'self mut ref'")
+        reasons.append("method '\(name)' receiver must be 'self ref' or 'self ref mut'")
       }
 
       // Rule 2: Self must not appear in parameter types (except receiver) or return type

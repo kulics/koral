@@ -1224,7 +1224,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
         } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // mut ref -> ref widening
+          // ref mut -> ref widening
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
@@ -1247,7 +1247,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // mut ref → ref widening: pass through unchanged
+          // ref mut → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -1332,7 +1332,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = ptr.type else {
         throw SemanticError(.generic("cannot use .val on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "mut ptr")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "ptr mut")
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
     case "spawn_thread":
@@ -1345,10 +1345,10 @@ extension TypeChecker {
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
       guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be UInt8 ptr mut ptr"))
+        throw SemanticError(.generic("spawn_thread: first argument must be UInt8 ptr ptr mut"))
       }
       guard case .mutablePointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be UInt64 mut ptr"))
+        throw SemanticError(.generic("spawn_thread: second argument must be UInt64 ptr mut"))
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

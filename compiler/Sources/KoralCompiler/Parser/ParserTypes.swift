@@ -25,42 +25,31 @@ extension Parser {
     var prefixes: [TypeModifierPrefix] = []
 
     while true {
-      if currentToken === .mutKeyword {
-        let nextToken = lexer.peekNextToken()
-        if nextToken === .refKeyword {
-          try match(.mutKeyword)
-          try match(.refKeyword)
-          prefixes.append(.reference(mutable: true))
-          continue
-        }
-        if nextToken === .ptrKeyword {
-          try match(.mutKeyword)
-          try match(.ptrKeyword)
-          prefixes.append(.pointer(mutable: true))
-          continue
-        }
-        if nextToken === .weakrefKeyword {
-          try match(.mutKeyword)
-          try match(.weakrefKeyword)
-          prefixes.append(.weakReference(mutable: true))
-          continue
-        }
-        break
-      }
-
       if currentToken === .refKeyword {
         try match(.refKeyword)
-        prefixes.append(.reference(mutable: false))
+        let mutable = currentToken === .mutKeyword
+        if mutable {
+          try match(.mutKeyword)
+        }
+        prefixes.append(.reference(mutable: mutable))
         continue
       }
       if currentToken === .ptrKeyword {
         try match(.ptrKeyword)
-        prefixes.append(.pointer(mutable: false))
+        let mutable = currentToken === .mutKeyword
+        if mutable {
+          try match(.mutKeyword)
+        }
+        prefixes.append(.pointer(mutable: mutable))
         continue
       }
       if currentToken === .weakrefKeyword {
         try match(.weakrefKeyword)
-        prefixes.append(.weakReference(mutable: false))
+        let mutable = currentToken === .mutKeyword
+        if mutable {
+          try match(.mutKeyword)
+        }
+        prefixes.append(.weakReference(mutable: mutable))
         continue
       }
       break

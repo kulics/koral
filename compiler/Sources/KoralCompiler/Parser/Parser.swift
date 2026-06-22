@@ -325,7 +325,7 @@ public class Parser {
 
   func canStartTypeSyntax() -> Bool {
     switch currentToken {
-    case .selfTypeKeyword, .leftBracket, .refKeyword, .ptrKeyword, .weakrefKeyword, .mutKeyword:
+    case .selfTypeKeyword, .leftBracket, .refKeyword, .ptrKeyword, .weakrefKeyword:
       return true
     case .identifier:
       return true

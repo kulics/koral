@@ -1,14 +1,14 @@
 using std::os { env }
 
 public type MIRLowerer(
-    program mut ref MonomorphizedProgram,
+    program ref mut MonomorphizedProgram,
     context CompilerContext,
     mut pending_work_items List[ref MIRFunctionWorkItem],
     mut streaming_nodes_prepared Bool,
 )
 
 given MIRLowerer {
-    public new(program mut ref MonomorphizedProgram, context CompilerContext) MIRLowerer =
+    public new(program ref mut MonomorphizedProgram, context CompilerContext) MIRLowerer =
         MIRLowerer(program, context, List[ref MIRFunctionWorkItem].new(), false)
 
     public metadata_program(self) ref MIRProgram = {
@@ -122,7 +122,7 @@ given MIRLowerer {
         return program
     }
 
-    public lower_next_work_item(self mut ref) Option[ref MIRFunction] = {
+    public lower_next_work_item(self ref mut) Option[ref MIRFunction] = {
         self.prepare_streaming_nodes()
 
         while true then {
@@ -139,7 +139,7 @@ given MIRLowerer {
         return Option[ref MIRFunction].None()
     }
 
-    private prepare_streaming_nodes(self mut ref) Void = {
+    private prepare_streaming_nodes(self ref mut) Void = {
         if self.streaming_nodes_prepared then {
             return
         }
@@ -152,7 +152,7 @@ given MIRLowerer {
         self.streaming_nodes_prepared = true
     }
 
-    private enqueue_node_work_items(self mut ref, node_ref ref TypedDecl) Void = {
+    private enqueue_node_work_items(self ref mut, node_ref ref TypedDecl) Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier)
@@ -217,7 +217,7 @@ given MIRLowerer {
         }
     }
 
-    public lower(self mut ref) ref MIRProgram = {
+    public lower(self ref mut) ref MIRProgram = {
         let program = self.metadata_program()
         let mut functions = List[ref MIRFunction].new()
         while true then {
@@ -331,9 +331,9 @@ given MIRLowerer {
     private collect_ordered_trait_members(
         self,
         trait_name String,
-        ordered mut ref List[TypedTraitMember],
-        visited_traits mut ref Set[String],
-        seen_methods mut ref Set[String],
+        ordered ref mut List[TypedTraitMember],
+        visited_traits ref mut Set[String],
+        seen_methods ref mut Set[String],
     ) Void = {
         if visited_traits.contains(trait_name) then { return }
         visited_traits.insert(trait_name)
@@ -485,7 +485,7 @@ given MIRReferenceAllocationPromoter {
         return MIRReferenceAllocationPromoter(program)
     }
 
-    public promote(self mut ref) ref MIRProgram = {
+    public promote(self ref mut) ref MIRProgram = {
         let summary_def_id_by_identity_key = self.build_summary_def_id_by_identity_key()
         let mut summaries = Dict[UInt, MIRReferenceParameterSummary].new()
         let mut changed = true
@@ -691,7 +691,7 @@ given MIRReferenceEscapeAnalyzer {
         )
     }
 
-    public analyze(self mut ref) MIRReferenceEscapeAnalysis = {
+    public analyze(self ref mut) MIRReferenceEscapeAnalysis = {
         self.collect_dependencies_and_escapes()
         self.propagate_escapes_through_dependencies()
 
@@ -724,7 +724,7 @@ given MIRReferenceEscapeAnalyzer {
         )
     }
 
-    private collect_dependencies_and_escapes(self mut ref) Void = {
+    private collect_dependencies_and_escapes(self ref mut) Void = {
         for block in self.function.blocks then {
             for statement in block.statements then {
                 when statement.val in {
@@ -765,7 +765,7 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private propagate_escapes_through_dependencies(self mut ref) Void = {
+    private propagate_escapes_through_dependencies(self ref mut) Void = {
         let mut changed = true
         while changed then {
             changed = false
@@ -800,21 +800,21 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private mark_stored_escaping_references(self mut ref, value MIRValue) Void = {
+    private mark_stored_escaping_references(self ref mut, value MIRValue) Void = {
         let deps = self.reference_dependencies_in_value(value)
         for dep in deps then {
             self.stored_escaping_local_ids.insert(dep.raw_value)
         }
     }
 
-    private mark_return_escaping_references(self mut ref, value MIRValue) Void = {
+    private mark_return_escaping_references(self ref mut, value MIRValue) Void = {
         let deps = self.reference_dependencies_in_value(value)
         for dep in deps then {
             self.return_escaping_local_ids.insert(dep.raw_value)
         }
     }
 
-    private mark_stored_call_arguments(self mut ref, value MIRValue) Void = {
+    private mark_stored_call_arguments(self ref mut, value MIRValue) Void = {
         when value in {
             .Call(call) then {
                 self.mark_stored_arguments_for_callee(call.callee, call.arguments, call.result_type)
@@ -846,7 +846,7 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private mark_stored_arguments_for_callee(self mut ref, callee MIROperand, arguments List[ref MIRValue], result_type Type) Void = {
+    private mark_stored_arguments_for_callee(self ref mut, callee MIROperand, arguments List[ref MIRValue], result_type Type) Void = {
         when callee in {
             .Function(symbol) then {
                 let stored_parameters = when self.parameter_summary_for_call(symbol, arguments, result_type) in {
@@ -865,7 +865,7 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private mark_stored_intrinsic_arguments(self mut ref, node MIRIntrinsic) Void = {
+    private mark_stored_intrinsic_arguments(self ref mut, node MIRIntrinsic) Void = {
         when node in {
             .InitMemory(_, value) then self.mark_stored_escaping_references(value.val),
             .SpawnThread(_, _, closure, _) then self.mark_stored_escaping_references(closure.val),
@@ -873,7 +873,7 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private reference_dependencies_in_value(self mut ref, value MIRValue) List[MIRLocalID] = {
+    private reference_dependencies_in_value(self ref mut, value MIRValue) List[MIRLocalID] = {
         if not self.type_contains_escaping_references(self.type_of_value(value)) then {
             return when value in {
                 .Lambda(lambda) then self.lambda_capture_dependencies(lambda),
@@ -927,7 +927,7 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private return_parameter_dependencies(self mut ref, call MIRCall) List[MIRLocalID] = {
+    private return_parameter_dependencies(self ref mut, call MIRCall) List[MIRLocalID] = {
         return when call.callee in {
             .Function(symbol) then {
                 let return_parameters = when self.parameter_summary_for_call(symbol, call.arguments, call.result_type) in {
@@ -948,7 +948,7 @@ given MIRReferenceEscapeAnalyzer {
         }
     }
 
-    private lambda_capture_dependencies(self mut ref, lambda MIRLambda) List[MIRLocalID] = {
+    private lambda_capture_dependencies(self ref mut, lambda MIRLambda) List[MIRLocalID] = {
         let mut deps = List[MIRLocalID].new()
         for capture_source in lambda.capture_sources then {
             when self.root_local_of_place(capture_source) in {
@@ -1200,7 +1200,7 @@ given MIRReferenceEscapeAnalyzer {
         return self.value_types(arguments)
     }
 
-    private add_dependencies(self mut ref, local MIRLocalID, deps List[MIRLocalID]) Void = {
+    private add_dependencies(self ref mut, local MIRLocalID, deps List[MIRLocalID]) Void = {
         let mut existing = self.dependencies_by_local_id.get(local.raw_value) or else List[MIRLocalID].new()
         self.local_list_union_into(existing.ref, deps)
         self.dependencies_by_local_id.insert(local.raw_value, existing)
@@ -1318,7 +1318,7 @@ given MIRReferenceEscapeAnalyzer {
         return false
     }
 
-    private local_list_union_into(self ref, dest mut ref List[MIRLocalID], source List[MIRLocalID]) Void = {
+    private local_list_union_into(self ref, dest ref mut List[MIRLocalID], source List[MIRLocalID]) Void = {
         let _ = self
         for value in source then {
             let mut present = false
@@ -1363,7 +1363,7 @@ given MIRReferenceAllocationFunctionPromoter {
         )
     }
 
-    public promote(self mut ref) ref MIRFunction = {
+    public promote(self ref mut) ref MIRFunction = {
         let mut blocks = List[ref MIRBasicBlock].new()
         for block in self.function.blocks then {
             let mut statements = List[ref MIRStatement].new()
@@ -1383,7 +1383,7 @@ given MIRReferenceAllocationFunctionPromoter {
         ))
     }
 
-    private promote_statement(self mut ref, statement MIRStatement) MIRStatement = {
+    private promote_statement(self ref mut, statement MIRStatement) MIRStatement = {
         return when statement in {
             .Assign(place, value) then {
                 yield when place in {
@@ -1406,7 +1406,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    private promote_escaping_call_arguments(self mut ref, value MIRValue) MIRValue = {
+    private promote_escaping_call_arguments(self ref mut, value MIRValue) MIRValue = {
         return when value in {
             .Call(call) then MIRValue.Call(MIRCall(
                 call.callee,
@@ -1419,7 +1419,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    private promote_arguments(self mut ref, arguments List[ref MIRValue], callee MIROperand, result_type Type) List[ref MIRValue] = {
+    private promote_arguments(self ref mut, arguments List[ref MIRValue], callee MIROperand, result_type Type) List[ref MIRValue] = {
         return when callee in {
             .Function(symbol) then {
                 let stored_parameters = when self.parameter_summary_for_call(symbol, arguments, result_type) in {
@@ -1446,7 +1446,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    private promote_intrinsic(self mut ref, node MIRIntrinsic) MIRIntrinsic = {
+    private promote_intrinsic(self ref mut, node MIRIntrinsic) MIRIntrinsic = {
         return when node in {
             .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(pointer, box(self.promote_direct_references(value.val))),
             .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(out_handle, out_tid, box(self.promote_direct_references(closure.val)), stack_size),
@@ -1454,7 +1454,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    private promote_direct_references(self mut ref, value MIRValue) MIRValue = {
+    private promote_direct_references(self ref mut, value MIRValue) MIRValue = {
         return when value in {
             .Ref(place, kind, allocation) then when allocation in {
                 .StackBorrow() then MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned()),

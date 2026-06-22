@@ -102,7 +102,7 @@ given StdoutPipe {
 }
 
 given StdoutPipe as Reader {
-    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given StderrPipe {
@@ -110,7 +110,7 @@ given StderrPipe {
 }
 
 given StderrPipe as Reader {
-    public read(self ref, into: mut ref List[UInt8], range Range[UInt]) Result[UInt]
+    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given Process {

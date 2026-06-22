@@ -11,16 +11,13 @@ extension Parser {
     }
 
     var selfType: TypeNode = .inferredSelf
-    if currentToken === .mutKeyword {
-      try match(.mutKeyword)
-      if currentToken !== .refKeyword {
-        throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+    if currentToken === .refKeyword {
+      try match(.refKeyword)
+      let mutable = currentToken === .mutKeyword
+      if mutable {
+        try match(.mutKeyword)
       }
-      try match(.refKeyword)
-      selfType = .reference(selfType, mutable: true)
-    } else if currentToken === .refKeyword {
-      try match(.refKeyword)
-      selfType = .reference(selfType, mutable: false)
+      selfType = .reference(selfType, mutable: mutable)
     }
 
     if currentToken !== .comma && currentToken !== .rightParen {

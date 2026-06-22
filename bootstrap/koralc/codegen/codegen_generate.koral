@@ -280,14 +280,14 @@ given CodeGen {
     /// 生成完整的 C 源代码
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
-    public generate_into_buffer(self mut ref) Void = {
+    public generate_into_buffer(self ref mut) Void = {
         self.validate_codegen_inputs()
         self.generate_prelude_into_buffer()
         self.emit_mir_function_implementations()
         self.finalize_program_into_buffer()
     }
 
-    public generate_prelude_into_buffer(self mut ref) Void = {
+    public generate_prelude_into_buffer(self ref mut) Void = {
         self.buffer = box(CodegenBuffer.new())
         self.precompute_c_type_name_cache()
         self.precompute_callable_c_name_cache()
@@ -301,18 +301,18 @@ given CodeGen {
         self.emit_vtable_definitions()
     }
 
-    public finalize_program_into_buffer(self mut ref) Void = {
+    public finalize_program_into_buffer(self ref mut) Void = {
         self.emit_c_main()
     }
 
     public generated_buffer(self ref) ref CodegenBuffer = self.buffer
 
-    public generate(self mut ref) String = {
+    public generate(self ref mut) String = {
         self.generate_into_buffer()
         return self.buffer.to_string()
     }
 
-    private scan_program_codegen_inputs(self mut ref) ForeignDeclarations = {
+    private scan_program_codegen_inputs(self ref mut) ForeignDeclarations = {
         let mut empty_types = List[String].new()
         let mut foreign_functions = List[ForeignFunctionPrototype].new()
         let stdlib_functions = ["exit", "abort"]
@@ -390,7 +390,7 @@ given CodeGen {
     /// 收集、拓扑排序、生成类型定义（结构体/枚举，含 copy/drop）
     ///
     /// Requirements: 3.1–3.8, 13.1
-    emit_type_declarations(self mut ref) Void = {
+    emit_type_declarations(self ref mut) Void = {
         let sorted_decls = self.collect_and_sort_type_declarations()
 
         for decl in sorted_decls then {
@@ -448,7 +448,7 @@ given CodeGen {
 
     // ── emit_mir_global_variables ────────────────────────────────────────────
 
-    emit_mir_global_variables(self mut ref) Void = {
+    emit_mir_global_variables(self ref mut) Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignGlobalVariable(identifier, mutable, decl_type) then {
@@ -476,13 +476,13 @@ given CodeGen {
     /// 生成 vtable 定义（调用 process_vtable_requests）
     ///
     /// Requirements: 10.1–10.5
-    emit_vtable_definitions(self mut ref) Void = {
+    emit_vtable_definitions(self ref mut) Void = {
         self.process_vtable_requests()
     }
 
     // ── emit_mir_function_implementations ────────────────────────────────────
 
-    emit_mir_function_implementations(self mut ref) Void = {
+    emit_mir_function_implementations(self ref mut) Void = {
         for function in self.program.functions then {
             self.emit_mir_global_function(function)
         }
@@ -493,7 +493,7 @@ given CodeGen {
         identifier ref Symbol,
         params List[TypedParam],
         return_type Type,
-        emitted mut ref Set[String],
+        emitted ref mut Set[String],
     ) Void = {
         let c_name = self.callable_c_name(identifier)
         if emitted.contains(c_name) then { return }
@@ -509,7 +509,7 @@ given CodeGen {
         self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n")
     }
 
-    private emit_symbol_function_declaration(self ref, symbol ref Symbol, emitted mut ref Set[String]) Void = {
+    private emit_symbol_function_declaration(self ref, symbol ref Symbol, emitted ref mut Set[String]) Void = {
         let c_name = self.callable_c_name(symbol)
         if emitted.contains(c_name) then { return }
         emitted.insert(c_name)
@@ -531,7 +531,7 @@ given CodeGen {
     /// 生成 C main 函数
     ///
     /// Requirements: 12.6, 12.7, 12.8
-    emit_c_main(self mut ref) Void = {
+    emit_c_main(self ref mut) Void = {
         let has_global_inits = self.has_mir_global_initializers()
         let has_user_main = when self.user_main_function_name in {
             .Some(_) then true,
@@ -603,7 +603,7 @@ given CodeGen {
         return false
     }
 
-    private emit_mir_global_initializers(self mut ref) Void = {
+    private emit_mir_global_initializers(self ref mut) Void = {
         for global in self.program.globals then {
             when global in {
                 .GlobalVariable(identifier, initializer_function, _, _) then {

@@ -18,11 +18,11 @@ protected type TypeCheckerStorage(
     mut function_return_context FunctionReturnContext,
     mut in_loop Bool,
     mut in_finally Bool,
-    mut yield_targets List[mut ref YieldTarget],
+    mut yield_targets List[ref mut YieldTarget],
     mut constraint_solver ConstraintSolver,
     mut trait_registry TraitRegistry,
     mut generic_param_constraints Dict[String, List[GenericConstraintBound]],
-    mut generic_templates mut ref GenericTemplateRegistry,
+    mut generic_templates ref mut GenericTemplateRegistry,
     mut instantiation_requests Set[InstantiationRequest],
     mut import_graph Option[ImportGraph],
     mut explicit_trait_conformances Set[ExplicitTraitConformanceKey],
@@ -38,7 +38,7 @@ protected type TypeCheckerStorage(
     mut current_scope Scope,
 )
 
-public type TypeChecker(protected mut storage mut ref TypeCheckerStorage)
+public type TypeChecker(protected mut storage ref mut TypeCheckerStorage)
 
 protected type IfChain(
     arms List[Pair[ref Expr, ref Expr]],
@@ -118,7 +118,7 @@ given TypeChecker {
             FunctionReturnContext(Option[Type].None(), Option[Type].None(), false),
             false,
             false,
-            List[mut ref YieldTarget].new(),
+            List[ref mut YieldTarget].new(),
             ConstraintSolver.new(),
             TraitRegistry.new(),
             Dict[String, List[GenericConstraintBound]].new(),
@@ -144,7 +144,7 @@ given TypeChecker {
     }
 
     protected register_receiver_dispatch_for_given_members(
-        self mut ref,
+        self ref mut,
         target_type Type,
         trait_name Option[String],
         members List[ref TypedGivenMember],
@@ -383,7 +383,7 @@ given TypeChecker {
     // Reuse the pass1 DefId for top-level declarations, matching Swift's
     // makeGlobalSymbol/getOrAllocateTypeDefId flow instead of allocating fallback ids.
     protected get_or_allocate_top_level_def_id(
-        self mut ref,
+        self ref mut,
         name String,
         kind DefKind,
         access AccessModifier,
@@ -403,7 +403,7 @@ given TypeChecker {
     }
 
     protected make_top_level_symbol(
-        self mut ref,
+        self ref mut,
         name String,
         symbol_type Type,
         kind SymbolKind,
@@ -426,7 +426,7 @@ given TypeChecker {
     }
 
     protected make_top_level_type_symbol(
-        self mut ref,
+        self ref mut,
         name String,
         type_kind TypeDefKind,
         symbol_type Type,
@@ -732,7 +732,7 @@ given TypeChecker {
                 yield out
             },
             .MutableReferenceType(inner) then {
-                let mut out = "mut ref "
+                let mut out = "ref mut "
                 out.push_string(self.display_type_name(inner.val))
                 yield out
             },
@@ -742,7 +742,7 @@ given TypeChecker {
                 yield out
             },
             .MutablePointerType(inner) then {
-                let mut out = "mut ptr "
+                let mut out = "ptr mut "
                 out.push_string(self.display_type_name(inner.val))
                 yield out
             },
@@ -752,7 +752,7 @@ given TypeChecker {
                 yield out
             },
             .MutableWeakReferenceType(inner) then {
-                let mut out = "mut weakref "
+                let mut out = "weakref mut "
                 out.push_string(self.display_type_name(inner.val))
                 yield out
             },
@@ -931,7 +931,7 @@ given TypeChecker {
         return false
     }
 
-    public check_program(self mut ref, program Program, retain_checked_template_bodies Bool) TypedProgram = {
+    public check_program(self ref mut, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
         let mut typed_decls = List[ref TypedDecl].new()
         for decl in program.declarations then {
@@ -957,7 +957,7 @@ given TypeChecker {
 
     // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
     // Each node carries its own source_file for accurate diagnostics.
-    public check_loaded_nodes(self mut ref, nodes List[Pair[LoadedNode, List[String]]], retain_checked_template_bodies Bool) TypedProgram = {
+    public check_loaded_nodes(self ref mut, nodes List[Pair[LoadedNode, List[String]]], retain_checked_template_bodies Bool) TypedProgram = {
         let debug_progress = self.sema_progress_debug_enabled()
         if debug_progress then {
             println("[sema-phase] pass2: collect signatures begin nodes=\(nodes.count())")
@@ -1066,7 +1066,7 @@ given TypeChecker {
         return TypedProgram(typed_decls, self.context().get_names())
     }
 
-    private finalize_checked_decl_constraints(self mut ref, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
+    private finalize_checked_decl_constraints(self ref mut, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
         let subst_result = self.storage.constraint_solver.solve()
         return when subst_result in {
             .Ok(subst) then {
@@ -1095,7 +1095,7 @@ given TypeChecker {
         }
     }
 
-    private collect_signatures(self mut ref, program Program) Void = {
+    private collect_signatures(self ref mut, program Program) Void = {
         for decl in program.declarations then {
             when decl in {
                 .TraitDecl(_, _, _, _, _, _) then self.collect_decl_signature(decl),
@@ -1110,7 +1110,7 @@ given TypeChecker {
         }
     }
 
-    private collect_decl_signature(self mut ref, decl Decl) Void = {
+    private collect_decl_signature(self ref mut, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let resolved_type = self.lookup_current_file_type_symbol(name)
@@ -1877,7 +1877,7 @@ given TypeChecker {
         }
     }
 
-    private mark_not_deref_type(self mut ref, type_params List[TypeParameter], type_node TypeNode, trait_name String) Void = {
+    private mark_not_deref_type(self ref mut, type_params List[TypeParameter], type_node TypeNode, trait_name String) Void = {
         if trait_name <> "Deref" then {
             self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Only 'not Deref' is currently supported"))
             return
@@ -1903,7 +1903,7 @@ given TypeChecker {
         }
     }
 
-    private check_given_not_trait_decl(self mut ref, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {
+    private check_given_not_trait_decl(self ref mut, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {
         let _ = span
         self.mark_not_deref_type(type_params, target_type, trait_name)
     }

@@ -314,15 +314,15 @@ public indirect enum Type: CustomStringConvertible {
     case .reference(let inner):
       return "ref \(inner.description)"
     case .mutableReference(let inner):
-      return "mut ref \(inner.description)"
+      return "ref mut \(inner.description)"
     case .pointer(let element):
       return "ptr \(element.description)"
     case .mutablePointer(let element):
-      return "mut ptr \(element.description)"
+      return "ptr mut \(element.description)"
     case .weakReference(let inner):
       return "weakref \(inner.description)"
     case .mutableWeakReference(let inner):
-      return "mut weakref \(inner.description)"
+      return "weakref mut \(inner.description)"
     case .genericParameter(let name):
       return name
     case .genericStruct(let template, let args):

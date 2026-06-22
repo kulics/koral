@@ -374,8 +374,8 @@ lowering helper that the backend calls.
 
 ### References, Pointers, And Escape Analysis
 
-Koral has managed references (`ref T`, `mut ref T`), weak references, and raw
-pointers (`ptr T`, `mut ptr T`). MIR should distinguish:
+Koral has managed references (`ref T`, `ref mut T`), weak references, and raw
+pointers (`ptr T`, `ptr mut T`). MIR should distinguish:
 
 - A place borrow from an addressable local or field.
 - An owned heap reference created for rvalues or escaping locals.
@@ -884,6 +884,6 @@ Additional fixes:
 
 Remaining work:
 - Bootstrap `--emit-c` generates `void` for generic types (check path works)
-- MIR `read[copy]` for mut ref field access through mut ref parameter
+- MIR `read[copy]` for ref mut field access through ref mut parameter
 - Unifier dictionary reuse
 - Runtime alloc tracking code removed from koral_runtime.c (was debug-only)
