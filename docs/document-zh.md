@@ -181,16 +181,16 @@ let (_, g) = (1, 2)                   // 丢弃第一个元素
 
 #### 引用创建规则（`.ref` / `box`）
 
-Koral 将 `ref` / `ref mut` 与 `ref $a` / `ref $a mut` 都作为受语言管理的引用类型：
+Koral 将 `ref` / `ref mut` 与 `ref 'a` / `ref 'a mut` 都作为受语言管理的引用类型：
 
 - `ref T` / `ref mut T` 是托管引用。
   - 允许逃逸。
   - 可以返回、存字段、存容器、存枚举 payload。
-- `ref $a T` / `ref $a mut T` 是借用引用。
+- `ref 'a T` / `ref 'a mut T` 是借用引用。
   - phase 1 只允许出现在函数参数和 receiver 位置。
   - 不允许返回，不允许存到字段、枚举 payload、全局或闭包环境。
 - 借用引用与托管引用的运行时布局相同，retain / release 行为也相同；区别只在前端静态语义。
-- `ref mut T` 可隐式转换为 `ref T`，`ref $a mut T` 可隐式转换为 `ref $a T`。反向转换不允许。
+- `ref mut T` 可隐式转换为 `ref T`，`ref 'a mut T` 可隐式转换为 `ref 'a T`。反向转换不允许。
 
 `.ref` 采用“借用优先”的固定语义：
 
@@ -202,8 +202,8 @@ Koral 将 `ref` / `ref mut` 与 `ref $a` / `ref $a mut` 都作为受语言管理
 
 receiver 语义也同步固定：
 
-- `self ref` 是 `self ref $_ Self` 的语法糖，表示借用 receiver。
-- `self ref mut` 是 `self ref $_ mut Self` 的语法糖。
+- `self ref` 是 `self ref '_ Self` 的语法糖，表示借用 receiver。
+- `self ref mut` 是 `self ref '_ mut Self` 的语法糖。
 - 若需要显式托管 receiver，必须写全称 `self ref Self` 或 `self ref mut Self`。
 - `self ref` 调用仍可接受右值接收者表达式，编译器会为这次调用物化稳定临时值；这个特例只适用于 receiver 调整，不会让右值上的 `.ref` 合法化。
 - `self ref mut` 仍然要求可写左值接收者。
@@ -213,7 +213,7 @@ let mut x = 10
 let rx ref mut Int = x.ref   // 托管期望类型触发局部提升
 
 let y = 10
-let ry ref $_ Int = y.ref    // 默认得到借用引用
+let ry ref '_ Int = y.ref    // 默认得到借用引用
 
 let owned ref mut Int = box(42) // box() 返回 ref mut T
 
@@ -503,27 +503,27 @@ let empty List[Int] = []             // 空字面量必须有类型上下文
 
 - `ref T` — 托管只读引用。支持 `.val` 读取，但不支持 `.val = expr` 赋值。
 - `ref mut T` — 托管可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
-- `ref $a T` — 借用只读引用。运行时布局与 `ref T` 相同，但前端禁止逃逸。
-- `ref $a mut T` — 借用可变引用。运行时布局与 `ref mut T` 相同，但前端禁止逃逸。
-- `ref mut T` 可隐式转换为 `ref T`，`ref $a mut T` 可隐式转换为 `ref $a T`。反向转换不允许。
+- `ref 'a T` — 借用只读引用。运行时布局与 `ref T` 相同，但前端禁止逃逸。
+- `ref 'a mut T` — 借用可变引用。运行时布局与 `ref mut T` 相同，但前端禁止逃逸。
+- `ref mut T` 可隐式转换为 `ref T`，`ref 'a mut T` 可隐式转换为 `ref 'a T`。反向转换不允许。
 
 使用 `.ref` 后缀表达式可以从值路径创建引用：
 
 ```koral
 let mut n = 42
-let a ref $_ mut Int = n.ref
+let a ref '_ mut Int = n.ref
 let b = a.val            // 解引用，得到 42
 a.val = 100              // 解引用赋值（ref mut 支持 .val = expr）
 
 let m = 42
-let c ref $_ Int = m.ref
+let c ref '_ Int = m.ref
 let d = c.val            // 解引用读取，得到 42
 // c.val = 100           // 错误：ref 不支持 .val 赋值
 
 let owned ref mut Int = n.ref // 托管期望类型触发局部提升
 ```
 
-`ref` / `ref mut` 与 `ref $a` / `ref $a mut` 在运行时都复用当前 Koral `ref` 的同一套 ABI、内存布局与 retain / release 行为。区别只在前端语义：借用引用不能逃逸，托管引用可以长期持有。`.ref` 默认先构造成借用引用；只有当前局部上下文已经明确要求托管引用时，编译器才会在当前函数内把这次构造提升为托管引用。`box(expr)` 则始终显式构造托管 `ref mut T`。
+`ref` / `ref mut` 与 `ref 'a` / `ref 'a mut` 在运行时都复用当前 Koral `ref` 的同一套 ABI、内存布局与 retain / release 行为。区别只在前端语义：借用引用不能逃逸，托管引用可以长期持有。`.ref` 默认先构造成借用引用；只有当前局部上下文已经明确要求托管引用时，编译器才会在当前函数内把这次构造提升为托管引用。`box(expr)` 则始终显式构造托管 `ref mut T`。
 
 指针类型同样区分只读和可变：
 
@@ -555,7 +555,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`ref` / `ref mut` 是可逃逸的托管引用，`ref $a` / `ref $a mut` 是不可逃逸的借用引用。两者运行时布局相同，retain / release 行为也相同，差异只体现在前端静态语义。`.ref` 默认构造借用引用；只有当前局部上下文已经明确要求托管引用时，才会发生局部提升。`box(expr)` 是显式托管构造。方法/下标接收者调整中，`self ref` / `self ref mut` 默认都是借用 receiver sugar；若要显式托管 receiver，必须写 `self ref Self` / `self ref mut Self`。
+- **引用（Reference）**：`ref` / `ref mut` 是可逃逸的托管引用，`ref 'a` / `ref 'a mut` 是不可逃逸的借用引用。两者运行时布局相同，retain / release 行为也相同，差异只体现在前端静态语义。`.ref` 默认构造借用引用；只有当前局部上下文已经明确要求托管引用时，才会发生局部提升。`box(expr)` 是显式托管构造。方法/下标接收者调整中，`self ref` / `self ref mut` 默认都是借用 receiver sugar；若要显式托管 receiver，必须写 `self ref Self` / `self ref mut Self`。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符

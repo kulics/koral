@@ -1013,11 +1013,41 @@ given Lexer {
             }
 
             if ch == '\'' then {
-                when self.read_rune(start_line, start_col) in {
-                    .Ok(_) then {},
-                    .Error(e) then {
-                        return self.fail(start_line, start_col, e.message())
-                    },
+                let saved_index = self.index
+                let next = self.peek() or else {
+                    return self.fail(start_line, start_col, "unterminated lifetime or rune literal")
+                }
+                if Lexer.is_identifier_start(next) then {
+                    // Could be lifetime ('a, '_ ) or rune literal ('a')
+                    // Build identifier and scan forward
+                    let mut name = String.new()
+                    name.push_rune('\'')
+                    name.push_rune(self.advance().unwrap())
+                    while self.peek() is .Some(c) and Lexer.is_identifier_continue(c) then {
+                        name.push_rune(self.advance().unwrap())
+                    }
+                    // Check if followed by closing '
+                    if self.peek() is .Some('\'') then {
+                        // Rune literal: 'a' — restore position and call read_rune
+                        self.index = saved_index
+                        when self.read_rune(start_line, start_col) in {
+                            .Ok(_) then {},
+                            .Error(e) then {
+                                return self.fail(start_line, start_col, e.message())
+                            },
+                        }
+                    } else {
+                        // Lifetime identifier: 'a
+                        self.add(TokenKind.LifetimeIdentifier(name), start_line, start_col)
+                    }
+                } else {
+                    // Not identifier start — rune literal
+                    when self.read_rune(start_line, start_col) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            return self.fail(start_line, start_col, e.message())
+                        },
+                    }
                 }
                 continue
             }

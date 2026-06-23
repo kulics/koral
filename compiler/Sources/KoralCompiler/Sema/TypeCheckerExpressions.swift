@@ -2014,10 +2014,10 @@ extension TypeChecker {
         try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref mut")
         return .derefExpression(expression: typedInner, type: innerType)
       } else if case .borrowedReference(let innerType, _) = typedInner.type {
-        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref $_")
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref '_")
         return .derefExpression(expression: typedInner, type: innerType)
       } else if case .mutableBorrowedReference(let innerType, _) = typedInner.type {
-        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref $_ mut")
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref '_ mut")
         return .derefExpression(expression: typedInner, type: innerType)
       } else if case .pointer(let elementType) = typedInner.type {
         try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr")
@@ -2091,8 +2091,8 @@ extension TypeChecker {
           : .reference(inner: typedInner.type)
       } else {
         refType = shouldProduceMutable
-          ? .mutableBorrowedReference(inner: typedInner.type, lifetime: "$_")
-          : .borrowedReference(inner: typedInner.type, lifetime: "$_")
+          ? .mutableBorrowedReference(inner: typedInner.type, lifetime: "'_")
+          : .borrowedReference(inner: typedInner.type, lifetime: "'_")
       }
       return .referenceExpression(expression: typedInner, type: refType)
 
@@ -7166,7 +7166,7 @@ extension TypeChecker {
         try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref mut")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutableBorrowedReference(let innerType, _):
-        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref $_ mut")
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref '_ mut")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutablePointer(let elementType):
         try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr mut")

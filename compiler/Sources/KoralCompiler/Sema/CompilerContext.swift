@@ -452,7 +452,6 @@ public final class CompilerContext: @unchecked Sendable {
 
     private func sanitizeLifetimeKey(_ lifetime: String) -> String {
         lifetime
-          .replacingOccurrences(of: "$", with: "D")
           .replacingOccurrences(of: "'", with: "Q")
     }
 

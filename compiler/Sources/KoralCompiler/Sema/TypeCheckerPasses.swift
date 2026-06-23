@@ -5,7 +5,7 @@ import Foundation
 
 extension TypeChecker {
   private func filterLifetimeTypeParameters(_ typeParameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
-    typeParameters.filter { !$0.name.hasPrefix("$") }
+    typeParameters.filter { !$0.name.hasPrefix("'") }
   }
 
   private func assertNoBorrowedReferenceType(
@@ -639,9 +639,9 @@ extension TypeChecker {
     case "MutRef":
       return .mutableReference(inner: genericArgs[0])
     case "BorrowRef":
-      return .borrowedReference(inner: genericArgs[0], lifetime: "$_")
+      return .borrowedReference(inner: genericArgs[0], lifetime: "'_")
     case "BorrowMutRef":
-      return .mutableBorrowedReference(inner: genericArgs[0], lifetime: "$_")
+      return .mutableBorrowedReference(inner: genericArgs[0], lifetime: "'_")
     case "WeakRef":
       return .weakReference(inner: genericArgs[0])
     case "MutWeakRef":

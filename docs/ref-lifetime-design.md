@@ -10,9 +10,9 @@
 
 本轮整改已经按既定范围落地完成，当前 compiler、bootstrap、std、tests、samples、toolchain 已对齐到新的 borrowed `ref` 固定语义：
 
-- 生命周期语法采用 `$a` / `$_`
-- `ref $a T` / `ref $a mut T` 作为借用引用类型接入前端类型系统
-- `self ref` / `self ref mut` 解释为 borrowed receiver sugar
+- 生命周期语法采用 `'a` / `'_`
+- `ref 'a T` / `ref 'a mut T` 作为借用引用类型接入前端类型系统
+- `self ref` / `self ref mut` 解释为 borrowed receiver sugar（等价于 `self ref '_ Self` / `self ref '_ mut Self`）
 - `self ref Self` / `self ref mut Self` 保留为显式托管 receiver
 - `.ref` 改成借用优先，只有当前局部上下文明确要求托管 `ref` 时才发生局部提升
 - compiler 与 bootstrap 中旧的跨函数逃逸分析兼容路径已删除
@@ -22,11 +22,11 @@
 
 ### 前端与类型系统
 
-- lexer / parser 支持 `$a`、`$_`、`ref $a T`、`ref $a mut T`
+- lexer / parser 支持 `'a`、`'_`、`ref 'a T`、`ref 'a mut T`
 - AST、Type、type resolver、monomorphizer、method lookup、trait dispatch 已识别 borrowed `ref`
 - receiver 语义完成切换：
-  - `self ref` => `self ref $_ Self`
-  - `self ref mut` => `self ref $_ mut Self`
+  - `self ref` => `self ref '_ Self`
+  - `self ref mut` => `self ref '_ mut Self`
   - `self ref Self` / `self ref mut Self` 继续表示托管 receiver
 - borrowed `ref` 的非法位置限制已接入：
   - 禁止返回
@@ -39,7 +39,7 @@
 
 - `.ref` 已改成 borrow-first 固定语义
 - 传给托管 `ref` / `ref mut` 形参时，会在当前函数内做局部托管提升
-- `ref mut` 与 `ref $a mut` 的规则保持对称
+- `ref mut` 与 `ref 'a mut` 的规则保持对称
 - MIR lowering、promotion、verifier、codegen 已按 borrowed / managed 分流后的语义刷新
 - lambda capture 被视为逃逸边界，禁止把 borrowed forwarding 错误回退成 stack borrow
 
@@ -88,7 +88,7 @@ Koral 后续将有两套 `ref` 语义：
   - 允许逃逸
   - 可以存字段、存容器、存枚举 payload、返回、跨函数长期持有
 
-- `ref $a T` / `ref $a mut T`
+- `ref 'a T` / `ref 'a mut T`
   - 借用 ref
   - 只允许出现在函数参数和 receiver 语义位置
   - 不允许逃逸
@@ -103,8 +103,8 @@ Koral 后续将有两套 `ref` 语义：
 本方案明确规定：
 
 - 借用 ref 与托管 ref 使用**相同的内存布局**
-- 借用 `ref $a T` 与托管 `ref T` 的 ABI 形状一致
-- 借用 `ref $a mut T` 与托管 `ref mut T` 的 ABI 形状一致
+- 借用 `ref 'a T` 与托管 `ref T` 的 ABI 形状一致
+- 借用 `ref 'a mut T` 与托管 `ref mut T` 的 ABI 形状一致
 - codegen / runtime 仍然沿用当前 Koral `ref` 的 retain / release 行为
 
 也就是说：
@@ -134,13 +134,13 @@ Koral 后续将有两套 `ref` 语义：
 本方案进一步规定：
 
 - 借用 ref 与托管 ref 产生相同的 retain / release 行为
-- 不因为类型写成 `ref $a`，就生成另一套特殊 retain / release 路径
+- 不因为类型写成 `ref 'a`，就生成另一套特殊 retain / release 路径
 - 生命周期限制只由前端检查保证，而不是由运行时对象种类保证
 
 可以把它理解为：
 
-- `ref $a T` 和 `ref T` 在运行时都是同一种 “Koral ref”
-- 只是 `ref $a T` 在语义上被禁止逃逸、禁止存储、禁止升级成长期所有权
+- `ref 'a T` 和 `ref T` 在运行时都是同一种 “Koral ref”
+- 只是 `ref 'a T` 在语义上被禁止逃逸、禁止存储、禁止升级成长期所有权
 
 因此本方案不是“新增一套 borrow runtime”；
 而是“在保留现有 runtime ref 机制的前提下，收紧语言前端语义”。
@@ -178,7 +178,7 @@ Koral 后续将有两套 `ref` 语义：
 
 ### 借用 ref
 
-`ref $a T` / `ref $a mut T` 是不可逃逸的借用 ref。
+`ref 'a T` / `ref 'a mut T` 是不可逃逸的借用 ref。
 
 属性：
 
@@ -187,191 +187,74 @@ Koral 后续将有两套 `ref` 语义：
 - phase 1 不允许返回
 - phase 1 不允许存字段 / 枚举 payload / 全局 / 闭包环境
 - 不允许转 `weakref`
-- `ref $a mut T` 可宽化为 `ref $a T`
+- `ref 'a mut T` 可宽化为 `ref 'a T`
 
 再次强调：这些限制是**静态语义限制**，不是运行时对象差异。
 
-## 语法问题与候选方案
+## 语法决策
 
-用户当前提出的核心问题是：`'a` 会让高亮器把它当成字符字面量相关语法，影响阅读体验。
-同时，生命周期未来还会进入泛型参数空间，所以**裸 `a` 也不能直接复用**。一旦写成：
+### 最终选择：前导 `'` + 严格小写
 
-```koral
-let f[a](x ref[a] Int) Int
-```
-
-就会和现有 `[]` 的泛型 / 下标表面语法共享同一条通道，未来很容易出现歧义。因此 Koral 的生命周期参数必须满足至少一条：
-
-- 要么有独立词法标记，例如 `'a`、`$a`
-- 要么有独立参数通道，而不是和普通泛型参数混在同一个 `[]` 里
-
-### Rust 是怎么做的
-
-Rust 使用前导 `'`：
-
-```rust
-fn f<'a>(x: &'a T) -> &'a T
-```
-
-Rust 之所以可行，不是因为 `'a` 天然没有歧义，而是因为：
-
-- Rust lexer 把 `'a`、`'_`、`'static` 识别成专门的 lifetime token
-- 字符字面量是 `'a'`，和 lifetime token 在词法层面可区分
-- 主流编辑器都有成熟的 Rust grammar / tree-sitter / textmate 支持
-
-结论：
-
-- **Rust 是靠完整工具链生态解决的，不是靠通用文本高亮自动解决的**
-
-### Haskell 是怎么做的
-
-Haskell 并没有 Rust 这一套前导 lifetime 语法。
-
-Haskell 里更常见的是：
-
-- `'` 作为标识符后缀的一部分，例如 `map'`
-- 某些扩展里用 `'Name` 做 quote，但那也依赖 Haskell 专用语法支持
-
-结论：
-
-- **Haskell 没有“用前导 `'` 表示生命周期并解决通用高亮问题”的现成经验可直接照搬**
-
-### Koral 的可选方案
-
-#### 方案 A：继续用 Rust 风格 `'a`
-
-示例：
+生命周期语法采用 Rust / OCaml 风格的前导 `'`，严格小写：
 
 ```koral
 let f['a](x ref 'a Int) Int
+let swap['a](x ref 'a mut Int, y ref 'a mut Int) Void
 ```
 
-优点：
-
-- 熟悉 Rust 的用户几乎零成本理解
-- 语义指向明确
-- 与 `'_` 这样的匿名 lifetime 形式自然匹配
-
-缺点：
-
-- 高亮器必须专门支持 Koral 语法，否则很容易把它当成字符字面量起始
-- 编辑器生态成本高
-- 在 markdown、终端、简单 tokenizer 环境里观感不稳定
-
-结论：
-
-- **如果 Koral 明确愿意维护自己的 tree-sitter / textmate 语法，这条路可以走**
-- **如果希望源码在弱工具环境里也尽量可读，这条路并不理想**
-
-#### 方案 B：用 `$a`
-
-示例：
+匿名生命周期使用 `'_`：
 
 ```koral
-let f[$a](x ref $a Int) Int
+self ref                // sugar for self ref '_ Self
+self ref mut            // sugar for self ref '_ mut Self
 ```
 
-优点：
+### 为什么用 `'a` 而不是 `$a`
 
-- 不会和字符字面量冲突
-- 词法上非常显眼
-- parser 和高亮器都比较容易区分
-- 与未来泛型参数并排出现时也没有歧义，例如 `let f[$a, T](x ref $a T) T`
+`$a` 工程上稳定但可读性差——`$` 在主流语言里的语义是变量展开（shell / PHP / 模板），用它表示 lifetime 不自然。`'a` 在 Rust / OCaml / SML / F# 里都有类型参数/lifetime 的语义基础，用户直觉上更容易接受。
 
-缺点：
+### 为什么严格小写
 
-- 风格上不够自然，比较像 shell / PHP 风格变量
-- 类型语法观感偏“工具味”
-- 后续和普通泛型参数并排出现时可读性一般
-
-结论：
-
-- **工程上最稳，语法上不如 Rust 风格自然**
-
-#### 方案 C：用 `` `a` ``
-
-示例：
+遵循 Rust / OCaml 的惯例：类型参数大写（`T`、`U`），lifetime 参数小写（`'a`、`'b`）。这样在泛型列表里两者一目了然：
 
 ```koral
-let f[`a](x ref `a Int) Int
+let f['a, T](x ref 'a T) T
+//    ^^  ^
+//    |   └─ type parameter (大写)
+//    └──── lifetime parameter (小写 + ' 前缀)
 ```
 
-优点：
+### 为什么不和字符字面量冲突
 
-- 与字符字面量不冲突
+Koral 的 rune literal 是 `'X'`（两个引号闭合），lifetime 是 `'a`（只有前导引号）。Lexer 只需要一个字符的 lookahead：
 
-缺点：
-
-- 键入不顺手
-- markdown、文档、终端里噪音很大
-- 很多工具会把它当成别的 quoting 语法
-
-结论：
-
-- **不推荐**
-
-#### 方案 D：裸 `a` / `ref[a] T`
-
-示例：
-
-```koral
-let f[a](x ref[a] Int) Int
-let g[a](x ref[a] mut List[Int]) Void
+```
+遇到 '
+ ├─ 下一个是字母 → 读 identifier
+ │   ├─ 后面紧跟 ' → rune literal: 'X'
+ │   └─ 后面不是 ' → lifetime: 'a
+ │
+ └─ 下一个是 \ → 读转义 → rune literal: '\n'
 ```
 
-缺点：
+这和 OCaml / F# / Rust 的 lexer 是同一种状态机，没有歧义。
 
-- 一旦生命周期未来允许进入泛型参数列表，就会与现有 `[]` 泛型 / 下标语法共享同一表面形式
-- `let f[a, T](...)` 这种写法只能靠大小写或命名约定区分，语法层面不稳
-- 后续如果再引入类型级生命周期参数或相关 sugar，歧义会继续放大
+### 为什么不用大写 `'A`
 
-结论：
+Koral 的惯例是类型层面统一大写，但 `'a` 选择小写是因为：
 
-- **不能作为最终方案**
+- 前导 `'` 已经在 lexer 层区分了 lifetime 和 type parameter，大小写不需要再重复做这件事
+- 小写 lifetime + 大写 type parameter 在泛型列表里视觉对比更强
+- 与 Rust / OCaml 用户的肌肉记忆一致
 
-#### 方案 E：独立生命周期参数通道
+### 其他备选方案的排除
 
-示例：
-
-```koral
-let f<$a, T>(x ref $a T) T
-```
-
-优点：
-
-- 生命周期参数与类型参数在语法层彻底分离
-- 不依赖大小写约定
-
-缺点：
-
-- 需要新增一整套参数列表表面语法
-- 与 Koral 现有 `[]` 泛型风格不连续
-- 对当前 phase 1 目标来说改动面偏大
-
-结论：
-
-- **可以作为未来扩展方向，但不适合作为这轮整改的最小落地方案**
-
-### 推荐语法
-
-本文推荐采用：
-
-```koral
-let f[$a](x ref $a Int) Int
-let swap[$a](x ref $a mut Int, y ref $a mut Int) Void
-```
-
-并约定：
-
-- 生命周期参数必须带独立 sigil，phase 1 采用 `$a`
-- 类型参数继续沿用现有 `T` / `U` 风格
-- 匿名生命周期使用 `$_`
-
-推荐 `$a` 的原因不是它比 Rust 风格更优雅，而是它同时满足三点：
-
-- 不和字符字面量高亮冲突
-- 不和未来泛型 / 下标语法冲突
-- parser、bootstrap、编辑器高亮都容易稳定落地
+| 方案 | 排除原因 |
+|---|---|
+| `'a` | `$` 语义是变量展开，可读性差 |
+| `` `a `` | 键入不顺手，markdown / 终端噪音大 |
+| 裸 `a` | 与泛型 / 下标语法冲突，靠大小写约定不稳 |
+| 独立参数通道 `<'a, T>` | 需要新增一整套参数列表语法，改动面偏大 |
 
 ## receiver 语法
 
@@ -384,10 +267,10 @@ let swap[$a](x ref $a mut Int, y ref $a mut Int) Void
 
 语义糖解释为：
 
-- `self ref` => `self ref $_ Self`
-- `self ref mut` => `self ref $_ mut Self`
+- `self ref` => `self ref '_ Self`
+- `self ref mut` => `self ref '_ mut Self`
 
-这里的 `$_` 表示匿名生命周期参数，仅作为 receiver sugar 使用。
+这里的 `'_` 表示匿名生命周期参数，仅作为 receiver sugar 使用。
 
 ### 显式托管 receiver
 
@@ -402,16 +285,16 @@ let swap[$a](x ref $a mut Int, y ref $a mut Int) Void
 
 ### 借用参数
 
-对于参数类型 `ref $a T`：
+对于参数类型 `ref 'a T`：
 
 - 可从不可变值或可变值重借用只读引用
 - 可从 `ref T` / `ref mut T` 重借用只读借用 ref
 - 可对右值做只读临时物化
 
-对于参数类型 `ref $a mut T`：
+对于参数类型 `ref 'a mut T`：
 
 - 只能从可写位置借用
-- 可从 `ref mut T` 重借用为 `ref $a mut T`
+- 可从 `ref mut T` 重借用为 `ref 'a mut T`
 - 不接受右值
 
 ### 托管参数
@@ -449,7 +332,7 @@ let swap[$a](x ref $a mut Int, y ref $a mut Int) Void
 
 这条必须与 `ref` 保持对称：
 
-- 可写值路径既可以满足 `ref $a mut T`
+- 可写值路径既可以满足 `ref 'a mut T`
 - 也可以在需要时局部提升满足 `ref mut T`
 
 这样规则更统一：
@@ -478,7 +361,7 @@ let swap[$a](x ref $a mut Int, y ref $a mut Int) Void
 
 phase 1 的原则是：
 
-- 允许 `ref $a TraitObject` 这类借用 trait object 参数形态
+- 允许 `ref 'a TraitObject` 这类借用 trait object 参数形态
 - 但它的运行时表示仍然与当前 trait object ref 保持一致
 - 不为 borrowed trait object 设计新的 runtime 布局
 
@@ -524,11 +407,11 @@ phase 1 的原则是：
 这轮 borrow ref 整改，不是单点 parser 改动，而是一次跨前端到后端的“语义重新分层”：
 
 1. 词法与语法层
-   - 目标：把 `$a` 生命周期和 `ref $a T` / `self ref` sugar 稳定落成语法事实
+   - 目标：把 `'a` 生命周期和 `ref 'a T` / `self ref` sugar 稳定落成语法事实
    - 涉及：
-     - lexer 新 token：`$a`、`$_`
+     - lexer 新 token：`'a`、`'_`
      - parser 支持借用 ref type node
-     - parser 支持 receiver sugar：`self ref` => `self ref $_ Self`
+     - parser 支持 receiver sugar：`self ref` => `self ref '_ Self`
      - parser 允许生命周期参数进入 `[]`，但与普通类型参数分开处理
 
 2. AST / 类型表示层
@@ -553,8 +436,8 @@ phase 1 的原则是：
      - 允许位置：函数参数、method 参数、trait 参数、receiver
      - 禁止位置：返回、字段、enum payload、全局、闭包捕获、构造器结果
      - `self ref` 与 `self ref Self` 的语义分流
-     - `ref $a mut T` 的可写性检查
-     - `ref mut T -> ref T`、`ref $a mut T -> ref $a T` 宽化
+     - `ref 'a mut T` 的可写性检查
+     - `ref mut T -> ref T`、`ref 'a mut T -> ref 'a T` 宽化
 
 5. 调用点与隐式构造层
    - 目标：把今天“靠逃逸分析决定 ref 行为”的逻辑，替换成局部可解释规则
@@ -563,7 +446,7 @@ phase 1 的原则是：
      - 值路径 / 字段路径的局部托管提升
      - borrowed receiver 的自动重借用
      - rvalue `self ref` 的临时物化
-     - `ref $a` 与托管 `ref` 的禁止升级边界
+     - `ref 'a` 与托管 `ref` 的禁止升级边界
 
 6. trait / method dispatch 层
    - 目标：保证借用 receiver 不会把方法分派链打断
@@ -617,8 +500,8 @@ phase 1 的原则是：
 
 ### 阶段 A：语法与类型骨架
 
-- [ ] lexer 支持 `$a` / `$_`
-- [ ] parser 支持 `ref $a T` / `ref $a mut T`
+- [ ] lexer 支持 `'a` / `'_`
+- [ ] parser 支持 `ref 'a T` / `ref 'a mut T`
 - [ ] parser 支持生命周期参数列表
 - [ ] AST / Type 增加 borrowed ref 类型表示
 - [ ] pretty-print / debug / substitution / equality 全部识别 borrowed ref
@@ -630,8 +513,8 @@ phase 1 的原则是：
 
 ### 阶段 B：receiver 语义切换
 
-- [ ] `self ref` -> `self ref $_ Self`
-- [ ] `self ref mut` -> `self ref $_ mut Self`
+- [ ] `self ref` -> `self ref '_ Self`
+- [ ] `self ref mut` -> `self ref '_ mut Self`
 - [ ] `self ref Self` / `self ref mut Self` 保留为显式托管写法
 - [ ] receiver 错误消息更新
 - [ ] trait object safety / receiver type check 更新
@@ -647,7 +530,7 @@ phase 1 的原则是：
 - [ ] 禁止 borrowed ref 存字段 / enum payload / 全局 / 闭包环境
 - [ ] `.ref` 借用优先规则定型
 - [ ] 值路径局部托管提升规则定型
-- [ ] `ref mut` / `ref $a mut` 的对称提升和宽化打通
+- [ ] `ref mut` / `ref 'a mut` 的对称提升和宽化打通
 
 验收：
 
@@ -710,7 +593,7 @@ phase 1 的原则是：
 为了把 borrowed `ref` 真正落地，这轮整改不是“只加一个生命周期类型分支”就结束，而是要同时收口五条链路：
 
 1. 语法链
-   - 负责把 `$a` / `$_`、`ref $a T`、`self ref` sugar 解析成稳定 AST
+   - 负责把 `'a` / `'_`、`ref 'a T`、`self ref` sugar 解析成稳定 AST
 
 2. 类型与约束链
    - 负责让 borrowed `ref` 成为一等类型，并在 sema 中限制它的出现位置与逃逸边界
@@ -731,10 +614,10 @@ phase 1 的原则是：
 
 ### 1. Parser / AST
 
-- lexer 需要把 `$a`、`$_` 识别成独立 lifetime token
+- lexer 需要把 `'a`、`'_` 识别成独立 lifetime token
 - parser 需要支持：
-  - `ref $a T`
-  - `ref $a mut T`
+  - `ref 'a T`
+  - `ref 'a mut T`
   - `self ref`
   - `self ref mut`
   - `self ref Self`
@@ -758,7 +641,7 @@ phase 1 的原则是：
 - `.ref` 的类型决定方式要从“后验逃逸分析”切到“局部先定型”：
   - 默认构造 borrowed `ref`
   - 只有值或值的 field 访问形式允许局部托管提升
-  - 不允许 `ref $a T` 直接隐式升级成 `ref T`
+  - 不允许 `ref 'a T` 直接隐式升级成 `ref T`
 
 ### 3. Method Lookup / Trait Dispatch
 
@@ -840,7 +723,7 @@ phase 1 的原则是：
 - [ ] 限制允许自动托管提升的源表达式：
   - 值
   - 值的 field 访问
-- [ ] 同步 `ref mut` / `ref $a mut` 的对应规则
+- [ ] 同步 `ref mut` / `ref 'a mut` 的对应规则
 - [ ] 把这套规则落到 MIR promotion / lowering，而不是跨函数逃逸分析
 
 ### P2：补完 borrowed `ref` 的静态限制
@@ -865,8 +748,8 @@ phase 1 的原则是：
 
 1. `.ref` 的前端定型
    - 如果期望类型是 `ref T` / `ref mut T`，则 `.ref` 直接定型成托管 ref
-   - 如果期望类型是 `ref $a T` / `ref $a mut T`，则 `.ref` 直接定型成 borrowed ref
-   - 如果没有期望类型，则 `.ref` 默认定型成 `ref $_ T` / `ref $_ mut T`
+   - 如果期望类型是 `ref 'a T` / `ref 'a mut T`，则 `.ref` 直接定型成 borrowed ref
+   - 如果没有期望类型，则 `.ref` 默认定型成 `ref '_ T` / `ref '_ mut T`
 
 2. 托管提升的判定位置
    - 不再根据“callee 后续会不会存起来”做跨函数传播
@@ -880,7 +763,7 @@ phase 1 的原则是：
 3. 不做的事情
    - 不做“先推成 borrowed，稍后再跨语句回溯改成 managed”的二次推断
    - 不做跨函数逃逸摘要
-   - 不允许把已经形成的 `ref $a T` 再隐式转成 `ref T`
+   - 不允许把已经形成的 `ref 'a T` 再隐式转成 `ref T`
 
 这意味着：
 
@@ -932,9 +815,9 @@ phase 1 的原则是：
 
 ### 最终语义结论
 
-- 生命周期语法采用 `$a` / `$_`，不使用 Rust 风格 `'a`
+- 生命周期语法采用 `'a` / `'_`，遵循 Rust / OCaml 风格，严格小写
 - `ref T` / `ref mut T` 表示可逃逸托管引用
-- `ref $a T` / `ref $a mut T` 表示不可逃逸借用引用
+- `ref 'a T` / `ref 'a mut T` 表示不可逃逸借用引用
 - `self ref` / `self ref mut` 是 borrowed receiver sugar
 - `self ref Self` / `self ref mut Self` 是显式托管 receiver
 - `.ref` 不是“永远构造托管引用”，而是优先构造借用引用；当当前局部上下文要求托管类型时，再在本地完成提升
@@ -986,6 +869,6 @@ compiler/.build/debug/koralc build toolchain/doc/generate_std_api_docs.koral
 
 ### 后续可选工作
 
-- 编辑器语法高亮补充 `$a` / `$_` 生命周期 token 支持
+- 编辑器语法高亮补充 `'a` / `'_` 生命周期 token 支持
 - 如果未来要让生命周期进入更宽的泛型位置，再单独评估是否需要独立参数通道
 - 若后续继续扩展 borrow 语义，再评估是否需要更高阶生命周期能力，但这不属于当前阶段的整改范围

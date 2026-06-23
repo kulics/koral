@@ -4,7 +4,7 @@
 /// Extension containing all declaration parsing methods
 extension Parser {
   private func filterLifetimeTypeParameters(_ parameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
-    parameters.filter { !$0.name.hasPrefix("$") }
+    parameters.filter { !$0.name.hasPrefix("'") }
   }
 
   private func parseSelfReceiverType() throws -> TypeNode {
@@ -35,7 +35,7 @@ extension Parser {
         }
         selfType = .borrowedReference(selfType, lifetime: lifetime, mutable: sawMut)
       } else if currentToken === .comma || currentToken === .rightParen {
-        selfType = .borrowedReference(selfType, lifetime: "$_", mutable: sawMut)
+        selfType = .borrowedReference(selfType, lifetime: "'_", mutable: sawMut)
       } else {
         let explicitInner: TypeNode
         if currentToken === .selfTypeKeyword {

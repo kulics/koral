@@ -27,7 +27,7 @@ public enum Token: CustomStringConvertible {
   case float(String)  // Float literal as string, e.g.: "3.14"
   case string(String)  // String literal, e.g.: "hello"
   case rune(String)    // Rune literal, e.g.: 'A', '\n'
-  case lifetimeIdentifier(String)  // Lifetime identifier, e.g.: $a
+  case lifetimeIdentifier(String)  // Lifetime identifier, e.g.: 'a
   case interpolatedString(parts: [InterpolatedStringPart])  // Interpolated string literal
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -1214,81 +1214,6 @@ public class Lexer {
 
   // Read a rune literal (single-quoted): 'A', '\n', '\u{1F600}'
   // Produces a .rune(String) token where the string is the post-escape content.
-  private func readRuneToken() throws -> Token {
-    guard let startChar = getNextChar(), startChar == "'" else {
-      throw LexerError.invalidString(span: tokenSpan, "expected rune start with '")
-    }
-
-    var literalBuffer = ""
-
-    while let char = getNextChar() {
-      if char == "'" {
-        return .rune(literalBuffer)
-      }
-
-      if char == "\\" {
-        guard let escaped = getNextChar() else {
-          throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence in rune literal")
-        }
-
-        switch escaped {
-        case "n": literalBuffer.append("\n")
-        case "t": literalBuffer.append("\t")
-        case "r": literalBuffer.append("\r")
-        case "v": literalBuffer.append("\u{000B}")
-        case "f": literalBuffer.append("\u{000C}")
-        case "0": literalBuffer.append("\0")
-        case "\\": literalBuffer.append("\\")
-        case "'": literalBuffer.append("'")
-        case "\"": literalBuffer.append("\"")
-        case "x":
-          var hex = ""
-          for _ in 0..<2 {
-            guard let h = getNextChar() else {
-              throw LexerError.invalidString(span: tokenSpan, "\\x escape requires exactly 2 hex digits")
-            }
-            guard h.isHexDigit else {
-              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\x escape")
-            }
-            hex.append(h)
-          }
-          let byte = UInt8(hex, radix: 16)!
-          literalBuffer.append(Character(UnicodeScalar(byte)))
-        case "u":
-          guard let brace = getNextChar(), brace == "{" else {
-            throw LexerError.invalidString(span: tokenSpan, "\\u escape requires braces: \\u{HHHH}")
-          }
-          var hex = ""
-          while let h = getNextChar() {
-            if h == "}" { break }
-            guard h.isHexDigit else {
-              throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\u escape")
-            }
-            hex.append(h)
-            if hex.count > 6 {
-              throw LexerError.invalidString(span: tokenSpan, "\\u escape has too many digits (max 6)")
-            }
-          }
-          guard !hex.isEmpty else {
-            throw LexerError.invalidString(span: tokenSpan, "\\u{} escape requires at least one hex digit")
-          }
-          guard let codePoint = UInt32(hex, radix: 16),
-                let scalar = Unicode.Scalar(codePoint) else {
-            throw LexerError.invalidString(span: tokenSpan, "\\u{\(hex)} is not a valid Unicode scalar")
-          }
-          literalBuffer.append(Character(scalar))
-        default:
-          throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
-        }
-        continue
-      }
-
-      literalBuffer.append(char)
-    }
-
-    throw LexerError.invalidString(span: tokenSpan, "unterminated rune literal")
-  }
-
   private func readInterpolationExpression() throws -> String {
     var expr = ""
     var depth = 1
@@ -1339,32 +1264,118 @@ public class Lexer {
     throw LexerError.invalidString(span: tokenSpan, "unterminated string interpolation")
   }
 
-  private func readLifetimeIdentifier() throws -> Token {
-    guard let sigil = getNextChar(), sigil == "$" else {
-      throw LexerError.invalidString(span: tokenSpan, "expected lifetime start with $")
+  private func readQuoteToken() throws -> Token {
+    // The opening ' has already been consumed by the main dispatch.
+    // Read the next character to decide: lifetime identifier or rune literal?
+    guard let next = getNextChar() else {
+      throw LexerError.invalidString(span: tokenSpan, "unterminated lifetime or rune literal")
     }
 
-    guard let first = getNextChar() else {
-      throw LexerError.invalidString(span: tokenSpan, "unterminated lifetime identifier")
+    if next.isLetter || next == "_" {
+      // Could be a lifetime identifier ('a, '_ ) or a rune literal ('a')
+      var name = String(next)
+      while let c = getNextChar() {
+        if c.isLetter || c.isNumber || c == "_" {
+          name.append(c)
+        } else {
+          unreadChar(c)
+          break
+        }
+      }
+      // If followed by a closing quote, it's a rune literal: 'a'
+      if let close = getNextChar() {
+        if close == "'" {
+          return .rune(name)
+        }
+        // Not a closing quote → lifetime identifier; unread the char
+        unreadChar(close)
+      }
+      // Otherwise it's a lifetime identifier: 'a
+      return .lifetimeIdentifier("'" + name)
     }
 
-    guard first.isLetter || first == "_" else {
-      throw LexerError.invalidString(span: tokenSpan, "lifetime identifier must start with a letter or _")
+    // Not a letter/underscore → must be a rune literal
+    // unreadChar(next) and readQuote are already consumed; reconstruct by
+    // unreading next and letting readRuneToken re-read the full rune literal.
+    // But readRuneToken expects to read the opening ' itself, so we need
+    // to unread both. Since we can only unread one char, handle this case inline.
+    var literalBuffer = String(next)
+
+    if next == "\\" {
+      guard let escaped = getNextChar() else {
+        throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence in rune literal")
+      }
+      literalBuffer = try readRuneEscape(escaped)
     }
 
-    var name = "$"
-    name.append(first)
-
-    while let next = getNextChar() {
-      if next.isLetter || next.isNumber || next == "_" {
-        name.append(next)
+    // Read until closing '
+    while let char = getNextChar() {
+      if char == "'" {
+        return .rune(literalBuffer)
+      }
+      if char == "\\" {
+        guard let escaped = getNextChar() else {
+          throw LexerError.invalidString(span: tokenSpan, "unterminated escape sequence in rune literal")
+        }
+        literalBuffer += try readRuneEscape(escaped)
         continue
       }
-      unreadChar(next)
-      break
+      literalBuffer.append(char)
     }
 
-    return .lifetimeIdentifier(name)
+    throw LexerError.invalidString(span: tokenSpan, "unterminated rune literal")
+  }
+
+  private func readRuneEscape(_ escaped: Character) throws -> String {
+    switch escaped {
+    case "n": return "\n"
+    case "t": return "\t"
+    case "r": return "\r"
+    case "v": return "\u{000B}"
+    case "f": return "\u{000C}"
+    case "0": return "\0"
+    case "\\": return "\\"
+    case "'": return "'"
+    case "\"": return "\""
+    case "x":
+      var hex = ""
+      for _ in 0..<2 {
+        guard let h = getNextChar() else {
+          throw LexerError.invalidString(span: tokenSpan, "\\x escape requires exactly 2 hex digits")
+        }
+        guard h.isHexDigit else {
+          throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\x escape")
+        }
+        hex.append(h)
+      }
+      let byte = UInt8(hex, radix: 16)!
+      return String(Character(UnicodeScalar(byte)))
+    case "u":
+      guard let brace = getNextChar(), brace == "{" else {
+        throw LexerError.invalidString(span: tokenSpan, "\\u escape requires braces: \\u{HHHH}")
+      }
+      var hex = ""
+      while let h = getNextChar() {
+        if h == "}" { break }
+        guard h.isHexDigit else {
+          throw LexerError.invalidString(span: tokenSpan, "invalid hex digit '\(h)' in \\u escape")
+        }
+        hex.append(h)
+        if hex.count > 6 {
+          throw LexerError.invalidString(span: tokenSpan, "\\u escape has too many digits (max 6)")
+        }
+      }
+      guard !hex.isEmpty else {
+        throw LexerError.invalidString(span: tokenSpan, "\\u{} escape requires at least one hex digit")
+      }
+      guard let codePoint = UInt32(hex, radix: 16),
+            let scalar = Unicode.Scalar(codePoint) else {
+        throw LexerError.invalidString(span: tokenSpan, "\\u{\(hex)} is not a valid Unicode scalar")
+      }
+      return String(Character(scalar))
+    default:
+      throw LexerError.invalidString(span: tokenSpan, "unknown escape: \\\(escaped)")
+    }
   }
 
   // Read an identifier
@@ -1564,11 +1575,8 @@ public class Lexer {
       unreadChar(char)
       return try readStringToken()
     case "'":
-      unreadChar(char)
-      return try readRuneToken()
-    case "$":
-      unreadChar(char)
-      return try readLifetimeIdentifier()
+      let token = try readQuoteToken()
+      return token
     case let c where c.isNumber:
       unreadChar(c)
       let numberLiteral = try readNumber()
