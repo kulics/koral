@@ -78,13 +78,13 @@ void __koral_weak_release(void* raw_control) {
     }
 }
 
-void __koral_ref_slot_drop(void* raw_ref) {
+void __koral_ref_drop(void* raw_ref) {
     if (!raw_ref) return;
     struct __koral_Ref* ref = (struct __koral_Ref*)raw_ref;
     __koral_release(ref->control);
 }
 
-void __koral_weakref_slot_drop(void* raw_weak_ref) {
+void __koral_weakref_drop(void* raw_weak_ref) {
     if (!raw_weak_ref) return;
     struct __koral_WeakRef* weak_ref = (struct __koral_WeakRef*)raw_weak_ref;
     __koral_weak_release(weak_ref->control);
@@ -140,7 +140,7 @@ void __koral_closure_release(struct __koral_Closure closure) {
     }
 }
 
-void __koral_closure_slot_drop(void* raw_closure) {
+void __koral_closure_drop(void* raw_closure) {
     if (!raw_closure) return;
     struct __koral_Closure* closure = (struct __koral_Closure*)raw_closure;
     __koral_closure_release(*closure);

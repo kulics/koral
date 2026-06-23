@@ -1837,13 +1837,13 @@ final class MIRFunctionCodeEmitter {
       codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n")
     case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
       codeGen.addIndent()
-      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_ref_slot_drop;\n")
+      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_ref_drop;\n")
     case .weakReference, .mutableWeakReference:
       codeGen.addIndent()
-      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_weakref_slot_drop;\n")
+      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_weakref_drop;\n")
     case .function:
       codeGen.addIndent()
-      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_closure_slot_drop;\n")
+      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_closure_drop;\n")
     default:
       codeGen.addIndent()
       codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
