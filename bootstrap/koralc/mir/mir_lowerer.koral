@@ -445,35 +445,10 @@ type MIRReferenceAllocationPromoter(
     program ref MIRProgram,
 )
 
-type MIRReferenceEscapeAnalysis(
-    escaping_local_ids Set[UInt],
-    parameter_summary MIRReferenceParameterSummary,
-)
-
-type MIRReferenceParameterSummary(
-    stored_parameter_indices Set[UInt],
-    return_parameter_indices Set[UInt],
-)
-
-type MIRReferenceEscapeAnalyzer(
-    function ref MIRFunction,
-    context CompilerContext,
-    escaping_parameter_summaries Dict[UInt, MIRReferenceParameterSummary],
-    summary_def_id_by_identity_key Dict[String, UInt],
-    receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
-    concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    local_types_by_id Dict[UInt, Type],
-    parameter_index_by_local_id Dict[UInt, UInt],
-    mut dependencies_by_local_id Dict[UInt, List[MIRLocalID]],
-    mut stored_escaping_local_ids Set[UInt],
-    mut return_escaping_local_ids Set[UInt],
-)
-
 type MIRReferenceAllocationFunctionPromoter(
     function ref MIRFunction,
-    escaping_local_ids Set[UInt],
-    escaping_parameter_summaries Dict[UInt, MIRReferenceParameterSummary],
-    summary_def_id_by_identity_key Dict[String, UInt],
+    parameter_types_by_def_id Dict[UInt, List[Type]],
+    parameter_types_by_name Dict[String, List[Type]],
     context CompilerContext,
     receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
@@ -486,51 +461,16 @@ given MIRReferenceAllocationPromoter {
     }
 
     public promote(self ref mut) ref MIRProgram = {
-        let summary_def_id_by_identity_key = self.build_summary_def_id_by_identity_key()
-        let mut summaries = Dict[UInt, MIRReferenceParameterSummary].new()
-        let mut changed = true
-        while changed then {
-            changed = false
-            for function_ref in self.program.functions then {
-                let function = function_ref.val
-                let mut analyzer = MIRReferenceEscapeAnalyzer.new(
-                    function,
-                    self.program.context,
-                    summaries,
-                    summary_def_id_by_identity_key,
-                    self.program.receiver_method_dispatch,
-                    self.program.concrete_callables_by_def_id,
-                )
-                let analysis = analyzer.analyze()
-                let key = function.identifier.def_id.id
-                let should_update = when summaries.get(key) in {
-                    .Some(existing) then not self.parameter_summary_equals(existing, analysis.parameter_summary),
-                    .None() then true,
-                }
-                if should_update then {
-                    summaries.insert(key, analysis.parameter_summary)
-                    changed = true
-                }
-            }
-        }
+        let parameter_types_by_def_id = self.build_parameter_types_by_def_id()
+        let parameter_types_by_name = self.build_parameter_types_by_name()
 
         let mut functions = List[ref MIRFunction].new()
         for function_ref in self.program.functions then {
             let function = function_ref.val
-            let mut analyzer = MIRReferenceEscapeAnalyzer.new(
-                function,
-                self.program.context,
-                summaries,
-                summary_def_id_by_identity_key,
-                self.program.receiver_method_dispatch,
-                self.program.concrete_callables_by_def_id,
-            )
-            let analysis = analyzer.analyze()
             let mut promoter = MIRReferenceAllocationFunctionPromoter.new(
                 function,
-                analysis.escaping_local_ids,
-                summaries,
-                summary_def_id_by_identity_key,
+                parameter_types_by_def_id,
+                parameter_types_by_name,
                 self.program.context,
                 self.program.receiver_method_dispatch,
                 self.program.concrete_callables_by_def_id,
@@ -549,43 +489,28 @@ given MIRReferenceAllocationPromoter {
         ))
     }
 
-    private parameter_summary_equals(self, left MIRReferenceParameterSummary, right MIRReferenceParameterSummary) Bool = {
-        let _ = self
-        return self.uint_set_equals(left.stored_parameter_indices, right.stored_parameter_indices)
-            and self.uint_set_equals(left.return_parameter_indices, right.return_parameter_indices)
-    }
-
-    private uint_set_equals(self, left Set[UInt], right Set[UInt]) Bool = {
-        let _ = self
-        for value in left.iterator() then {
-            if not right.contains(value) then { return false }
-        }
-        for value in right.iterator() then {
-            if not left.contains(value) then { return false }
-        }
-        return true
-    }
-
-    private build_summary_def_id_by_identity_key(self) Dict[String, UInt] = {
-        let mut keys = Dict[String, UInt].new()
+    private build_parameter_types_by_def_id(self) Dict[UInt, List[Type]] = {
+        let mut map = Dict[UInt, List[Type]].new()
         for function_ref in self.program.functions then {
             let function = function_ref.val
-            for key in self.callable_identity_keys(function.identifier, self.function_param_types(function), function.return_type) then {
-                keys.insert(key, function.identifier.def_id.id)
-            }
+            map.insert(function.identifier.def_id.id, self.function_param_types(function))
         }
-        return keys
+        return map
     }
 
-    private callable_identity_keys(self, symbol ref Symbol, param_types List[Type], return_type Type) List[String] = {
-        let mut keys = List[String].new()
-        for name in self.callable_name_aliases(symbol) then {
-            let key = self.callable_signature_key(name, param_types, return_type)
-            if not keys.contains(key) then {
-                keys.push(key)
+    private build_parameter_types_by_name(self) Dict[String, List[Type]] = {
+        let mut map = Dict[String, List[Type]].new()
+        for function_ref in self.program.functions then {
+            let function = function_ref.val
+            let param_types = self.function_param_types(function)
+            for name in self.callable_name_aliases(function.identifier) then {
+                when map.get(name) in {
+                    .Some(_) then {},
+                    .None() then { map.insert(name, param_types) },
+                }
             }
         }
-        return keys
+        return map
     }
 
     private callable_logical_name(self, symbol ref Symbol) String = {
@@ -627,25 +552,6 @@ given MIRReferenceAllocationPromoter {
         return names
     }
 
-    private context_function_type_key(self, t Type) String = {
-        return self.program.context.type_display_name(t)
-    }
-
-    private callable_signature_key(self, name String, param_types List[Type], return_type Type) String = {
-        let mut key = "\(name)|"
-        let mut first = true
-        for param_type in param_types then {
-            if not first then {
-                key.push_string(",")
-            }
-            key.push_string(self.context_function_type_key(param_type))
-            first = false
-        }
-        key.push_string("->")
-        key.push_string(self.context_function_type_key(return_type))
-        return key
-    }
-
     private function_param_types(self, function ref MIRFunction) List[Type] = {
         let mut types = List[Type].new()
         for param in function.params then {
@@ -655,694 +561,11 @@ given MIRReferenceAllocationPromoter {
     }
 }
 
-given MIRReferenceEscapeAnalyzer {
-    public new(
-        function ref MIRFunction,
-        context CompilerContext,
-        escaping_parameter_summaries Dict[UInt, MIRReferenceParameterSummary],
-        summary_def_id_by_identity_key Dict[String, UInt],
-        receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
-        concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    ) MIRReferenceEscapeAnalyzer = {
-        let mut local_types_by_id = Dict[UInt, Type].new()
-        for local in function.locals then {
-            local_types_by_id.insert(local.id.raw_value, local.local_type)
-        }
-        let mut parameter_index_by_local_id = Dict[UInt, UInt].new()
-        let mut parameter_index = 0(UInt)
-        for local in function.locals then {
-            if local.storage is .Parameter() then {
-                parameter_index_by_local_id.insert(local.id.raw_value, parameter_index)
-                parameter_index += 1
-            }
-        }
-        return MIRReferenceEscapeAnalyzer(
-            function,
-            context,
-            escaping_parameter_summaries,
-            summary_def_id_by_identity_key,
-            receiver_method_dispatch,
-            concrete_callables_by_def_id,
-            local_types_by_id,
-            parameter_index_by_local_id,
-            Dict[UInt, List[MIRLocalID]].new(),
-            Set[UInt].new(),
-            Set[UInt].new(),
-        )
-    }
-
-    public analyze(self ref mut) MIRReferenceEscapeAnalysis = {
-        self.collect_dependencies_and_escapes()
-        self.propagate_escapes_through_dependencies()
-
-        let mut stored_parameters = Set[UInt].new()
-        for local_id in self.stored_escaping_local_ids.iterator() then {
-            when self.parameter_index_by_local_id.get(local_id) in {
-                .Some(parameter_index) then stored_parameters.insert(parameter_index),
-                .None() then {},
-            }
-        }
-        let mut return_parameters = Set[UInt].new()
-        for local_id in self.return_escaping_local_ids.iterator() then {
-            when self.parameter_index_by_local_id.get(local_id) in {
-                .Some(parameter_index) then return_parameters.insert(parameter_index),
-                .None() then {},
-            }
-        }
-
-        let mut escaping_local_ids = Set[UInt].new()
-        for local_id in self.stored_escaping_local_ids.iterator() then {
-            escaping_local_ids.insert(local_id)
-        }
-        for local_id in self.return_escaping_local_ids.iterator() then {
-            escaping_local_ids.insert(local_id)
-        }
-
-        return MIRReferenceEscapeAnalysis(
-            escaping_local_ids,
-            MIRReferenceParameterSummary(stored_parameters, return_parameters),
-        )
-    }
-
-    private collect_dependencies_and_escapes(self ref mut) Void = {
-        for block in self.function.blocks then {
-            for statement in block.statements then {
-                when statement.val in {
-                    .Assign(place, value) then {
-                        when place in {
-                            .Local(local) then {
-                                if self.type_contains_escaping_references(self.local_type(local)) then {
-                                    self.add_dependencies(local, self.reference_dependencies_in_value(value))
-                                }
-                            },
-                            _ then self.mark_stored_escaping_references(value),
-                        }
-                        self.mark_stored_call_arguments(value)
-                    },
-                    .CompoundAssign(assignment) then {
-                        if not self.is_local_place(assignment.target) then {
-                            self.mark_stored_escaping_references(assignment.value)
-                        }
-                        self.mark_stored_call_arguments(assignment.value)
-                    },
-                    .Evaluate(value) then self.mark_stored_call_arguments(value),
-                    .Retain(value) then self.mark_stored_call_arguments(value),
-                    .Release(value) then self.mark_stored_call_arguments(value),
-                    _ then {},
-                }
-            }
-            when block.terminator in {
-                .ReturnValue(operand) then {
-                    if self.type_contains_escaping_references(self.function.return_type) then {
-                        when operand in {
-                            .Some(op) then self.mark_return_escaping_references(MIRValue.Operand(op)),
-                            .None() then {},
-                        }
-                    }
-                },
-                _ then {},
-            }
-        }
-    }
-
-    private propagate_escapes_through_dependencies(self ref mut) Void = {
-        let mut changed = true
-        while changed then {
-            changed = false
-
-            let mut stored_snapshot = List[MIRLocalID].new()
-            for local_id in self.stored_escaping_local_ids.iterator() then {
-                stored_snapshot.push(MIRLocalID(local_id))
-            }
-            for local in stored_snapshot then {
-                let deps = self.dependencies_by_local_id.get(local.raw_value) or else { continue }
-                for dep in deps then {
-                    if not self.stored_escaping_local_ids.contains(dep.raw_value) then {
-                        self.stored_escaping_local_ids.insert(dep.raw_value)
-                        changed = true
-                    }
-                }
-            }
-
-            let mut return_snapshot = List[MIRLocalID].new()
-            for local_id in self.return_escaping_local_ids.iterator() then {
-                return_snapshot.push(MIRLocalID(local_id))
-            }
-            for local in return_snapshot then {
-                let deps = self.dependencies_by_local_id.get(local.raw_value) or else { continue }
-                for dep in deps then {
-                    if not self.return_escaping_local_ids.contains(dep.raw_value) then {
-                        self.return_escaping_local_ids.insert(dep.raw_value)
-                        changed = true
-                    }
-                }
-            }
-        }
-    }
-
-    private mark_stored_escaping_references(self ref mut, value MIRValue) Void = {
-        let deps = self.reference_dependencies_in_value(value)
-        for dep in deps then {
-            self.stored_escaping_local_ids.insert(dep.raw_value)
-        }
-    }
-
-    private mark_return_escaping_references(self ref mut, value MIRValue) Void = {
-        let deps = self.reference_dependencies_in_value(value)
-        for dep in deps then {
-            self.return_escaping_local_ids.insert(dep.raw_value)
-        }
-    }
-
-    private mark_stored_call_arguments(self ref mut, value MIRValue) Void = {
-        when value in {
-            .Call(call) then {
-                self.mark_stored_arguments_for_callee(call.callee, call.arguments, call.result_type)
-                for argument in call.arguments then {
-                    self.mark_stored_call_arguments(argument.val)
-                }
-            },
-            .Intrinsic(node) then {
-                self.mark_stored_intrinsic_arguments(node)
-                for nested in self.intrinsic_values(node) then {
-                    self.mark_stored_call_arguments(nested)
-                }
-            },
-            .Aggregate(aggregate) then for field in aggregate.fields then {
-                self.mark_stored_call_arguments(field.val)
-            },
-            .EnumCase(construction) then for argument in construction.arguments then {
-                self.mark_stored_call_arguments(argument.val)
-            },
-            .TraitObjectConversion(conversion) then self.mark_stored_call_arguments(conversion.inner.val),
-            .TraitMethodCall(call) then {
-                self.mark_stored_call_arguments(call.receiver.val)
-                for argument in call.arguments then {
-                    self.mark_stored_call_arguments(argument.val)
-                }
-            },
-            .EnumTag(tag) then self.mark_stored_call_arguments(tag.subject.val),
-            _ then {},
-        }
-    }
-
-    private mark_stored_arguments_for_callee(self ref mut, callee MIROperand, arguments List[ref MIRValue], result_type Type) Void = {
-        when callee in {
-            .Function(symbol) then {
-                let stored_parameters = when self.parameter_summary_for_call(symbol, arguments, result_type) in {
-                    .Some(summary) then summary.stored_parameter_indices,
-                    .None() then Set[UInt].new(),
-                }
-                let mut index = 0(UInt)
-                while index < arguments.count() then {
-                    if stored_parameters.contains(index) then {
-                        self.mark_stored_escaping_references(arguments[index].val)
-                    }
-                    index += 1
-                }
-            },
-            _ then {},
-        }
-    }
-
-    private mark_stored_intrinsic_arguments(self ref mut, node MIRIntrinsic) Void = {
-        when node in {
-            .InitMemory(_, value) then self.mark_stored_escaping_references(value.val),
-            .SpawnThread(_, _, closure, _) then self.mark_stored_escaping_references(closure.val),
-            _ then {},
-        }
-    }
-
-    private reference_dependencies_in_value(self ref mut, value MIRValue) List[MIRLocalID] = {
-        if not self.type_contains_escaping_references(self.type_of_value(value)) then {
-            return when value in {
-                .Lambda(lambda) then self.lambda_capture_dependencies(lambda),
-                _ then List[MIRLocalID].new(),
-            }
-        }
-
-        return when value in {
-            .Operand(operand) then when operand in {
-                .Local(local) then self.local_list_single(local),
-                _ then List[MIRLocalID].new(),
-            },
-            .PlaceRead(place, _) then when self.root_local_of_place(place) in {
-                .Some(local) then self.local_list_single(local),
-                .None() then List[MIRLocalID].new(),
-            },
-            .Aggregate(aggregate) then {
-                let mut deps = List[MIRLocalID].new()
-                for field in aggregate.fields then {
-                    self.local_list_union_into(deps.ref, self.reference_dependencies_in_value(field.val))
-                }
-                yield deps
-            },
-            .EnumCase(construction) then {
-                let mut deps = List[MIRLocalID].new()
-                for argument in construction.arguments then {
-                    self.local_list_union_into(deps.ref, self.reference_dependencies_in_value(argument.val))
-                }
-                yield deps
-            },
-            .TraitObjectConversion(conversion) then self.reference_dependencies_in_value(conversion.inner.val),
-            .TraitMethodCall(call) then {
-                let mut deps = self.reference_dependencies_in_value(call.receiver.val)
-                for argument in call.arguments then {
-                    self.local_list_union_into(deps.ref, self.reference_dependencies_in_value(argument.val))
-                }
-                yield deps
-            },
-            .Lambda(lambda) then self.lambda_capture_dependencies(lambda),
-            .Cast(operand, _) then self.reference_dependencies_in_value(MIRValue.Operand(operand)),
-            .Intrinsic(node) then {
-                let mut deps = List[MIRLocalID].new()
-                for nested in self.intrinsic_values(node) then {
-                    self.local_list_union_into(deps.ref, self.reference_dependencies_in_value(nested))
-                }
-                yield deps
-            },
-            .EnumTag(tag) then self.reference_dependencies_in_value(tag.subject.val),
-            .Call(call) then self.return_parameter_dependencies(call),
-            _ then List[MIRLocalID].new(),
-        }
-    }
-
-    private return_parameter_dependencies(self ref mut, call MIRCall) List[MIRLocalID] = {
-        return when call.callee in {
-            .Function(symbol) then {
-                let return_parameters = when self.parameter_summary_for_call(symbol, call.arguments, call.result_type) in {
-                    .Some(summary) then summary.return_parameter_indices,
-                    .None() then Set[UInt].new(),
-                }
-                let mut deps = List[MIRLocalID].new()
-                let mut index = 0(UInt)
-                while index < call.arguments.count() then {
-                    if return_parameters.contains(index) then {
-                        self.local_list_union_into(deps.ref, self.reference_dependencies_in_value(call.arguments[index].val))
-                    }
-                    index += 1
-                }
-                yield deps
-            },
-            _ then List[MIRLocalID].new(),
-        }
-    }
-
-    private lambda_capture_dependencies(self ref mut, lambda MIRLambda) List[MIRLocalID] = {
-        let mut deps = List[MIRLocalID].new()
-        for capture_source in lambda.capture_sources then {
-            when self.root_local_of_place(capture_source) in {
-                .Some(local) then {
-                    if self.type_contains_escaping_references(self.local_type(local)) and not self.local_list_contains(deps, local) then {
-                        deps.push(local)
-                    }
-                },
-                .None() then {},
-            }
-        }
-        return deps
-    }
-
-    private type_contains_escaping_references(self ref, t Type) Bool = {
-        return when t in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            .FunctionType(_, _) then true,
-            .TraitObject(_, _) then true,
-            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
-                .Some(fields) then {
-                    for field in fields then {
-                        if self.type_contains_escaping_references(field.field_type) then { return true }
-                    }
-                    yield false
-                },
-                .None() then false,
-            },
-            .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
-                .Some(cases) then {
-                    for case_info in cases then {
-                        for param in case_info.params then {
-                            if self.type_contains_escaping_references(param.param_type) then { return true }
-                        }
-                    }
-                    yield false
-                },
-                .None() then false,
-            },
-            .GenericStruct(_, args) then {
-                for arg in args then {
-                    if self.type_contains_escaping_references(arg.val) then { return true }
-                }
-                yield false
-            },
-            .GenericEnum(_, args) then {
-                for arg in args then {
-                    if self.type_contains_escaping_references(arg.val) then { return true }
-                }
-                yield false
-            },
-            _ then false,
-        }
-    }
-
-    private root_local_of_place(self ref, place MIRPlace) Option[MIRLocalID] = {
-        return when place in {
-            .Local(local) then Option[MIRLocalID].Some(local),
-            .Field(base, _) then self.root_local_of_place(base.val),
-            .EnumPayload(base, _, _, _, _) then self.root_local_of_place(base.val),
-            _ then Option[MIRLocalID].None(),
-        }
-    }
-
-    private is_local_place(self ref, place MIRPlace) Bool = {
-        let _ = self
-        return if place is .Local(_) then true else false
-    }
-
-    private type_of_value(self ref, value MIRValue) Type = {
-        return when value in {
-            .Operand(operand) then self.type_of_operand(operand),
-            .PlaceRead(place, _) then self.type_of_place(place),
-            .Binary(operation) then operation.result_type,
-            .Unary(operation) then operation.result_type,
-            .Call(call) then call.result_type,
-            .Aggregate(aggregate) then aggregate.aggregate_type,
-            .EnumCase(construction) then construction.enum_type,
-            .EnumTag(_) then Type.IntType(),
-            .TraitObjectConversion(conversion) then conversion.result_type,
-            .TraitMethodCall(call) then call.result_type,
-            .Ref(place, kind, _) then self.type_of_ref(place, kind),
-            .Pointer(place) then Type.PointerType(box(self.type_of_place(place))),
-            .Cast(_, target_type) then target_type,
-            .Intrinsic(node) then when node in {
-                .AllocMemory(_, result_type) then result_type,
-                .IsUniqueMutable(_) then Type.BoolType(),
-                .RefCount(_) then Type.UIntType(),
-                .MakeRef(_, _, result_type) then result_type,
-                .MakeMutRef(_, _, result_type) then result_type,
-                .DowngradeRef(_, result_type) then result_type,
-                .DowngradeMutRef(_, result_type) then result_type,
-                .UpgradeRef(_, result_type) then result_type,
-                .UpgradeMutRef(_, result_type) then result_type,
-                .TakeMemory(_, result_type) then result_type,
-                .NullPtr(result_type) then result_type,
-                .SpawnThread(_, _, _, _) then Type.Int32Type(),
-                _ then Type.VoidType(),
-            },
-            .Lambda(lambda) then lambda.lambda_type,
-        }
-    }
-
-    private type_of_place(self ref, place MIRPlace) Type = {
-        return when place in {
-            .Local(local) then self.local_type(local),
-            .Global(def_id) then self.context.get_symbol_type(def_id) or else Type.Unknown(),
-            .Field(_, field) then field.symbol_type,
-            .EnumPayload(_, _, _, _, field_type) then field_type,
-            .Deref(_, pointee) then pointee,
-            .PointerElement(_, element) then element,
-        }
-    }
-
-    private type_of_operand(self ref, operand MIROperand) Type = {
-        return when operand in {
-            .Local(local) then self.local_type(local),
-            .Function(symbol) then symbol.symbol_type,
-            .Constant(constant) then when constant in {
-                .Integer(_, t) then t,
-                .Float(_, t) then t,
-                .StringLiteral(_, t) then t,
-                .Boolean(_) then Type.BoolType(),
-                .Void() then Type.VoidType(),
-            },
-        }
-    }
-
-    private type_of_ref(self ref, place MIRPlace, kind MIRReferenceKind) Type = {
-        let inner = self.type_of_place(place)
-        return when kind in {
-            .Mutable() then Type.MutableReferenceType(box(inner)),
-            .Weak() then Type.WeakReferenceType(box(inner)),
-            .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
-            .Shared() then Type.ReferenceType(box(inner)),
-        }
-    }
-
-    private local_type(self ref, local MIRLocalID) Type = {
-        return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
-    }
-
-    private parameter_summary_for_call(self, symbol ref Symbol, arguments List[ref MIRValue], result_type Type) Option[MIRReferenceParameterSummary] = {
-        when self.escaping_parameter_summaries.get(symbol.def_id.id) in {
-            .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
-            .None() then {},
-        }
-        let param_types = self.callable_param_types(symbol, arguments)
-        for identity_key in self.callable_identity_keys(symbol, param_types, result_type) then {
-            when self.summary_def_id_by_identity_key.get(identity_key) in {
-                .Some(def_id) then when self.escaping_parameter_summaries.get(def_id) in {
-                    .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
-                    .None() then {},
-                },
-                .None() then {},
-            }
-        }
-        return Option[MIRReferenceParameterSummary].None()
-    }
-
-    private callable_identity_keys(self, symbol ref Symbol, param_types List[Type], return_type Type) List[String] = {
-        let mut keys = List[String].new()
-        for name in self.callable_name_aliases(symbol) then {
-            let key = self.callable_signature_key(name, param_types, return_type)
-            if not keys.contains(key) then {
-                keys.push(key)
-            }
-        }
-        return keys
-    }
-
-    private callable_logical_name(self, symbol ref Symbol) String = {
-        if symbol.def_id.id > 0 then {
-            when self.receiver_method_dispatch.get(symbol.def_id) in {
-                .Some(info) then { return info.method_name },
-                .None() then {},
-            }
-            when self.concrete_callables_by_def_id.get(symbol.def_id) in {
-                .Some(info) then { return info.logical_name },
-                .None() then {},
-            }
-            when self.context.get_name(symbol.def_id) in {
-                .Some(name) then { return name },
-                .None() then {},
-            }
-        }
-        return self.context.symbol_name(symbol)
-    }
-
-    private callable_name_aliases(self, symbol ref Symbol) List[String] = {
-        let mut names = List[String].new()
-        let logical = self.callable_logical_name(symbol)
-        if not logical.is_empty() then {
-            names.push(logical)
-        }
-        let symbol_name = self.context.symbol_name(symbol)
-        if not symbol_name.is_empty() and not names.contains(symbol_name) then {
-            names.push(symbol_name)
-        }
-        if symbol.def_id.id > 0 then {
-            when self.context.get_name(symbol.def_id) in {
-                .Some(name) then if not name.is_empty() and not names.contains(name) then {
-                    names.push(name)
-                },
-                .None() then {},
-            }
-        }
-        return names
-    }
-
-    private callable_signature_key(self, name String, param_types List[Type], return_type Type) String = {
-        let mut key = "\(name)|"
-        let mut first = true
-        for param_type in param_types then {
-            if not first then {
-                key.push_string(",")
-            }
-            key.push_string(self.context.type_display_name(param_type))
-            first = false
-        }
-        key.push_string("->")
-        key.push_string(self.context.type_display_name(return_type))
-        return key
-    }
-
-    private value_types(self ref, values List[ref MIRValue]) List[Type] = {
-        let mut types = List[Type].new()
-        for value in values then {
-            types.push(self.type_of_value(value.val))
-        }
-        return types
-    }
-
-    private callable_param_types(self ref, symbol ref Symbol, arguments List[ref MIRValue]) List[Type] = {
-        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
-        when function_type in {
-            .FunctionType(params, _) then {
-                let mut types = List[Type].new()
-                for param in params then {
-                    types.push(param.val.param_type)
-                }
-                return types
-            },
-            _ then {},
-        }
-        return self.value_types(arguments)
-    }
-
-    private add_dependencies(self ref mut, local MIRLocalID, deps List[MIRLocalID]) Void = {
-        let mut existing = self.dependencies_by_local_id.get(local.raw_value) or else List[MIRLocalID].new()
-        self.local_list_union_into(existing.ref, deps)
-        self.dependencies_by_local_id.insert(local.raw_value, existing)
-    }
-
-    private intrinsic_values(self ref, node MIRIntrinsic) List[MIRValue] = {
-        let _ = self
-        return when node in {
-            .AllocMemory(count, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(count.val)
-                yield values
-            },
-            .DeallocMemory(pointer) then {
-                let mut values = List[MIRValue].new()
-                values.push(pointer.val)
-                yield values
-            },
-            .CopyMemory(dest, source, count) then {
-                let mut values = List[MIRValue].new()
-                values.push(dest.val)
-                values.push(source.val)
-                values.push(count.val)
-                yield values
-            },
-            .MoveMemory(dest, source, count) then {
-                let mut values = List[MIRValue].new()
-                values.push(dest.val)
-                values.push(source.val)
-                values.push(count.val)
-                yield values
-            },
-            .IsUniqueMutable(value) then {
-                let mut values = List[MIRValue].new()
-                values.push(value.val)
-                yield values
-            },
-            .RefCount(value) then {
-                let mut values = List[MIRValue].new()
-                values.push(value.val)
-                yield values
-            },
-            .MakeRef(pointer, owner, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(pointer.val)
-                values.push(owner.val)
-                yield values
-            },
-            .MakeMutRef(pointer, owner, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(pointer.val)
-                values.push(owner.val)
-                yield values
-            },
-            .DowngradeRef(value, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(value.val)
-                yield values
-            },
-            .DowngradeMutRef(value, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(value.val)
-                yield values
-            },
-            .UpgradeRef(value, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(value.val)
-                yield values
-            },
-            .UpgradeMutRef(value, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(value.val)
-                yield values
-            },
-            .InitMemory(pointer, value) then {
-                let mut values = List[MIRValue].new()
-                values.push(pointer.val)
-                values.push(value.val)
-                yield values
-            },
-            .DeinitMemory(pointer) then {
-                let mut values = List[MIRValue].new()
-                values.push(pointer.val)
-                yield values
-            },
-            .TakeMemory(pointer, _) then {
-                let mut values = List[MIRValue].new()
-                values.push(pointer.val)
-                yield values
-            },
-            .NullPtr(_) then List[MIRValue].new(),
-            .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-                let mut values = List[MIRValue].new()
-                values.push(out_handle.val)
-                values.push(out_tid.val)
-                values.push(closure.val)
-                values.push(stack_size.val)
-                yield values
-            },
-        }
-    }
-
-    private local_list_single(self ref, local MIRLocalID) List[MIRLocalID] = {
-        let _ = self
-        let mut out = List[MIRLocalID].new()
-        out.push(local)
-        return out
-    }
-
-    private local_list_contains(self ref, values List[MIRLocalID], target MIRLocalID) Bool = {
-        let _ = self
-        for value in values then {
-            if value.raw_value == target.raw_value then { return true }
-        }
-        return false
-    }
-
-    private local_list_union_into(self ref, dest ref mut List[MIRLocalID], source List[MIRLocalID]) Void = {
-        let _ = self
-        for value in source then {
-            let mut present = false
-            let mut index UInt = 0
-            while index < dest.count() then {
-                if dest[index].raw_value == value.raw_value then {
-                    present = true
-                }
-                index += 1
-            }
-            if not present then {
-                dest.push(value)
-            }
-        }
-    }
-
-}
-
 given MIRReferenceAllocationFunctionPromoter {
     public new(
         function ref MIRFunction,
-        escaping_local_ids Set[UInt],
-        escaping_parameter_summaries Dict[UInt, MIRReferenceParameterSummary],
-        summary_def_id_by_identity_key Dict[String, UInt],
+        parameter_types_by_def_id Dict[UInt, List[Type]],
+        parameter_types_by_name Dict[String, List[Type]],
         context CompilerContext,
         receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
         concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
@@ -1353,9 +576,8 @@ given MIRReferenceAllocationFunctionPromoter {
         }
         return MIRReferenceAllocationFunctionPromoter(
             function,
-            escaping_local_ids,
-            escaping_parameter_summaries,
-            summary_def_id_by_identity_key,
+            parameter_types_by_def_id,
+            parameter_types_by_name,
             context,
             receiver_method_dispatch,
             concrete_callables_by_def_id,
@@ -1386,64 +608,116 @@ given MIRReferenceAllocationFunctionPromoter {
     private promote_statement(self ref mut, statement MIRStatement) MIRStatement = {
         return when statement in {
             .Assign(place, value) then {
-                yield when place in {
-                    .Local(local) then if self.escaping_local_ids.contains(local.raw_value)
-                        then MIRStatement.Assign(place, self.promote_direct_references(value))
-                        else MIRStatement.Assign(place, self.promote_escaping_call_arguments(value)),
-                    _ then MIRStatement.Assign(place, self.promote_direct_references(value)),
-                }
+                let destination_type = self.destination_type_for_place(place)
+                yield MIRStatement.Assign(place, self.promote_value(value, destination_type))
             },
             .CompoundAssign(assignment) then {
-                let new_value = if self.is_local_place(assignment.target)
-                    then self.promote_escaping_call_arguments(assignment.value)
-                    else self.promote_direct_references(assignment.value)
-                yield MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, new_value))
+                let destination_type = self.destination_type_for_place(assignment.target)
+                yield MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, self.promote_value(assignment.value, destination_type)))
             },
-            .Evaluate(value) then MIRStatement.Evaluate(self.promote_escaping_call_arguments(value)),
-            .Retain(value) then MIRStatement.Retain(self.promote_escaping_call_arguments(value)),
-            .Release(value) then MIRStatement.Release(self.promote_escaping_call_arguments(value)),
+            .Evaluate(value) then MIRStatement.Evaluate(self.promote_value(value, Option[Type].None())),
+            .Retain(value) then MIRStatement.Retain(value),
+            .Release(value) then MIRStatement.Release(value),
             _ then statement,
         }
     }
 
-    private promote_escaping_call_arguments(self ref mut, value MIRValue) MIRValue = {
-        return when value in {
+    private destination_type_for_place(self ref, place MIRPlace) Option[Type] = {
+        return when place in {
+            .Local(local) then Option[Type].Some(self.local_type(local)),
+            .Global(def_id) then self.context.get_symbol_type(def_id),
+            .Field(_, field) then Option[Type].Some(field.symbol_type),
+            .EnumPayload(_, _, _, _, field_type) then Option[Type].Some(field_type),
+            _ then Option[Type].None(),
+        }
+    }
+
+    private promote_value(self ref mut, value MIRValue, destination_type Option[Type]) MIRValue = {
+        let promoted = when value in {
             .Call(call) then MIRValue.Call(MIRCall(
                 call.callee,
-                self.promote_arguments(call.arguments, call.callee, call.result_type),
+                self.promote_call_arguments(call.arguments, call.callee, call.result_type),
                 call.argument_ownerships,
                 call.result_type,
             )),
             .Intrinsic(node) then MIRValue.Intrinsic(self.promote_intrinsic(node)),
+            .Aggregate(aggregate) then {
+                let mut fields = List[ref MIRValue].new()
+                for field in aggregate.fields then {
+                    fields.push(box(self.promote_value(field.val, Option[Type].None())))
+                }
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+            },
+            .EnumCase(construction) then {
+                let mut args = List[ref MIRValue].new()
+                for arg in construction.arguments then {
+                    args.push(box(self.promote_value(arg.val, Option[Type].None())))
+                }
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+            },
+            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_value(conversion.inner.val, Option[Type].None())), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
+            .TraitMethodCall(call) then {
+                let mut args = List[ref MIRValue].new()
+                for arg in call.arguments then {
+                    args.push(box(self.promote_value(arg.val, Option[Type].None())))
+                }
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(call.receiver.val, Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+            },
+            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(tag.subject.val, Option[Type].None())), tag.enum_type)),
             _ then value,
         }
+        if destination_type is .Some(dt) then {
+            if self.type_requires_owned_reference_storage(dt) then {
+                return self.promote_direct_references(promoted)
+            }
+        }
+        return promoted
     }
 
-    private promote_arguments(self ref mut, arguments List[ref MIRValue], callee MIROperand, result_type Type) List[ref MIRValue] = {
-        return when callee in {
-            .Function(symbol) then {
-                let stored_parameters = when self.parameter_summary_for_call(symbol, arguments, result_type) in {
-                    .Some(summary) then summary.stored_parameter_indices,
-                    .None() then Set[UInt].new(),
-                }
-                if stored_parameters.is_empty() then {
-                    yield arguments
-                }
-                let mut promoted = List[ref MIRValue].new()
-                let mut index = 0(UInt)
-                while index < arguments.count() then {
-                    let argument = arguments[index].val
-                    promoted.push(box(
-                        if stored_parameters.contains(index)
-                            then self.promote_direct_references(argument)
-                            else argument
-                    ))
-                    index += 1
-                }
-                yield promoted
-            },
-            _ then arguments,
+    private promote_call_arguments(self ref mut, arguments List[ref MIRValue], callee MIROperand, result_type Type) List[ref MIRValue] = {
+        let param_types = when callee in {
+            .Function(symbol) then self.parameter_types_for_call(symbol),
+            _ then List[Type].new(),
         }
+        if param_types.is_empty() then {
+            return arguments
+        }
+        let mut promoted = List[ref MIRValue].new()
+        let mut index = 0(UInt)
+        while index < arguments.count() then {
+            let argument = arguments[index].val
+            let param_type = if index < param_types.count()
+                then Option[Type].Some(param_types[index])
+                else Option[Type].None()
+            promoted.push(box(self.promote_value(argument, param_type)))
+            index += 1
+        }
+        return promoted
+    }
+
+    private parameter_types_for_call(self ref, symbol ref Symbol) List[Type] = {
+        when self.parameter_types_by_def_id.get(symbol.def_id.id) in {
+            .Some(types) then { return types },
+            .None() then {},
+        }
+        for name in self.callable_name_aliases(symbol) then {
+            when self.parameter_types_by_name.get(name) in {
+                .Some(types) then { return types },
+                .None() then {},
+            }
+        }
+        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
+        when function_type in {
+            .FunctionType(params, _) then {
+                let mut types = List[Type].new()
+                for param in params then {
+                    types.push(param.val.param_type)
+                }
+                return types
+            },
+            _ then {},
+        }
+        return List[Type].new()
     }
 
     private promote_intrinsic(self ref mut, node MIRIntrinsic) MIRIntrinsic = {
@@ -1451,6 +725,50 @@ given MIRReferenceAllocationFunctionPromoter {
             .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(pointer, box(self.promote_direct_references(value.val))),
             .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(out_handle, out_tid, box(self.promote_direct_references(closure.val)), stack_size),
             _ then node,
+        }
+    }
+
+    private type_requires_owned_reference_storage(self ref, t Type) Bool = {
+        return when t in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            .FunctionType(_, _) then true,
+            .TraitObject(_, _) then true,
+            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if self.type_requires_owned_reference_storage(field.field_type) then { return true }
+                    }
+                    yield false
+                },
+                .None() then false,
+            },
+            .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    for case_info in cases then {
+                        for param in case_info.params then {
+                            if self.type_requires_owned_reference_storage(param.param_type) then { return true }
+                        }
+                    }
+                    yield false
+                },
+                .None() then false,
+            },
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    if self.type_requires_owned_reference_storage(arg.val) then { return true }
+                }
+                yield false
+            },
+            .GenericEnum(_, args) then {
+                for arg in args then {
+                    if self.type_requires_owned_reference_storage(arg.val) then { return true }
+                }
+                yield false
+            },
+            _ then false,
         }
     }
 
@@ -1487,40 +805,6 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    private is_local_place(self ref, place MIRPlace) Bool = {
-        let _ = self
-        return if place is .Local(_) then true else false
-    }
-
-    private parameter_summary_for_call(self, symbol ref Symbol, arguments List[ref MIRValue], result_type Type) Option[MIRReferenceParameterSummary] = {
-        when self.escaping_parameter_summaries.get(symbol.def_id.id) in {
-            .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
-            .None() then {},
-        }
-        let param_types = self.callable_param_types(symbol, arguments)
-        for identity_key in self.callable_identity_keys(symbol, param_types, result_type) then {
-            when self.summary_def_id_by_identity_key.get(identity_key) in {
-                .Some(def_id) then when self.escaping_parameter_summaries.get(def_id) in {
-                    .Some(summary) then { return Option[MIRReferenceParameterSummary].Some(summary) },
-                    .None() then {},
-                },
-                .None() then {},
-            }
-        }
-        return Option[MIRReferenceParameterSummary].None()
-    }
-
-    private callable_identity_keys(self, symbol ref Symbol, param_types List[Type], return_type Type) List[String] = {
-        let mut keys = List[String].new()
-        for name in self.callable_name_aliases(symbol) then {
-            let key = self.callable_signature_key(name, param_types, return_type)
-            if not keys.contains(key) then {
-                keys.push(key)
-            }
-        }
-        return keys
-    }
-
     private callable_logical_name(self, symbol ref Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.receiver_method_dispatch.get(symbol.def_id) in {
@@ -1558,44 +842,6 @@ given MIRReferenceAllocationFunctionPromoter {
             }
         }
         return names
-    }
-
-    private callable_signature_key(self, name String, param_types List[Type], return_type Type) String = {
-        let mut key = "\(name)|"
-        let mut first = true
-        for param_type in param_types then {
-            if not first then {
-                key.push_string(",")
-            }
-            key.push_string(self.context.type_display_name(param_type))
-            first = false
-        }
-        key.push_string("->")
-        key.push_string(self.context.type_display_name(return_type))
-        return key
-    }
-
-    private value_types(self ref, values List[ref MIRValue]) List[Type] = {
-        let mut types = List[Type].new()
-        for value in values then {
-            types.push(self.type_of_value(value.val))
-        }
-        return types
-    }
-
-    private callable_param_types(self ref, symbol ref Symbol, arguments List[ref MIRValue]) List[Type] = {
-        let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
-        when function_type in {
-            .FunctionType(params, _) then {
-                let mut types = List[Type].new()
-                for param in params then {
-                    types.push(param.val.param_type)
-                }
-                return types
-            },
-            _ then {},
-        }
-        return self.value_types(arguments)
     }
 
     private type_of_value(self ref, value MIRValue) Type = {
