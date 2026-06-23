@@ -21,6 +21,19 @@ extension TypeChecker {
       // If not found on Ref, continue auto-deref to inner type
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
+    case .borrowedReference(let inner, _):
+      if let extensions = genericExtensionMethods["Ref"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: .reference(inner: inner),
+          templateName: "Ref",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+
     case .mutableReference(let inner):
       if let extensions = genericExtensionMethods["MutRef"],
          let ext = extensions.first(where: { $0.method.name == name })
@@ -37,6 +50,29 @@ extension TypeChecker {
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
+          templateName: "Ref",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+
+    case .mutableBorrowedReference(let inner, _):
+      if let extensions = genericExtensionMethods["MutRef"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: .mutableReference(inner: inner),
+          templateName: "MutRef",
+          typeArgs: [inner],
+          methodInfo: ext
+        )
+      }
+      if let extensions = genericExtensionMethods["Ref"],
+         let ext = extensions.first(where: { $0.method.name == name })
+      {
+        return try resolveGenericExtensionMethod(
+          baseType: .reference(inner: inner),
           templateName: "Ref",
           typeArgs: [inner],
           methodInfo: ext
@@ -306,15 +342,37 @@ extension TypeChecker {
 
     case .reference(let pInner):
       switch actual {
-      case .reference(let aInner), .mutableReference(let aInner):
+      case .reference(let aInner), .mutableReference(let aInner),
+           .borrowedReference(let aInner, _), .mutableBorrowedReference(let aInner, _):
         return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
       default:
         return false
       }
 
     case .mutableReference(let pInner):
-      guard case .mutableReference(let aInner) = actual else { return false }
-      return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      switch actual {
+      case .mutableReference(let aInner), .mutableBorrowedReference(let aInner, _):
+        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      default:
+        return false
+      }
+
+    case .borrowedReference(let pInner, _):
+      switch actual {
+      case .reference(let aInner), .mutableReference(let aInner),
+           .borrowedReference(let aInner, _), .mutableBorrowedReference(let aInner, _):
+        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      default:
+        return false
+      }
+
+    case .mutableBorrowedReference(let pInner, _):
+      switch actual {
+      case .mutableReference(let aInner), .mutableBorrowedReference(let aInner, _):
+        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
+      default:
+        return false
+      }
 
     case .weakReference(let pInner):
       switch actual {
@@ -886,7 +944,7 @@ extension TypeChecker {
         let functionType = try withNewScope {
           // Bind Self to the generic parameter type
           let normalizedSelfType: Type
-          if case .reference(let inner) = baseType {
+          if let (inner, _) = referenceTypeComponents(baseType) {
             normalizedSelfType = inner
           } else {
             normalizedSelfType = baseType
@@ -957,7 +1015,8 @@ extension TypeChecker {
 
   private func builtinSubscriptBaseType(_ type: Type) -> Type {
     switch type {
-    case .reference(let inner), .mutableReference(let inner):
+    case .reference(let inner), .mutableReference(let inner),
+         .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
       return inner
     default:
       return type
@@ -1040,16 +1099,14 @@ extension TypeChecker {
 
     var finalBase = resolvedBase
     if let firstParam = params.first, firstParam.type != resolvedBase.type {
-      if case (.mutableReference(let baseInner), .reference(let paramInner)) = (resolvedBase.type, firstParam.type),
-         baseInner == paramInner
-      {
+      if let flavorConversion = makeReferenceFlavorConversion(resolvedBase, expectedType: firstParam.type) {
+        finalBase = flavorConversion
+      } else if canWidenMutableReference(resolvedBase, expectedType: firstParam.type) {
         finalBase = resolvedBase
       } else if let implicitRef = try makeImplicitReference(resolvedBase, expectedType: firstParam.type) {
         finalBase = implicitRef
       } else if let implicitDeref = makeImplicitDereference(resolvedBase, expectedType: firstParam.type) {
         finalBase = implicitDeref
-      } else if canWidenMutableReference(resolvedBase, expectedType: firstParam.type) {
-        finalBase = resolvedBase
       } else {
         throw SemanticError.typeMismatch(
           expected: firstParam.type.description,
@@ -1219,6 +1276,8 @@ extension TypeChecker {
         let coercedBase = try coerceLiteral(finalBase, to: firstParam.type)
         if coercedBase.type == firstParam.type {
           finalBase = coercedBase
+        } else if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
+          finalBase = flavorConversion
         } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitRef
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
@@ -1242,7 +1301,9 @@ extension TypeChecker {
       var typedArg = try inferTypedExpression(arg, expectedType: param.type)
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
+          typedArg = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref

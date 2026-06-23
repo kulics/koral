@@ -147,6 +147,9 @@ extension TypeChecker {
           actualReturnType = typedBody.type
         }
       }
+      if actualReturnType.containsBorrowedReference {
+        throw SemanticError(.generic("lambda return type cannot contain borrowed reference type '\(actualReturnType)'"), span: currentSpan)
+      }
       
       // Build function type
       let funcParams = typedParams.map { Parameter(type: $0.type, kind: .byVal) }
@@ -209,6 +212,9 @@ extension TypeChecker {
         // Check if it's mutable - only immutable variables can be captured
         if info.mutable {
           throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), span: currentSpan)
+        }
+        if info.type.containsBorrowedReference {
+          throw SemanticError(.generic("Cannot capture borrowed reference '\(name)'"), span: currentSpan)
         }
         
         // Avoid duplicates

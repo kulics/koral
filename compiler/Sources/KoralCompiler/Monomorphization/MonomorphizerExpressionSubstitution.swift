@@ -13,17 +13,24 @@ extension Monomorphizer {
             return base.type
         }
         if case .referenceExpression(let inner, _) = base {
-            switch inner {
-            case .variable:
-                return base.type
-            default:
-                return inner.type
-            }
+            return substitutionMethodLookupBaseType(for: inner)
         }
         if case .reference(let inner) = base.type {
             return inner
         }
         if case .mutableReference(let inner) = base.type {
+            return inner
+        }
+        if case .borrowedReference(let inner, _) = base.type {
+            return inner
+        }
+        if case .mutableBorrowedReference(let inner, _) = base.type {
+            return inner
+        }
+        if case .weakReference(let inner) = base.type {
+            return inner
+        }
+        if case .mutableWeakReference(let inner) = base.type {
             return inner
         }
         return base.type
@@ -294,7 +301,7 @@ extension Monomorphizer {
             
         case .call(let callee, let arguments, let type):
             var newCallee = substituteTypesInExpression(callee, substitution: substitution)
-            let newArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
+            var newArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
             let newType = substituteType(type, substitution: substitution)
 
             if case .variable(let identifier) = newCallee,
@@ -369,6 +376,17 @@ extension Monomorphizer {
                     }()
                 if let concreteMethod {
                     let resolvedMethodType = concreteMethod.type
+                    if case .function(let params, _) = resolvedMethodType {
+                        newArguments = zip(newArguments, params.dropFirst()).map { arg, param in
+                            alignMethodReferenceBase(
+                                arg,
+                                to: .function(
+                                    parameters: [Parameter(type: param.type, kind: param.kind)],
+                                    returns: param.type
+                                )
+                            )
+                        }
+                    }
                     newCallee = .methodReference(
                         base: alignMethodReferenceBase(base, to: resolvedMethodType),
                         method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
@@ -622,7 +640,11 @@ extension Monomorphizer {
             let newBase = substituteTypesInExpression(base, substitution: substitution)
             let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
             let substitutedType = substituteType(type, substitution: substitution)
-            let lookupBaseType = newBase.type
+            let lookupBaseType = substitutionMethodLookupBaseType(for: newBase)
+            let normalizedExpectedMethodType = normalizedTraitPlaceholderExpectedMethodType(
+                substitutedType,
+                for: lookupBaseType
+            )
             // Enqueue trait placeholder request for later resolution
             enqueueTraitPlaceholderRequest(
                 baseType: lookupBaseType,
@@ -649,7 +671,7 @@ extension Monomorphizer {
                     on: lookupBaseType,
                     name: methodName,
                     methodTypeArgs: substitutedMethodTypeArgs,
-                    expectedMethodType: substitutedType
+                    expectedMethodType: normalizedExpectedMethodType
                 )) {
                     let resolvedMethodType = concreteMethod.type
                     let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
@@ -671,7 +693,7 @@ extension Monomorphizer {
                         on: lookupBaseType,
                         name: methodName,
                         methodTypeArgs: substitutedMethodTypeArgs,
-                        expectedMethodType: substitutedType
+                        expectedMethodType: normalizedExpectedMethodType
                     )) {
                         let resolvedMethodType = concreteMethod.type
                         let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)

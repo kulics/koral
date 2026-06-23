@@ -291,6 +291,12 @@ public enum SemaUtils {
 
         case .mutableReference(let inner):
             return .mutableReference(inner: substituteType(inner, substitution: substitution, context: context))
+
+        case .borrowedReference(let inner, let lifetime):
+            return .borrowedReference(inner: substituteType(inner, substitution: substitution, context: context), lifetime: lifetime)
+
+        case .mutableBorrowedReference(let inner, let lifetime):
+            return .mutableBorrowedReference(inner: substituteType(inner, substitution: substitution, context: context), lifetime: lifetime)
             
         case .pointer(let element):
             return .pointer(element: substituteType(element, substitution: substitution, context: context))

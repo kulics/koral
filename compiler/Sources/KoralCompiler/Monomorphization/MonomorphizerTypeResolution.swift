@@ -14,12 +14,7 @@ extension Monomorphizer {
             return base.type
         }
         if case .referenceExpression(let inner, _) = base {
-            switch inner {
-            case .variable:
-                return base.type
-            default:
-                return inner.type
-            }
+            return methodLookupBaseType(for: inner)
         }
         if case .reference(let inner) = base.type {
             return inner
@@ -27,7 +22,41 @@ extension Monomorphizer {
         if case .mutableReference(let inner) = base.type {
             return inner
         }
+        if case .borrowedReference(let inner, _) = base.type {
+            return inner
+        }
+        if case .mutableBorrowedReference(let inner, _) = base.type {
+            return inner
+        }
         return base.type
+    }
+
+    func normalizedTraitPlaceholderExpectedMethodType(_ methodType: Type, for lookupBaseType: Type) -> Type {
+        guard case .function(let params, let returns) = methodType,
+              let first = params.first else {
+            return methodType
+        }
+
+        let normalizedReceiver: Type
+        switch first.type {
+        case .reference:
+            normalizedReceiver = .reference(inner: lookupBaseType)
+        case .mutableReference:
+            normalizedReceiver = .mutableReference(inner: lookupBaseType)
+        case .borrowedReference(_, let lifetime):
+            normalizedReceiver = .borrowedReference(inner: lookupBaseType, lifetime: lifetime)
+        case .mutableBorrowedReference(_, let lifetime):
+            normalizedReceiver = .mutableBorrowedReference(inner: lookupBaseType, lifetime: lifetime)
+        case .weakReference:
+            normalizedReceiver = .weakReference(inner: lookupBaseType)
+        case .mutableWeakReference:
+            normalizedReceiver = .mutableWeakReference(inner: lookupBaseType)
+        default:
+            normalizedReceiver = lookupBaseType
+        }
+
+        let normalizedParams = [Parameter(type: normalizedReceiver, kind: first.kind)] + params.dropFirst()
+        return .function(parameters: normalizedParams, returns: returns)
     }
 
 
@@ -41,7 +70,15 @@ extension Monomorphizer {
         switch (firstParam.type, baseType) {
         case (.reference(let lhs), .reference(let rhs)),
              (.reference(let lhs), .mutableReference(let rhs)),
+             (.reference(let lhs), .borrowedReference(let rhs, _)),
+             (.reference(let lhs), .mutableBorrowedReference(let rhs, _)),
              (.mutableReference(let lhs), .mutableReference(let rhs)),
+             (.borrowedReference(let lhs, _), .reference(let rhs)),
+             (.borrowedReference(let lhs, _), .mutableReference(let rhs)),
+             (.borrowedReference(let lhs, _), .borrowedReference(let rhs, _)),
+             (.borrowedReference(let lhs, _), .mutableBorrowedReference(let rhs, _)),
+             (.mutableBorrowedReference(let lhs, _), .mutableReference(let rhs)),
+             (.mutableBorrowedReference(let lhs, _), .mutableBorrowedReference(let rhs, _)),
              (.weakReference(let lhs), .weakReference(let rhs)),
              (.weakReference(let lhs), .mutableWeakReference(let rhs)),
              (.mutableWeakReference(let lhs), .mutableWeakReference(let rhs)):
@@ -143,6 +180,12 @@ extension Monomorphizer {
         case .reference(let inner, mutable: let mutable):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutableReference(inner: innerType) : .reference(inner: innerType)
+
+        case .borrowedReference(let inner, lifetime: let lifetime, mutable: let mutable):
+            let innerType = try resolveTypeNode(inner, substitution: substitution)
+            return mutable
+                ? .mutableBorrowedReference(inner: innerType, lifetime: lifetime)
+                : .borrowedReference(inner: innerType, lifetime: lifetime)
 
         case .pointer(let inner, mutable: let mutable):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
@@ -730,7 +773,7 @@ extension Monomorphizer {
             
         case .call(let callee, let arguments, let type):
             var newCallee = resolveTypesInExpression(callee)
-            let newArguments = arguments.map { resolveTypesInExpression($0) }
+            var newArguments = arguments.map { resolveTypesInExpression($0) }
             let newType = resolveParameterizedType(type)
 
             if case .variable(let identifier) = newCallee,
@@ -804,6 +847,17 @@ extension Monomorphizer {
                     }()
                 if let concreteMethod {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
+                    if case .function(let params, _) = resolvedMethodType {
+                        newArguments = zip(newArguments, params.dropFirst()).map { arg, param in
+                            alignMethodReferenceBase(
+                                arg,
+                                to: .function(
+                                    parameters: [Parameter(type: param.type, kind: param.kind)],
+                                    returns: param.type
+                                )
+                            )
+                        }
+                    }
                     newCallee = .methodReference(
                         base: alignMethodReferenceBase(base, to: resolvedMethodType),
                         method: copySymbolWithNewDefId(concreteMethod, newType: resolvedMethodType),
@@ -1085,18 +1139,23 @@ extension Monomorphizer {
             let newBase = resolveTypesInExpression(base)
             let resolvedMethodTypeArgs = methodTypeArgs.map { resolveParameterizedType($0) }
             let resolvedType = resolveParameterizedType(type)
+            let lookupBaseType = methodLookupBaseType(for: newBase)
+            let normalizedExpectedMethodType = normalizedTraitPlaceholderExpectedMethodType(
+                resolvedType,
+                for: lookupBaseType
+            )
             // Enqueue trait placeholder request for later resolution
             enqueueTraitPlaceholderRequest(
-                baseType: newBase.type,
+                baseType: lookupBaseType,
                 methodName: methodName,
                 methodTypeArgs: resolvedMethodTypeArgs
             )
             
             // Try to resolve to concrete method if base type is now concrete
-            if !context.containsGenericParameter(newBase.type) {
+            if !context.containsGenericParameter(lookupBaseType) {
                 // Check if the base type is a trait object — if so, keep as placeholder
                 // (the .call case will convert it to traitMethodCall with proper arguments)
-                if extractTraitObjectType(newBase.type) != nil {
+                if extractTraitObjectType(lookupBaseType) != nil {
                     return .traitMethodPlaceholder(
                         traitName: traitName,
                         methodName: methodName,
@@ -1108,10 +1167,10 @@ extension Monomorphizer {
 
                 // Look up the concrete method on the resolved base type
                 if let concreteMethod = (try? lookupConcreteMethodSymbolWithRefLikeFallback(
-                    on: newBase.type,
+                    on: lookupBaseType,
                     name: methodName,
                     methodTypeArgs: resolvedMethodTypeArgs,
-                    expectedMethodType: resolvedType
+                    expectedMethodType: normalizedExpectedMethodType
                 )) {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                     let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)
@@ -1125,15 +1184,15 @@ extension Monomorphizer {
                 } else {
                     // Try to instantiate the method first
                     _ = try? instantiateTraitPlaceholderMethod(
-                        baseType: newBase.type,
+                        baseType: lookupBaseType,
                         name: methodName,
                         methodTypeArgs: resolvedMethodTypeArgs
                     )
                     if let concreteMethod = (try? lookupConcreteMethodSymbolWithRefLikeFallback(
-                        on: newBase.type,
+                        on: lookupBaseType,
                         name: methodName,
                         methodTypeArgs: resolvedMethodTypeArgs,
-                        expectedMethodType: resolvedType
+                        expectedMethodType: normalizedExpectedMethodType
                     )) {
                         let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
                         let adjustedBase = alignMethodReferenceBase(newBase, to: resolvedMethodType)

@@ -404,15 +404,15 @@ private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs 
 }
 
 given Monomorphizer {
-    protected receiver_method_dispatch_info(self ref, def_id DefId) Option[ReceiverMethodDispatchInfo] = {
+    protected receiver_method_dispatch_info(self ref Self, def_id DefId) Option[ReceiverMethodDispatchInfo] = {
         return self.storage.receiver_method_dispatch.get(def_id)
     }
 
-    protected concrete_callable_info(self ref, def_id DefId) Option[ConcreteCallableInfo] = {
+    protected concrete_callable_info(self ref Self, def_id DefId) Option[ConcreteCallableInfo] = {
         return self.storage.concrete_callables_by_def_id.get(def_id)
     }
 
-    protected register_concrete_callable_if_absent(self ref, info ConcreteCallableInfo) Void = {
+    protected register_concrete_callable_if_absent(self ref Self, info ConcreteCallableInfo) Void = {
         if not self.storage.concrete_callables_by_def_id.contains_key(info.def_id) then {
             self.storage.concrete_callables_by_def_id.insert(info.def_id, info)
             // Build secondary index: "layout_key(owner).method_name" -> [def_id, ...]
@@ -428,7 +428,7 @@ given Monomorphizer {
         }
     }
 
-    protected set_receiver_method_dispatch_if_absent(self ref, callsite_def_id DefId, info ReceiverMethodDispatchInfo) Void = {
+    protected set_receiver_method_dispatch_if_absent(self ref Self, callsite_def_id DefId, info ReceiverMethodDispatchInfo) Void = {
         if not self.storage.receiver_method_dispatch.contains_key(callsite_def_id) then {
             self.storage.receiver_method_dispatch.insert(callsite_def_id, info)
         }
@@ -510,7 +510,7 @@ given Monomorphizer {
     // Register method DefIds from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
     // into extension_method_def_ids so that resolve_static_method_call_to_call
     // can find them, using a single stable concrete receiver key.
-    private seed_given_method_def_ids(self ref, node ref TypedDecl) Void = {
+    private seed_given_method_def_ids(self ref Self, node ref TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
                 self.register_given_members_def_ids(target_type, Option[String].None(), members)
@@ -525,7 +525,7 @@ given Monomorphizer {
         }
     }
 
-    private register_given_members_def_ids(self ref, target_type Type, trait_conformance Option[String], members List[ref TypedGivenMember]) Void = {
+    private register_given_members_def_ids(self ref Self, target_type Type, trait_conformance Option[String], members List[ref TypedGivenMember]) Void = {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
@@ -565,7 +565,7 @@ given Monomorphizer {
     //   4. Build staticMethodLookup
     //   5. Assemble and return MonomorphizedProgram
     //
-    public monomorphize(self ref) MonomorphizedProgram = {
+    public monomorphize(self ref Self) MonomorphizedProgram = {
         // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
         // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
         // so that resolve_static_method_call_to_call can find them.
@@ -716,58 +716,58 @@ given Monomorphizer {
 
     // Instantiate a generic struct template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.3).
-    instantiate_struct_impl(self ref, template GenericStructTemplate, args List[ref Type]) Type = {
+    instantiate_struct_impl(self ref Self, template GenericStructTemplate, args List[ref Type]) Type = {
         return instantiate_struct(self, template, args)
     }
 
     // Instantiate a generic enum template with concrete type arguments.
     // Implemented in mono_types.koral (task 5.4).
-    instantiate_enum_impl(self ref, template GenericEnumTemplate, args List[ref Type]) Type = {
+    instantiate_enum_impl(self ref Self, template GenericEnumTemplate, args List[ref Type]) Type = {
         return instantiate_enum(self, template, args)
     }
 
     // Instantiate a generic function template with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.1).
-    instantiate_function_impl(self ref, template ref GenericFunctionTemplate, args List[ref Type]) InstantiatedFunction = {
+    instantiate_function_impl(self ref Self, template ref GenericFunctionTemplate, args List[ref Type]) InstantiatedFunction = {
         return instantiate_function(self, template, args)
     }
 
     // Instantiate a generic extension method with concrete type arguments.
     // Implemented in mono_functions.koral (task 6.2).
-    instantiate_extension_method_impl(self ref, base_type Type, template_name String, template ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) Symbol = {
+    instantiate_extension_method_impl(self ref Self, base_type Type, template_name String, template ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) Symbol = {
         let sym = instantiate_extension_method(self, base_type, template_name, template, type_args, method_type_args)
         return sym
     }
 
-    instantiate_extension_method_def_id_impl(self ref, base_type Type, template_name String, template ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
+    instantiate_extension_method_def_id_impl(self ref Self, base_type Type, template_name String, template ref GenericExtensionMethodTemplate, type_args List[ref Type], method_type_args List[ref Type]) DefId = {
         return instantiate_extension_method_def_id(self, base_type, template_name, template, type_args, method_type_args)
     }
 
     // Resolve a trait placeholder method call to a concrete implementation.
     // Implemented in mono_functions.koral (task 6.6).
-    instantiate_trait_placeholder_method_impl(self ref, base_type Type, method_name String, method_type_args List[ref Type]) Void = {
+    instantiate_trait_placeholder_method_impl(self ref Self, base_type Type, method_name String, method_type_args List[ref Type]) Void = {
         instantiate_trait_placeholder_method(self, base_type, method_name, method_type_args)
     }
 
-    instantiate_trait_vtable_methods_impl(self ref, concrete_type Type, trait_name String, trait_type_args List[ref Type]) Void = {
+    instantiate_trait_vtable_methods_impl(self ref Self, concrete_type Type, trait_name String, trait_type_args List[ref Type]) Void = {
         instantiate_trait_vtable_methods(self, concrete_type, trait_name, trait_type_args)
     }
 
     // Substitute generic type parameters in a Type.
     // Implemented in mono_type_resolution.koral (task 8.1).
-    substitute_type_impl(self ref, t Type, substitution Dict[String, Type]) Type = {
+    substitute_type_impl(self ref Self, t Type, substitution Dict[String, Type]) Type = {
         return substitute_type(self, t, substitution)
     }
 
     // Substitute generic type parameters in a TypeNode, resolving to a concrete Type.
     // Implemented in mono_type_resolution.koral (task 8.3).
-    resolve_type_node_impl(self ref, node TypeNode, substitution Dict[String, Type]) Type = {
+    resolve_type_node_impl(self ref Self, node TypeNode, substitution Dict[String, Type]) Type = {
         return resolve_type_node(self, node, substitution)
     }
 
     // Substitute generic type parameters throughout a TypedExpr tree.
     // Implemented in mono_expr_substitution.koral (task 9.1).
-    substitute_types_in_expression_impl(self ref, expr ref TypedExpr, substitution Dict[String, Type]) ref TypedExpr = {
+    substitute_types_in_expression_impl(self ref Self, expr ref TypedExpr, substitution Dict[String, Type]) ref TypedExpr = {
         return substitute_types_in_expression(self, expr, substitution)
     }
 

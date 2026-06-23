@@ -27,6 +27,7 @@ public enum Token: CustomStringConvertible {
   case float(String)  // Float literal as string, e.g.: "3.14"
   case string(String)  // String literal, e.g.: "hello"
   case rune(String)    // Rune literal, e.g.: 'A', '\n'
+  case lifetimeIdentifier(String)  // Lifetime identifier, e.g.: $a
   case interpolatedString(parts: [InterpolatedStringPart])  // Interpolated string literal
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -153,6 +154,8 @@ public enum Token: CustomStringConvertible {
       return true
     case (.rune(_), .rune(_)):
       return true
+    case (.lifetimeIdentifier(_), .lifetimeIdentifier(_)):
+      return true
     case (.interpolatedString(_), .interpolatedString(_)):
       return true
     case (.bool(_), .bool(_)):
@@ -240,6 +243,8 @@ public enum Token: CustomStringConvertible {
       return "String(\(value))"
     case .rune(let value):
       return "Rune('\(value)')"
+    case .lifetimeIdentifier(let value):
+      return "Lifetime(\(value))"
     case .interpolatedString(let parts):
       return "InterpolatedString(\(parts))"
     case .plus:
@@ -1334,6 +1339,34 @@ public class Lexer {
     throw LexerError.invalidString(span: tokenSpan, "unterminated string interpolation")
   }
 
+  private func readLifetimeIdentifier() throws -> Token {
+    guard let sigil = getNextChar(), sigil == "$" else {
+      throw LexerError.invalidString(span: tokenSpan, "expected lifetime start with $")
+    }
+
+    guard let first = getNextChar() else {
+      throw LexerError.invalidString(span: tokenSpan, "unterminated lifetime identifier")
+    }
+
+    guard first.isLetter || first == "_" else {
+      throw LexerError.invalidString(span: tokenSpan, "lifetime identifier must start with a letter or _")
+    }
+
+    var name = "$"
+    name.append(first)
+
+    while let next = getNextChar() {
+      if next.isLetter || next.isNumber || next == "_" {
+        name.append(next)
+        continue
+      }
+      unreadChar(next)
+      break
+    }
+
+    return .lifetimeIdentifier(name)
+  }
+
   // Read an identifier
   private func readIdentifier() -> String {
     var idStr = ""
@@ -1533,6 +1566,9 @@ public class Lexer {
     case "'":
       unreadChar(char)
       return try readRuneToken()
+    case "$":
+      unreadChar(char)
+      return try readLifetimeIdentifier()
     case let c where c.isNumber:
       unreadChar(c)
       let numberLiteral = try readNumber()

@@ -28,6 +28,7 @@ fileprivate struct MIRFunctionEmitPlan {
   let localByID: [MIRLocalID: MIRLocal]
   let localNameByID: [MIRLocalID: String]
   let nonOwningLocalIDs: Set<MIRLocalID>
+  let borrowedForwardingLocalIDs: Set<MIRLocalID>
   let initFlagByLocalID: [MIRLocalID: String]
   let lifetimePlan: MIRLocalLifetimePlan
   let blockLabelByID: [MIRBlockID: String]
@@ -50,7 +51,13 @@ fileprivate struct MIRFunctionEmitPlan {
       }
     }
 
-    let nonOwningLocalIDs = MIRFunctionCodeEmitter.computeNonOwningLocals(function: function)
+    let borrowedForwardingLocalIDs = MIRFunctionCodeEmitter.computeBorrowedForwardingLocals(
+      codeGen: codeGen,
+      function: function
+    )
+    let nonOwningLocalIDs =
+      MIRFunctionCodeEmitter.computeNonOwningLocals(function: function)
+      .union(borrowedForwardingLocalIDs)
 
     var initFlagByLocalID: [MIRLocalID: String] = [:]
     for local in function.locals
@@ -75,6 +82,7 @@ fileprivate struct MIRFunctionEmitPlan {
       localByID: localByID,
       localNameByID: localNameByID,
       nonOwningLocalIDs: nonOwningLocalIDs,
+      borrowedForwardingLocalIDs: borrowedForwardingLocalIDs,
       initFlagByLocalID: initFlagByLocalID,
       lifetimePlan: lifetimePlan,
       blockLabelByID: blockLabelByID
@@ -94,6 +102,7 @@ final class MIRFunctionCodeEmitter {
   private let localByID: [MIRLocalID: MIRLocal]
   private let localNameByID: [MIRLocalID: String]
   private let nonOwningLocalIDs: Set<MIRLocalID>
+  private let borrowedForwardingLocalIDs: Set<MIRLocalID>
   private let initFlagByLocalID: [MIRLocalID: String]
   private let lifetimePlan: MIRLocalLifetimePlan
   private let blockLabelByID: [MIRBlockID: String]
@@ -112,6 +121,7 @@ final class MIRFunctionCodeEmitter {
     self.localByID = plan.localByID
     self.localNameByID = plan.localNameByID
     self.nonOwningLocalIDs = plan.nonOwningLocalIDs
+    self.borrowedForwardingLocalIDs = plan.borrowedForwardingLocalIDs
     self.initFlagByLocalID = plan.initFlagByLocalID
     self.lifetimePlan = plan.lifetimePlan
     self.blockLabelByID = plan.blockLabelByID
@@ -386,9 +396,285 @@ final class MIRFunctionCodeEmitter {
     return nonOwning
   }
 
+  fileprivate static func computeBorrowedForwardingLocals(
+    codeGen: CodeGen,
+    function: MIRFunction
+  ) -> Set<MIRLocalID> {
+    var heapOwnedRefLocals: Set<MIRLocalID> = []
+    var localUseCounts: [MIRLocalID: Int] = [:]
+    var localHasUnsafeUses: Set<MIRLocalID> = []
+    var copiedFromByLocal: [MIRLocalID: MIRLocalID] = [:]
+
+    func recordUse(_ localID: MIRLocalID) {
+      localUseCounts[localID, default: 0] += 1
+    }
+
+    func markUnsafe(_ localID: MIRLocalID) {
+      var current: MIRLocalID? = localID
+      while let candidate = current, !localHasUnsafeUses.contains(candidate) {
+        localHasUnsafeUses.insert(candidate)
+        current = copiedFromByLocal[candidate]
+      }
+    }
+
+    func walkOperand(_ operand: MIROperand) {
+      if case .local(let localID) = operand {
+        recordUse(localID)
+        markUnsafe(localID)
+      }
+    }
+
+    func walkPlace(_ place: MIRPlace) {
+      switch place {
+      case .local(let localID):
+        recordUse(localID)
+      case .global:
+        break
+      case .field(let base, _),
+           .enumPayload(let base, _, _, _, _):
+        walkPlace(base)
+      case .deref(let base, _),
+           .pointerElement(let base, _):
+        walkValue(base)
+      }
+    }
+
+    func walkBorrowLikePlace(_ place: MIRPlace) {
+      switch place {
+      case .local(let localID):
+        recordUse(localID)
+      case .global:
+        break
+      case .field(let base, _),
+           .enumPayload(let base, _, _, _, _):
+        walkBorrowLikePlace(base)
+      case .deref(let base, _),
+           .pointerElement(let base, _):
+        walkValue(base)
+      }
+    }
+
+    func walkValue(_ value: MIRValue) {
+      switch value {
+      case .operand(let operand):
+        walkOperand(operand)
+      case .placeRead(let place, let ownership):
+        switch ownership {
+        case .borrow:
+          walkBorrowLikePlace(place)
+        case .copy, .move, .take:
+          walkPlace(place)
+          if case .local(let localID) = place {
+            markUnsafe(localID)
+          }
+        }
+      case .pointer(let place):
+        walkBorrowLikePlace(place)
+      case .binary(let operation):
+        walkOperand(operation.left)
+        walkOperand(operation.right)
+      case .unary(let operation):
+        walkOperand(operation.operand)
+      case .call(let call):
+        walkOperand(call.callee)
+        for argument in call.arguments {
+          walkValue(argument)
+        }
+      case .aggregate(let aggregate):
+        for field in aggregate.fields {
+          walkValue(field)
+        }
+      case .enumCase(let construction):
+        for argument in construction.arguments {
+          walkValue(argument)
+        }
+      case .enumTag(let tag):
+        walkValue(tag.subject)
+      case .traitObjectConversion(let conversion):
+        walkValue(conversion.inner)
+      case .traitMethodCall(let call):
+        walkValue(call.receiver)
+        for argument in call.arguments {
+          walkValue(argument)
+        }
+      case .ref(let place, _, _):
+        walkPlace(place)
+        if case .local(let localID) = place {
+          markUnsafe(localID)
+        }
+      case .cast(let operand, _):
+        walkOperand(operand)
+      case .intrinsic:
+        break
+      case .lambda(let lambda):
+        for source in lambda.captureSources {
+          walkPlace(source)
+          if case .local(let localID) = source {
+            markUnsafe(localID)
+          }
+        }
+      }
+    }
+
+    func copiedLocal(from value: MIRValue) -> MIRLocalID? {
+      switch value {
+      case .operand(.local(let localID)):
+        return localID
+      case .placeRead(.local(let localID), _):
+        return localID
+      case .cast(.local(let localID), _):
+        return localID
+      default:
+        return nil
+      }
+    }
+
+    for block in function.blocks {
+      for statement in block.statements {
+        switch statement {
+        case .assign(let place, let value):
+          if case .local(let localID) = place,
+             case .ref(_, _, .heapOwned) = value {
+            heapOwnedRefLocals.insert(localID)
+          }
+          if case .local(let destLocal) = place,
+             let sourceLocal = copiedLocal(from: value),
+             copiedFromByLocal[destLocal] == nil || copiedFromByLocal[destLocal] == sourceLocal {
+            copiedFromByLocal[destLocal] = sourceLocal
+            recordUse(sourceLocal)
+            continue
+          }
+          walkValue(value)
+        case .compoundAssign(let assignment):
+          walkPlace(assignment.target)
+          walkValue(assignment.value)
+        case .evaluate(let value),
+             .retain(let value),
+             .release(let value):
+          walkValue(value)
+        case .drop(let place):
+          walkPlace(place)
+        case .declare, .scopeEnter, .scopeExit, .debugSource:
+          break
+        }
+      }
+
+      switch block.terminator {
+      case .returnValue(let operand):
+        if let operand, case .local(let localID) = operand {
+          recordUse(localID)
+          markUnsafe(localID)
+        }
+      case .branch(let condition, _, _):
+        walkOperand(condition)
+      case .switchValue(let operand, _, _):
+        walkOperand(operand)
+      case .goto, .unreachable:
+        break
+      }
+    }
+
+    func parameterTypes(for callee: MIROperand) -> [Type] {
+      switch callee {
+      case .function(let symbol):
+        if let exact = codeGen.mirProgram.functions.first(where: { $0.identifier.defId == symbol.defId }) {
+          return exact.parameters.map(\.type)
+        }
+        let targetName = codeGen.qualifiedName(for: symbol)
+        if let exact = codeGen.mirProgram.functions.first(where: { codeGen.qualifiedName(for: $0.identifier) == targetName }) {
+          return exact.parameters.map(\.type)
+        }
+        for global in codeGen.mirProgram.globals {
+          switch global {
+          case .function(let identifier, let parameters, _)
+          where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
+            return parameters.map(\.type)
+          case .foreignFunction(let identifier, let parameters)
+          where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
+            return parameters.map(\.type)
+          default:
+            continue
+          }
+        }
+        if case .function(let parameters, _) = symbol.type {
+          return parameters.map(\.type)
+        }
+        return []
+      default:
+        return []
+      }
+    }
+
+    func localForwarded(in value: MIRValue) -> MIRLocalID? {
+      switch value {
+      case .operand(.local(let localID)):
+        return localID
+      case .placeRead(.local(let localID), _):
+        return localID
+      default:
+        return nil
+      }
+    }
+
+    func isBorrowedParameterType(_ type: Type) -> Bool {
+      switch type {
+      case .borrowedReference, .mutableBorrowedReference:
+        return true
+      default:
+        return false
+      }
+    }
+
+    func isManagedReferenceParameterType(_ type: Type) -> Bool {
+      switch type {
+      case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+        return true
+      default:
+        return false
+      }
+    }
+
+    var result: Set<MIRLocalID> = []
+    for block in function.blocks {
+      for statement in block.statements {
+        let value: MIRValue
+        switch statement {
+        case .assign(_, let rhs), .evaluate(let rhs):
+          value = rhs
+        default:
+          continue
+        }
+
+        guard case .call(let call) = value else { continue }
+        let parameterTypeList = parameterTypes(for: call.callee)
+        for (index, argument) in call.arguments.enumerated() {
+          guard index < parameterTypeList.count,
+                let localID = localForwarded(in: argument),
+                heapOwnedRefLocals.contains(localID) else {
+            continue
+          }
+          let parameterType = parameterTypeList[index]
+          if isBorrowedParameterType(parameterType), localUseCounts[localID] == 1 {
+            result.insert(localID)
+            continue
+          }
+          if isManagedReferenceParameterType(parameterType) {
+            markUnsafe(localID)
+          }
+        }
+      }
+    }
+
+    for localID in heapOwnedRefLocals where !localHasUnsafeUses.contains(localID) {
+      result.insert(localID)
+    }
+
+    return result
+  }
+
   private static func isBorrowedReferenceLikeType(_ type: Type) -> Bool {
     switch type {
-    case .reference, .mutableReference, .weakReference, .mutableWeakReference:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .weakReference, .mutableWeakReference:
       return true
     default:
       return false
@@ -514,9 +800,17 @@ final class MIRFunctionCodeEmitter {
 
   private func emitAssign(place: MIRPlace, value: MIRValue) {
     let access = emitPlaceAccess(place)
-    let valueEmission = emitValue(value)
     let destinationType = resolver.type(of: place) ?? function.returnType
     let localID = localTargetID(for: place)
+    let valueToEmit: MIRValue
+    if let localID,
+       borrowedForwardingLocalIDs.contains(localID),
+       case .ref(let refPlace, let kind, .heapOwned) = value {
+      valueToEmit = .ref(refPlace, kind: kind, allocation: .stackBorrow)
+    } else {
+      valueToEmit = value
+    }
+    let valueEmission = emitValue(valueToEmit)
 
     // When MIR assigns a void constant to a struct/enum result (dead branch of when/if),
     // emit memset instead of invalid `struct_var = 0`.
@@ -528,7 +822,7 @@ final class MIRFunctionCodeEmitter {
       }
       codeGen.addIndent()
       codeGen.appendToBuffer("memset(&(\(access.path)), 0, sizeof(\(access.path)));\n")
-      consumeMovedSource(value)
+      consumeMovedSource(valueToEmit)
       emitCleanups(access.cleanups)
       if let localID, initFlagByLocalID[localID] != nil {
         setInitFlag(localID, to: true)
@@ -541,7 +835,7 @@ final class MIRFunctionCodeEmitter {
         emitGuardedDrop(flag: flag, type: destinationType, expression: access.path)
       }
       codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: access.path, isLvalue: false)
-      consumeMovedSource(value)
+      consumeMovedSource(valueToEmit)
       emitCleanups(access.cleanups)
       emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
       if initFlagByLocalID[localID] != nil {
@@ -559,14 +853,14 @@ final class MIRFunctionCodeEmitter {
       // deref places; for other non-local places (field access), move is fine.
       let storeIsLvalue = isDerefPlace(place)
       codeGen.emitCopyOrMove(type: destinationType, source: prepared, dest: access.path, isLvalue: storeIsLvalue)
-      consumeMovedSource(value)
+      consumeMovedSource(valueToEmit)
       emitCleanups(access.cleanups)
       emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
       return
     }
 
     codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: access.path, isLvalue: false)
-    consumeMovedSource(value)
+    consumeMovedSource(valueToEmit)
     emitCleanups(access.cleanups)
     emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
   }
@@ -632,7 +926,7 @@ final class MIRFunctionCodeEmitter {
     let emission = emitValue(value, sourceMode: true)
     let type = resolver.type(of: value) ?? .void
     switch type {
-    case .reference, .mutableReference, .traitObject:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .traitObject:
       codeGen.addIndent()
       codeGen.appendToBuffer("if (((\(emission.expression)).control)) { __koral_retain(((\(emission.expression)).control)); }\n")
     case .weakReference, .mutableWeakReference:
@@ -689,7 +983,7 @@ final class MIRFunctionCodeEmitter {
 
   private func isReferenceLikeType(_ type: Type) -> Bool {
     switch type {
-    case .reference, .mutableReference, .weakReference, .mutableWeakReference, .traitObject:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .weakReference, .mutableWeakReference, .traitObject:
       return true
     default:
       return false
@@ -1161,8 +1455,28 @@ final class MIRFunctionCodeEmitter {
   }
 
   private func emitCall(_ call: MIRCall) -> MIRValueEmission {
-    let argumentEmissions = zip(call.arguments, call.argumentOwnerships).map { value, ownership in
-      emitDirectCallArgument(value, ownership: ownership)
+    let parameterTypes: [Type]
+    switch call.callee {
+    case .function(let symbol):
+      if let exactParameterTypes = globalFunctionParameterTypes(for: symbol) {
+        parameterTypes = exactParameterTypes
+      } else if case .function(let parameters, _) = codeGen.context.getSymbolType(symbol.defId) ?? symbol.type {
+        parameterTypes = parameters.map(\.type)
+      } else {
+        parameterTypes = []
+      }
+    default:
+      let calleeType = resolver.type(of: call.callee) ?? .void
+      if case .function(let parameters, _) = calleeType {
+        parameterTypes = parameters.map(\.type)
+      } else {
+        parameterTypes = []
+      }
+    }
+
+    let argumentEmissions = zip(call.arguments, call.argumentOwnerships).enumerated().map { index, pair in
+      let expectedType = index < parameterTypes.count ? parameterTypes[index] : nil
+      return emitDirectCallArgument(pair.0, ownership: pair.1, expectedType: expectedType)
     }
     let argumentList = argumentEmissions.map(\.expression)
 
@@ -1210,7 +1524,10 @@ final class MIRFunctionCodeEmitter {
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: call.type))
   }
 
-  private func emitDirectCallArgument(_ value: MIRValue, ownership: MIROwnershipUse) -> MIRValueEmission {
+  private func emitDirectCallArgument(_ value: MIRValue, ownership: MIROwnershipUse, expectedType: Type?) -> MIRValueEmission {
+    if let borrowed = emitBorrowedCallArgumentIfNeeded(value, expectedType: expectedType) {
+      return borrowed
+    }
     let type = resolver.type(of: value) ?? .void
     switch ownership {
     case .copy:
@@ -1229,6 +1546,101 @@ final class MIRFunctionCodeEmitter {
     case .move, .take:
       return emitValue(value, sourceMode: true)
     }
+  }
+
+  private func emitBorrowedCallArgumentIfNeeded(_ value: MIRValue, expectedType: Type?) -> MIRValueEmission? {
+    guard let expectedType else { return nil }
+    let actualType = resolver.type(of: value) ?? .void
+
+    func placeForBorrow(_ value: MIRValue) -> MIRPlace? {
+      switch value {
+      case .placeRead(let place, _):
+        return place
+      case .operand(.local(let localID)):
+        return .local(localID)
+      default:
+        return nil
+      }
+    }
+
+    switch expectedType {
+    case .reference(let inner), .borrowedReference(let inner, _):
+      guard borrowCompatible(actualType: actualType, expectedInner: inner) else { return nil }
+      if isReferenceLikeType(actualType) {
+        return emitValue(value, sourceMode: true)
+      }
+      guard let place = placeForBorrow(value) else { return nil }
+      let allocation: MIRReferenceAllocation = {
+        switch expectedType {
+        case .reference:
+          return .heapOwned
+        default:
+          return .stackBorrow
+        }
+      }()
+      return emitReference(place: place, kind: .shared, allocation: allocation)
+    case .mutableReference(let inner), .mutableBorrowedReference(let inner, _):
+      guard borrowCompatible(actualType: actualType, expectedInner: inner) else { return nil }
+      if isReferenceLikeType(actualType) {
+        return emitValue(value, sourceMode: true)
+      }
+      guard let place = placeForBorrow(value) else { return nil }
+      let allocation: MIRReferenceAllocation = {
+        switch expectedType {
+        case .mutableReference:
+          return .heapOwned
+        default:
+          return .stackBorrow
+        }
+      }()
+      return emitReference(place: place, kind: .mutable, allocation: allocation)
+    case .weakReference(let inner):
+      guard borrowCompatible(actualType: actualType, expectedInner: inner) else { return nil }
+      if isReferenceLikeType(actualType) {
+        return emitValue(value, sourceMode: true)
+      }
+      guard let place = placeForBorrow(value) else { return nil }
+      return emitReference(place: place, kind: .weak, allocation: .stackBorrow)
+    case .mutableWeakReference(let inner):
+      guard borrowCompatible(actualType: actualType, expectedInner: inner) else { return nil }
+      if isReferenceLikeType(actualType) {
+        return emitValue(value, sourceMode: true)
+      }
+      guard let place = placeForBorrow(value) else { return nil }
+      return emitReference(place: place, kind: .mutableWeak, allocation: .stackBorrow)
+    default:
+      return nil
+    }
+  }
+
+  private func borrowCompatible(actualType: Type, expectedInner: Type) -> Bool {
+    if actualType == expectedInner || codeGen.context.containsGenericParameter(expectedInner) {
+      return true
+    }
+    if !isReferenceLikeType(actualType) {
+      return true
+    }
+    return codeGen.context.getLayoutKey(actualType) == codeGen.context.getLayoutKey(expectedInner)
+  }
+
+  private func globalFunctionParameterTypes(for symbol: Symbol) -> [Type]? {
+    if let exactFunction = codeGen.mirProgram.functions.first(where: { $0.identifier.defId == symbol.defId }) {
+      return exactFunction.parameters.map(\.type)
+    }
+    let targetName = codeGen.qualifiedName(for: symbol)
+    for global in codeGen.mirProgram.globals {
+      switch global {
+      case .function(let identifier, let parameters, _)
+      where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
+        return parameters.map(\.type)
+      case .foreignFunction(let identifier, let parameters)
+      where identifier.defId == symbol.defId || codeGen.qualifiedName(for: identifier) == targetName:
+        return parameters.map(\.type)
+      default:
+        continue
+      }
+    }
+    return nil
   }
 
   private func emitAggregate(_ aggregate: MIRAggregate) -> MIRValueEmission {
@@ -1423,6 +1835,15 @@ final class MIRFunctionCodeEmitter {
       let typeName = codeGen.cIdentifierByDefId[codeGen.defIdKey(defId)] ?? codeGen.context.getCIdentifier(defId) ?? "U_\(defId.id)"
       codeGen.addIndent()
       codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_\(typeName)_drop;\n")
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_ref_slot_drop;\n")
+    case .weakReference, .mutableWeakReference:
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_weakref_slot_drop;\n")
+    case .function:
+      codeGen.addIndent()
+      codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = (__koral_Dtor)__koral_closure_slot_drop;\n")
     default:
       codeGen.addIndent()
       codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->dtor = NULL;\n")
@@ -1463,8 +1884,20 @@ final class MIRFunctionCodeEmitter {
     switch (sourceType, targetType) {
     case (.reference, .reference),
          (.reference, .mutableReference),
+         (.reference, .borrowedReference),
+         (.reference, .mutableBorrowedReference),
          (.mutableReference, .reference),
          (.mutableReference, .mutableReference),
+         (.mutableReference, .borrowedReference),
+         (.mutableReference, .mutableBorrowedReference),
+         (.borrowedReference, .reference),
+         (.borrowedReference, .mutableReference),
+         (.borrowedReference, .borrowedReference),
+         (.borrowedReference, .mutableBorrowedReference),
+         (.mutableBorrowedReference, .reference),
+         (.mutableBorrowedReference, .mutableReference),
+         (.mutableBorrowedReference, .borrowedReference),
+         (.mutableBorrowedReference, .mutableBorrowedReference),
          (.weakReference, .weakReference),
          (.weakReference, .mutableWeakReference),
          (.mutableWeakReference, .weakReference),
@@ -1579,7 +2012,9 @@ final class MIRFunctionCodeEmitter {
       let expression: String
       switch resolver.type(of: value) ?? .void {
       case .reference(let inner) where isTraitObjectType(inner),
-           .mutableReference(let inner) where isTraitObjectType(inner):
+           .mutableReference(let inner) where isTraitObjectType(inner),
+           .borrowedReference(let inner, _) where isTraitObjectType(inner),
+           .mutableBorrowedReference(let inner, _) where isTraitObjectType(inner):
         expression = codeGen.nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
         let weakTemp = codeGen.nextTempWithDecl(cType: "struct __koral_WeakRef")
         codeGen.addIndent()
@@ -1808,7 +2243,8 @@ final class MIRFunctionCodeEmitter {
       let baseType = resolver.type(of: base) ?? .void
       let memberName = sanitizeCIdentifier(codeGen.context.getName(field.defId) ?? "field")
       switch baseType {
-      case .reference(let inner), .mutableReference(let inner):
+      case .reference(let inner), .mutableReference(let inner),
+           .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
         let path = "((\(codeGen.cTypeName(inner))*)\(baseAccess.path).ptr)->\(memberName)"
         return MIRPlaceAccess(path: path, control: "\(baseAccess.path).control", cleanups: baseAccess.cleanups)
       case .pointer, .mutablePointer:
@@ -1826,7 +2262,7 @@ final class MIRFunctionCodeEmitter {
       let baseEmission = emitValue(base, sourceMode: true)
       let baseType = resolver.type(of: base) ?? .void
       switch baseType {
-      case .reference, .mutableReference:
+      case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
         let path = "(*(\(codeGen.cTypeName(pointee))*)\(baseEmission.expression).ptr)"
         return MIRPlaceAccess(path: path, control: "\(baseEmission.expression).control", cleanups: baseEmission.cleanups)
       case .pointer, .mutablePointer:
@@ -2062,7 +2498,7 @@ final class MIRFunctionCodeEmitter {
 
   private func controlExpression(for type: Type, value: String) -> String {
     switch type {
-    case .reference, .mutableReference, .weakReference, .mutableWeakReference, .traitObject:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .weakReference, .mutableWeakReference, .traitObject:
       return "\(value).control"
     case .pointer, .mutablePointer:
       // ptr ref mut T — the value is a pointer to a ref struct, use -> for member access

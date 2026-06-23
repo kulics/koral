@@ -81,7 +81,7 @@ extension TypeChecker {
     case .whenExpression(let subject, let cases, _):
       let typedSubject = try inferTypedExpression(subject)
       var subjectType = typedSubject.type
-      if case .reference(let inner) = subjectType {
+      if let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
 

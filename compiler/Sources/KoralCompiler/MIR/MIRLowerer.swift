@@ -128,8 +128,11 @@ final class MIRLowerer {
     guard let firstParam = signature.parameters.first, firstParam.name == "self" else {
       return false
     }
-    if case .reference = firstParam.type {
+    switch firstParam.type {
+    case .reference, .borrowedReference:
       return false
+    default:
+      break
     }
     return true
   }
@@ -152,6 +155,13 @@ final class MIRLowerer {
         return nil
       }
       return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
+    case .borrowedReference(let inner, let lifetime, let mutable):
+      guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
+        return nil
+      }
+      return mutable
+        ? .mutableBorrowedReference(inner: resolved, lifetime: lifetime)
+        : .borrowedReference(inner: resolved, lifetime: lifetime)
     case .weakReference(let inner, let mutable):
       guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
         return nil
@@ -595,7 +605,9 @@ private final class MIRFunctionBuilder {
       return MIRExprResult(type: .bool, category: .rvalue, operand: .constant(.boolean(value)), place: nil)
     case .variable(let symbol):
       if case .function = symbol.kind {
-        return MIRExprResult(type: symbol.type, category: .rvalue, operand: .function(symbol), place: nil)
+        let resolvedType = programFunctionType(for: symbol.defId) ?? receiverAwareFunctionType(for: symbol)
+        let resolvedSymbol = Symbol(defId: symbol.defId, type: resolvedType, kind: symbol.kind)
+        return MIRExprResult(type: resolvedType, category: .rvalue, operand: .function(resolvedSymbol), place: nil)
       }
       let place = lowerPlace(expression) ?? .global(symbol.defId)
       return MIRExprResult(type: symbol.type, category: expression.valueCategory, operand: nil, place: place)
@@ -706,7 +718,7 @@ private final class MIRFunctionBuilder {
         }
         return lowerSimpleWhenExpression(subject: subject, cases: cases, type: type)
       }
-      fatalError("Unsupported when expression reached MIR lowering")
+      fatalError("Unsupported when expression reached MIR lowering: subject=\(subject.type) matched=\(patternMatchType(subject.type)) caseCount=\(cases.count)")
     case .lambdaExpression(let parameters, let captures, let body, let type):
       let captureSources = captures.map { capturePlace(for: $0.symbol) }
       let value = MIRValue.lambda(
@@ -1455,8 +1467,8 @@ private final class MIRFunctionBuilder {
     elements: [TypedPattern],
     negated: Bool
   ) -> MIROperand? {
-    guard case .enum(let defId) = subjectType,
-          let cases = context.getEnumCases(defId),
+    let resolvedSubjectType = resolveConcretePatternNominalType(subjectType)
+    guard let cases = resolvedPatternEnumCases(for: resolvedSubjectType),
           cases.indices.contains(tagIndex) else {
       return nil
     }
@@ -1466,7 +1478,7 @@ private final class MIRFunctionBuilder {
       return nil
     }
 
-    let tagOperand = materialize(.enumTag(MIREnumTag(subject: subjectValue, enumType: subjectType)), type: .int)
+    let tagOperand = materialize(.enumTag(MIREnumTag(subject: subjectValue, enumType: resolvedSubjectType)), type: .int)
     let expected = MIROperand.constant(.integer(String(tagIndex), .int))
     let tagCondition = materialize(
       .binary(MIRBinaryOperation(left: tagOperand, operatorKind: .comparison(.equal), right: expected, type: .bool)),
@@ -1546,8 +1558,8 @@ private final class MIRFunctionBuilder {
     elements: [TypedPattern],
     negated: Bool
   ) -> MIROperand? {
-    guard case .structure(let defId) = subjectType,
-          let members = context.getStructMembers(defId),
+    let resolvedSubjectType = resolveConcretePatternNominalType(subjectType)
+    guard let members = resolvedPatternStructMembers(for: resolvedSubjectType),
           members.count == elements.count else {
       return nil
     }
@@ -1590,6 +1602,8 @@ private final class MIRFunctionBuilder {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
+         .borrowedReference(let inner, _),
+         .mutableBorrowedReference(let inner, _),
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return (.deref(base: .placeRead(place, ownership: .borrow), pointee: inner), inner)
@@ -1598,10 +1612,382 @@ private final class MIRFunctionBuilder {
     }
   }
 
+  private func resolveConcretePatternNominalType(_ type: Type) -> Type {
+    switch type {
+    case .genericStruct, .genericEnum:
+      let targetName = context.getDebugName(type)
+      for node in program.globalNodes {
+        switch node {
+        case .globalStructDeclaration(let identifier, _),
+             .foreignStruct(let identifier, _),
+             .globalEnumDeclaration(let identifier, _):
+          if context.getDebugName(identifier.type) == targetName {
+            return identifier.type
+          }
+        default:
+          continue
+        }
+      }
+      return type
+    default:
+      return type
+    }
+  }
+
+  private func resolvePatternTypeNode(_ node: TypeNode, substitution: [String: Type]) -> Type? {
+    switch node {
+    case .identifier(let name):
+      if let substituted = substitution[name] {
+        return substituted
+      }
+      if let builtinType = SemaUtils.resolveBuiltinType(name) {
+        return builtinType
+      }
+      for global in program.globalNodes {
+        switch global {
+        case .globalStructDeclaration(let identifier, _), .foreignStruct(let identifier, _):
+          let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
+          guard symbolNames.contains(where: { $0 == name || $0.components(separatedBy: ".").last == name }),
+                case .structure(let defId) = identifier.type else { continue }
+          return .structure(defId: defId)
+        case .globalEnumDeclaration(let identifier, _):
+          let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
+          guard symbolNames.contains(where: { $0 == name || $0.components(separatedBy: ".").last == name }),
+                case .`enum`(let defId) = identifier.type else { continue }
+          return .`enum`(defId: defId)
+        default:
+          continue
+        }
+      }
+      if let defId = context.lookupDefId(modulePath: [], name: name, sourceFile: nil),
+         let kind = context.getKind(defId) {
+        switch kind {
+        case .type(.structure):
+          return .structure(defId: defId)
+        case .type(.`enum`):
+          return .`enum`(defId: defId)
+        default:
+          break
+        }
+      }
+      return nil
+    case .reference(let inner, let mutable):
+      if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
+        return mutable ? .mutableReference(inner: traitInner) : .reference(inner: traitInner)
+      }
+      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+        return nil
+      }
+      return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
+    case .borrowedReference(let inner, let lifetime, let mutable):
+      if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
+        return mutable
+          ? .mutableBorrowedReference(inner: traitInner, lifetime: lifetime)
+          : .borrowedReference(inner: traitInner, lifetime: lifetime)
+      }
+      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+        return nil
+      }
+      return mutable
+        ? .mutableBorrowedReference(inner: resolved, lifetime: lifetime)
+        : .borrowedReference(inner: resolved, lifetime: lifetime)
+    case .weakReference(let inner, let mutable):
+      if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
+        return mutable ? .mutableWeakReference(inner: traitInner) : .weakReference(inner: traitInner)
+      }
+      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+        return nil
+      }
+      return mutable ? .mutableWeakReference(inner: resolved) : .weakReference(inner: resolved)
+    case .pointer(let inner, let mutable):
+      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+        return nil
+      }
+      return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
+    case .generic(let base, let args):
+      let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      guard resolvedArgs.count == args.count else { return nil }
+      for global in program.globalNodes {
+        switch global {
+        case .globalStructDeclaration(let identifier, _), .foreignStruct(let identifier, _):
+          let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
+          if symbolNames.contains(where: { $0 == base || $0.components(separatedBy: ".").last == base }) {
+            return .genericStruct(template: base, args: resolvedArgs)
+          }
+        case .globalEnumDeclaration(let identifier, _):
+          let symbolNames = [context.getName(identifier.defId), context.getQualifiedName(identifier.defId)].compactMap { $0 }
+          if symbolNames.contains(where: { $0 == base || $0.components(separatedBy: ".").last == base }) {
+            return .genericEnum(template: base, args: resolvedArgs)
+          }
+        default:
+          continue
+        }
+      }
+      if let defId = context.lookupDefId(modulePath: [], name: base, sourceFile: nil),
+         let kind = context.getKind(defId) {
+        switch kind {
+        case .type(.structure), .genericTemplate(.structure):
+          return .genericStruct(template: base, args: resolvedArgs)
+        case .type(.`enum`), .genericTemplate(.`enum`):
+          return .genericEnum(template: base, args: resolvedArgs)
+        default:
+          break
+        }
+      }
+      return nil
+    case .functionType(let paramTypes, let returnType):
+      let resolvedParams = paramTypes.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      guard resolvedParams.count == paramTypes.count,
+            let resolvedReturn = resolvePatternTypeNode(returnType, substitution: substitution) else {
+        return nil
+      }
+      let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
+      return .function(parameters: params, returns: resolvedReturn)
+    case .inferredSelf:
+      return substitution["Self"]
+    }
+  }
+
+  private func resolvePatternTraitObjectType(
+    _ node: TypeNode,
+    substitution: [String: Type]
+  ) -> Type? {
+    switch node {
+    case .identifier(let name):
+      guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
+      guard resolvePatternTypeNode(node, substitution: substitution) == nil else { return nil }
+      return .traitObject(traitName: name, typeArgs: [])
+    case .generic(let base, let args):
+      let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      guard resolvedArgs.count == args.count else { return nil }
+      return .traitObject(traitName: base, typeArgs: resolvedArgs)
+    default:
+      return nil
+    }
+  }
+
+  private func resolvedPatternStructMembers(
+    for type: Type
+  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+    let resolvedType = resolveConcretePatternNominalType(type)
+    switch resolvedType {
+    case .structure(let defId):
+      if let members = context.getStructMembers(defId) {
+        return members
+      }
+      if let members = instantiatedStructMembers(for: defId) {
+        return members
+      }
+      for node in program.globalNodes {
+        switch node {
+        case .globalStructDeclaration(let identifier, let parameters)
+          where patternProgramTypeMatches(identifier.type, resolvedType):
+          return parameters.map { parameter in
+            (
+              name: context.getName(parameter.defId) ?? "",
+              type: parameter.type,
+              mutable: parameter.isMutable(),
+              access: .public,
+              named: true
+            )
+          }
+        case .foreignStruct(let identifier, let fields)
+          where patternProgramTypeMatches(identifier.type, resolvedType):
+          return fields.map { field in
+            (
+              name: field.name,
+              type: field.type,
+              mutable: false,
+              access: .public,
+              named: true
+            )
+          }
+        default:
+          continue
+        }
+      }
+      return nil
+    case .genericStruct(let templateName, let args):
+      if let members = programStructMembers(matching: resolvedType) {
+        return members
+      }
+      guard let defId = context.defIdMap.lookupGenericStructTemplateDefId(templateName),
+            let info = context.defIdMap.getGenericStructTemplateInfo(defId) else {
+        return nil
+      }
+      var substitution: [String: Type] = [:]
+      for (index, param) in info.typeParameters.enumerated() where index < args.count {
+        substitution[param.name] = args[index]
+      }
+      var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = []
+      resolvedMembers.reserveCapacity(info.parameters.count)
+      for member in info.parameters {
+        guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution) else {
+          return nil
+        }
+        resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named))
+      }
+      return resolvedMembers
+    default:
+      return nil
+    }
+  }
+
+  private func resolvedPatternEnumCases(for type: Type) -> [EnumCase]? {
+    let resolvedType = resolveConcretePatternNominalType(type)
+    switch resolvedType {
+    case .`enum`(let defId):
+      if let cases = context.getEnumCases(defId) {
+        return cases
+      }
+      if let cases = instantiatedEnumCases(for: defId) {
+        return cases
+      }
+      for node in program.globalNodes {
+        guard case .globalEnumDeclaration(let identifier, let cases) = node,
+              patternProgramTypeMatches(identifier.type, resolvedType) else {
+          continue
+        }
+        return cases
+      }
+      return nil
+    case .genericEnum(let templateName, let args):
+      if let cases = programEnumCases(matching: resolvedType) {
+        return cases
+      }
+      guard let defId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName),
+            let info = context.defIdMap.getGenericEnumTemplateInfo(defId) else {
+        return nil
+      }
+      var substitution: [String: Type] = [:]
+      for (index, param) in info.typeParameters.enumerated() where index < args.count {
+        substitution[param.name] = args[index]
+      }
+      var resolvedCases: [EnumCase] = []
+      resolvedCases.reserveCapacity(info.cases.count)
+      for caseDecl in info.cases {
+        var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+        resolvedParams.reserveCapacity(caseDecl.parameters.count)
+        for parameter in caseDecl.parameters {
+          guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution) else {
+            return nil
+          }
+          resolvedParams.append((name: parameter.name, type: resolvedType, access: AccessModifier.public, named: parameter.named))
+        }
+        resolvedCases.append(EnumCase(name: caseDecl.name, parameters: resolvedParams))
+      }
+      return resolvedCases
+    default:
+      return nil
+    }
+  }
+
+  private func patternProgramTypeMatches(_ lhs: Type, _ rhs: Type) -> Bool {
+    lhs == rhs || context.getDebugName(lhs) == context.getDebugName(rhs)
+  }
+
+  private func programStructMembers(
+    matching type: Type
+  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+    for node in program.globalNodes {
+      switch node {
+      case .globalStructDeclaration(let identifier, let parameters)
+        where patternProgramTypeMatches(identifier.type, type):
+        return parameters.map { parameter in
+          (
+            name: context.getName(parameter.defId) ?? "",
+            type: parameter.type,
+            mutable: parameter.isMutable(),
+            access: .public,
+            named: true
+          )
+        }
+      case .foreignStruct(let identifier, let fields)
+        where patternProgramTypeMatches(identifier.type, type):
+        return fields.map { field in
+          (
+            name: field.name,
+            type: field.type,
+            mutable: false,
+            access: .public,
+            named: true
+          )
+        }
+      default:
+        continue
+      }
+    }
+    return nil
+  }
+
+  private func programEnumCases(matching type: Type) -> [EnumCase]? {
+    for node in program.globalNodes {
+      guard case .globalEnumDeclaration(let identifier, let cases) = node,
+            patternProgramTypeMatches(identifier.type, type) else {
+        continue
+      }
+      return cases
+    }
+    return nil
+  }
+
+  private func instantiatedStructMembers(
+    for defId: DefId
+  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+    guard let templateName = context.getTemplateName(defId),
+          let args = context.getTypeArguments(defId),
+          let templateDefId = context.defIdMap.lookupGenericStructTemplateDefId(templateName),
+          let info = context.defIdMap.getGenericStructTemplateInfo(templateDefId) else {
+      return nil
+    }
+    var substitution: [String: Type] = [:]
+    for (index, param) in info.typeParameters.enumerated() where index < args.count {
+      substitution[param.name] = args[index]
+    }
+    var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = []
+    resolvedMembers.reserveCapacity(info.parameters.count)
+    for member in info.parameters {
+      guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution) else {
+        return nil
+      }
+      resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named))
+    }
+    return resolvedMembers
+  }
+
+  private func instantiatedEnumCases(for defId: DefId) -> [EnumCase]? {
+    guard let templateName = context.getTemplateName(defId),
+          let args = context.getTypeArguments(defId),
+          let templateDefId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName),
+          let info = context.defIdMap.getGenericEnumTemplateInfo(templateDefId) else {
+      return nil
+    }
+    var substitution: [String: Type] = [:]
+    for (index, param) in info.typeParameters.enumerated() where index < args.count {
+      substitution[param.name] = args[index]
+    }
+    var resolvedCases: [EnumCase] = []
+    resolvedCases.reserveCapacity(info.cases.count)
+    for caseDecl in info.cases {
+      var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+      resolvedParams.reserveCapacity(caseDecl.parameters.count)
+      for parameter in caseDecl.parameters {
+        guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution) else {
+          return nil
+        }
+        resolvedParams.append((name: parameter.name, type: resolvedType, access: .public, named: parameter.named))
+      }
+      resolvedCases.append(EnumCase(name: caseDecl.name, parameters: resolvedParams))
+    }
+    return resolvedCases
+  }
+
   private func patternMatchSubject(value: MIRValue, type: Type) -> (value: MIRValue, type: Type) {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
+         .borrowedReference(let inner, _),
+         .mutableBorrowedReference(let inner, _),
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return (.placeRead(.deref(base: value, pointee: inner), ownership: .borrow), inner)
@@ -1614,11 +2000,13 @@ private final class MIRFunctionBuilder {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
+         .borrowedReference(let inner, _),
+         .mutableBorrowedReference(let inner, _),
          .weakReference(let inner),
          .mutableWeakReference(let inner):
-      return inner
+      return resolveConcretePatternNominalType(inner)
     default:
-      return type
+      return resolveConcretePatternNominalType(type)
     }
   }
 
@@ -1636,15 +2024,13 @@ private final class MIRFunctionBuilder {
     case .comparisonPattern:
       return matchedType.isIntegerType
     case .enumCase(_, let tagIndex, let elements):
-      guard case .enum(let defId) = matchedType,
-            let cases = context.getEnumCases(defId),
+      guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else { return false }
       let caseDef = cases[tagIndex]
       return caseDef.parameters.count == elements.count
         && zip(elements, caseDef.parameters).allSatisfy { canLowerSimplePattern($0.0, subjectType: $0.1.type) }
     case .structPattern(_, let elements):
-      guard case .structure(let defId) = matchedType,
-            let members = context.getStructMembers(defId),
+      guard let members = resolvedPatternStructMembers(for: matchedType),
             members.count == elements.count else { return false }
       return zip(elements, members).allSatisfy { canLowerSimplePattern($0.0, subjectType: $0.1.type) }
     case .andPattern(let left, let right),
@@ -1671,8 +2057,7 @@ private final class MIRFunctionBuilder {
     case .variable:
       return true
     case .enumCase(_, let tagIndex, let elements):
-      guard case .enum(let defId) = matchedType,
-            let cases = context.getEnumCases(defId),
+      guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else {
         return false
       }
@@ -1680,8 +2065,7 @@ private final class MIRFunctionBuilder {
       return caseDef.parameters.count == elements.count
         && zip(elements, caseDef.parameters).allSatisfy { canLowerPatternWithBindings($0.0, subjectType: $0.1.type) }
     case .structPattern(_, let elements):
-      guard case .structure(let defId) = matchedType,
-            let members = context.getStructMembers(defId),
+      guard let members = resolvedPatternStructMembers(for: matchedType),
             members.count == elements.count else {
         return false
       }
@@ -1710,7 +2094,7 @@ private final class MIRFunctionBuilder {
   private func bindPatternVariables(pattern: TypedPattern, subjectPlace: MIRPlace, subjectType: Type) {
     let matchedSubject = patternMatchPlace(place: subjectPlace, type: subjectType)
     let matchedPlace = matchedSubject.place
-    let matchedType = matchedSubject.type
+    let matchedType = resolveConcretePatternNominalType(matchedSubject.type)
 
     switch pattern {
     case .variable(let symbol):
@@ -1722,8 +2106,7 @@ private final class MIRFunctionBuilder {
         }
       }
     case .enumCase(let caseName, let tagIndex, let elements):
-      guard case .enum(let defId) = matchedType,
-            let cases = context.getEnumCases(defId),
+      guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else {
         return
       }
@@ -1753,8 +2136,7 @@ private final class MIRFunctionBuilder {
         bindPatternVariables(pattern: element, subjectPlace: resolvedPlace, subjectType: parameter.type)
       }
     case .structPattern(_, let elements):
-      guard case .structure(let defId) = matchedType,
-            let members = context.getStructMembers(defId),
+      guard let members = resolvedPatternStructMembers(for: matchedType),
             members.count == elements.count else {
         return
       }
@@ -1843,8 +2225,7 @@ private final class MIRFunctionBuilder {
       let sourcePlace = symbol.type == subjectType ? subjectPlace : matchedPlace
       append(.assign(destination, .placeRead(sourcePlace, ownership: .copy)))
     case .enumCase(let caseName, let tagIndex, let elements):
-      guard case .enum(let defId) = matchedType,
-            let cases = context.getEnumCases(defId),
+      guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else {
         return
       }
@@ -1861,8 +2242,7 @@ private final class MIRFunctionBuilder {
         assignPatternBindingLocals(pattern: element, subjectPlace: payloadPlace, subjectType: parameter.type)
       }
     case .structPattern(_, let elements):
-      guard case .structure(let defId) = matchedType,
-            let members = context.getStructMembers(defId),
+      guard let members = resolvedPatternStructMembers(for: matchedType),
             members.count == elements.count else {
         return
       }
@@ -2118,7 +2498,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func canLowerSimpleWhen(subject: TypedExpressionNode, cases: [TypedMatchCase]) -> Bool {
-    guard !context.containsGenericParameter(subject.type) else { return false }
+    guard !context.containsGenericParameter(patternMatchType(subject.type)) else { return false }
     guard cases.allSatisfy({ canLowerPatternWithBindings($0.pattern, subjectType: subject.type) }) else { return false }
     return true
   }
@@ -2135,6 +2515,7 @@ private final class MIRFunctionBuilder {
     let subjectType: Type
     switch subject.type {
     case .reference(let inner), .mutableReference(let inner),
+         .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _),
          .weakReference(let inner), .mutableWeakReference(let inner):
       subjectType = inner
     default:
@@ -2474,8 +2855,21 @@ private final class MIRFunctionBuilder {
        let callableMethod = concreteMethodSymbol(method: method, calleeType: callee.type, resultType: type) {
       var argumentValues: [MIRValue] = [lowerMethodReceiverArgument(base, method: callableMethod)]
       argumentValues.reserveCapacity(arguments.count + 1)
-      for argument in arguments {
-        argumentValues.append(lowerValue(argument))
+      let methodType: Type
+      if case .function = callableMethod.type, !context.containsGenericParameter(callableMethod.type) {
+        methodType = callableMethod.type
+      } else {
+        methodType = preferredFunctionType(for: callableMethod)
+      }
+      let methodParameters: [Parameter]
+      if case .function(let parameters, _) = methodType {
+        methodParameters = parameters
+      } else {
+        methodParameters = []
+      }
+      for (index, argument) in arguments.enumerated() {
+        let expectedType = (index + 1) < methodParameters.count ? methodParameters[index + 1].type : nil
+        argumentValues.append(lowerCallArgument(argument, expectedType: expectedType))
         guard !currentBlockIsTerminated else { return nil }
       }
       guard !currentBlockIsTerminated else { return nil }
@@ -2492,7 +2886,7 @@ private final class MIRFunctionBuilder {
 
     if context.containsGenericParameter(callee.type)
       || arguments.contains(where: { context.containsGenericParameter($0.type) }) {
-      fatalError("Unsupported generic dynamic call reached MIR lowering")
+      fatalError("Unsupported generic dynamic call reached MIR lowering: callee=\(callee) calleeType=\(callee.type) argTypes=\(arguments.map { $0.type })")
     }
 
     let calleeOperand = lowerOperand(callee)
@@ -2527,7 +2921,12 @@ private final class MIRFunctionBuilder {
   }
 
   private func lowerMethodReceiverArgument(_ base: TypedExpressionNode, method: Symbol) -> MIRValue {
-    let methodType = context.getSymbolType(method.defId) ?? method.type
+    let methodType: Type
+    if case .function = method.type, !context.containsGenericParameter(method.type) {
+      methodType = method.type
+    } else {
+      methodType = programFunctionType(for: method.defId) ?? receiverAwareFunctionType(for: method)
+    }
     if case .function(let parameters, _) = methodType,
        let first = parameters.first,
        let borrowed = lowerBorrowedReferenceArgument(base, expectedType: first.type) {
@@ -2540,28 +2939,42 @@ private final class MIRFunctionBuilder {
     guard let expectedType else { return nil }
     switch expectedType {
     case .reference(let inner):
-      if argument.type == inner, let place = lowerPlace(argument) {
-        return .ref(place, kind: .shared, allocation: .stackBorrow)
+      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
+        return .ref(place, kind: .shared, allocation: .heapOwned)
       }
-      if argument.type == expectedType {
+      if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: false) {
         return lowerBorrowedSourceValue(argument)
       }
     case .mutableReference(let inner):
-      if argument.type == inner, let place = lowerPlace(argument) {
+      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
+        return .ref(place, kind: .mutable, allocation: .heapOwned)
+      }
+      if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: true) {
+        return lowerBorrowedSourceValue(argument)
+      }
+    case .borrowedReference(let inner, _):
+      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
+        return .ref(place, kind: .shared, allocation: .stackBorrow)
+      }
+      if argument.type == expectedType || argument.type == .reference(inner: inner) || context.containsGenericParameter(inner) {
+        return lowerBorrowedSourceValue(argument)
+      }
+    case .mutableBorrowedReference(let inner, _):
+      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .mutable, allocation: .stackBorrow)
       }
-      if argument.type == expectedType {
+      if argument.type == expectedType || argument.type == .mutableReference(inner: inner) || context.containsGenericParameter(inner) {
         return lowerBorrowedSourceValue(argument)
       }
     case .weakReference(let inner):
-      if argument.type == inner, let place = lowerPlace(argument) {
+      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .weak, allocation: .stackBorrow)
       }
       if argument.type == expectedType {
         return lowerBorrowedSourceValue(argument)
       }
     case .mutableWeakReference(let inner):
-      if argument.type == inner, let place = lowerPlace(argument) {
+      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .mutableWeak, allocation: .stackBorrow)
       }
       if argument.type == expectedType {
@@ -2573,11 +2986,26 @@ private final class MIRFunctionBuilder {
     return nil
   }
 
+  private func isCompatibleManagedReferenceArgument(_ actualType: Type, expectedInner: Type, mutable: Bool) -> Bool {
+    switch (mutable, actualType) {
+    case (false, .reference(let inner)),
+         (false, .mutableReference(let inner)),
+         (false, .borrowedReference(let inner, _)),
+         (false, .mutableBorrowedReference(let inner, _)):
+      return inner == expectedInner || context.containsGenericParameter(expectedInner)
+    case (true, .mutableReference(let inner)),
+         (true, .mutableBorrowedReference(let inner, _)):
+      return inner == expectedInner || context.containsGenericParameter(expectedInner)
+    default:
+      return false
+    }
+  }
+
   private func functionParameterTypes(for callee: MIROperand) -> [Type] {
     let calleeType: Type
     switch callee {
     case .function(let symbol):
-      calleeType = symbol.type
+      calleeType = programFunctionType(for: symbol.defId) ?? preferredFunctionType(for: symbol)
     case .local(let localID):
       calleeType = locals.first(where: { $0.id == localID })?.type ?? .void
     case .constant:
@@ -2594,9 +3022,13 @@ private final class MIRFunctionBuilder {
     calleeType: Type,
     resultType: Type
   ) -> Symbol? {
-    if let resolvedType = context.getSymbolType(method.defId),
-       case .function = resolvedType {
-      return Symbol(defId: method.defId, type: resolvedType, kind: method.kind)
+    if let programType = programFunctionType(for: method.defId) {
+      return Symbol(defId: method.defId, type: programType, kind: method.kind)
+    }
+
+    let preferredType = preferredFunctionType(for: method)
+    if case .function = preferredType, !context.containsGenericParameter(preferredType) {
+      return Symbol(defId: method.defId, type: preferredType, kind: method.kind)
     }
 
     guard case .function(let parameters, _) = calleeType else { return nil }
@@ -2605,6 +3037,95 @@ private final class MIRFunctionBuilder {
     guard !context.containsGenericParameter(concreteType) else { return nil }
 
     return Symbol(defId: method.defId, type: concreteType, kind: method.kind)
+  }
+
+  private func preferredFunctionType(for symbol: Symbol) -> Type {
+    let symbolType = symbol.type
+    let contextType = context.getSymbolType(symbol.defId)
+
+    if case .function = symbolType, !context.containsGenericParameter(symbolType) {
+      return symbolType
+    }
+
+    if let contextType,
+       case .function = contextType,
+       !context.containsGenericParameter(contextType) || !context.containsGenericParameter(symbolType) {
+      return contextType
+    }
+
+    return symbolType
+  }
+
+  private func programFunctionType(for defId: DefId) -> Type? {
+    for node in program.globalNodes {
+      switch node {
+      case .globalFunction(let identifier, let parameters, _):
+        guard identifier.defId == defId else { continue }
+        let returnType: Type
+        if case .function(_, let returns) = identifier.type {
+          returnType = returns
+        } else {
+          returnType = .void
+        }
+        return .function(
+          parameters: parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
+          returns: returnType
+        )
+      case .givenDeclaration(_, _, let methods):
+        guard let method = methods.first(where: { $0.identifier.defId == defId }) else { continue }
+        return .function(
+          parameters: method.parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
+          returns: method.returnType
+        )
+      default:
+        continue
+      }
+    }
+    return nil
+  }
+
+  private func receiverAwareFunctionType(for symbol: Symbol) -> Type {
+    let symbolType = preferredFunctionType(for: symbol)
+    guard let contextType = context.getSymbolType(symbol.defId),
+          case .function(let contextParams, let contextReturn) = contextType,
+          case .function(let symbolParams, let symbolReturn) = symbolType,
+          let contextReceiver = contextParams.first?.type,
+          let symbolReceiver = symbolParams.first?.type else {
+      return symbolType
+    }
+
+    if isRefLikeType(contextReceiver) && !isRefLikeType(symbolReceiver) {
+      let mergedParams = [Parameter(type: contextReceiver, kind: passKindForType(contextReceiver))]
+        + symbolParams.dropFirst()
+      return .function(parameters: mergedParams, returns: context.containsGenericParameter(contextReturn) ? symbolReturn : contextReturn)
+    }
+
+    return symbolType
+  }
+
+  private func canBorrowArgument(_ actualType: Type, as expectedInner: Type) -> Bool {
+    if actualType == expectedInner || context.containsGenericParameter(expectedInner) {
+      return true
+    }
+    if !isRefLikeType(actualType) {
+      return true
+    }
+    return context.getLayoutKey(actualType) == context.getLayoutKey(expectedInner)
+  }
+
+  private func isRefLikeType(_ type: Type) -> Bool {
+    switch type {
+    case .reference, .mutableReference,
+         .borrowedReference, .mutableBorrowedReference,
+         .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func passKindForType(_ type: Type) -> PassKind {
+    .byVal
   }
 
   private func finishCall(
@@ -2812,6 +3333,8 @@ private final class MIRFunctionBuilder {
       switch source.type {
       case .reference(let inner),
            .mutableReference(let inner),
+           .borrowedReference(let inner, _),
+           .mutableBorrowedReference(let inner, _),
            .weakReference(let inner),
            .mutableWeakReference(let inner),
            .pointer(let inner),

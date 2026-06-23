@@ -4,6 +4,20 @@ import Foundation
 // This extension contains Pass 1/2/3 logic and module symbol building.
 
 extension TypeChecker {
+  private func filterLifetimeTypeParameters(_ typeParameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
+    typeParameters.filter { !$0.name.hasPrefix("$") }
+  }
+
+  private func assertNoBorrowedReferenceType(
+    _ type: Type,
+    context description: String,
+    span: SourceSpan
+  ) throws {
+    guard !type.containsBorrowedReference else {
+      throw SemanticError(.generic("\(description) cannot contain borrowed reference type '\(type)'"), span: span)
+    }
+  }
+
   private func validateCompilerDropSignature(
     params: [Symbol],
     returnType: Type,
@@ -597,6 +611,8 @@ extension TypeChecker {
       return (mutable ? "MutPtr" : "Ptr", [inner])
     case .reference(let inner, let mutable):
       return (mutable ? "MutRef" : "Ref", [inner])
+    case .borrowedReference(let inner, _, let mutable):
+      return (mutable ? "BorrowMutRef" : "BorrowRef", [inner])
     case .weakReference(let inner, let mutable):
       return (mutable ? "MutWeakRef" : "WeakRef", [inner])
     default:
@@ -622,6 +638,10 @@ extension TypeChecker {
       return .reference(inner: genericArgs[0])
     case "MutRef":
       return .mutableReference(inner: genericArgs[0])
+    case "BorrowRef":
+      return .borrowedReference(inner: genericArgs[0], lifetime: "$_")
+    case "BorrowMutRef":
+      return .mutableBorrowedReference(inner: genericArgs[0], lifetime: "$_")
     case "WeakRef":
       return .weakReference(inner: genericArgs[0])
     case "MutWeakRef":
@@ -633,7 +653,7 @@ extension TypeChecker {
 
   private func isTypeModifierBaseName(_ baseName: String) -> Bool {
     switch baseName {
-    case "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef":
+    case "Ref", "MutRef", "BorrowRef", "BorrowMutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef":
       return true
     default:
       return false
@@ -644,6 +664,8 @@ extension TypeChecker {
     switch typeNode {
     case .reference(_, let mutable):
       return mutable ? "MutRef" : "Ref"
+    case .borrowedReference(_, _, let mutable):
+      return mutable ? "BorrowMutRef" : "BorrowRef"
     case .pointer(_, let mutable):
       return mutable ? "MutPtr" : "Ptr"
     case .weakReference(_, let mutable):
@@ -1565,6 +1587,7 @@ extension TypeChecker {
         
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
+          try assertNoBorrowedReferenceType(paramType, context: "struct field '\(param.name)'", span: span)
           if paramType == placeholder {
             throw SemanticError.invalidOperation(
               op: "Direct recursion in struct \(name) not allowed (use ref)", type1: param.name,
@@ -1610,6 +1633,7 @@ extension TypeChecker {
       var resolvedFields: [(name: String, type: Type)] = []
       for field in fields {
         let fieldType = try resolveTypeNode(field.type)
+        try assertNoBorrowedReferenceType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
         if fieldType == placeholder {
           throw SemanticError.invalidOperation(
             op: "Direct recursion in foreign struct \(name) not allowed (use ptr)",
@@ -1656,6 +1680,7 @@ extension TypeChecker {
           var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
+            try assertNoBorrowedReferenceType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             if resolved == placeholder {
               throw SemanticError.invalidOperation(
                 op: "Direct recursion in enum \(name) not allowed (use ref)", type1: p.name,
@@ -1686,11 +1711,13 @@ extension TypeChecker {
       
     case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span):
       self.currentSpan = span
+      let genericTypeParameters = filterLifetimeTypeParameters(typeParameters)
       // Register function signature so it can be called from methods defined earlier
-      if typeParameters.isEmpty {
+      if genericTypeParameters.isEmpty {
         // Non-generic function: register signature now
         let returnType = try resolveTypeNode(returnTypeNode)
         try assertNotOpaqueType(returnType, span: span)
+        try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
           try assertNotOpaqueType(paramType, span: span)
@@ -1732,7 +1759,7 @@ extension TypeChecker {
         let dummyBody = ExpressionNode.booleanLiteral(false)
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: typeParameters,
+          typeParameters: genericTypeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: dummyBody
@@ -1768,8 +1795,9 @@ extension TypeChecker {
       
     case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
       self.currentSpan = span
+      let genericTypeParameters = filterLifetimeTypeParameters(typeParameters)
       // Register intrinsic function signature so it can be called from methods defined earlier
-      if typeParameters.isEmpty {
+      if genericTypeParameters.isEmpty {
         let returnType = try resolveTypeNode(returnTypeNode)
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
@@ -1795,7 +1823,7 @@ extension TypeChecker {
         let dummyBody = ExpressionNode.booleanLiteral(false)
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: typeParameters,
+          typeParameters: genericTypeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: dummyBody
@@ -1868,7 +1896,8 @@ extension TypeChecker {
           
           for c in cases {
             for p in c.parameters {
-              _ = try resolveTypeNode(p.type)
+              let payloadType = try resolveTypeNode(p.type)
+              try assertNoBorrowedReferenceType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             }
           }
         }
@@ -1901,6 +1930,7 @@ extension TypeChecker {
       }
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueType(type, span: span)
+      try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
       
       // For Lambda expressions, pass the expected type for type inference
       var typedValue: TypedExpressionNode
@@ -1970,6 +2000,7 @@ extension TypeChecker {
       self.currentSpan = span
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueType(type, span: span)
+      try assertNoBorrowedReferenceType(type, context: "foreign global type", span: span)
 
       let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
@@ -2000,6 +2031,7 @@ extension TypeChecker {
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
       let span):
       self.currentSpan = span
+      let genericTypeParameters = filterLifetimeTypeParameters(typeParameters)
       let declaredDefId = declaredDefIdForCurrentGlobal(name: name, access: access)
 
       // For non-generic functions, allow the same declaration pre-registered in Pass 2.
@@ -2009,7 +2041,7 @@ extension TypeChecker {
         ? currentScope.lookup(name, sourceFile: currentSourceFile) 
         : currentScope.lookup(name)
 
-      if typeParameters.isEmpty {
+      if genericTypeParameters.isEmpty {
         if let existingLookup,
            isFunctionDefConflictingInCurrentDecl(
              existingDefId: existingLookup,
@@ -2029,7 +2061,7 @@ extension TypeChecker {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
 
-      if !typeParameters.isEmpty {
+      if !genericTypeParameters.isEmpty {
         let defId = declaredGenericFunctionTemplateDefIdForCurrentGlobal(name: name, access: access)
           ?? defIdMap.allocate(
             modulePath: currentModulePath,
@@ -2044,7 +2076,7 @@ extension TypeChecker {
         // Define placeholder template for recursion
         let placeholderTemplate = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: typeParameters,
+          typeParameters: genericTypeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: ExpressionNode.call(
@@ -2054,12 +2086,13 @@ extension TypeChecker {
 
         // Perform declaration-site checking and store results
         let (checkedBody, checkedParams, checkedReturnType) = try withNewScope {
-          for param in typeParameters {
+          for param in genericTypeParameters {
             currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
-          try recordGenericTraitBounds(typeParameters)
+          try recordGenericTraitBounds(genericTypeParameters)
 
           let returnType = try resolveTypeNode(returnTypeNode)
+          try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
           let params = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
             return makeLocalSymbol(
@@ -2075,7 +2108,7 @@ extension TypeChecker {
         // Create template with checked results
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: typeParameters,
+          typeParameters: genericTypeParameters,
           parameters: parameters,
           returnType: returnTypeNode,
           body: body,
@@ -2128,6 +2161,7 @@ extension TypeChecker {
       self.currentSpan = span
 
       let returnType = try resolveTypeNode(returnTypeNode)
+      try assertNoBorrowedReferenceType(returnType, context: "foreign function return type", span: span)
       if !isFfiCompatibleType(returnType) {
         throw SemanticError(
           .ffiIncompatibleType(type: returnType.description, reason: ffiTypeError(returnType)),
@@ -2181,7 +2215,8 @@ extension TypeChecker {
             currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
-          _ = try resolveTypeNode(returnTypeNode)
+          let returnType = try resolveTypeNode(returnTypeNode)
+          try assertNoBorrowedReferenceType(returnType, context: "intrinsic function return type", span: span)
           _ = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
             return makeLocalSymbol(
@@ -2217,6 +2252,7 @@ extension TypeChecker {
 
       let (functionType, _, _) = try withNewScope {
         let returnType = try resolveTypeNode(returnTypeNode)
+        try assertNoBorrowedReferenceType(returnType, context: "intrinsic function return type", span: span)
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
           return makeLocalSymbol(
@@ -3246,7 +3282,8 @@ extension TypeChecker {
           
           // Validate all field types are valid under the type parameters
           for param in parameters {
-            _ = try resolveTypeNode(param.type)
+            let fieldType = try resolveTypeNode(param.type)
+            try assertNoBorrowedReferenceType(fieldType, context: "struct field '\(param.name)'", span: span)
           }
         }
         

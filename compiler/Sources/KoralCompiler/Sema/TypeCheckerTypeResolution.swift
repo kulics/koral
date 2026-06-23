@@ -100,6 +100,33 @@ extension TypeChecker {
       }
       let base = try resolveTypeNode(inner)
       return mutable ? .mutableReference(inner: base) : .reference(inner: base)
+
+    case .borrowedReference(let inner, let lifetime, let mutable):
+      if case .identifier(let name) = inner, traits[name] != nil {
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return mutable
+          ? .mutableBorrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
+          : .borrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
+      }
+      if case .generic(let base, let args) = inner, traits[base] != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return mutable
+          ? .mutableBorrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
+          : .borrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
+      }
+      let base = try resolveTypeNode(inner)
+      return mutable ? .mutableBorrowedReference(inner: base, lifetime: lifetime) : .borrowedReference(inner: base, lifetime: lifetime)
     case .pointer(let inner, let mutable):
       let base = try resolveTypeNode(inner)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
@@ -257,6 +284,33 @@ extension TypeChecker {
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return mutable ? .mutableReference(inner: base) : .reference(inner: base)
 
+    case .borrowedReference(let inner, let lifetime, let mutable):
+      if case .identifier(let name) = inner, traits[name] != nil {
+        let (safe, reasons) = try checkObjectSafety(name)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        return mutable
+          ? .mutableBorrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
+          : .borrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
+      }
+      if case .generic(let base, let args) = inner, traits[base] != nil {
+        let (safe, reasons) = try checkObjectSafety(base)
+        if !safe {
+          throw SemanticError(.generic(
+            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+          ), span: currentSpan)
+        }
+        let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+        return mutable
+          ? .mutableBorrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
+          : .borrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
+      }
+      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
+      return mutable ? .mutableBorrowedReference(inner: base, lifetime: lifetime) : .borrowedReference(inner: base, lifetime: lifetime)
+
     case .pointer(let inner, let mutable):
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
@@ -405,6 +459,8 @@ extension TypeChecker {
     switch type {
     case .reference(let inner): return inner
     case .mutableReference(let inner): return inner
+    case .borrowedReference(let inner, _): return inner
+    case .mutableBorrowedReference(let inner, _): return inner
     case .pointer(let element): return element
     case .mutablePointer(let element): return element
     case .weakReference(let inner): return inner
@@ -418,6 +474,8 @@ extension TypeChecker {
     switch type {
     case .reference: return "Ref"
     case .mutableReference: return "MutRef"
+    case .borrowedReference: return "Ref"
+    case .mutableBorrowedReference: return "MutRef"
     case .pointer: return "Ptr"
     case .mutablePointer: return "MutPtr"
     case .weakReference: return "WeakRef"

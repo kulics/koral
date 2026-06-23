@@ -326,6 +326,19 @@ extension TypeChecker {
           try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
         }
       }
+    case .borrowedReference(let inner, _, mutable: let mutable):
+      if mutable, case .mutableBorrowedReference(let innerType, _) = type {
+        try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+      } else if mutable {
+        try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
+      } else if !mutable {
+        switch type {
+        case .borrowedReference(let innerType, _), .mutableBorrowedReference(let innerType, _):
+          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+        default:
+          try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
+        }
+      }
     case .pointer(let inner, mutable: let mutable):
       if mutable, case .mutablePointer(let elementType) = type {
         try unify(node: inner, type: elementType, inferred: &inferred, typeParams: typeParams)

@@ -177,6 +177,10 @@ extension TypeHandlerKind {
             return .reference
         case .mutableReference:
             return .reference
+        case .borrowedReference:
+            return .reference
+        case .mutableBorrowedReference:
+            return .reference
         case .pointer:
             return .pointer
         case .mutablePointer:
@@ -901,6 +905,12 @@ public class ReferenceHandler: TypeHandler {
         if case .mutableReference = type {
             return true
         }
+        if case .borrowedReference = type {
+            return true
+        }
+        if case .mutableBorrowedReference = type {
+            return true
+        }
         return false
     }
     
@@ -922,6 +932,12 @@ public class ReferenceHandler: TypeHandler {
         if case .mutableReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
+        if case .borrowedReference(let inner, _) = type, usesTraitObjectRefStorage(inner, context: context) {
+            return "struct __koral_TraitRef"
+        }
+        if case .mutableBorrowedReference(let inner, _) = type, usesTraitObjectRefStorage(inner, context: context) {
+            return "struct __koral_TraitRef"
+        }
         return "struct __koral_Ref"
     }
     
@@ -939,9 +955,13 @@ public class ReferenceHandler: TypeHandler {
     public func getQualifiedName(_ type: Type) -> String {
         switch type {
         case .reference(let inner):
-            return "\(inner.description) ref"
+            return "ref \(inner.description)"
         case .mutableReference(let inner):
-            return "\(inner.description) ref mut"
+            return "ref mut \(inner.description)"
+        case .borrowedReference(let inner, let lifetime):
+            return "ref \(lifetime) \(inner.description)"
+        case .mutableBorrowedReference(let inner, let lifetime):
+            return "ref \(lifetime) mut \(inner.description)"
         default:
             return ""
         }
@@ -951,6 +971,8 @@ public class ReferenceHandler: TypeHandler {
         let inner: Type
         switch type {
         case .reference(let resolvedInner), .mutableReference(let resolvedInner):
+            inner = resolvedInner
+        case .borrowedReference(let resolvedInner, _), .mutableBorrowedReference(let resolvedInner, _):
             inner = resolvedInner
         default:
             return false
@@ -966,7 +988,8 @@ public class ReferenceHandler: TypeHandler {
     /// 获取引用的内部类型
     public func getInnerType(_ type: Type) -> Type? {
         switch type {
-        case .reference(let inner), .mutableReference(let inner):
+        case .reference(let inner), .mutableReference(let inner),
+             .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
             return inner
         default:
             return nil
@@ -1111,9 +1134,9 @@ public class WeakReferenceHandler: TypeHandler {
     public func getQualifiedName(_ type: Type) -> String {
         switch type {
         case .weakReference(let inner):
-            return "\(inner.description) weakref"
+            return "weakref \(inner.description)"
         case .mutableWeakReference(let inner):
-            return "\(inner.description) weakref mut"
+            return "weakref mut \(inner.description)"
         default:
             return ""
         }
@@ -1199,9 +1222,9 @@ public class PointerHandler: TypeHandler {
     public func getQualifiedName(_ type: Type) -> String {
         switch type {
         case .pointer(let element):
-            return "\(element.description) ptr"
+            return "ptr \(element.description)"
         case .mutablePointer(let element):
-            return "\(element.description) ptr mut"
+            return "ptr mut \(element.description)"
         default:
             return ""
         }
@@ -1343,10 +1366,6 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
         switch type {
         case .genericParameter(let name):
             fatalError("Generic parameter \(name) should be resolved before CodeGen")
-        case .genericStruct(let template, _):
-            fatalError("Generic struct \(template) should be resolved before CodeGen")
-        case .genericEnum(let template, _):
-            fatalError("Generic enum \(template) should be resolved before CodeGen")
         case .module:
             fatalError("Module type should not appear in CodeGen")
         case .typeVariable(let tv):

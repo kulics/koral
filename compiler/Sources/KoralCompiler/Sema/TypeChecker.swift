@@ -460,6 +460,30 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .mutableReference(inner: conformanceTypeKey(inner, mode: nextMode))
+    case .borrowedReference(let inner, let lifetime):
+      let nextMode: ConformanceKeyMode
+      switch mode {
+      case .wildcardReceiver:
+        nextMode = .wildcardReceiver
+      case .wildcardTraitArg:
+        nextMode = .wildcardTraitArg
+      case .exact:
+        nextMode = .exact
+      }
+      _ = lifetime
+      return .reference(inner: conformanceTypeKey(inner, mode: nextMode))
+    case .mutableBorrowedReference(let inner, let lifetime):
+      let nextMode: ConformanceKeyMode
+      switch mode {
+      case .wildcardReceiver:
+        nextMode = .wildcardReceiver
+      case .wildcardTraitArg:
+        nextMode = .wildcardTraitArg
+      case .exact:
+        nextMode = .exact
+      }
+      _ = lifetime
+      return .mutableReference(inner: conformanceTypeKey(inner, mode: nextMode))
     case .weakReference(let inner):
       let nextMode: ConformanceKeyMode
       switch mode {
@@ -659,6 +683,8 @@ public class TypeChecker {
       return true
     case .weakReference, .mutableWeakReference:
       return false
+    case .borrowedReference, .mutableBorrowedReference:
+      return false
     case .opaque:
       return true
     case .structure, .`enum`, .reference, .mutableReference, .function, .genericParameter:
@@ -678,6 +704,8 @@ public class TypeChecker {
       return "Koral enum types cannot be used in foreign functions"
     case .reference:
       return "Reference types (ref) cannot be used in foreign functions"
+    case .borrowedReference, .mutableBorrowedReference:
+      return "Borrowed reference types cannot be used in foreign functions"
     case .function:
       return "Function types cannot be used in foreign functions"
     case .genericParameter, .genericStruct, .genericEnum:
@@ -1139,6 +1167,9 @@ public class TypeChecker {
     _ returnType: Type,
     _ body: ExpressionNode
   ) throws -> (TypedExpressionNode, Type) {
+    if returnType.containsBorrowedReference {
+      throw SemanticError(.generic("function return type cannot contain borrowed reference type '\(returnType)'"), span: currentSpan)
+    }
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType
     let previousYieldTargets = yieldTargets
@@ -1312,7 +1343,16 @@ public class TypeChecker {
       
     case (.reference(let expectedInner), .reference(let actualInner)),
          (.reference(let expectedInner), .mutableReference(let actualInner)),
-         (.mutableReference(let expectedInner), .mutableReference(let actualInner)):
+         (.reference(let expectedInner), .borrowedReference(let actualInner, _)),
+         (.reference(let expectedInner), .mutableBorrowedReference(let actualInner, _)),
+         (.mutableReference(let expectedInner), .mutableReference(let actualInner)),
+         (.mutableReference(let expectedInner), .mutableBorrowedReference(let actualInner, _)),
+         (.borrowedReference(let expectedInner, _), .reference(let actualInner)),
+         (.borrowedReference(let expectedInner, _), .mutableReference(let actualInner)),
+         (.borrowedReference(let expectedInner, _), .borrowedReference(let actualInner, _)),
+         (.borrowedReference(let expectedInner, _), .mutableBorrowedReference(let actualInner, _)),
+         (.mutableBorrowedReference(let expectedInner, _), .mutableReference(let actualInner)),
+         (.mutableBorrowedReference(let expectedInner, _), .mutableBorrowedReference(let actualInner, _)):
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
       
     case (.pointer(let expectedElem), .pointer(let actualElem)),
@@ -1372,6 +1412,10 @@ public class TypeChecker {
     case .reference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .mutableReference(let inner):
+      extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
+    case .borrowedReference(let inner, _):
+      extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
+    case .mutableBorrowedReference(let inner, _):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .pointer(let element):
       extractGenericParameterNamesHelper(from: element, names: &names, seen: &seen)

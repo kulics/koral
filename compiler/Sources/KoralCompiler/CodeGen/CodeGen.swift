@@ -281,7 +281,7 @@ public class CodeGen {
   
   func needsDrop(_ type: Type) -> Bool {
     switch type {
-    case .structure, .`enum`, .reference, .mutableReference, .function, .weakReference, .mutableWeakReference, .traitObject:
+    case .structure, .`enum`, .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .function, .weakReference, .mutableWeakReference, .traitObject:
       return true
     default:
       return false
@@ -770,8 +770,6 @@ public class CodeGen {
 
     switch type {
     case .genericParameter,
-         .genericStruct,
-         .genericEnum,
          .typeVariable,
          .module:
       fatalError("Unresolved type \(type) during codegen")
@@ -834,7 +832,8 @@ public class CodeGen {
     }
     let storageType: Type
     switch storageMember.type {
-    case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType):
+    case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType),
+         .borrowedReference(let resolvedStorageType, _), .mutableBorrowedReference(let resolvedStorageType, _):
       storageType = resolvedStorageType
     default:
       fatalError("String literal requires String.storage: ref StringStorage")
@@ -898,7 +897,7 @@ public class CodeGen {
     case .`enum`(let defId):
       let typeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
       return "\(dest) = __koral_\(typeName)_copy(&\(source));\n"
-    case .reference, .mutableReference:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
       return "\(dest) = \(source);\n__koral_retain(\(dest).control);\n"
     case .weakReference, .mutableWeakReference:
       return "\(dest) = \(source);\n__koral_weak_retain(\(dest).control);\n"
@@ -963,7 +962,7 @@ public class CodeGen {
   /// 检查类型是否是引用类型
   func isReferenceType(_ type: Type) -> Bool {
     switch type {
-    case .reference, .mutableReference:
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
       return true
     default:
       return false

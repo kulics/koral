@@ -171,6 +171,8 @@ public indirect enum Type: CustomStringConvertible {
   case structure(defId: DefId)
   case reference(inner: Type)
   case mutableReference(inner: Type)
+  case borrowedReference(inner: Type, lifetime: String)
+  case mutableBorrowedReference(inner: Type, lifetime: String)
   case pointer(element: Type)
   case mutablePointer(element: Type)
   case weakReference(inner: Type)
@@ -315,6 +317,10 @@ public indirect enum Type: CustomStringConvertible {
       return "ref \(inner.description)"
     case .mutableReference(let inner):
       return "ref mut \(inner.description)"
+    case .borrowedReference(let inner, let lifetime):
+      return "ref \(lifetime) \(inner.description)"
+    case .mutableBorrowedReference(let inner, let lifetime):
+      return "ref \(lifetime) mut \(inner.description)"
     case .pointer(let element):
       return "ptr \(element.description)"
     case .mutablePointer(let element):
@@ -418,6 +424,14 @@ public indirect enum Type: CustomStringConvertible {
     case .mutableReference(let inner):
       hasher.combine(19)
       hasher.combine(inner.stableHashKey)
+    case .borrowedReference(let inner, let lifetime):
+      hasher.combine(32)
+      hasher.combine(inner.stableHashKey)
+      hasher.combine(lifetime)
+    case .mutableBorrowedReference(let inner, let lifetime):
+      hasher.combine(33)
+      hasher.combine(inner.stableHashKey)
+      hasher.combine(lifetime)
     case .pointer(let element):
       hasher.combine(20)
       hasher.combine(element.stableHashKey)
@@ -502,6 +516,10 @@ public indirect enum Type: CustomStringConvertible {
       return "Ref(\(inner.stableKey))"
     case .mutableReference(let inner):
       return "MutRef(\(inner.stableKey))"
+    case .borrowedReference(let inner, let lifetime):
+      return "BorrowRef(\(lifetime))(\(inner.stableKey))"
+    case .mutableBorrowedReference(let inner, let lifetime):
+      return "BorrowMutRef(\(lifetime))(\(inner.stableKey))"
     case .pointer(let element):
       return "Ptr(\(element.stableKey))"
     case .mutablePointer(let element):
@@ -555,6 +573,8 @@ public indirect enum Type: CustomStringConvertible {
       .uint, .uint8, .uint16, .uint32, .uint64,
       .float32, .float64, .bool, .void, .never: return self
     case .reference(_), .mutableReference(_): return .reference(inner: .void)
+    case .borrowedReference(_, let lifetime): return .borrowedReference(inner: .void, lifetime: lifetime)
+    case .mutableBorrowedReference(_, let lifetime): return .borrowedReference(inner: .void, lifetime: lifetime)
     case .pointer(let element): return .pointer(element: element.canonical)
     case .mutablePointer(let element): return .pointer(element: element.canonical)
     case .weakReference(let inner): return .weakReference(inner: inner.canonical)
@@ -622,6 +642,10 @@ public func passKindForParameterType(_ type: Type) -> PassKind {
     return .byRef
   case .mutableReference:
     return .byMutRef
+  case .borrowedReference:
+    return .byRef
+  case .mutableBorrowedReference:
+    return .byMutRef
   default:
     return .byVal
   }
@@ -642,6 +666,28 @@ public func fromSymbolKindToPassKind(_ kind: SymbolKind) -> PassKind {
     }
   case .function, .type, .module:
     fatalError("Cannot convert function, type, or module symbol kind to pass kind")
+  }
+}
+
+public extension Type {
+  var containsBorrowedReference: Bool {
+    switch self {
+    case .borrowedReference, .mutableBorrowedReference:
+      return true
+    case .function(let parameters, let returns):
+      return parameters.contains { $0.type.containsBorrowedReference } || returns.containsBorrowedReference
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .pointer(let inner),
+         .mutablePointer(let inner),
+         .weakReference(let inner),
+         .mutableWeakReference(let inner):
+      return inner.containsBorrowedReference
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+      return args.contains(where: \.containsBorrowedReference)
+    default:
+      return false
+    }
   }
 }
 
@@ -675,6 +721,10 @@ extension Type: Equatable, Hashable {
       return l == r
     case (.mutableReference(let l), .mutableReference(let r)):
       return l == r
+    case (.borrowedReference(let lInner, let lLifetime), .borrowedReference(let rInner, let rLifetime)):
+      return lInner == rInner && lLifetime == rLifetime
+    case (.mutableBorrowedReference(let lInner, let lLifetime), .mutableBorrowedReference(let rInner, let rLifetime)):
+      return lInner == rInner && lLifetime == rLifetime
     case (.pointer(let l), .pointer(let r)):
        return l == r
     case (.mutablePointer(let l), .mutablePointer(let r)):

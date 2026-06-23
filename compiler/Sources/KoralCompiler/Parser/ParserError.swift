@@ -133,7 +133,7 @@ public enum ParserError: Error {
     case .expectedArrow:
       return "Expected '->' in lambda expression"
     case .invalidReceiverParameterSyntax:
-      return "Invalid receiver parameter syntax: use 'self', 'self ref', or 'self ref mut'"
+      return "Invalid receiver parameter syntax: use 'self', borrowed 'self ref'/'self ref mut', or explicit managed 'self ref Self'/'self ref mut Self'"
     case .foreignAndIntrinsicConflict:
       return "foreign and intrinsic cannot be used together"
     case .foreignFunctionNoBody:

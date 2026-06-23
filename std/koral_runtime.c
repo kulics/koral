@@ -78,6 +78,18 @@ void __koral_weak_release(void* raw_control) {
     }
 }
 
+void __koral_ref_slot_drop(void* raw_ref) {
+    if (!raw_ref) return;
+    struct __koral_Ref* ref = (struct __koral_Ref*)raw_ref;
+    __koral_release(ref->control);
+}
+
+void __koral_weakref_slot_drop(void* raw_weak_ref) {
+    if (!raw_weak_ref) return;
+    struct __koral_WeakRef* weak_ref = (struct __koral_WeakRef*)raw_weak_ref;
+    __koral_weak_release(weak_ref->control);
+}
+
 struct __koral_WeakRef __koral_downgrade_ref(struct __koral_Ref r) {
     struct __koral_WeakRef w;
     w.control = r.control;
@@ -126,6 +138,12 @@ void __koral_closure_release(struct __koral_Closure closure) {
             free(closure.env);
         }
     }
+}
+
+void __koral_closure_slot_drop(void* raw_closure) {
+    if (!raw_closure) return;
+    struct __koral_Closure* closure = (struct __koral_Closure*)raw_closure;
+    __koral_closure_release(*closure);
 }
 
 CFile* __koral_stdin(void) {

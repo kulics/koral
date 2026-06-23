@@ -206,7 +206,9 @@ extension TypeChecker {
 
   func isRefLikeTypeForMutability(_ type: Type) -> Bool {
     switch type {
-    case .reference(_), .mutableReference(_), .pointer(_), .mutablePointer(_):
+    case .reference(_), .mutableReference(_),
+         .borrowedReference(_, _), .mutableBorrowedReference(_, _),
+         .pointer(_), .mutablePointer(_):
       return true
     default:
       return false
@@ -215,7 +217,7 @@ extension TypeChecker {
 
   func isMutableRefLikeType(_ type: Type) -> Bool {
     switch type {
-    case .mutableReference(_), .mutablePointer(_):
+    case .mutableReference(_), .mutableBorrowedReference(_, _), .mutablePointer(_):
       return true
     default:
       return false
@@ -224,7 +226,7 @@ extension TypeChecker {
 
   func isReadOnlyRefLikeType(_ type: Type) -> Bool {
     switch type {
-    case .reference(_), .pointer(_):
+    case .reference(_), .borrowedReference(_, _), .pointer(_):
       return true
     default:
       return false
@@ -233,7 +235,8 @@ extension TypeChecker {
 
   func dereferenceTargetType(of type: Type) -> Type? {
     switch type {
-    case .reference(let inner), .mutableReference(let inner):
+    case .reference(let inner), .mutableReference(let inner),
+         .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
       return inner
     case .pointer(let element), .mutablePointer(let element):
       return element
@@ -374,6 +377,21 @@ extension TypeChecker {
       return (inner, false)
     case .mutableReference(let inner):
       return (inner, true)
+    case .borrowedReference(let inner, _):
+      return (inner, false)
+    case .mutableBorrowedReference(let inner, _):
+      return (inner, true)
+    default:
+      return nil
+    }
+  }
+
+  func borrowedReferenceTypeComponents(_ type: Type) -> (inner: Type, lifetime: String, mutable: Bool)? {
+    switch type {
+    case .borrowedReference(let inner, let lifetime):
+      return (inner, lifetime, false)
+    case .mutableBorrowedReference(let inner, let lifetime):
+      return (inner, lifetime, true)
     default:
       return nil
     }
@@ -441,13 +459,30 @@ extension TypeChecker {
     }
 
     switch expectedType {
+    case .borrowedReference(let inner, _) where implicitReferenceInnerMatches(inner, actualType: base.type):
+      let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
+      return (
+        .variable(identifier: tempSymbol),
+        (symbol: tempSymbol, value: base)
+      )
     case .reference(let inner) where implicitReferenceInnerMatches(inner, actualType: base.type):
       let tempSymbol = nextSynthSymbol(prefix: "temp_recv", type: base.type)
       return (
         .variable(identifier: tempSymbol),
         (symbol: tempSymbol, value: base)
       )
+    case .mutableBorrowedReference(let inner, _) where implicitReferenceInnerMatches(inner, actualType: base.type):
+      if canTakeImplicitReference(to: base, mutable: true) {
+        return (base, nil)
+      }
+      throw SemanticError(
+        .generic("Cannot call 'self ref mut' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"),
+        span: currentSpan
+      )
     case .mutableReference(let inner) where implicitReferenceInnerMatches(inner, actualType: base.type):
+      if canTakeImplicitReference(to: base, mutable: true) {
+        return (base, nil)
+      }
       throw SemanticError(
         .generic("Cannot call 'self ref mut' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"),
         span: currentSpan
@@ -480,6 +515,10 @@ extension TypeChecker {
       return .derefExpression(expression: expr, type: inner)
     case .mutableReference(let inner) where implicitReferenceInnerMatches(inner, actualType: expectedType):
       return .derefExpression(expression: expr, type: inner)
+    case .borrowedReference(let inner, _) where implicitReferenceInnerMatches(inner, actualType: expectedType):
+      return .derefExpression(expression: expr, type: inner)
+    case .mutableBorrowedReference(let inner, _) where implicitReferenceInnerMatches(inner, actualType: expectedType):
+      return .derefExpression(expression: expr, type: inner)
     default:
       return nil
     }
@@ -490,6 +529,10 @@ extension TypeChecker {
     case .reference(let inner):
       return .derefExpression(expression: expr, type: inner)
     case .mutableReference(let inner):
+      return .derefExpression(expression: expr, type: inner)
+    case .borrowedReference(let inner, _):
+      return .derefExpression(expression: expr, type: inner)
+    case .mutableBorrowedReference(let inner, _):
       return .derefExpression(expression: expr, type: inner)
     default:
       return expr
@@ -505,12 +548,36 @@ extension TypeChecker {
     switch (expr.type, expectedType) {
     case (.mutableReference(let fromInner), .reference(let toInner)):
       return implicitReferenceInnerMatches(fromInner, actualType: toInner)
+    case (.mutableBorrowedReference(let fromInner, _), .borrowedReference(let toInner, _)):
+      return implicitReferenceInnerMatches(fromInner, actualType: toInner)
     case (.mutablePointer(let fromElem), .pointer(let toElem)):
       return implicitReferenceInnerMatches(fromElem, actualType: toElem)
     case (.mutableWeakReference(let fromInner), .weakReference(let toInner)):
       return implicitReferenceInnerMatches(fromInner, actualType: toInner)
     default:
       return false
+    }
+  }
+
+  func makeReferenceFlavorConversion(_ expr: TypedExpressionNode, expectedType: Type) -> TypedExpressionNode? {
+    switch (expr.type, expectedType) {
+    case (.mutableReference(let fromInner), .reference(let toInner))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    case (.reference(let fromInner), .borrowedReference(let toInner, _))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    case (.mutableReference(let fromInner), .borrowedReference(let toInner, _))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    case (.mutableReference(let fromInner), .mutableBorrowedReference(let toInner, _))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    case (.mutableBorrowedReference(let fromInner, _), .borrowedReference(let toInner, _))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    default:
+      return nil
     }
   }
 
@@ -542,7 +609,9 @@ extension TypeChecker {
       return typedArg
     }
     if typedArg.type != expectedType {
-      if let implicitRef = try makeImplicitReference(typedArg, expectedType: expectedType) {
+      if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType) {
+        typedArg = flavorConversion
+      } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: expectedType) {
         typedArg = implicitRef
       } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: expectedType) {
         typedArg = implicitDeref
@@ -717,6 +786,10 @@ extension TypeChecker {
     }
 
     var normalized = expr
+    if normalized.type != expectedType,
+       let flavorConversion = makeReferenceFlavorConversion(normalized, expectedType: expectedType) {
+      normalized = flavorConversion
+    }
     if normalized.type != expectedType,
        let implicitDeref = makeImplicitDereference(normalized, expectedType: expectedType) {
       normalized = implicitDeref
@@ -973,7 +1046,7 @@ extension TypeChecker {
     let typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
-    if case .reference(let inner) = subjectType {
+    if let inner = dereferenceTargetType(of: subjectType) {
       subjectType = inner
     }
 
@@ -1078,7 +1151,7 @@ extension TypeChecker {
     let typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
-    if case .reference(let inner) = subjectType {
+    if let inner = dereferenceTargetType(of: subjectType) {
       subjectType = inner
     }
 
@@ -1461,6 +1534,8 @@ extension TypeChecker {
       switch subjectType {
       case .reference(let inner),
            .mutableReference(let inner),
+           .borrowedReference(let inner, _),
+           .mutableBorrowedReference(let inner, _),
            .weakReference(let inner),
            .mutableWeakReference(let inner):
         subjectType = inner
@@ -1938,6 +2013,12 @@ extension TypeChecker {
       } else if case .mutableReference(let innerType) = typedInner.type {
         try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref mut")
         return .derefExpression(expression: typedInner, type: innerType)
+      } else if case .borrowedReference(let innerType, _) = typedInner.type {
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref $_")
+        return .derefExpression(expression: typedInner, type: innerType)
+      } else if case .mutableBorrowedReference(let innerType, _) = typedInner.type {
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref $_ mut")
+        return .derefExpression(expression: typedInner, type: innerType)
       } else if case .pointer(let elementType) = typedInner.type {
         try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr")
         return .derefExpression(expression: typedInner, type: elementType)
@@ -1960,6 +2041,11 @@ extension TypeChecker {
         case .reference(let innerType):
           innerExpected = innerType
         case .mutableReference(let innerType):
+          innerExpected = innerType
+          expectedMutable = true
+        case .borrowedReference(let innerType, _):
+          innerExpected = innerType
+        case .mutableBorrowedReference(let innerType, _):
           innerExpected = innerType
           expectedMutable = true
         default:
@@ -1994,9 +2080,20 @@ extension TypeChecker {
         let name = implicitSelfRefViolationName(typedInner) ?? String(describing: inner)
         throw SemanticError(.generic("Cannot take mutable reference from immutable binding '\(name)'"), span: currentSpan)
       }
-      let refType: Type = shouldProduceMutable
-        ? .mutableReference(inner: typedInner.type)
-        : .reference(inner: typedInner.type)
+      let refType: Type
+      if let borrowed = expectedType.flatMap(borrowedReferenceTypeComponents) {
+        refType = shouldProduceMutable
+          ? .mutableBorrowedReference(inner: typedInner.type, lifetime: borrowed.lifetime)
+          : .borrowedReference(inner: typedInner.type, lifetime: borrowed.lifetime)
+      } else if innerExpected != nil {
+        refType = shouldProduceMutable
+          ? .mutableReference(inner: typedInner.type)
+          : .reference(inner: typedInner.type)
+      } else {
+        refType = shouldProduceMutable
+          ? .mutableBorrowedReference(inner: typedInner.type, lifetime: "$_")
+          : .borrowedReference(inner: typedInner.type, lifetime: "$_")
+      }
       return .referenceExpression(expression: typedInner, type: refType)
 
     case .weakrefExpression(let inner):
@@ -2118,7 +2215,7 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
-      if case .reference(let inner) = subjectType {
+      if let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
 
@@ -2141,7 +2238,7 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
-      if case .reference(let inner) = subjectType {
+      if let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
 
@@ -2499,6 +2596,8 @@ extension TypeChecker {
     case .never: return .identifier("Never")
     case .reference(let inner): return .reference(try toTypeNode(inner), mutable: false)
     case .mutableReference(let inner): return .reference(try toTypeNode(inner), mutable: true)
+    case .borrowedReference(let inner, let lifetime): return .borrowedReference(try toTypeNode(inner), lifetime: lifetime, mutable: false)
+    case .mutableBorrowedReference(let inner, let lifetime): return .borrowedReference(try toTypeNode(inner), lifetime: lifetime, mutable: true)
     case .pointer(let inner): return .pointer(try toTypeNode(inner), mutable: false)
     case .mutablePointer(let inner): return .pointer(try toTypeNode(inner), mutable: true)
     case .weakReference(let inner): return .weakReference(try toTypeNode(inner), mutable: false)
@@ -3679,7 +3778,9 @@ extension TypeChecker {
         materializedReceiver = nil
       }
       if let firstParam = params.first, adjustedBase.type != firstParam.type {
-        if let implicitRef = try makeImplicitReference(adjustedBase, expectedType: firstParam.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(adjustedBase, expectedType: firstParam.type) {
+          adjustedBase = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(adjustedBase, expectedType: firstParam.type) {
           adjustedBase = implicitRef
         } else if let implicitDeref = makeImplicitDereference(adjustedBase, expectedType: firstParam.type) {
           adjustedBase = implicitDeref
@@ -3782,7 +3883,9 @@ extension TypeChecker {
         }
         typedArg = try coerceLiteral(typedArg, to: param.type)
         if typedArg.type != param.type {
-          if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+          if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
+            typedArg = flavorConversion
+          } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
             typedArg = implicitRef
           } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
             typedArg = implicitDeref
@@ -4456,6 +4559,9 @@ extension TypeChecker {
             finalBase = coercedBase
           }
           else
+          if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
+            finalBase = flavorConversion
+          } else
           // 尝试自动取引用：期望 T ref，实际是 T
           if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
             finalBase = implicitRef
@@ -4753,7 +4859,9 @@ extension TypeChecker {
       finalBase = prepared.base
       materializedReceiver = prepared.binding
       if finalBase.type != firstParam.type {
-        if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
+          finalBase = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitRef
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
@@ -4793,7 +4901,9 @@ extension TypeChecker {
       }
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
+          typedArg = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
@@ -4943,8 +5053,7 @@ extension TypeChecker {
       let isLast = index == path.count - 1
 
       let (typeToLookup, isPointerAccess) = {
-        if case .reference(let inner) = currentType { return (inner, false) }
-        if case .mutableReference(let inner) = currentType { return (inner, false) }
+        if let (inner, _) = referenceTypeComponents(currentType) { return (inner, false) }
         if case .pointer(let inner) = currentType { return (inner, true) }
         if case .mutablePointer(let inner) = currentType { return (inner, true) }
         return (currentType, false)
@@ -5031,7 +5140,7 @@ extension TypeChecker {
             if case .methodReference(let methodBase, let method, _, _, let methodType) = methodResult,
                case .function(let params, _) = method.type,
                let selfParam = params.first,
-               case .mutableReference = selfParam.type,
+               isMutableRefLikeType(selfParam.type),
                methodBase.valueCategory == .rvalue,
                case .subscriptExpression(let subBase, let subArgs) = baseExpr {
               let typedSubBase = try inferTypedExpression(subBase)
@@ -5045,7 +5154,7 @@ extension TypeChecker {
                   // Build __index_mut_ref call → ref mut V
                   let refResult = try buildBuiltinSubscriptHelperCall(
                     base: typedSubBase, args: typedSubArgs, helperName: "__index_mut_ref")
-                  if case .mutableReference = refResult.type {
+                  if isMutableRefLikeType(refResult.type) {
                     return .methodReference(
                       base: refResult, method: method, typeArgs: nil, methodTypeArgs: nil, type: methodType)
                   }
@@ -6042,7 +6151,9 @@ extension TypeChecker {
 
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
+          typedArg = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
@@ -6685,7 +6796,9 @@ extension TypeChecker {
       var typedArg = arg
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
+          typedArg = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
@@ -6731,7 +6844,9 @@ extension TypeChecker {
       finalBase = prepared.base
       materializedReceiver = prepared.binding
       if finalBase.type != firstParam.type {
-        if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
+          finalBase = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitRef
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
@@ -6753,7 +6868,9 @@ extension TypeChecker {
       var typedArg = arg
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
+        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
+          typedArg = flavorConversion
+        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
           typedArg = implicitRef
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
@@ -6834,7 +6951,9 @@ extension TypeChecker {
 
       func isRefLikeType(_ type: Type) -> Bool {
         switch type {
-        case .reference(_), .mutableReference(_), .pointer(_), .mutablePointer(_):
+        case .reference(_), .mutableReference(_),
+             .borrowedReference(_, _), .mutableBorrowedReference(_, _),
+             .pointer(_), .mutablePointer(_):
           return true
         default:
           return false
@@ -6897,8 +7016,7 @@ extension TypeChecker {
       for (memberIndex, memberName) in path.enumerated() {
         let isLastMember = memberIndex == path.count - 1
         let (typeToLookup, isPointerAccess) = {
-          if case .reference(let inner) = currentType { return (inner, false) }
-          if case .mutableReference(let inner) = currentType { return (inner, false) }
+          if let (inner, _) = referenceTypeComponents(currentType) { return (inner, false) }
           if case .pointer(let inner) = currentType { return (inner, true) }
           if case .mutablePointer(let inner) = currentType { return (inner, true) }
           return (currentType, false)
@@ -7036,12 +7154,19 @@ extension TypeChecker {
         throw SemanticError(.generic(
           "Cannot assign through read-only reference of type '\(typedInner.type)'"
         ), span: currentSpan)
+      case .borrowedReference:
+        throw SemanticError(.generic(
+          "Cannot assign through read-only reference of type '\(typedInner.type)'"
+        ), span: currentSpan)
       case .pointer:
         throw SemanticError(.generic(
           "Cannot assign through read-only pointer of type '\(typedInner.type)'"
         ), span: currentSpan)
       case .mutableReference(let innerType):
         try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref mut")
+        return .derefExpression(expression: typedInner, type: innerType)
+      case .mutableBorrowedReference(let innerType, _):
+        try requireDerefablePointee(innerType, operation: ".val", spelledType: "ref $_ mut")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutablePointer(let elementType):
         try requireDerefablePointee(elementType, operation: ".val", spelledType: "ptr mut")
@@ -7455,7 +7580,7 @@ extension TypeChecker {
     var iterableType = typedIterable.type
     
     // Auto-deref: if the iterable is a reference type, unwrap it
-    if case .reference(let inner) = iterableType {
+    if let (inner, _) = referenceTypeComponents(iterableType) {
       iterableType = inner
     }
     
@@ -7648,7 +7773,7 @@ extension TypeChecker {
     // Auto-deref: if the iterable is a reference, we need to deref it first
     var actualIterable = typedIterable
     var actualIterableType = typedIterable.type
-    if case .reference(let inner) = typedIterable.type {
+    if let (inner, _) = referenceTypeComponents(typedIterable.type) {
       actualIterable = .derefExpression(expression: typedIterable, type: inner)
       actualIterableType = inner
     }
@@ -7679,9 +7804,10 @@ extension TypeChecker {
     // Get the iterator type from the reference (ref or ref mut)
     let iteratorType: Type
     switch iterRef.type {
-    case .reference(let inner):
-      iteratorType = inner
-    case .mutableReference(let inner):
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .borrowedReference(let inner, _),
+         .mutableBorrowedReference(let inner, _):
       iteratorType = inner
     default:
       throw SemanticError(.generic("Expected reference to iterator"), span: currentSpan)

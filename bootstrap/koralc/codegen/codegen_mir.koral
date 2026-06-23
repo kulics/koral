@@ -303,7 +303,7 @@ given MIRFunctionCodeEmitter {
         )
     }
 
-    public emit_body(self ref mut) Void = {
+    public emit_body(self ref mut Self) Void = {
         self.emit_local_declarations()
         for block in self.function.blocks then {
             self.emit_block(block)
@@ -331,7 +331,7 @@ given MIRFunctionCodeEmitter {
         return Option[String].None()
     }
 
-    private emit_local_declarations(self ref mut) Void = {
+    private emit_local_declarations(self ref mut Self) Void = {
         for local_id in self.lifetime_plan.hoisted_declaration_locals then {
             when self.local_info(local_id) in {
                 .Some(local) then {
@@ -361,7 +361,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_block(self ref mut, block ref MIRBasicBlock) Void = {
+    private emit_block(self ref mut Self, block ref MIRBasicBlock) Void = {
         let preserved_return_local = when block.terminator in {
             .ReturnValue(operand_opt) then when operand_opt in {
                 .Some(operand) then self.local_id_from_operand(operand),
@@ -402,7 +402,7 @@ given MIRFunctionCodeEmitter {
         self.emit_terminator(block.terminator)
     }
 
-    private emit_statement(self ref mut, statement ref MIRStatement) Void = {
+    private emit_statement(self ref mut Self, statement ref MIRStatement) Void = {
         when statement in {
             .Declare(local_id) then {
         when self.lifetime_plan.block_local_declaration_locals.get(local_id.raw_value) in {
@@ -432,7 +432,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_terminator(self ref mut, terminator MIRTerminator) Void = {
+    private emit_terminator(self ref mut Self, terminator MIRTerminator) Void = {
         when terminator in {
             .Goto(block) then self.emit_goto(block),
             .Branch(condition, then_block, else_block) then {
@@ -485,14 +485,14 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_goto(self ref mut, block MIRBlockID) Void = {
+    private emit_goto(self ref mut Self, block MIRBlockID) Void = {
         self.codegen.add_indent()
         self.codegen.buffer.push_string("goto ")
         self.codegen.buffer.push_string(self.block_label(block))
         self.codegen.buffer.push_string(";\n")
     }
 
-    private emit_assign(self ref mut, place MIRPlace, value MIRValue) Void = {
+    private emit_assign(self ref mut Self, place MIRPlace, value MIRValue) Void = {
         let access = self.emit_place_access(place)
         let emission = self.emit_value(value)
         let target_type = self.type_of_place(place)
@@ -586,7 +586,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_compound_assign(self ref mut, assignment MIRCompoundAssignment) Void = {
+    private emit_compound_assign(self ref mut Self, assignment MIRCompoundAssignment) Void = {
         let access = self.emit_place_access(assignment.target)
         let emission = self.emit_value(assignment.value)
         let target_type = self.type_of_place(assignment.target)
@@ -634,7 +634,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_drop(self ref mut, place MIRPlace) Void = {
+    private emit_drop(self ref mut Self, place MIRPlace) Void = {
         let access = self.emit_place_access(place)
         let drop_type = self.type_of_place(place)
         when self.local_target_id(place) in {
@@ -650,7 +650,7 @@ given MIRFunctionCodeEmitter {
         self.emit_cleanup(access.cleanup)
     }
 
-    private emit_retain(self ref mut, value MIRValue) Void = {
+    private emit_retain(self ref mut Self, value MIRValue) Void = {
         let emission = self.emit_value_source(value)
         let value_type = self.type_of_value(value)
         when value_type in {
@@ -681,14 +681,14 @@ given MIRFunctionCodeEmitter {
         self.emit_cleanup(emission.cleanup)
     }
 
-    private emit_release(self ref mut, value MIRValue) Void = {
+    private emit_release(self ref mut Self, value MIRValue) Void = {
         let emission = self.emit_value_source(value)
         self.codegen.add_indent()
         self.codegen.append_drop_statement(self.type_of_value(value), emission.expression)
         self.emit_cleanup(emission.cleanup)
     }
 
-    private emit_evaluate(self ref mut, value MIRValue) Void = {
+    private emit_evaluate(self ref mut Self, value MIRValue) Void = {
         let emission = self.emit_value(value)
         let value_type = self.type_of_value(value)
         if self.codegen.needs_drop(value_type) then {
@@ -708,11 +708,11 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_scope_cleanup(self ref mut, scope MIRScopeID) Void = {
+    private emit_scope_cleanup(self ref mut Self, scope MIRScopeID) Void = {
         self.emit_scope_cleanup_preserving(scope, Option[MIRLocalID].None())
     }
 
-    private emit_scope_cleanup_preserving(self ref mut, scope MIRScopeID, preserved Option[MIRLocalID]) Void = {
+    private emit_scope_cleanup_preserving(self ref mut Self, scope MIRScopeID, preserved Option[MIRLocalID]) Void = {
         when self.lifetime_plan.locals_by_scope.get(scope.raw_value) in {
             .Some(locals) then {
                 let mut i = locals.count()
@@ -738,7 +738,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_return(self ref mut, operand Option[MIROperand]) Void = {
+    private emit_return(self ref mut Self, operand Option[MIROperand]) Void = {
         when operand in {
             .Some(op) then {
                 let raw_emission = self.emit_operand_value(op)
@@ -787,7 +787,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_root_cleanup(self ref mut, preserved Option[MIRLocalID]) Void = {
+    private emit_root_cleanup(self ref mut Self, preserved Option[MIRLocalID]) Void = {
         let mut i = self.function.locals.count()
         while i > 0 then {
             i -= 1
@@ -802,7 +802,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_guarded_drop(self ref mut, flag String, drop_type Type, expression String) Void = {
+    private emit_guarded_drop(self ref mut Self, flag String, drop_type Type, expression String) Void = {
         self.codegen.add_indent()
         self.codegen.buffer.push_string("if (")
         self.codegen.buffer.push_string(flag)
@@ -819,7 +819,7 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string("}\n")
     }
 
-    private emit_value(self ref mut, value MIRValue) MIRValueEmission = {
+    private emit_value(self ref mut Self, value MIRValue) MIRValueEmission = {
         return when value in {
             .Operand(operand) then self.emit_operand_value(operand),
             .PlaceRead(place, ownership) then self.emit_place_read(place, ownership, false),
@@ -839,18 +839,18 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_value_source(self ref mut, value MIRValue) MIRValueEmission = {
+    private emit_value_source(self ref mut Self, value MIRValue) MIRValueEmission = {
         return when value in {
             .PlaceRead(place, ownership) then self.emit_place_read(place, ownership, true),
             _ then self.emit_value(value),
         }
     }
 
-    private emit_operand_value(self ref mut, operand MIROperand) MIRValueEmission = {
+    private emit_operand_value(self ref mut Self, operand MIROperand) MIRValueEmission = {
         return MIRValueEmission(self.emit_operand_expression(operand), Option[ref MIRValueCleanup].None())
     }
 
-    private emit_operand_expression(self ref mut, operand MIROperand) String = {
+    private emit_operand_expression(self ref mut Self, operand MIROperand) String = {
         return when operand in {
             .Local(local) then self.local_name(local),
             .Function(symbol) then self.codegen.callable_c_name(symbol),
@@ -858,7 +858,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private constant_expression(self ref mut, constant MIRConstant) String = {
+    private constant_expression(self ref mut Self, constant MIRConstant) String = {
         return when constant in {
             .Integer(value, _) then self.codegen.sanitize_c_numeric_literal(value),
             .Float(value, _) then self.codegen.sanitize_c_numeric_literal(value),
@@ -868,7 +868,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_place_read(self ref mut, place MIRPlace, ownership MIROwnershipUse, source_mode Bool) MIRValueEmission = {
+    private emit_place_read(self ref mut Self, place MIRPlace, ownership MIROwnershipUse, source_mode Bool) MIRValueEmission = {
         let access = self.emit_place_access(place)
         let place_type = self.type_of_place(place)
         if ownership is .Move() then {
@@ -883,7 +883,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, place_type))
     }
 
-    private emit_binary(self ref mut, operation MIRBinaryOperation) MIRValueEmission = {
+    private emit_binary(self ref mut Self, operation MIRBinaryOperation) MIRValueEmission = {
         let left = self.emit_operand_expression(operation.left)
         let right = self.emit_operand_expression(operation.right)
         let result_type = operation.result_type
@@ -926,7 +926,7 @@ given MIRFunctionCodeEmitter {
         return "koral_wrapping_\(op_name)_\(self.codegen.type_suffix(t))"
     }
 
-    private emit_unary(self ref mut, operation MIRUnaryOperation) MIRValueEmission = {
+    private emit_unary(self ref mut Self, operation MIRUnaryOperation) MIRValueEmission = {
         let operand = self.emit_operand_expression(operation.operand)
         let result_type = operation.result_type
         let expression = when operation.operator_kind in {
@@ -936,7 +936,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type))
     }
 
-    private emit_call(self ref mut, call MIRCall) MIRValueEmission = {
+    private emit_call(self ref mut Self, call MIRCall) MIRValueEmission = {
         let has_ownerships = call.argument_ownerships.count() == call.arguments.count()
         when call.callee in {
             .Function(symbol) then {
@@ -1008,7 +1008,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type))
     }
 
-    private emit_direct_call_argument(self ref mut, value MIRValue, ownership MIROwnershipUse) MIRValueEmission = {
+    private emit_direct_call_argument(self ref mut Self, value MIRValue, ownership MIROwnershipUse) MIRValueEmission = {
         let value_type = self.type_of_value(value)
         return when ownership in {
             .Copy() then {
@@ -1052,7 +1052,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_direct_call_0(self ref mut, function_name String, return_type Type) String = {
+    private emit_direct_call_0(self ref mut Self, function_name String, return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent()
             self.codegen.buffer.push_string(function_name)
@@ -1062,7 +1062,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_0(self.codegen.c_type_name(return_type), function_name)
     }
 
-    private emit_direct_call_1(self ref mut, function_name String, arg String, return_type Type) String = {
+    private emit_direct_call_1(self ref mut Self, function_name String, arg String, return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent()
             self.codegen.buffer.push_string(function_name)
@@ -1074,7 +1074,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_1(self.codegen.c_type_name(return_type), function_name, arg)
     }
 
-    private emit_direct_call_2(self ref mut, function_name String, first_arg String, second_arg String, return_type Type) String = {
+    private emit_direct_call_2(self ref mut Self, function_name String, first_arg String, second_arg String, return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent()
             self.codegen.buffer.push_string(function_name)
@@ -1088,7 +1088,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_2(self.codegen.c_type_name(return_type), function_name, first_arg, second_arg)
     }
 
-    private emit_direct_call(self ref mut, function_name String, arguments List[String], return_type Type) String = {
+    private emit_direct_call(self ref mut Self, function_name String, arguments List[String], return_type Type) String = {
         if self.codegen.type_is_void_or_never(return_type) then {
             self.codegen.add_indent()
             self.codegen.buffer.push_string(function_name)
@@ -1100,7 +1100,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_call_args(self.codegen.c_type_name(return_type), function_name, arguments)
     }
 
-    private emit_closure_call(self ref mut, closure_expr String, callee_type Type, arguments List[String], return_type Type) String = {
+    private emit_closure_call(self ref mut Self, closure_expr String, callee_type Type, arguments List[String], return_type Type) String = {
         let mut param_types = List[String].new()
         when callee_type in {
             .FunctionType(params, _) then for param in params then { param_types.push(self.codegen.c_type_name(param.param_type)) },
@@ -1188,7 +1188,7 @@ given MIRFunctionCodeEmitter {
         return result
     }
 
-    private emit_aggregate(self ref mut, aggregate MIRAggregate) MIRValueEmission = {
+    private emit_aggregate(self ref mut Self, aggregate MIRAggregate) MIRValueEmission = {
         let mut fields = List[String].new()
         let mut emissions = List[MIRValueEmission].new()
         for field in aggregate.fields then {
@@ -1202,7 +1202,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, aggregate.aggregate_type))
     }
 
-    private emit_enum_case(self ref mut, construction MIREnumConstruction) MIRValueEmission = {
+    private emit_enum_case(self ref mut Self, construction MIREnumConstruction) MIRValueEmission = {
         let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(construction.enum_type))
         let case_info = self.enum_case_info(construction.enum_type, construction.case_name)
         self.codegen.add_indent()
@@ -1232,7 +1232,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, construction.enum_type))
     }
 
-    private emit_enum_tag(self ref mut, tag MIREnumTag) MIRValueEmission = {
+    private emit_enum_tag(self ref mut Self, tag MIREnumTag) MIRValueEmission = {
         let subject = self.emit_value_source(tag.subject.val)
         let subject_expr = when self.type_of_value(tag.subject.val) in {
             .ReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
@@ -1246,7 +1246,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, Option[ref MIRValueCleanup].None())
     }
 
-    private emit_trait_object_conversion(self ref mut, conversion MIRTraitObjectConversion) MIRValueEmission = {
+    private emit_trait_object_conversion(self ref mut Self, conversion MIRTraitObjectConversion) MIRValueEmission = {
         let inner = self.emit_value_source(conversion.inner.val)
         let inner_type = self.type_of_value(conversion.inner.val)
         let should_retain = conversion.source_ownership is .Copy() or conversion.source_ownership is .Borrow()
@@ -1334,7 +1334,7 @@ given MIRFunctionCodeEmitter {
     }
 
     private adapt_expression_for_target_type(
-        self ref mut,
+        self ref mut Self,
         expression String,
         source_type Type,
         target_type Type,
@@ -1357,7 +1357,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_trait_method_call(self ref mut, call MIRTraitMethodCall) MIRValueEmission = {
+    private emit_trait_method_call(self ref mut Self, call MIRTraitMethodCall) MIRValueEmission = {
         let receiver = self.emit_value_source(call.receiver.val)
         let mut arg_values = List[String].new()
         let mut arg_types = List[Type].new()
@@ -1381,7 +1381,7 @@ given MIRFunctionCodeEmitter {
     }
 
     private emit_trait_method_call_abi(
-        self ref mut,
+        self ref mut Self,
         receiver_result String,
         receiver_ownership MIROwnershipUse,
         trait_name String,
@@ -1470,7 +1470,7 @@ given MIRFunctionCodeEmitter {
         return code
     }
 
-    private emit_reference(self ref mut, place MIRPlace, kind MIRReferenceKind, allocation MIRReferenceAllocation) MIRValueEmission = {
+    private emit_reference(self ref mut Self, place MIRPlace, kind MIRReferenceKind, allocation MIRReferenceAllocation) MIRValueEmission = {
         let result_type = self.type_of_ref(place, kind)
         return when allocation in {
             .HeapOwned() then self.emit_heap_reference(place, result_type),
@@ -1478,7 +1478,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_borrowed_reference(self ref mut, place MIRPlace, result_type Type) MIRValueEmission = {
+    private emit_borrowed_reference(self ref mut Self, place MIRPlace, result_type Type) MIRValueEmission = {
         let access = self.emit_place_access(place)
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
         self.codegen.add_indent()
@@ -1495,7 +1495,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, Option[ref MIRValueCleanup].None())
     }
 
-    private emit_heap_reference(self ref mut, place MIRPlace, result_type Type) MIRValueEmission = {
+    private emit_heap_reference(self ref mut Self, place MIRPlace, result_type Type) MIRValueEmission = {
         let access = self.emit_place_access(place)
         let pointee_type = self.type_of_place(place)
         let pointee_c_type = self.codegen.c_type_name(pointee_type)
@@ -1556,7 +1556,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_pointer(self ref mut, place MIRPlace) MIRValueEmission = {
+    private emit_pointer(self ref mut Self, place MIRPlace) MIRValueEmission = {
         let access = self.emit_place_access(place)
         let pointer_type = self.type_of_pointer(place)
         let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(pointer_type), "&\(access.path)")
@@ -1614,7 +1614,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_cast_operand(self ref mut, operand MIROperand, target_type Type) MIRValueEmission = {
+    private emit_cast_operand(self ref mut Self, operand MIROperand, target_type Type) MIRValueEmission = {
         let source = self.emit_operand_value(operand)
         let source_type = self.type_of_operand(operand)
         let target_c_type = self.codegen.c_type_name(target_type)
@@ -1637,7 +1637,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, target_type))
     }
 
-    private emit_intrinsic(self ref mut, node MIRIntrinsic) MIRValueEmission = {
+    private emit_intrinsic(self ref mut Self, node MIRIntrinsic) MIRValueEmission = {
         return when node in {
             .AllocMemory(count, result_type) then {
                 let count_emission = self.emit_value_source(count.val)
@@ -1704,7 +1704,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_lambda(self ref mut, lambda MIRLambda) MIRValueEmission = {
+    private emit_lambda(self ref mut Self, lambda MIRLambda) MIRValueEmission = {
         // Resolve capture sources to C expression paths
         let mut capture_source_overrides = Dict[UInt, String].new()
         let mut capture_source_cleanups = List[ref MIRValueCleanup].new()
@@ -1728,7 +1728,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(closure, self.cleanup_for_temporary_result(closure, lambda.lambda_type))
     }
 
-    private generate_lambda_expression(self ref mut, lambda MIRLambda, capture_source_overrides Dict[UInt, String]) String = {
+    private generate_lambda_expression(self ref mut Self, lambda MIRLambda, capture_source_overrides Dict[UInt, String]) String = {
         let lambda_name = self.next_lambda_name()
         // Extract function parameters and return type from lambda_type
         let (function_params, return_type) = when lambda.lambda_type in {
@@ -1766,7 +1766,7 @@ given MIRFunctionCodeEmitter {
         return self.codegen.next_temp_with_init("struct __koral_Closure", "{ .fn = (void*)\(lambda_name), .env = \(env_var), .drop = __koral_\(env_struct_name)_drop }")
     }
 
-    private generate_no_capture_lambda_function(self ref mut, name String, params List[ref Symbol], function_params List[ref FunctionParamEntry], return_type Type, mir_function ref MIRFunction) Void = {
+    private generate_no_capture_lambda_function(self ref mut Self, name String, params List[ref Symbol], function_params List[ref FunctionParamEntry], return_type Type, mir_function ref MIRFunction) Void = {
         let plan = build_mir_function_emit_plan(self.codegen, mir_function)
         let mut parameter_local_names = List[String].new()
         for local in mir_function.locals then {
@@ -1804,7 +1804,7 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("}\n")
     }
 
-    private generate_capture_lambda_function(self ref mut, name String, env_struct_name String, params List[ref Symbol], function_params List[ref FunctionParamEntry], return_type Type, captures List[ref Symbol], capture_source_overrides Dict[UInt, String], mir_function ref MIRFunction) Void = {
+    private generate_capture_lambda_function(self ref mut Self, name String, env_struct_name String, params List[ref Symbol], function_params List[ref FunctionParamEntry], return_type Type, captures List[ref Symbol], capture_source_overrides Dict[UInt, String], mir_function ref MIRFunction) Void = {
         let plan = build_mir_function_emit_plan(self.codegen, mir_function)
         let mut parameter_local_names = List[String].new()
         for local in mir_function.locals then {
@@ -1858,7 +1858,7 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("}\n")
     }
 
-    private generate_lambda_env_struct(self ref mut, env_struct_name String, captures List[ref Symbol]) Void = {
+    private generate_lambda_env_struct(self ref mut Self, env_struct_name String, captures List[ref Symbol]) Void = {
         // Generate env struct definition
         self.nested_definitions.push_string("struct \(env_struct_name) {\n")
         self.nested_definitions.push_string("    _Atomic intptr_t __refcount;\n")
@@ -1887,7 +1887,7 @@ given MIRFunctionCodeEmitter {
         self.nested_definitions.push_string("}\n")
     }
 
-    private emit_place_access(self ref mut, place MIRPlace) MIRPlaceAccess = {
+    private emit_place_access(self ref mut Self, place MIRPlace) MIRPlaceAccess = {
         return when place in {
             .Local(local) then {
                 let name = self.local_name(local)
@@ -2082,14 +2082,14 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private consume_moved_place(self ref mut, place MIRPlace) Void = {
+    private consume_moved_place(self ref mut Self, place MIRPlace) Void = {
         when self.root_local_of_place(place) in {
             .Some(local) then self.set_init_flag(local, false),
             .None() then {},
         }
     }
 
-    private consume_moved_source(self ref mut, value MIRValue) Void = {
+    private consume_moved_source(self ref mut Self, value MIRValue) Void = {
         when value in {
             .Operand(.Local(local)) then self.set_init_flag(local, false),
             .PlaceRead(place, ownership) then {
@@ -2101,7 +2101,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private next_lambda_name(self ref mut) String = {
+    private next_lambda_name(self ref mut Self) String = {
         let name = "__koral_lambda_\(self.function.identifier.def_id.id)_\(self.lambda_counter)"
         self.lambda_counter += 1
         return name
@@ -2124,7 +2124,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private set_init_flag(self ref mut, local MIRLocalID, value Bool) Void = {
+    private set_init_flag(self ref mut Self, local MIRLocalID, value Bool) Void = {
         when self.init_flag(local) in {
             .Some(flag) then {
                 self.codegen.add_indent()
@@ -2144,7 +2144,7 @@ given MIRFunctionCodeEmitter {
         return Option[ref MIRValueCleanup].None()
     }
 
-    private emit_cleanup(self ref mut, cleanup Option[ref MIRValueCleanup]) Void = {
+    private emit_cleanup(self ref mut Self, cleanup Option[ref MIRValueCleanup]) Void = {
         when cleanup in {
             .Some(item) then {
                 self.codegen.add_indent()
@@ -2154,7 +2154,7 @@ given MIRFunctionCodeEmitter {
         }
     }
 
-    private emit_residual_cleanups(self ref mut, emission MIRValueEmission, consumed Bool) Void = {
+    private emit_residual_cleanups(self ref mut Self, emission MIRValueEmission, consumed Bool) Void = {
         when emission.cleanup in {
             .Some(cleanup) then {
                 if consumed and cleanup.name == emission.expression then {
@@ -2181,7 +2181,7 @@ given MIRFunctionCodeEmitter {
 
     private context_name(self ref, def_id DefId) String = self.codegen.context.get_name(def_id) or else "global_\(def_id.id)"
 
-    private switch_case_expression(self ref mut, constant MIRConstant) String = self.constant_expression(constant)
+    private switch_case_expression(self ref mut Self, constant MIRConstant) String = self.constant_expression(constant)
 
     private enum_case_info(self ref, enum_type Type, case_name String) Pair[UInt, List[EnumCaseParam]] = {
         let def_id = when enum_type in { .EnumType(id) then id, _ then DefId(0(UInt)) }
@@ -2206,7 +2206,7 @@ given MIRFunctionCodeEmitter {
 
     private pointer_element_type(self ref, pointer_type Type) Type = when pointer_type in { .PointerType(inner) then inner.val, .MutablePointerType(inner) then inner.val, _ then Type.VoidType() }
 
-    private emit_memory_transfer(self ref mut, function_name String, dest MIRValue, source MIRValue, count MIRValue) MIRValueEmission = {
+    private emit_memory_transfer(self ref mut Self, function_name String, dest MIRValue, source MIRValue, count MIRValue) MIRValueEmission = {
         let d = self.emit_value_source(dest)
         let s = self.emit_value_source(source)
         let c = self.emit_value_source(count)
@@ -2228,7 +2228,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission("", Option[ref MIRValueCleanup].None())
     }
 
-    private emit_is_unique(self ref mut, value MIRValue) MIRValueEmission = {
+    private emit_is_unique(self ref mut Self, value MIRValue) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let result = self.codegen.next_temp_with_decl("int")
         // The value is ptr ref mut T — a raw pointer to the ref struct.
@@ -2253,7 +2253,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, Option[ref MIRValueCleanup].None())
     }
 
-    private emit_ref_count(self ref mut, value MIRValue) MIRValueEmission = {
+    private emit_ref_count(self ref mut Self, value MIRValue) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(Type.UIntType()))
         let value_type = self.type_of_value(value)
@@ -2278,7 +2278,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, Option[ref MIRValueCleanup].None())
     }
 
-    private emit_make_ref(self ref mut, pointer MIRValue, owner MIRValue, result_type Type) MIRValueEmission = {
+    private emit_make_ref(self ref mut Self, pointer MIRValue, owner MIRValue, result_type Type) MIRValueEmission = {
         let p = self.emit_value_source(pointer)
         let o = self.emit_value_source(owner)
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
@@ -2303,14 +2303,14 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
     }
 
-    private emit_runtime_unary_ref(self ref mut, function_name String, value MIRValue, result_type Type) MIRValueEmission = {
+    private emit_runtime_unary_ref(self ref mut Self, function_name String, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let result = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "\(function_name)(\(emission.expression))")
         self.emit_cleanup(emission.cleanup)
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
     }
 
-    private emit_downgrade_ref(self ref mut, value MIRValue, result_type Type) MIRValueEmission = {
+    private emit_downgrade_ref(self ref mut Self, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         return when self.type_of_value(value) in {
             .ReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
@@ -2364,7 +2364,7 @@ given MIRFunctionCodeEmitter {
     }
 
     private emit_runtime_unary_ref_from_emission(
-        self ref mut,
+        self ref mut Self,
         function_name String,
         emission MIRValueEmission,
         result_type Type,
@@ -2374,7 +2374,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
     }
 
-    private emit_upgrade_ref(self ref mut, value MIRValue, result_type Type) MIRValueEmission = {
+    private emit_upgrade_ref(self ref mut Self, value MIRValue, result_type Type) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let success = self.codegen.next_temp_with_decl("int")
         return when self.type_of_value(value) in {
@@ -2461,7 +2461,7 @@ given MIRFunctionCodeEmitter {
     }
 
     private emit_plain_upgrade_ref(
-        self ref mut,
+        self ref mut Self,
         emission MIRValueEmission,
         success String,
         result_type Type,
@@ -2484,7 +2484,7 @@ given MIRFunctionCodeEmitter {
         return MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
     }
 
-    private emit_spawn_thread(self ref mut, out_handle MIRValue, out_tid MIRValue, closure MIRValue, stack_size MIRValue) MIRValueEmission = {
+    private emit_spawn_thread(self ref mut Self, out_handle MIRValue, out_tid MIRValue, closure MIRValue, stack_size MIRValue) MIRValueEmission = {
         let h = self.emit_value_source(out_handle)
         let t = self.emit_value_source(out_tid)
         let c = self.emit_value_source(closure)
@@ -2643,7 +2643,7 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
 }
 
 given CodeGen {
-    public emit_mir_function_body(self ref mut, function ref MIRFunction) String = {
+    public emit_mir_function_body(self ref mut Self, function ref MIRFunction) String = {
         let saved_indent = self.indent
         self.indent = "    "
         let plan = build_mir_function_emit_plan(self, function)
@@ -2663,7 +2663,7 @@ given CodeGen {
         return body_text
     }
 
-    public emit_mir_global_function(self ref mut, function ref MIRFunction) Void = {
+    public emit_mir_global_function(self ref mut Self, function ref MIRFunction) Void = {
         let c_name = self.callable_c_name(function.identifier)
         if self.emitted_function_names.contains(c_name) then { return }
         self.emitted_function_names.insert(c_name)

@@ -6,6 +6,7 @@ extension Parser {
 
   private enum TypeModifierPrefix {
     case reference(mutable: Bool)
+    case borrowedReference(lifetime: String, mutable: Bool)
     case pointer(mutable: Bool)
     case weakReference(mutable: Bool)
   }
@@ -14,6 +15,8 @@ extension Parser {
     switch prefix {
     case .reference(let mutable):
       return .reference(base, mutable: mutable)
+    case .borrowedReference(let lifetime, let mutable):
+      return .borrowedReference(base, lifetime: lifetime, mutable: mutable)
     case .pointer(let mutable):
       return .pointer(base, mutable: mutable)
     case .weakReference(let mutable):
@@ -27,11 +30,22 @@ extension Parser {
     while true {
       if currentToken === .refKeyword {
         try match(.refKeyword)
+        let lifetime: String?
+        if case .lifetimeIdentifier(let lifetimeName) = currentToken {
+          lifetime = lifetimeName
+          try match(.lifetimeIdentifier(lifetimeName))
+        } else {
+          lifetime = nil
+        }
         let mutable = currentToken === .mutKeyword
         if mutable {
           try match(.mutKeyword)
         }
-        prefixes.append(.reference(mutable: mutable))
+        if let lifetime {
+          prefixes.append(.borrowedReference(lifetime: lifetime, mutable: mutable))
+        } else {
+          prefixes.append(.reference(mutable: mutable))
+        }
         continue
       }
       if currentToken === .ptrKeyword {

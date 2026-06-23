@@ -3,6 +3,9 @@
 
 /// Extension containing all declaration parsing methods
 extension Parser {
+  private func filterLifetimeTypeParameters(_ parameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
+    parameters.filter { !$0.name.hasPrefix("$") }
+  }
 
   private func parseSelfReceiverType() throws -> TypeNode {
     try match(.selfKeyword)
@@ -13,11 +16,36 @@ extension Parser {
     var selfType: TypeNode = .inferredSelf
     if currentToken === .refKeyword {
       try match(.refKeyword)
-      let mutable = currentToken === .mutKeyword
-      if mutable {
+      let explicitLifetime: String?
+      if case .lifetimeIdentifier(let lifetimeName) = currentToken {
+        explicitLifetime = lifetimeName
+        try match(.lifetimeIdentifier(lifetimeName))
+      } else {
+        explicitLifetime = nil
+      }
+
+      let sawMut = currentToken === .mutKeyword
+      if sawMut {
         try match(.mutKeyword)
       }
-      selfType = .reference(selfType, mutable: mutable)
+
+      if let lifetime = explicitLifetime {
+        if currentToken === .selfTypeKeyword {
+          try match(.selfTypeKeyword)
+        }
+        selfType = .borrowedReference(selfType, lifetime: lifetime, mutable: sawMut)
+      } else if currentToken === .comma || currentToken === .rightParen {
+        selfType = .borrowedReference(selfType, lifetime: "$_", mutable: sawMut)
+      } else {
+        let explicitInner: TypeNode
+        if currentToken === .selfTypeKeyword {
+          try match(.selfTypeKeyword)
+          explicitInner = .inferredSelf
+        } else {
+          explicitInner = try parseType()
+        }
+        selfType = .reference(explicitInner, mutable: sawMut)
+      }
     }
 
     if currentToken !== .comma && currentToken !== .rightParen {
@@ -69,7 +97,7 @@ extension Parser {
 
       try match(.identifier(name))
 
-      let typePrams = try parseTypeParameters()
+      let typePrams = filterLifetimeTypeParameters(try parseTypeParameters())
 
       if isForeign && !typePrams.isEmpty {
         throw ParserError.foreignFunctionNoGenerics(span: currentSpan)
@@ -129,7 +157,7 @@ extension Parser {
 
       try match(.identifier(name))
 
-      let typeParams = try parseTypeParameters()
+      let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
 
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
@@ -191,7 +219,7 @@ extension Parser {
     try match(.identifier(name))
 
     // Parse optional postfix type parameters for generic traits: Iterator[T Any]
-    let typeParams = try parseTypeParameters()
+    let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
 
     // Optional inheritance list: trait Child ParentA and ParentB { ... }
     var superTraits: [TypeNode] = []
@@ -220,7 +248,7 @@ extension Parser {
       }
       try match(.identifier(methodName))
 
-      let methodTypeParams = try parseTypeParameters()
+      let methodTypeParams = filterLifetimeTypeParameters(try parseTypeParameters())
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -295,7 +323,7 @@ extension Parser {
   
   private func parseIntrinsicGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
     try match(.givenKeyword)
-    let typeParams = try parseTypeParameters()
+    let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
     let type = try parseType()
     try match(.leftBrace)
 
@@ -314,7 +342,7 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      let methodTypeParams = try parseTypeParameters()
+      let methodTypeParams = filterLifetimeTypeParameters(try parseTypeParameters())
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -382,7 +410,7 @@ extension Parser {
 
   private func parseGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
     try match(.givenKeyword)
-    let typeParams = try parseTypeParameters()
+    let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
     let type = try parseType()
     if currentToken === .notKeyword {
       try match(.notKeyword)
@@ -411,7 +439,7 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      let typeParams = try parseTypeParameters()
+      let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
@@ -528,17 +556,29 @@ extension Parser {
     if currentToken === .leftBracket {
       try match(.leftBracket)
       while currentToken !== .rightBracket {
-        guard case .identifier(let paramName) = currentToken else {
+        let paramName: String
+        let isLifetime: Bool
+        switch currentToken {
+        case .identifier(let name):
+          paramName = name
+          isLifetime = false
+          try match(.identifier(name))
+        case .lifetimeIdentifier(let name):
+          paramName = name
+          isLifetime = true
+          try match(.lifetimeIdentifier(name))
+        default:
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
         }
-        try match(.identifier(paramName))
 
         var constraints: [TypeNode] = []
-        constraints.append(try parseTraitConstraint())
-        while currentToken === .andKeyword {
-          try match(.andKeyword)
+        if !isLifetime {
           constraints.append(try parseTraitConstraint())
+          while currentToken === .andKeyword {
+            try match(.andKeyword)
+            constraints.append(try parseTraitConstraint())
+          }
         }
 
         parameters.append((name: paramName, constraints: constraints))

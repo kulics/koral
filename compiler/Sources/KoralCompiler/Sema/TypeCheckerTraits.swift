@@ -293,6 +293,8 @@ extension TypeChecker {
       return name == "Self"
     case .reference(let inner, _):
       return containsSelfType(inner)
+    case .borrowedReference(let inner, _, _):
+      return containsSelfType(inner)
     case .pointer(let inner, _):
       return containsSelfType(inner)
     case .weakReference(let inner, _):
@@ -309,6 +311,10 @@ extension TypeChecker {
     case .reference(.inferredSelf, _):
       return true
     case .reference(.identifier(let name), _):
+      return name == "Self"
+    case .borrowedReference(.inferredSelf, _, _):
+      return true
+    case .borrowedReference(.identifier(let name), _, _):
       return name == "Self"
     default:
       return false

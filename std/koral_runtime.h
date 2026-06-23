@@ -68,12 +68,15 @@ void __koral_retain(void* raw_control);
 void __koral_release(void* raw_control);
 void __koral_weak_retain(void* raw_control);
 void __koral_weak_release(void* raw_control);
+void __koral_ref_slot_drop(void* raw_ref);
+void __koral_weakref_slot_drop(void* raw_weak_ref);
 
 struct __koral_WeakRef __koral_downgrade_ref(struct __koral_Ref r);
 struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success);
 
 void __koral_closure_retain(struct __koral_Closure closure);
 void __koral_closure_release(struct __koral_Closure closure);
+void __koral_closure_slot_drop(void* raw_closure);
 
 void __koral_panic_overflow_add(void);
 void __koral_panic_overflow_sub(void);

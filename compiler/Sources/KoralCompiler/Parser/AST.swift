@@ -74,6 +74,7 @@ public typealias TypeParameterDecl = (name: String, constraints: [TypeNode])
 public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String)
   case reference(TypeNode, mutable: Bool)
+  case borrowedReference(TypeNode, lifetime: String, mutable: Bool)
   case pointer(TypeNode, mutable: Bool)
   case weakReference(TypeNode, mutable: Bool)
   case generic(base: String, args: [TypeNode])
@@ -88,6 +89,8 @@ public indirect enum TypeNode: CustomStringConvertible {
       return name
     case .reference(let inner, let mutable):
       return mutable ? "ref mut \(inner)" : "ref \(inner)"
+    case .borrowedReference(let inner, let lifetime, let mutable):
+      return mutable ? "ref \(lifetime) mut \(inner)" : "ref \(lifetime) \(inner)"
     case .pointer(let inner, let mutable):
       return mutable ? "ptr mut \(inner)" : "ptr \(inner)"
     case .weakReference(let inner, let mutable):

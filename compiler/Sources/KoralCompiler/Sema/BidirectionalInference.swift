@@ -486,6 +486,10 @@ public class BidirectionalInference {
             return .genericStruct(template: base, args: argTypes)
         case .reference(let inner, let mutable):
             return mutable ? .mutableReference(inner: resolveTypeNode(inner)) : .reference(inner: resolveTypeNode(inner))
+        case .borrowedReference(let inner, let lifetime, let mutable):
+            return mutable
+                ? .mutableBorrowedReference(inner: resolveTypeNode(inner), lifetime: lifetime)
+                : .borrowedReference(inner: resolveTypeNode(inner), lifetime: lifetime)
         case .pointer(let inner, let mutable):
             return mutable ? .mutablePointer(element: resolveTypeNode(inner)) : .pointer(element: resolveTypeNode(inner))
         case .inferredSelf:
