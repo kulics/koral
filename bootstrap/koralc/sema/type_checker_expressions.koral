@@ -158,6 +158,8 @@ given TypeChecker {
         let normalized = when base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then base_type,
@@ -308,6 +310,24 @@ given TypeChecker {
                         }
                     },
                     .ReferenceType(inner_ref) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    .MutableBorrowedReferenceType(inner_ref, _) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    .BorrowedReferenceType(inner_ref, _) then {
                         yield when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
@@ -494,6 +514,8 @@ given TypeChecker {
             },
             .MutableReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .ReferenceType(inner) then self.resolve_member_type(inner.val, member),
+            .MutableBorrowedReferenceType(inner, _) then self.resolve_member_type(inner.val, member),
+            .BorrowedReferenceType(inner, _) then self.resolve_member_type(inner.val, member),
             .WeakReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .MutableWeakReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
@@ -824,6 +846,8 @@ given TypeChecker {
         let normalized = when base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then base_type,
@@ -906,6 +930,8 @@ given TypeChecker {
         let normalized = when actual_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then actual_type,
@@ -939,6 +965,14 @@ given TypeChecker {
                 .TraitObject(_, _) then inner.val,
                 _ then inner.val,
             },
+            .BorrowedReferenceType(inner, _) then when inner.val in {
+                .TraitObject(_, _) then inner.val,
+                _ then inner.val,
+            },
+            .MutableBorrowedReferenceType(inner, _) then when inner.val in {
+                .TraitObject(_, _) then inner.val,
+                _ then inner.val,
+            },
             _ then source_type,
         }
     }
@@ -957,6 +991,14 @@ given TypeChecker {
                 .TraitObject(_, _) then inner.val,
                 _ then trait_type,
             },
+            .BorrowedReferenceType(inner, _) then when inner.val in {
+                .TraitObject(_, _) then inner.val,
+                _ then trait_type,
+            },
+            .MutableBorrowedReferenceType(inner, _) then when inner.val in {
+                .TraitObject(_, _) then inner.val,
+                _ then trait_type,
+            },
             _ then trait_type,
         }
         return make_typed_expr(
@@ -969,6 +1011,8 @@ given TypeChecker {
         return when source_type in {
             .MutableReferenceType(_) then Type.MutableReferenceType(box(trait_type)),
             .ReferenceType(_) then Type.ReferenceType(box(trait_type)),
+            .MutableBorrowedReferenceType(_, lt) then Type.MutableBorrowedReferenceType(box(trait_type), lt),
+            .BorrowedReferenceType(_, lt) then Type.BorrowedReferenceType(box(trait_type), lt),
             .WeakReferenceType(_) then Type.WeakReferenceType(box(trait_type)),
             .MutableWeakReferenceType(_) then Type.MutableWeakReferenceType(box(trait_type)),
             _ then trait_type,
@@ -1003,6 +1047,8 @@ given TypeChecker {
                 .Variable(symbol) then when symbol.symbol_type in {
                     .ReferenceType(_) then Option[Type].Some(symbol.symbol_type),
                     .MutableReferenceType(_) then Option[Type].Some(symbol.symbol_type),
+                    .BorrowedReferenceType(_, _) then Option[Type].Some(symbol.symbol_type),
+                    .MutableBorrowedReferenceType(_, _) then Option[Type].Some(symbol.symbol_type),
                     .WeakReferenceType(_) then Option[Type].Some(symbol.symbol_type),
                     .MutableWeakReferenceType(_) then Option[Type].Some(symbol.symbol_type),
                     _ then Option[Type].None(),
@@ -1021,12 +1067,38 @@ given TypeChecker {
                                     return adapted
                                 }
                             },
+                            .MutableBorrowedReferenceType(actual_inner_ref, _) then {
+                                let actual_inner = actual_inner_ref.val
+                                if self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
                             _ then {},
                         },
                         .None() then {},
                     }
                     when expr.expr_type in {
                         .MutableReferenceType(actual_inner_ref) then {
+                            let actual_inner = actual_inner_ref.val
+                            when expected_inner in {
+                                .TraitObject(trait_name, _) then {
+                                    if self.can_convert_to_trait_object(actual_inner, trait_name) then {
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
+                                        return adapted
+                                    }
+                                },
+                                _ then {},
+                            }
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                               and not self.contains_generic_parameter(expected_inner)
+                            then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                return adapted
+                            }
+                            return expr
+                        },
+                        .MutableBorrowedReferenceType(actual_inner_ref, _) then {
                             let actual_inner = actual_inner_ref.val
                             when expected_inner in {
                                 .TraitObject(trait_name, _) then {
@@ -1088,6 +1160,20 @@ given TypeChecker {
                                     return adapted
                                 }
                             },
+                            .BorrowedReferenceType(actual_inner_ref, _) then {
+                                let actual_inner = actual_inner_ref.val
+                                if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
+                            .MutableBorrowedReferenceType(actual_inner_ref, _) then {
+                                let actual_inner = actual_inner_ref.val
+                                if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                    adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                    return adapted
+                                }
+                            },
                             _ then {},
                         },
                         .None() then {},
@@ -1133,11 +1219,53 @@ given TypeChecker {
                                 return adapted
                             }
                         },
+                        .BorrowedReferenceType(actual_inner_ref, _) then {
+                            let actual_inner = actual_inner_ref.val
+                            when expected_inner in {
+                                .TraitObject(trait_name, _) then {
+                                    if self.can_convert_to_trait_object(actual_inner, trait_name) then {
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
+                                        return adapted
+                                    }
+                                },
+                                _ then {},
+                            }
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                               and not self.contains_generic_parameter(expected_inner)
+                            then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                return adapted
+                            }
+                        },
+                        .MutableBorrowedReferenceType(actual_inner_ref, _) then {
+                            let actual_inner = actual_inner_ref.val
+                            when expected_inner in {
+                                .TraitObject(trait_name, _) then {
+                                    if self.can_convert_to_trait_object(actual_inner, trait_name) then {
+                                        adapted = self.wrap_trait_object_conversion(expr, expected_type, expected_type)
+                                        return adapted
+                                    }
+                                },
+                                _ then {},
+                            }
+                            if (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(actual_inner))
+                               and not self.contains_generic_parameter(expected_inner)
+                            then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                return adapted
+                            }
+                            if not should_defer_generic_ref_retype and self.type_matches_expected_pattern(expected_inner, actual_inner) then {
+                                adapted = make_typed_expr_ref(expr.expr_kind, expected_type)
+                                return adapted
+                            }
+                        },
                         _ then {},
                     }
                     let expr_is_ref_like = when expr.expr_type in {
                         .ReferenceType(_) then true,
                         .MutableReferenceType(_) then true,
+                        .BorrowedReferenceType(_, _) then true,
+                        .MutableBorrowedReferenceType(_, _) then true,
                         .WeakReferenceType(_) then true,
                         .MutableWeakReferenceType(_) then true,
                         .PointerType(_) then true,
@@ -1248,6 +1376,7 @@ given TypeChecker {
                     }
                     let ref_expr = when expr.expr_type in {
                         .ReferenceType(_) then expr,
+                        .BorrowedReferenceType(_, _) then expr,
                         _ then if not should_defer_generic_deref_receiver_ref
                             and self.can_take_implicit_ref_receiver(expr_ref)
                             and self.can_convert_to_trait_object(expr.expr_type, trait_name)
@@ -1257,6 +1386,8 @@ given TypeChecker {
                     let can_cast = when ref_expr.expr_type in {
                         .ReferenceType(inner) then self.can_convert_to_trait_object(inner.val, trait_name),
                         .MutableReferenceType(inner) then self.can_convert_to_trait_object(inner.val, trait_name),
+                        .BorrowedReferenceType(inner, _) then self.can_convert_to_trait_object(inner.val, trait_name),
+                        .MutableBorrowedReferenceType(inner, _) then self.can_convert_to_trait_object(inner.val, trait_name),
                         _ then self.can_convert_to_trait_object(ref_expr.expr_type, trait_name),
                     }
                     if can_cast then {
@@ -1314,6 +1445,16 @@ given TypeChecker {
                                     }
                                 },
                                 .MutableReferenceType(inner) then {
+                                    if self.type_matches_expected_pattern(expected_type, inner.val) then {
+                                        adapted = make_typed_expr(TypedExprKind.DerefExpr(expr_ref), expected_type)
+                                    }
+                                },
+                                .BorrowedReferenceType(inner, _) then {
+                                    if self.type_matches_expected_pattern(expected_type, inner.val) then {
+                                        adapted = make_typed_expr(TypedExprKind.DerefExpr(expr_ref), expected_type)
+                                    }
+                                },
+                                .MutableBorrowedReferenceType(inner, _) then {
                                     if self.type_matches_expected_pattern(expected_type, inner.val) then {
                                         adapted = make_typed_expr(TypedExprKind.DerefExpr(expr_ref), expected_type)
                                     }

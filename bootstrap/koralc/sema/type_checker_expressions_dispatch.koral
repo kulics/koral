@@ -4,6 +4,8 @@ given TypeChecker {
             .TraitObject(_, _) then true,
             .ReferenceType(inner) then self.dispatches_via_trait_object(inner.val),
             .MutableReferenceType(inner) then self.dispatches_via_trait_object(inner.val),
+            .BorrowedReferenceType(inner, _) then self.dispatches_via_trait_object(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then self.dispatches_via_trait_object(inner.val),
             _ then false,
         }
     }
@@ -13,6 +15,8 @@ given TypeChecker {
             .TraitObject(_, _) then Option[Type].Some(receiver_type),
             .ReferenceType(inner) then self.trait_object_dispatch_type(inner.val),
             .MutableReferenceType(inner) then self.trait_object_dispatch_type(inner.val),
+            .BorrowedReferenceType(inner, _) then self.trait_object_dispatch_type(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then self.trait_object_dispatch_type(inner.val),
             _ then Option[Type].None(),
         }
     }
@@ -1706,7 +1710,7 @@ given TypeChecker {
         }
         let should_produce_mutable = self.can_take_ref_of_expr(typed_inner_ref)
         let expected_mutable = when expected in {
-            .Some(et) then et is .MutableReferenceType(_),
+            .Some(et) then et is .MutableReferenceType(_) or et is .MutableBorrowedReferenceType(_, _),
             .None() then false,
         }
         let force_mutable_after_diagnostic = expected_mutable and not should_produce_mutable and self.is_implicit_ref_candidate_shape(typed_inner_ref)
@@ -1723,10 +1727,29 @@ given TypeChecker {
                 )
             }
         }
-        let ref_type = if should_produce_mutable or force_mutable_after_diagnostic then {
-            yield Type.MutableReferenceType(box(typed_inner.expr_type))
-        } else {
-            yield Type.ReferenceType(box(typed_inner.expr_type))
+        let is_mutable = should_produce_mutable or force_mutable_after_diagnostic
+        // Three-tier decision: borrowed expected → borrowed; managed expected → managed; no expected → default borrowed
+        let ref_type = when expected in {
+            .Some(et) then when et in {
+                .BorrowedReferenceType(_, lt) then if is_mutable
+                    then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), lt)
+                    else Type.BorrowedReferenceType(box(typed_inner.expr_type), lt),
+                .MutableBorrowedReferenceType(_, lt) then if is_mutable
+                    then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), lt)
+                    else Type.BorrowedReferenceType(box(typed_inner.expr_type), lt),
+                .ReferenceType(_) then if is_mutable
+                    then Type.MutableReferenceType(box(typed_inner.expr_type))
+                    else Type.ReferenceType(box(typed_inner.expr_type)),
+                .MutableReferenceType(_) then if is_mutable
+                    then Type.MutableReferenceType(box(typed_inner.expr_type))
+                    else Type.ReferenceType(box(typed_inner.expr_type)),
+                _ then if is_mutable
+                    then Type.MutableReferenceType(box(typed_inner.expr_type))
+                    else Type.ReferenceType(box(typed_inner.expr_type)),
+            },
+            .None() then if is_mutable
+                then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), "'_")
+                else Type.BorrowedReferenceType(box(typed_inner.expr_type), "'_"),
         }
         return make_typed_expr(TypedExprKind.RefExpr(typed_inner_ref), ref_type)
     }
@@ -1740,6 +1763,11 @@ given TypeChecker {
                     .Some(et) then when et in {
                         .ReferenceType(inner_t) then { inner_expected = Option[Type].Some(inner_t.val) },
                         .MutableReferenceType(inner_t) then {
+                            inner_expected = Option[Type].Some(inner_t.val)
+                            expected_mutable = true
+                        },
+                        .BorrowedReferenceType(inner_t, _) then { inner_expected = Option[Type].Some(inner_t.val) },
+                        .MutableBorrowedReferenceType(inner_t, _) then {
                             inner_expected = Option[Type].Some(inner_t.val)
                             expected_mutable = true
                         },

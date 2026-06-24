@@ -71,6 +71,8 @@ given TypeChecker {
         return when t in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
             _ then t,
         }
     }
@@ -170,6 +172,8 @@ given TypeChecker {
                     let pointer_expr = when base.expr_type in {
                         .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
                         .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
+                        .BorrowedReferenceType(_, _) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
+                        .MutableBorrowedReferenceType(_, _) then make_typed_expr(TypedExprKind.DerefExpr(box(base)), pointer_base_type),
                         _ then base,
                     }
                     let offset_expr = make_typed_expr(
@@ -394,6 +398,8 @@ given TypeChecker {
             .MutableReferenceType(inner) then inner.val,
             .MutablePointerType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             .PointerType(inner) then inner.val,
@@ -554,12 +560,31 @@ given TypeChecker {
                 when normalized_concrete in {
                     .ReferenceType(c_inner) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
                     .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .BorrowedReferenceType(c_inner, _) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
                     _ then {},
                 }
             },
             .MutableReferenceType(p_inner) then {
                 when normalized_concrete in {
                     .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    _ then {},
+                }
+            },
+            .BorrowedReferenceType(p_inner, _) then {
+                when normalized_concrete in {
+                    .ReferenceType(c_inner) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .BorrowedReferenceType(c_inner, _) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    _ then {},
+                }
+            },
+            .MutableBorrowedReferenceType(p_inner, _) then {
+                when normalized_concrete in {
+                    .MutableReferenceType(c_inner) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
+                    .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings(p_inner.val, c_inner.val, bindings),
                     _ then {},
                 }
             },
@@ -644,6 +669,8 @@ given TypeChecker {
             },
             .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
             .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
+            .BorrowedReferenceType(inner, lt) then Type.BorrowedReferenceType(box(self.apply_type_bindings(inner.val, bindings)), lt),
+            .MutableBorrowedReferenceType(inner, lt) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(inner.val, bindings)), lt),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
             .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(inner.val, bindings))),
@@ -678,6 +705,8 @@ given TypeChecker {
         return when base_type in {
             .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
             .ReferenceType(inner) then Type.ReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
+            .MutableBorrowedReferenceType(inner, lt) then Type.MutableBorrowedReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val))), lt),
+            .BorrowedReferenceType(inner, lt) then Type.BorrowedReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val))), lt),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
             .MutablePointerType(inner) then Type.MutablePointerType(box(self.canonicalize_alias_type(self.concretize_default_literal_type(inner.val)))),
@@ -751,6 +780,14 @@ given TypeChecker {
                 .None() then Option[String].None(),
             },
             .MutableReferenceType(_) then when self.storage.generic_templates.lookup_extension_methods("MutRef") in {
+                .Some(_) then Option[String].Some("MutRef"),
+                .None() then Option[String].None(),
+            },
+            .BorrowedReferenceType(_, _) then when self.storage.generic_templates.lookup_extension_methods("Ref") in {
+                .Some(_) then Option[String].Some("Ref"),
+                .None() then Option[String].None(),
+            },
+            .MutableBorrowedReferenceType(_, _) then when self.storage.generic_templates.lookup_extension_methods("MutRef") in {
                 .Some(_) then Option[String].Some("MutRef"),
                 .None() then Option[String].None(),
             },
@@ -893,6 +930,8 @@ given TypeChecker {
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             .MutablePointerType(inner) then inner.val,
@@ -903,14 +942,35 @@ given TypeChecker {
         return when receiver_param_type in {
             .MutableReferenceType(_) then when normalized_base_type in {
                 .MutableReferenceType(_) then normalized_base_type,
+                .MutableBorrowedReferenceType(_, _) then normalized_base_type,
                 .ReferenceType(actual_inner) then {
+                    yield if self.same_expr_type(actual_inner.val, inner_type) then normalized_base_type else Type.MutableReferenceType(box(inner_type))
+                },
+                .BorrowedReferenceType(actual_inner, _) then {
                     yield if self.same_expr_type(actual_inner.val, inner_type) then normalized_base_type else Type.MutableReferenceType(box(inner_type))
                 },
                 _ then Type.MutableReferenceType(box(inner_type)),
             },
+            .MutableBorrowedReferenceType(_, _) then when normalized_base_type in {
+                .MutableReferenceType(_) then normalized_base_type,
+                .MutableBorrowedReferenceType(_, _) then normalized_base_type,
+                .ReferenceType(actual_inner) then {
+                    yield if self.same_expr_type(actual_inner.val, inner_type) then normalized_base_type else Type.MutableBorrowedReferenceType(box(inner_type), "'_")
+                },
+                .BorrowedReferenceType(actual_inner, _) then {
+                    yield if self.same_expr_type(actual_inner.val, inner_type) then normalized_base_type else Type.MutableBorrowedReferenceType(box(inner_type), "'_")
+                },
+                _ then Type.MutableBorrowedReferenceType(box(inner_type), "'_"),
+            },
             .ReferenceType(_) then when normalized_base_type in {
                 .ReferenceType(_) then normalized_base_type,
+                .BorrowedReferenceType(_, _) then normalized_base_type,
                 _ then Type.ReferenceType(box(inner_type)),
+            },
+            .BorrowedReferenceType(_, lt) then when normalized_base_type in {
+                .ReferenceType(_) then normalized_base_type,
+                .BorrowedReferenceType(_, _) then normalized_base_type,
+                _ then Type.BorrowedReferenceType(box(inner_type), lt),
             },
             .WeakReferenceType(_) then when normalized_base_type in {
                 .WeakReferenceType(_) then normalized_base_type,
@@ -997,6 +1057,8 @@ given TypeChecker {
         let concrete_self = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1021,6 +1083,8 @@ given TypeChecker {
         return when t in {
             .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.replace_type_occurrence(inner.val, pattern, replacement))),
             .ReferenceType(inner) then Type.ReferenceType(box(self.replace_type_occurrence(inner.val, pattern, replacement))),
+            .MutableBorrowedReferenceType(inner, lt) then Type.MutableBorrowedReferenceType(box(self.replace_type_occurrence(inner.val, pattern, replacement)), lt),
+            .BorrowedReferenceType(inner, lt) then Type.BorrowedReferenceType(box(self.replace_type_occurrence(inner.val, pattern, replacement)), lt),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.replace_type_occurrence(inner.val, pattern, replacement))),
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.replace_type_occurrence(inner.val, pattern, replacement))),
             .MutablePointerType(inner) then Type.MutablePointerType(box(self.replace_type_occurrence(inner.val, pattern, replacement))),
@@ -1060,6 +1124,8 @@ given TypeChecker {
         let concrete_self_type = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1075,6 +1141,16 @@ given TypeChecker {
                     or self.type_matches_expected_pattern(concrete_self_type, inner.val),
             },
             .MutableReferenceType(inner) then when inner.val in {
+                .GenericParameter(_) then true,
+                _ then self.same_expr_type(inner.val, concrete_self_type)
+                    or self.type_matches_expected_pattern(concrete_self_type, inner.val),
+            },
+            .BorrowedReferenceType(inner, _) then when inner.val in {
+                .GenericParameter(_) then true,
+                _ then self.same_expr_type(inner.val, concrete_self_type)
+                    or self.type_matches_expected_pattern(concrete_self_type, inner.val),
+            },
+            .MutableBorrowedReferenceType(inner, _) then when inner.val in {
                 .GenericParameter(_) then true,
                 _ then self.same_expr_type(inner.val, concrete_self_type)
                     or self.type_matches_expected_pattern(concrete_self_type, inner.val),
@@ -1116,6 +1192,8 @@ given TypeChecker {
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1198,6 +1276,8 @@ given TypeChecker {
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1289,6 +1369,8 @@ given TypeChecker {
         let normalized_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1370,6 +1452,8 @@ given TypeChecker {
         let concrete_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1386,6 +1470,8 @@ given TypeChecker {
         let concrete_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1403,6 +1489,8 @@ given TypeChecker {
         let concrete_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1415,6 +1503,8 @@ given TypeChecker {
         let receiver_inner = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             _ then receiver_type,
         }
         when receiver_inner in {
@@ -1556,6 +1646,8 @@ given TypeChecker {
             },
             .ReferenceType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
             .MutableReferenceType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
+            .BorrowedReferenceType(inner, _) then self.collect_ancestor_bindings(inner.val, bindings),
+            .MutableBorrowedReferenceType(inner, _) then self.collect_ancestor_bindings(inner.val, bindings),
             .PointerType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
             .MutablePointerType(inner) then self.collect_ancestor_bindings(inner.val, bindings),
             .GenericStruct(_, args) then {
@@ -1576,6 +1668,8 @@ given TypeChecker {
         let concrete_receiver = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -1584,6 +1678,8 @@ given TypeChecker {
             .TraitObject(name, _) then if name == trait_name then concrete_receiver else t,
             .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
             .ReferenceType(inner) then Type.ReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
+            .MutableBorrowedReferenceType(inner, lt) then Type.MutableBorrowedReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver)), lt),
+            .BorrowedReferenceType(inner, lt) then Type.BorrowedReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver)), lt),
             .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
             .MutablePointerType(inner) then Type.MutablePointerType(box(self.bind_conformance_trait_self_type(inner.val, trait_name, concrete_receiver))),
@@ -1757,6 +1853,8 @@ given TypeChecker {
             },
             .MutableReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
             .ReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
+            .MutableBorrowedReferenceType(inner, _) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
+            .BorrowedReferenceType(inner, _) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
             .WeakReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
             .MutableWeakReferenceType(inner) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
             .MutablePointerType(inner) then self.collect_unbound_method_generic_param_names(inner.val, receiver_bindings, ordered, seen),
@@ -2062,6 +2160,8 @@ given TypeChecker {
         let concrete_self_type = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver_type,
@@ -2077,6 +2177,8 @@ given TypeChecker {
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then normalized_base_type,
@@ -2638,6 +2740,8 @@ given TypeChecker {
         let inner_type = when constructor_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then constructor_type,

@@ -17,6 +17,47 @@ given TypeChecker {
                                 return receiver
                             }
                         },
+                        .BorrowedReferenceType(actual_inner, _) then {
+                            if self.type_matches_expected_pattern(inner.val, actual_inner.val) then {
+                                self.push_diagnostic_at_span(
+                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                    self.typed_expr_span(box(receiver))
+                                )
+                                return receiver
+                            }
+                        },
+                        _ then {},
+                    }
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and not self.is_implicit_ref_candidate_shape(box(receiver))
+                    then {
+                        self.push_diagnostic_at_span(
+                            "Cannot call 'self ref mut' method '\(method_name)' on an rvalue; store the value in a 'let mut' variable first",
+                            self.typed_expr_span(box(receiver))
+                        )
+                        return make_typed_expr(TypedExprKind.RefExpr(box(receiver)), expected_self)
+                    }
+                },
+                .MutableBorrowedReferenceType(inner, _) then {
+                    when receiver.expr_type in {
+                        .ReferenceType(actual_inner) then {
+                            if self.type_matches_expected_pattern(inner.val, actual_inner.val) then {
+                                self.push_diagnostic_at_span(
+                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                    self.typed_expr_span(box(receiver))
+                                )
+                                return receiver
+                            }
+                        },
+                        .BorrowedReferenceType(actual_inner, _) then {
+                            if self.type_matches_expected_pattern(inner.val, actual_inner.val) then {
+                                self.push_diagnostic_at_span(
+                                    "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                                    self.typed_expr_span(box(receiver))
+                                )
+                                return receiver
+                            }
+                        },
                         _ then {},
                     }
                     if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
@@ -54,6 +95,10 @@ given TypeChecker {
         return when expected_self_type in {
             .Some(expected_self) then when expected_self in {
                 .ReferenceType(inner) then {
+                    yield self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and not self.receiver_is_addressable_without_temp(receiver)
+                },
+                .BorrowedReferenceType(inner, _) then {
                     yield self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and not self.receiver_is_addressable_without_temp(receiver)
                 },
@@ -104,6 +149,8 @@ given TypeChecker {
                     let pointer_expr = when typed_base.expr_type in {
                         .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
                         .MutableReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
+                        .BorrowedReferenceType(_, _) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
+                        .MutableBorrowedReferenceType(_, _) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
                         _ then typed_base,
                     }
                     let index_expr = if typed_args.is_empty()
@@ -254,6 +301,8 @@ given TypeChecker {
         let normalized_receiver_type = when receiver.expr_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then receiver.expr_type,
@@ -501,6 +550,8 @@ given TypeChecker {
         let iterable_type = when typed_iter.expr_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then typed_iter.expr_type,

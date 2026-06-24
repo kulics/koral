@@ -602,6 +602,12 @@ public let resolve_type_node(mono ref Monomorphizer, node TypeNode, substitution
             yield if mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
         },
 
+        // TypeNode.BorrowedReference: recursively resolve inner type and wrap with lifetime.
+        .BorrowedReference(inner, lifetime, mutable) then {
+            let resolved_inner = resolve_type_node(mono, inner.val, substitution)
+            yield if mutable then Type.MutableBorrowedReferenceType(box(resolved_inner), lifetime) else Type.BorrowedReferenceType(box(resolved_inner), lifetime)
+        },
+
         // TypeNode.Pointer: recursively resolve inner type and wrap.
         .Pointer(inner, mutable) then {
             let resolved_inner = resolve_type_node(mono, inner.val, substitution)
@@ -4008,6 +4014,13 @@ private let collect_generic_bindings_from_type_node(
                 _ then {},
             }
         },
+        .BorrowedReference(inner, _, _) then {
+            when actual in {
+                .BorrowedReferenceType(act_inner, _) then collect_generic_bindings_from_type_node(mono, inner.val, act_inner.val, type_params, bindings),
+                .MutableBorrowedReferenceType(act_inner, _) then collect_generic_bindings_from_type_node(mono, inner.val, act_inner.val, type_params, bindings),
+                _ then {},
+            }
+        },
         .Generic(base, args) then {
             when actual in {
                 .GenericStruct(act_base, act_args) then {
@@ -4100,6 +4113,7 @@ private let type_node_mentions_type_parameter(node TypeNode, type_param_name Str
         .Reference(inner, _) then type_node_mentions_type_parameter(inner.val, type_param_name),
         .Pointer(inner, _) then type_node_mentions_type_parameter(inner.val, type_param_name),
         .WeakReference(inner, _) then type_node_mentions_type_parameter(inner.val, type_param_name),
+        .BorrowedReference(inner, _, _) then type_node_mentions_type_parameter(inner.val, type_param_name),
         .Generic(_, args) then {
             for arg in args then {
                 if type_node_mentions_type_parameter(arg.val, type_param_name) then { return true }

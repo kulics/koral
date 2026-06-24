@@ -153,6 +153,8 @@ public let pass_kind_from_type(t Type) FunctionParamPassKind = {
     return when t in {
         .ReferenceType(_) then FunctionParamPassKind.ByReference(),
         .MutableReferenceType(_) then FunctionParamPassKind.ByMutableReference(),
+        .BorrowedReferenceType(_, _) then FunctionParamPassKind.ByReference(),
+        .MutableBorrowedReferenceType(_, _) then FunctionParamPassKind.ByMutableReference(),
         _ then FunctionParamPassKind.ByValue(),
     }
 }
@@ -686,6 +688,8 @@ public type Type {
     EnumType(def_id DefId),
     ReferenceType(inner ref Type),
     MutableReferenceType(inner ref Type),
+    BorrowedReferenceType(inner ref Type, lifetime String),
+    MutableBorrowedReferenceType(inner ref Type, lifetime String),
     PointerType(inner ref Type),
     MutablePointerType(inner ref Type),
     WeakReferenceType(inner ref Type),
@@ -788,6 +792,8 @@ public let stable_type_key(t Type) String = {
         },
         .ReferenceType(inner) then "R(\(stable_type_key(inner.val)))",
         .MutableReferenceType(inner) then "MR(\(stable_type_key(inner.val)))",
+        .BorrowedReferenceType(inner, lt) then "BR(\(lt))(\(stable_type_key(inner.val)))",
+        .MutableBorrowedReferenceType(inner, lt) then "BMR(\(lt))(\(stable_type_key(inner.val)))",
         .PointerType(inner) then "P(\(stable_type_key(inner.val)))",
         .MutablePointerType(inner) then "MP(\(stable_type_key(inner.val)))",
         .WeakReferenceType(inner) then "W(\(stable_type_key(inner.val)))",
@@ -854,6 +860,20 @@ public let type_to_string(t Type) String = {
         },
         .MutableReferenceType(inner) then {
             let mut out = "ref mut "
+            out.push_string(type_to_string(inner.val))
+            yield out
+        },
+        .BorrowedReferenceType(inner, lt) then {
+            let mut out = "ref "
+            out.push_string(lt)
+            out.push_string(" ")
+            out.push_string(type_to_string(inner.val))
+            yield out
+        },
+        .MutableBorrowedReferenceType(inner, lt) then {
+            let mut out = "ref "
+            out.push_string(lt)
+            out.push_string(" mut ")
             out.push_string(type_to_string(inner.val))
             yield out
         },
@@ -951,6 +971,8 @@ public let stable_type_hash(t Type) UInt = {
         .EnumType(def_id) then 18(UInt).combine_hash(def_id.id),
         .ReferenceType(inner) then 19(UInt).combine_hash(stable_type_hash(inner.val)),
         .MutableReferenceType(inner) then 20(UInt).combine_hash(stable_type_hash(inner.val)),
+        .BorrowedReferenceType(inner, _) then 32(UInt).combine_hash(stable_type_hash(inner.val)),
+        .MutableBorrowedReferenceType(inner, _) then 33(UInt).combine_hash(stable_type_hash(inner.val)),
         .PointerType(inner) then 21(UInt).combine_hash(stable_type_hash(inner.val)),
         .MutablePointerType(inner) then 22(UInt).combine_hash(stable_type_hash(inner.val)),
         .WeakReferenceType(inner) then 23(UInt).combine_hash(stable_type_hash(inner.val)),
@@ -1062,6 +1084,14 @@ given Type as Eq {
         },
         .MutableReferenceType(inner) then when other in {
             .MutableReferenceType(other_inner) then inner.val == other_inner.val,
+            _ then false,
+        },
+        .BorrowedReferenceType(inner, lt) then when other in {
+            .BorrowedReferenceType(other_inner, other_lt) then inner.val == other_inner.val and lt == other_lt,
+            _ then false,
+        },
+        .MutableBorrowedReferenceType(inner, lt) then when other in {
+            .MutableBorrowedReferenceType(other_inner, other_lt) then inner.val == other_inner.val and lt == other_lt,
             _ then false,
         },
         .PointerType(inner) then when other in {

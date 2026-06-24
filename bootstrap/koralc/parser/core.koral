@@ -544,6 +544,11 @@ given Parser {
         when self.current().kind in {
             .KwRef() then {
                 self.advance()
+                let mut lifetime = Option[String].None()
+                if self.current().kind is .LifetimeIdentifier(name) then {
+                    self.advance()
+                    lifetime = Option[String].Some(name)
+                }
                 let mut mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
@@ -552,7 +557,10 @@ given Parser {
                 let inner = self.parse_type() or else {
                     return .Error(box("parse type error"))
                 }
-                return .Ok(TypeNode.Reference(box(inner), mutable))
+                when lifetime in {
+                    .Some(lt) then { return .Ok(TypeNode.BorrowedReference(box(inner), lt, mutable)) },
+                    .None() then { return .Ok(TypeNode.Reference(box(inner), mutable)) },
+                }
             },
             .KwPtr() then {
                 self.advance()
@@ -707,7 +715,14 @@ given Parser {
                         self.advance()
                         mutable = true
                     }
-                    self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), mutable)
+                    // self ref / self ref mut → borrowed receiver sugar (self ref '_ Self)
+                    // self ref Self / self ref mut Self → explicit managed receiver
+                    if self.current().kind is .KwSelfType() then {
+                        self.advance()
+                        self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), mutable)
+                    } else {
+                        self_type = TypeNode.BorrowedReference(box(TypeNode.InferredSelf()), "'_", mutable)
+                    }
                 } else if self.current().kind is .KwWeakref() then {
                     return .Error(box("'self' parameter cannot use 'weakref'; only 'ref' is allowed"))
                 } else if self.current().kind is .KwPtr() then {
