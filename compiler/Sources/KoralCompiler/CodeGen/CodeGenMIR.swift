@@ -1224,12 +1224,17 @@ final class MIRFunctionCodeEmitter {
         fatalError("Missing MIR lambda capture source for \(capture.symbol.defId.id)")
       }
       let dest = "\(envVar)->\(fieldName)"
-      // Both byValue and byReference use copy assignment.
-      // For ref-containing types (like AtomicBool), _copy retains internal refs.
-      // For plain structs, _copy is a simple struct copy.
-      // The original variable remains valid and will be dropped by its own scope.
       codeGen.addIndent()
-      codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
+      if capture.captureKind == .byMutReference {
+        // Store a pointer to the original variable for mutable captures
+        codeGen.appendToBuffer("\(dest) = &(\(source));\n")
+      } else {
+        // Both byValue and byReference use copy assignment.
+        // For ref-containing types (like AtomicBool), _copy retains internal refs.
+        // For plain structs, _copy is a simple struct copy.
+        // The original variable remains valid and will be dropped by its own scope.
+        codeGen.appendCopyAssignment(for: capture.symbol.type, source: source, dest: dest, indent: "")
+      }
     }
 
     return codeGen.nextTempWithInit(
@@ -1307,7 +1312,12 @@ final class MIRFunctionCodeEmitter {
 
     var localNameOverridesByDefId: [UInt64: String] = [:]
     for capture in captures {
-      localNameOverridesByDefId[capture.symbol.defId.id] = "__captured->\(captureFieldName(for: capture.symbol))"
+      if capture.captureKind == .byMutReference {
+        // Mutable captures are pointers — dereference to access the original variable
+        localNameOverridesByDefId[capture.symbol.defId.id] = "(*__captured->\(captureFieldName(for: capture.symbol)))"
+      } else {
+        localNameOverridesByDefId[capture.symbol.defId.id] = "__captured->\(captureFieldName(for: capture.symbol))"
+      }
     }
     let nested = renderMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
 
@@ -1348,15 +1358,23 @@ final class MIRFunctionCodeEmitter {
     var structBuffer = "\nstruct \(name) {\n"
     structBuffer += "  _Atomic intptr_t __refcount;\n"
     for capture in captures {
-      structBuffer += "  \(codeGen.cTypeName(capture.symbol.type)) \(captureFieldName(for: capture.symbol));\n"
+      if capture.captureKind == .byMutReference {
+        // Mutable captures are stored as pointers to the original variable
+        structBuffer += "  \(codeGen.cTypeName(capture.symbol.type))* \(captureFieldName(for: capture.symbol));\n"
+      } else {
+        structBuffer += "  \(codeGen.cTypeName(capture.symbol.type)) \(captureFieldName(for: capture.symbol));\n"
+      }
     }
     structBuffer += "};\n"
 
     structBuffer += "\nstatic void __koral_\(name)_drop(void* raw_env) {\n"
     structBuffer += "  struct \(name)* env = (struct \(name)*)raw_env;\n"
     for capture in captures {
-      let fieldExpr = "env->\(captureFieldName(for: capture.symbol))"
-      appendIndented(dropCodeForCapturedField(capture.symbol.type, fieldExpr: fieldExpr), to: &structBuffer, indent: "  ")
+      if capture.captureKind != .byMutReference {
+        // Pointer captures don't own the value — don't drop
+        let fieldExpr = "env->\(captureFieldName(for: capture.symbol))"
+        appendIndented(dropCodeForCapturedField(capture.symbol.type, fieldExpr: fieldExpr), to: &structBuffer, indent: "  ")
+      }
     }
     structBuffer += "  free(raw_env);\n"
     structBuffer += "}\n"

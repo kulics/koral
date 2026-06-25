@@ -564,6 +564,12 @@ extension Parser {
           isLifetime = false
           try match(.identifier(name))
         case .lifetimeIdentifier(let name):
+          if name != "'_" {
+            throw ParserError.unexpectedToken(
+              span: currentSpan,
+              got: "Named lifetime parameters (e.g. 'a) are not supported in generic parameter lists. Use '_ (anonymous lifetime) in ref types instead."
+            )
+          }
           paramName = name
           isLifetime = true
           try match(.lifetimeIdentifier(name))

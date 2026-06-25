@@ -2,11 +2,95 @@
 
 ## 状态
 
-- 状态：当前阶段已完成
-- 范围：语言语法、sema、MIR/lowering、std、bootstrap、测试、samples、toolchain、文档
-- 目标：用显式的“托管 ref / 借用 ref”语义，替换当前依赖逃逸分析决定 `ref` 行为的隐式双态模型
+- 状态：第二轮整改进行中
+- 范围：sema 调用规则、receiver 语义、闭包捕获、泛型约束
+- 目标：收紧隐式转换，提升可读性和可预测性
 
-## 本轮实施结论
+## 第二轮整改：收紧隐式转换与 receiver 语义
+
+### 背景
+
+第一轮整改完成了 borrowed / managed ref 的前端语义分离。但仍然存在以下问题：
+
+- 函数参数处允许隐式 T → ref T 提升，调用点无法直观看出是否产生了 ref
+- `self ref Self` 与 `self ref` 的语义区分不够清晰
+- 泛型参数列表支持 `'a` 生命周期语法，但实际没有泛型化能力
+- 闭包无法捕获 `let mut` 变量
+- 方法调用存在 auto-ref（T → T ref），增加理解成本
+
+### 本轮规则变更
+
+#### 规则 1：删除函数参数与 receiver 的隐式 ref 提升
+
+函数调用时，不再允许将 `T` 隐式提升为 `ref T` / `ref mut T`。
+
+- 期望 `ref T` 的参数，必须显式传入 `ref T` 类型的值
+- 使用 `.ref` 语法进行显式提升：`f(a.ref)` 而不是 `f(a)`
+- `.ref` 本身保留无上下文时默认 borrowed 的行为
+- 闭包调用参数保留隐式提升（见规则 5）
+
+#### 规则 2：`self ref Self` / `self ref mut Self` 语义明确为托管 receiver
+
+- `self ref` / `self ref mut`：borrowed receiver sugar（`'_`），保留 auto-ref
+- `self ref Self` / `self ref mut Self`：显式托管 receiver，禁止 auto-ref 和 auto-deref
+- `self Self`：值 receiver，禁止 auto-ref
+- `self`（bare）：暂时保留，等价于 `self Self`
+
+调用规则：
+- auto-deref 仅对 method receiver (self) 生效（`T ref` 可调用 `T` 的方法，跟随 Go 的设计）
+- auto-deref 不对普通函数参数生效（`T ref` 不能传给期望 `T` 的参数，必须用 `a.val` 显式解引用）
+- auto-ref 删除（`T` 不可隐式提升调用 `T ref` 的方法，必须用 `a.ref.f()`）
+
+#### 规则 3：泛型参数列表禁止生命周期参数
+
+- `f['a]` 语法报错，泛型参数列表中不允许 `'a`
+- `ref 'a T` 类型语法保留，但 `'a` 只能用 `'_`（匿名生命周期）
+- 命名生命周期 `'a` 暂不支持，下一步再考虑泛型化能力
+
+#### 规则 4：闭包允许捕获 `let mut` 变量
+
+- 闭包捕获 `let mut a` 时，隐式提升为 by-reference 捕获
+- 闭包内的修改对外部可见
+- 非 `let mut` 变量仍按当前规则捕获（by-value 或 by-reference 取决于类型）
+
+#### 规则 5：链式 ref 的 owner 正确性
+
+- `a.b.c.ref` 中，如果 `a` 或 `b` 是 ref T，ref 的 owner 应该是原始 ref 源
+- MIR 层 place lowering 已正确通过 deref 链追踪到原始 ref
+- 需要验证 MIR promotion 不会错误地将 ref 的 owner 设为中间节点
+
+#### 规则 6：auto-deref 保留，auto-ref 删除
+
+- Go 的 `*T` 支持 auto-deref（调用 `T` 的方法）和 auto-ref（`T` 调用 `*T` 的方法）
+- Koral 跟随 Go 的 auto-deref，不跟随 auto-ref
+- 具体：
+  - `T ref` 调用 `self Self` 方法：允许（auto-deref）
+  - `T` 调用 `self ref Self` 方法：不允许（需要显式 `a.ref`）
+  - `T ref` 调用 `self ref Self` 方法：不允许（类型不匹配，需要 `a.val.ref` 或直接 `a` 如果类型恰好匹配）
+
+### 改造工作量
+
+| 改动点 | 文件 | 工作量 |
+|--------|------|--------|
+| 删除参数隐式 ref 提升 | `TypeCheckerExpressions.swift` `inferArgumentExpression` | 低 |
+| 删除 receiver auto-ref | `TypeCheckerExpressions.swift` `inferMethodCall` | 低 |
+| `self ref Self` 语义改 managed | `ParserDeclarations.swift` `parseSelfReceiverType` | 低 |
+| 泛型禁止 `'a` | `ParserDeclarations.swift` `parseTypeParameters` | 低 |
+| 闭包捕获 `let mut` | `TypeCheckerLambda.swift` + MIR closure lowering | 中 |
+| 链式 ref 验证 | MIR lowering + promoter | 低（验证为主） |
+
+### 优先级
+
+1. 删除参数隐式 ref 提升（影响面最广）
+2. 删除 receiver auto-ref
+3. `self ref Self` 语义修正
+4. 泛型禁止 `'a`
+5. 闭包捕获 `let mut`
+6. 链式 ref 验证
+
+---
+
+## 上轮实施结论（第一轮整改）
 
 本轮整改已经按既定范围落地完成，当前 compiler、bootstrap、std、tests、samples、toolchain 已对齐到新的 borrowed `ref` 固定语义：
 

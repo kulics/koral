@@ -73,6 +73,8 @@ public enum CaptureKind {
   case byValue
   /// Reference capture: capture reference type, increment reference count
   case byReference
+  /// Mutable capture: capture let mut variable by pointer so mutations are visible outside
+  case byMutReference
 }
 
 /// Captured variable information for lambda closures

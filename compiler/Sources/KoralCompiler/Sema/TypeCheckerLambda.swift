@@ -209,18 +209,17 @@ extension TypeChecker {
         // and must not be materialized as closure environment fields.
         guard case .variable(_) = kind else { return }
 
-        // Check if it's mutable - only immutable variables can be captured
-        if info.mutable {
-          throw SemanticError(.generic("Cannot capture mutable variable '\(name)'"), span: currentSpan)
-        }
         if info.type.containsBorrowedReference {
           throw SemanticError(.generic("Cannot capture borrowed reference '\(name)'"), span: currentSpan)
         }
-        
+
         // Avoid duplicates
         if !captures.contains(where: { $0.symbol.defId == defId }) {
           let captureKind: CaptureKind
-          if case .reference(_) = info.type {
+          if info.mutable {
+            // let mut variables are captured by pointer so mutations are visible outside
+            captureKind = .byMutReference
+          } else if case .reference(_) = info.type {
             captureKind = .byReference
           } else {
             captureKind = .byValue

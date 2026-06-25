@@ -576,9 +576,62 @@ extension TypeChecker {
     case (.mutableBorrowedReference(let fromInner, _), .borrowedReference(let toInner, _))
       where implicitReferenceInnerMatches(fromInner, actualType: toInner):
       return .castExpression(expression: expr, type: expectedType)
+    case (.borrowedReference(let fromInner, _), .reference(let toInner))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    case (.mutableBorrowedReference(let fromInner, _), .reference(let toInner))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
+    case (.mutableBorrowedReference(let fromInner, _), .mutableReference(let toInner))
+      where implicitReferenceInnerMatches(fromInner, actualType: toInner):
+      return .castExpression(expression: expr, type: expectedType)
     default:
       return nil
     }
+  }
+
+  /// Applies the standard coercion chain to a typed argument that doesn't match the expected type.
+  /// Supports: reference flavor conversion, auto-ref for borrowed references, and mutable reference widening.
+  /// Note: auto-deref (ref T → T) is NOT allowed for regular function arguments.
+  /// Auto-deref only applies to method receivers (self).
+  func coerceArgumentType(_ typedArg: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode {
+    if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType) {
+      return flavorConversion
+    }
+    if borrowedReferenceTypeComponents(expectedType) != nil,
+       let implicitRef = try makeImplicitReference(typedArg, expectedType: expectedType) {
+      return implicitRef
+    }
+    if canWidenMutableReference(typedArg, expectedType: expectedType) {
+      return typedArg
+    }
+    throw SemanticError.typeMismatch(
+      expected: expectedType.description,
+      got: typedArg.type.description
+    )
+  }
+
+  /// Applies coercion chain for method receivers.
+  /// Auto-ref is only allowed for borrowed reference receivers (self ref / self ref mut).
+  /// Auto-deref (ref T → T) is allowed for self receivers (following Go's pointer receiver behavior).
+  func coerceReceiverType(_ base: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode {
+    if let flavorConversion = makeReferenceFlavorConversion(base, expectedType: expectedType) {
+      return flavorConversion
+    }
+    if borrowedReferenceTypeComponents(expectedType) != nil,
+       let implicitRef = try makeImplicitReference(base, expectedType: expectedType) {
+      return implicitRef
+    }
+    if let implicitDeref = makeImplicitDereference(base, expectedType: expectedType) {
+      return implicitDeref
+    }
+    if canWidenMutableReference(base, expectedType: expectedType) {
+      return base
+    }
+    throw SemanticError.typeMismatch(
+      expected: expectedType.description,
+      got: base.type.description
+    )
   }
 
   func inferArgumentExpression(
@@ -609,20 +662,7 @@ extension TypeChecker {
       return typedArg
     }
     if typedArg.type != expectedType {
-      if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType) {
-        typedArg = flavorConversion
-      } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: expectedType) {
-        typedArg = implicitRef
-      } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: expectedType) {
-        typedArg = implicitDeref
-      } else if canWidenMutableReference(typedArg, expectedType: expectedType) {
-        return typedArg
-      } else {
-        throw SemanticError.typeMismatch(
-          expected: expectedType.description,
-          got: typedArg.type.description
-        )
-      }
+      typedArg = try coerceArgumentType(typedArg, expectedType: expectedType)
     }
 
     return typedArg
@@ -3778,20 +3818,7 @@ extension TypeChecker {
         materializedReceiver = nil
       }
       if let firstParam = params.first, adjustedBase.type != firstParam.type {
-        if let flavorConversion = makeReferenceFlavorConversion(adjustedBase, expectedType: firstParam.type) {
-          adjustedBase = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(adjustedBase, expectedType: firstParam.type) {
-          adjustedBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(adjustedBase, expectedType: firstParam.type) {
-          adjustedBase = implicitDeref
-        } else if canWidenMutableReference(adjustedBase, expectedType: firstParam.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: firstParam.type.description,
-            got: adjustedBase.type.description
-          )
-        }
+        adjustedBase = try coerceReceiverType(adjustedBase, expectedType: firstParam.type)
       }
 
       var typedArguments: [TypedExpressionNode] = []
@@ -3883,20 +3910,7 @@ extension TypeChecker {
         }
         typedArg = try coerceLiteral(typedArg, to: param.type)
         if typedArg.type != param.type {
-          if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
-            typedArg = flavorConversion
-          } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-            typedArg = implicitRef
-          } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-            typedArg = implicitDeref
-          } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-            // ref mut → ref widening: pass through unchanged
-          } else {
-            throw SemanticError.typeMismatch(
-              expected: param.type.description,
-              got: typedArg.type.description
-            )
-          }
+          typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
         }
         typedArguments.append(typedArg)
       }
@@ -4558,24 +4572,8 @@ extension TypeChecker {
           if coercedBase.type == firstParam.type {
             finalBase = coercedBase
           }
-          else
-          if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
-            finalBase = flavorConversion
-          } else
-          // 尝试自动取引用：期望 T ref，实际是 T
-          if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
-            finalBase = implicitRef
-          } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
-            // 尝试自动解引用：期望 T，实际是 T ref
-            // Only safe for Copy types (otherwise this would implicitly move).
-            finalBase = implicitDeref
-          } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-            // ref mut → ref widening: pass through unchanged
-          } else {
-            throw SemanticError.typeMismatch(
-              expected: firstParam.type.description,
-              got: finalBase.type.description
-            )
+          else {
+            finalBase = try coerceReceiverType(finalBase, expectedType: firstParam.type)
           }
         }
       } else {
@@ -4859,25 +4857,12 @@ extension TypeChecker {
       finalBase = prepared.base
       materializedReceiver = prepared.binding
       if finalBase.type != firstParam.type {
-        if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
-          finalBase = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
-          finalBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
-          finalBase = implicitDeref
-        } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: firstParam.type.description,
-            got: finalBase.type.description
-          )
-        }
+        finalBase = try coerceReceiverType(finalBase, expectedType: firstParam.type)
       }
     } else {
       materializedReceiver = nil
     }
-    
+
     // Type check arguments
     var typedArguments: [TypedExpressionNode] = []
     for (arg, param) in zip(arguments, params.dropFirst()) {
@@ -4901,20 +4886,7 @@ extension TypeChecker {
       }
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
-          typedArg = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
-        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
+        typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
     }
@@ -6151,20 +6123,7 @@ extension TypeChecker {
 
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
-          typedArg = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
-        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
+        typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
     }
@@ -6796,20 +6755,7 @@ extension TypeChecker {
       var typedArg = arg
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
-          typedArg = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
-        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
+        typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
     }
@@ -6844,20 +6790,7 @@ extension TypeChecker {
       finalBase = prepared.base
       materializedReceiver = prepared.binding
       if finalBase.type != firstParam.type {
-        if let flavorConversion = makeReferenceFlavorConversion(finalBase, expectedType: firstParam.type) {
-          finalBase = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(finalBase, expectedType: firstParam.type) {
-          finalBase = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
-          finalBase = implicitDeref
-        } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: firstParam.type.description,
-            got: finalBase.type.description
-          )
-        }
+        finalBase = try coerceReceiverType(finalBase, expectedType: firstParam.type)
       }
     } else {
       materializedReceiver = nil
@@ -6868,20 +6801,7 @@ extension TypeChecker {
       var typedArg = arg
       typedArg = try coerceLiteral(typedArg, to: param.type)
       if typedArg.type != param.type {
-        if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
-          typedArg = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
-        } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // ref mut → ref widening: pass through unchanged
-        } else {
-          throw SemanticError.typeMismatch(
-            expected: param.type.description,
-            got: typedArg.type.description
-          )
-        }
+        typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
     }
