@@ -181,6 +181,12 @@ Koral uses `ref` and `ref mut` as managed reference types. `ref T` is a read-onl
 - `.ref` on rvalues is rejected.
 - To create a managed reference from a temporary/literal, use `box(expr)`, which returns `ref mut T`.
 
+Implicit conversion rules:
+
+- **No implicit ref promotion for function arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly.
+- **No auto-deref for regular function arguments.** If a function expects `T`, passing `ref T` requires `.val` explicitly.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref).
+
 Receiver adjustment for methods and subscripts has one extra rule:
 
 - A call whose receiver is declared as `self ref` may use an rvalue receiver expression. The compiler materializes a stable temporary for the duration of that call.
@@ -198,6 +204,20 @@ let ry ref Int = y.ref       // let → ref T
 let owned ref mut Int = box(42) // box() returns ref mut T
 
 // let rz = 42.ref           // error: rvalue cannot be borrowed
+
+// No implicit ref promotion for function arguments:
+let takes_ref(r ref Int) Int = r.val
+let v = 42
+// takes_ref(v)              // error: expected ref Int, got Int
+takes_ref(v.ref)             // OK: explicit .ref
+
+// Auto-deref only for method receivers:
+type Counter(mut value Int)
+given Counter {
+    public get(self ref) Int = self.value
+}
+let c = Counter(10)
+c.get()                      // OK: auto-ref for self ref receiver
 ```
 
 ### Assignment
@@ -518,7 +538,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` and `ref mut` are Koral's managed reference types. `ref T` is read-only, `ref mut T` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `ref mut T`). When a local value is promoted into an escaping managed reference, destruction transfers to that reference owner instead of running a second value drop on the source local. Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self ref mut` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` and `ref mut` are Koral's managed reference types. `ref T` is read-only, `ref mut T` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `ref mut T`). When a local value is promoted into an escaping managed reference, destruction transfers to that reference owner instead of running a second value drop on the source local. Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self ref mut` still requires a writable lvalue. Implicit ref promotion (`T` → `ref T`) is not allowed for function arguments — callers must use `.ref` explicitly. Auto-deref (`ref T` → `T`) is not allowed for regular function arguments — callers must use `.val` explicitly. These implicit conversions only apply to method receivers (`self`). Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -1236,14 +1256,16 @@ let result = add10(32)  // result == 42
 
 #### Capture Rules
 
-Koral only allows capturing **immutable** variables. Attempting to capture a mutable variable will result in a compile error.
+Closures can capture both immutable and mutable (`let mut`) variables. Mutable variables are captured by reference, so mutations inside the closure are visible outside.
 
 ```koral
 let x = 10
 let f = () -> x + 1  // OK: x is immutable
 
-let mut y = 20
-let g = () -> y + 1  // Error: cannot capture mutable variable 'y'
+let mut counter = 0
+let increment = () -> { counter = counter + 1 }  // OK: let mut captured by reference
+increment()
+// counter is now 1
 ```
 
 #### Currying

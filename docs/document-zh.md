@@ -192,13 +192,19 @@ Koral 将 `ref` / `ref mut` 与 `ref 'a` / `ref 'a mut` 都作为受语言管理
 - 借用引用与托管引用的运行时布局相同，retain / release 行为也相同；区别只在前端静态语义。
 - `ref mut T` 可隐式转换为 `ref T`，`ref 'a mut T` 可隐式转换为 `ref 'a T`。反向转换不允许。
 
-`.ref` 采用“借用优先”的固定语义：
+`.ref` 采用”借用优先”的固定语义：
 
 - 只允许从值路径构造，例如 `x.ref`、`self.field.ref`、`node.left.right.ref`。
 - 不允许对右值直接写 `.ref`，例如 `make_value().ref` 会报错。
 - 没有显式托管期望类型时，`.ref` 默认构造借用引用。
 - 如果当前局部上下文已经明确要求托管 `ref` / `ref mut`，编译器会在当前函数内把这次 `.ref` 局部提升成托管引用。
 - `box(expr)` 是显式托管构造，返回 `ref mut T`。
+
+隐式转换规则：
+
+- **函数参数不允许隐式 ref 提升。** 如果函数期望 `ref T`，调用方必须用 `a.ref` 显式传入。
+- **普通参数不允许 auto-deref。** 如果函数期望 `T`，传入 `ref T` 需要显式用 `.val` 解引用。
+- **auto-ref 和 auto-deref 仅对 method receiver (self) 生效。** `self ref` 方法可接受值（auto-ref）；`self` 方法可接受 `ref T`（auto-deref）。
 
 receiver 语义也同步固定：
 
@@ -218,6 +224,20 @@ let ry ref '_ Int = y.ref    // 默认得到借用引用
 let owned ref mut Int = box(42) // box() 返回 ref mut T
 
 // let rz = 42.ref           // 错误：右值不能借用
+
+// 函数参数不允许隐式 ref 提升：
+let takes_ref(r ref Int) Int = r.val
+let v = 42
+// takes_ref(v)              // 错误：期望 ref Int，得到 Int
+takes_ref(v.ref)             // OK：显式 .ref
+
+// auto-deref 仅对 receiver 生效：
+type Counter(mut value Int)
+given Counter {
+    public get(self ref) Int = self.value
+}
+let c = Counter(10)
+c.get()                      // OK：self ref 接受值（auto-ref）
 ```
 
 ### 赋值
@@ -555,7 +575,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`ref` / `ref mut` 是可逃逸的托管引用，`ref 'a` / `ref 'a mut` 是不可逃逸的借用引用。两者运行时布局相同，retain / release 行为也相同，差异只体现在前端静态语义。`.ref` 默认构造借用引用；只有当前局部上下文已经明确要求托管引用时，才会发生局部提升。`box(expr)` 是显式托管构造。方法/下标接收者调整中，`self ref` / `self ref mut` 默认都是借用 receiver sugar；若要显式托管 receiver，必须写 `self ref Self` / `self ref mut Self`。
+- **引用（Reference）**：`ref` / `ref mut` 是可逃逸的托管引用，`ref 'a` / `ref 'a mut` 是不可逃逸的借用引用。两者运行时布局相同，retain / release 行为也相同，差异只体现在前端静态语义。`.ref` 默认构造借用引用；只有当前局部上下文已经明确要求托管引用时，才会发生局部提升。`box(expr)` 是显式托管构造。函数参数不允许隐式 ref 提升——调用方必须用 `.ref` 显式传入。普通参数不允许 auto-deref——传入 `ref T` 给期望 `T` 的参数需要显式用 `.val`。隐式转换仅对 method receiver (self) 生效。方法/下标接收者调整中，`self ref` / `self ref mut` 默认都是借用 receiver sugar；若要显式托管 receiver，必须写 `self ref Self` / `self ref mut Self`。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -1287,14 +1307,16 @@ let result = add10(32)  // result == 42
 
 #### 捕获规则
 
-Koral 只允许捕获**不可变**变量。尝试捕获可变变量会导致编译错误。
+闭包可以捕获不可变变量和可变变量（`let mut`）。可变变量被捕获时采用引用捕获，因此闭包内的修改对外部可见。
 
 ```koral
 let x = 10
 let f = () -> x + 1  // OK: x 是不可变的
 
-let mut y = 20
-let g = () -> y + 1  // 错误: 不能捕获可变变量 'y'
+let mut counter = 0
+let increment = () -> { counter = counter + 1 }  // OK: let mut 通过引用捕获
+increment()
+// counter 现在是 1
 ```
 
 #### 柯里化

@@ -39,7 +39,7 @@
 调用规则：
 - auto-deref 仅对 method receiver (self) 生效（`T ref` 可调用 `T` 的方法，跟随 Go 的设计）
 - auto-deref 不对普通函数参数生效（`T ref` 不能传给期望 `T` 的参数，必须用 `a.val` 显式解引用）
-- auto-ref 删除（`T` 不可隐式提升调用 `T ref` 的方法，必须用 `a.ref.f()`）
+- auto-ref 仅对 borrowed receiver (`self ref`) 生效（`T` 可隐式提升调用 `self ref` 方法）；managed receiver (`self ref Self`) 不允许 auto-ref
 
 #### 规则 3：泛型参数列表禁止生命周期参数
 
