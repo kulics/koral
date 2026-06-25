@@ -320,7 +320,8 @@ extension TypeChecker {
         try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
       } else if !mutable {
         switch type {
-        case .reference(let innerType), .mutableReference(let innerType):
+        case .reference(let innerType), .mutableReference(let innerType),
+             .borrowedReference(let innerType, _), .mutableBorrowedReference(let innerType, _):
           try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
         default:
           try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
