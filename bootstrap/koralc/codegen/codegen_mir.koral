@@ -250,6 +250,7 @@ type MIRFunctionCodeEmitter(
     mut lifetime_plan ref MIRLocalLifetimePlan,
     mut lambda_counter UInt,
     mut nested_definitions String,
+    mut consumed_locals Dict[UInt, Bool],
 )
 
 private let build_mir_function_emit_plan(
@@ -304,6 +305,7 @@ given MIRFunctionCodeEmitter {
             plan.lifetime_plan,
             0(UInt),
             String.new(),
+            Dict[UInt, Bool].new(),
         )
     }
 
@@ -658,7 +660,7 @@ given MIRFunctionCodeEmitter {
         let emission = self.emit_value_source(value)
         let value_type = self.type_of_value(value)
         when value_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .TraitObject(_, _) then {
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) or .TraitObject(_, _) then {
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("if (((")
                 self.codegen.buffer.push_string(emission.expression)
@@ -1241,6 +1243,8 @@ given MIRFunctionCodeEmitter {
         let subject_expr = when self.type_of_value(tag.subject.val) in {
             .ReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
             .MutableReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
+            .BorrowedReferenceType(inner, _) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
+            .MutableBorrowedReferenceType(inner, _) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
             .WeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
             .MutableWeakReferenceType(inner) then "(*(\(self.codegen.c_type_name(inner.val))*)\(subject.expression).ptr)",
             _ then subject.expression,
@@ -1256,7 +1260,7 @@ given MIRFunctionCodeEmitter {
         let should_retain = conversion.source_ownership is .Copy() or conversion.source_ownership is .Borrow()
         // If inner is a scalar type (not a ref), we need to heap-allocate it first
         let is_ref_type = when inner_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then true,
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then true,
             _ then false,
         }
         let mut ref_expression = inner.expression
@@ -1305,6 +1309,12 @@ given MIRFunctionCodeEmitter {
                 .MutableReferenceType(_) then {
                     self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n")
                 },
+                .BorrowedReferenceType(_, _) then {
+                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n")
+                },
+                .MutableBorrowedReferenceType(_, _) then {
+                    self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n")
+                },
                 .WeakReferenceType(_) then {
                     self.codegen.buffer.push_string("(__koral_Dtor)__koral_weakref_drop;\n")
                 },
@@ -1335,6 +1345,8 @@ given MIRFunctionCodeEmitter {
             .TraitObject(trait_name, _) then Option[String].Some(trait_name),
             .ReferenceType(inner) then self.trait_object_target_name(inner.val),
             .MutableReferenceType(inner) then self.trait_object_target_name(inner.val),
+            .BorrowedReferenceType(inner, _) then self.trait_object_target_name(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then self.trait_object_target_name(inner.val),
             _ then Option[String].None(),
         }
     }
@@ -1346,6 +1358,12 @@ given MIRFunctionCodeEmitter {
                 then Option[Type].None()
                 else Option[Type].Some(inner.val),
             .MutableReferenceType(inner) then if inner.val is .TraitObject(_, _)
+                then Option[Type].None()
+                else Option[Type].Some(inner.val),
+            .BorrowedReferenceType(inner, _) then if inner.val is .TraitObject(_, _)
+                then Option[Type].None()
+                else Option[Type].Some(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then if inner.val is .TraitObject(_, _)
                 then Option[Type].None()
                 else Option[Type].Some(inner.val),
             _ then Option[Type].None(),
@@ -1562,6 +1580,12 @@ given MIRFunctionCodeEmitter {
             .MutableReferenceType(_) then {
                 self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n")
             },
+            .BorrowedReferenceType(_, _) then {
+                self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n")
+            },
+            .MutableBorrowedReferenceType(_, _) then {
+                self.codegen.buffer.push_string("(__koral_Dtor)__koral_ref_drop;\n")
+            },
             .WeakReferenceType(_) then {
                 self.codegen.buffer.push_string("(__koral_Dtor)__koral_weakref_drop;\n")
             },
@@ -1585,7 +1609,7 @@ given MIRFunctionCodeEmitter {
 
     private can_transfer_owned_heap_reference(self ref, place MIRPlace) Bool = {
         return when place in {
-            .Local(local) then self.init_flag(local) is .Some(_),
+            .Local(local) then self.init_flag(local) is .Some(_) and not self.consumed_locals.contains_key(local.raw_value),
             _ then false,
         }
     }
@@ -1935,7 +1959,7 @@ given MIRFunctionCodeEmitter {
                 let base_access = self.emit_place_access(base.val)
                 let field_name = self.codegen.sanitize_codegen_identifier(self.codegen.context.symbol_name(field))
                 let path = when self.type_of_place(base.val) in {
-                    .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
+                    .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner, _) or .MutableBorrowedReferenceType(inner, _) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
                         let mut path = String.new()
                         path.push_string("(*(")
                         path.push_string(self.codegen.c_type_name(inner.val))
@@ -1958,7 +1982,7 @@ given MIRFunctionCodeEmitter {
             .EnumPayload(base, case_name, field_name, _, _) then {
                 let base_access = self.emit_place_access(base.val)
                 let payload_base = when self.type_of_place(base.val) in {
-                    .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
+                    .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner, _) or .MutableBorrowedReferenceType(inner, _) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
                         let mut payload_base = String.new()
                         payload_base.push_string("(*(")
                         payload_base.push_string(self.codegen.c_type_name(inner.val))
@@ -1981,7 +2005,7 @@ given MIRFunctionCodeEmitter {
                 let base_emission = self.emit_value_source(base.val)
                 let base_type = self.type_of_value(base.val)
                 yield when base_type in {
-                    .ReferenceType(_) or .MutableReferenceType(_) then {
+                    .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) then {
                         let mut path = String.new()
                         path.push_string("(*(")
                         path.push_string(self.codegen.c_type_name(pointee))
@@ -2118,7 +2142,10 @@ given MIRFunctionCodeEmitter {
 
     private consume_moved_place(self ref mut Self, place MIRPlace) Void = {
         when self.root_local_of_place(place) in {
-            .Some(local) then self.set_init_flag(local, false),
+            .Some(local) then {
+                self.set_init_flag(local, false)
+                self.consumed_locals.insert(local.raw_value, true)
+            },
             .None() then {},
         }
     }
@@ -2129,6 +2156,12 @@ given MIRFunctionCodeEmitter {
             .PlaceRead(place, ownership) then {
                 if ownership is .Move() then {
                     self.consume_moved_place(place)
+                }
+            },
+            .Ref(place, _, allocation) then {
+                when allocation in {
+                    .HeapOwned() then self.consume_moved_place(place),
+                    _ then {},
                 }
             },
             _ then {},
@@ -2203,7 +2236,7 @@ given MIRFunctionCodeEmitter {
 
     private control_expression(self ref, value_type Type, value String) String = {
         return when value_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then {
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .TraitObject(_, _) then {
                 let mut control = String.new()
                 control.push_string(value)
                 control.push_string(".control")
@@ -2371,6 +2404,52 @@ given MIRFunctionCodeEmitter {
                 yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
             .MutableReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
+                let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
+                let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".ptr, ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".control});\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".control = ")
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(".control;\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".vtable = ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".vtable;\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+            } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
+            .BorrowedReferenceType(inner, _) then if inner.val is .TraitObject(_, _) then {
+                let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
+                let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(" = __koral_downgrade_ref((struct __koral_Ref){")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".ptr, ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".control});\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".control = ")
+                self.codegen.buffer.push_string(weak_temp)
+                self.codegen.buffer.push_string(".control;\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(result)
+                self.codegen.buffer.push_string(".vtable = ")
+                self.codegen.buffer.push_string(emission.expression)
+                self.codegen.buffer.push_string(".vtable;\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+            } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
+            .MutableBorrowedReferenceType(inner, _) then if inner.val is .TraitObject(_, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
                 let weak_temp = self.codegen.next_temp_with_decl("struct __koral_WeakRef")
                 self.codegen.add_indent()

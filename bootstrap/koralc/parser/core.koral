@@ -647,18 +647,36 @@ given Parser {
                 break
             }
 
-            let param_name = self.expect_identifier("type parameter") or else {
-                return .Error(box("parse type parameter error"))
+            // Accept both Identifier and LifetimeIdentifier as type parameter names
+            let param_name = when self.current().kind in {
+                .Identifier(name) then {
+                    self.advance()
+                    yield name
+                },
+                .LifetimeIdentifier(name) then {
+                    self.advance()
+                    yield name
+                },
+                _ then {
+                    return .Error(box(self.format_context_position_error("Expected identifier for ", "type parameter", self.current())))
+                },
             }
 
-            // 泛型类型参数必须跟约束
-            if not self.is_type_start() then {
+            // 泛型类型参数必须跟约束（生命周期参数除外）
+            let is_lifetime_param = param_name.starts_with("'")
+            if not is_lifetime_param and not self.is_type_start() then {
                 let t = self.current()
                 let mut message = "Type parameter '"
                 message.push_string(param_name)
                 message.push_string("' requires a constraint at ")
                 message.push_string(self.token_position_text(t))
                 return .Error(box(message))
+            }
+            if is_lifetime_param and not self.is_type_start() then {
+                // Lifetime parameter with no constraints — add as bare parameter
+                params.push(TypeParameter(param_name, List[ref TypeNode].new()))
+                if self.current().kind is .Comma() then { self.advance() }
+                continue
             }
             let mut constraints = List[ref TypeNode].new()
             let first_constraint = self.parse_type() or else {

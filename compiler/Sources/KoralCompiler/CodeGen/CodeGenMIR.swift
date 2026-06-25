@@ -109,6 +109,7 @@ final class MIRFunctionCodeEmitter {
   private var lambdaCounter = 0
   private var nestedTypeDefinitions = ""
   private var nestedFunctionDefinitions = ""
+  private var consumedLocalIDs = Set<MIRLocalID>()
 
   var generatedDefinitions: String {
     nestedTypeDefinitions + nestedFunctionDefinitions
@@ -1856,7 +1857,7 @@ final class MIRFunctionCodeEmitter {
     guard case .local(let local) = place else {
       return false
     }
-    return initFlagByLocalID[local] != nil
+    return initFlagByLocalID[local] != nil && !consumedLocalIDs.contains(local)
   }
 
   private func emitPointer(_ place: MIRPlace) -> MIRValueEmission {
@@ -2472,7 +2473,10 @@ final class MIRFunctionCodeEmitter {
   }
 
   private func consumeMovedPlace(_ place: MIRPlace) {
-    setInitFlag(rootLocal(of: place), to: false)
+    if let local = rootLocal(of: place) {
+      setInitFlag(local, to: false)
+      consumedLocalIDs.insert(local)
+    }
   }
 
   private func consumeMovedSource(_ value: MIRValue) {
@@ -2490,6 +2494,10 @@ final class MIRFunctionCodeEmitter {
       }
       if case .local(let local) = operand {
         setInitFlag(local, to: false)
+      }
+    case .ref(let place, _, let allocation):
+      if allocation == .heapOwned {
+        consumeMovedPlace(place)
       }
     default:
       break

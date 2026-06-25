@@ -224,6 +224,8 @@ given CodeGen {
         return when trait_type in {
             .ReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
             .MutableReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
+            .BorrowedReferenceType(inner_ref, _) then self.trait_name_of_trait_type(inner_ref.val),
+            .MutableBorrowedReferenceType(inner_ref, _) then self.trait_name_of_trait_type(inner_ref.val),
             .WeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
             .MutableWeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref.val),
             .TraitObject(trait_name, _) then trait_name,
@@ -247,6 +249,8 @@ given CodeGen {
             },
             .ReferenceType(inner_ref) then Type.ReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
+            .BorrowedReferenceType(inner_ref, lt) then Type.BorrowedReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings)), lt),
+            .MutableBorrowedReferenceType(inner_ref, lt) then Type.MutableBorrowedReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings)), lt),
             .PointerType(inner_ref) then Type.PointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .MutablePointerType(inner_ref) then Type.MutablePointerType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.apply_codegen_type_bindings(inner_ref.val, bindings))),
@@ -546,6 +550,8 @@ given CodeGen {
         let receiver_base_type = when concrete_receiver_type in {
             .ReferenceType(inner_ref) then inner_ref.val,
             .MutableReferenceType(inner_ref) then inner_ref.val,
+            .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
+            .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
             .WeakReferenceType(inner_ref) then inner_ref.val,
             .MutableWeakReferenceType(inner_ref) then inner_ref.val,
             _ then concrete_receiver_type,
@@ -560,6 +566,8 @@ given CodeGen {
                 let param_base_type = when concrete_param_type in {
                     .ReferenceType(inner_ref) then inner_ref.val,
                     .MutableReferenceType(inner_ref) then inner_ref.val,
+                    .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
+                    .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
                     .WeakReferenceType(inner_ref) then inner_ref.val,
                     .MutableWeakReferenceType(inner_ref) then inner_ref.val,
                     _ then concrete_param_type,
@@ -591,6 +599,8 @@ given CodeGen {
         when receiver_type in {
             .ReferenceType(_) then {},
             .MutableReferenceType(_) then {},
+            .BorrowedReferenceType(_, _) then {},
+            .MutableBorrowedReferenceType(_, _) then {},
             .WeakReferenceType(_) then {},
             .MutableWeakReferenceType(_) then {},
             _ then {
@@ -615,6 +625,8 @@ given CodeGen {
                     .None() then self.lookup_receiver_method(inner_ref.val, method_name),
                 }
             },
+            .BorrowedReferenceType(inner_ref, _) then self.lookup_receiver_method(inner_ref.val, method_name),
+            .MutableBorrowedReferenceType(inner_ref, _) then self.lookup_receiver_method(inner_ref.val, method_name),
             _ then Option[Symbol].None(),
         }
     }
@@ -798,6 +810,8 @@ given CodeGen {
                 yield Option[Type].Some(when receiver_type in {
                     .ReferenceType(inner) then inner.val,
                     .MutableReferenceType(inner) then inner.val,
+                    .BorrowedReferenceType(inner, _) then inner.val,
+                    .MutableBorrowedReferenceType(inner, _) then inner.val,
                     .WeakReferenceType(inner) then inner.val,
                     .MutableWeakReferenceType(inner) then inner.val,
                     _ then receiver_type,
@@ -867,6 +881,8 @@ given CodeGen {
             },
             .ReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
             .MutableReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .BorrowedReferenceType(_, _) then Option[String].Some(self.concrete_layout_key_for_type(t)),
+            .MutableBorrowedReferenceType(_, _) then Option[String].Some(self.concrete_layout_key_for_type(t)),
             .PointerType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
             .MutablePointerType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
             .WeakReferenceType(_) then Option[String].Some(self.concrete_layout_key_for_type(t)),
@@ -896,6 +912,8 @@ given CodeGen {
         return when t in {
             .ReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .MutableReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .BorrowedReferenceType(inner_ref, _) then self.receiver_type_lookup_name_fallback(inner_ref.val),
+            .MutableBorrowedReferenceType(inner_ref, _) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .PointerType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .MutablePointerType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .WeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
@@ -992,6 +1010,8 @@ given CodeGen {
         return when t in {
             .ReferenceType(inner) then "ref_\(self.concrete_layout_key_for_type(inner.val))",
             .MutableReferenceType(inner) then "mutref_\(self.concrete_layout_key_for_type(inner.val))",
+            .BorrowedReferenceType(inner, _) then "ref_\(self.concrete_layout_key_for_type(inner.val))",
+            .MutableBorrowedReferenceType(inner, _) then "mutref_\(self.concrete_layout_key_for_type(inner.val))",
             .PointerType(inner) then "ptr_\(self.concrete_layout_key_for_type(inner.val))",
             .MutablePointerType(inner) then "mutptr_\(self.concrete_layout_key_for_type(inner.val))",
             .WeakReferenceType(inner) then "weakref_\(self.concrete_layout_key_for_type(inner.val))",
@@ -1246,6 +1266,8 @@ given CodeGen {
             .TraitObject(_, _) then true,
             .ReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
             .MutableReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
+            .BorrowedReferenceType(inner_ref, _) then self.type_looks_traitlike_for_storage(inner_ref.val),
+            .MutableBorrowedReferenceType(inner_ref, _) then self.type_looks_traitlike_for_storage(inner_ref.val),
             .WeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
             .MutableWeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
@@ -1278,6 +1300,8 @@ given CodeGen {
         let storage_c_type_opt = when t in {
             .ReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, false),
             .MutableReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, false),
+            .BorrowedReferenceType(inner_ref, _) then self.storage_ref_wrapper_c_type_name(inner_ref.val, false),
+            .MutableBorrowedReferenceType(inner_ref, _) then self.storage_ref_wrapper_c_type_name(inner_ref.val, false),
             .WeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, true),
             .MutableWeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(inner_ref.val, true),
             .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
@@ -1332,6 +1356,18 @@ given CodeGen {
                 }
             },
             .MutableReferenceType(inner_ref) then {
+                yield when inner_ref.val in {
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
+                    _ then Option[String].None(),
+                }
+            },
+            .BorrowedReferenceType(inner_ref, _) then {
+                yield when inner_ref.val in {
+                    .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
+                    _ then Option[String].None(),
+                }
+            },
+            .MutableBorrowedReferenceType(inner_ref, _) then {
                 yield when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
@@ -1427,6 +1463,8 @@ given CodeGen {
         return when t in {
             .ReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
             .MutableReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
+            .BorrowedReferenceType(inner_ref, _) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
+            .MutableBorrowedReferenceType(inner_ref, _) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
             .PointerType(inner) then Option[String].Some("\(self.c_type_name(inner.val))*"),
             .MutablePointerType(inner) then Option[String].Some("\(self.c_type_name(inner.val))*"),
             .WeakReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, true)),
@@ -1463,6 +1501,8 @@ given CodeGen {
         when t in {
             .ReferenceType(inner) then self.cache_c_type_name(inner.val),
             .MutableReferenceType(inner) then self.cache_c_type_name(inner.val),
+            .BorrowedReferenceType(inner, _) then self.cache_c_type_name(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then self.cache_c_type_name(inner.val),
             .WeakReferenceType(inner) then self.cache_c_type_name(inner.val),
             .MutableWeakReferenceType(inner) then self.cache_c_type_name(inner.val),
             .PointerType(inner) then self.cache_c_type_name(inner.val),
