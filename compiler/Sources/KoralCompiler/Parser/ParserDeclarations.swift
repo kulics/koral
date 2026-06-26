@@ -561,30 +561,22 @@ extension Parser {
         switch currentToken {
         case .identifier(let name):
           paramName = name
-          isLifetime = false
           try match(.identifier(name))
-        case .lifetimeIdentifier(let name):
-          if name != "'_" {
-            throw ParserError.unexpectedToken(
-              span: currentSpan,
-              got: "Named lifetime parameters (e.g. 'a) are not supported in generic parameter lists. Use '_ (anonymous lifetime) in ref types instead."
-            )
-          }
-          paramName = name
-          isLifetime = true
-          try match(.lifetimeIdentifier(name))
+        case .lifetimeIdentifier(_):
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: "Lifetime parameters are not supported in generic parameter lists. Use '_ (anonymous lifetime) directly in ref types instead."
+          )
         default:
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
         }
 
         var constraints: [TypeNode] = []
-        if !isLifetime {
+        constraints.append(try parseTraitConstraint())
+        while currentToken === .andKeyword {
+          try match(.andKeyword)
           constraints.append(try parseTraitConstraint())
-          while currentToken === .andKeyword {
-            try match(.andKeyword)
-            constraints.append(try parseTraitConstraint())
-          }
         }
 
         parameters.append((name: paramName, constraints: constraints))
