@@ -75,8 +75,20 @@
 // `self` parameters and `foreign` declarations do not support named parameter syntax.
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
-<method-first-param> ::= "self" ("ref" | "mut" "ref")?
+<method-first-param> ::= "self"                                          // bare self (equivalent to self Self)
+                       | "self" "ref"                                    // borrowed receiver sugar (self ref '_ Self)
+                       | "self" "ref" "mut"                              // borrowed mutable receiver sugar (self ref '_ mut Self)
+                       | "self" "Self"                                   // explicit managed value receiver
+                       | "self" "ref" "Self"                             // explicit managed ref receiver
+                       | "self" "ref" "mut" "Self"                       // explicit managed mutable ref receiver
+                       | "self" "ref" <lifetime> "Self"                  // explicit borrowed ref with lifetime
+                       | "self" "ref" <lifetime> "mut" "Self"            // explicit borrowed mutable ref with lifetime
                        | <func-param>
+// Receiver rules:
+// - self ref / self ref mut: borrowed receiver sugar, auto-ref allowed
+// - self Self / self ref Self / self ref mut Self: managed receiver, no auto-ref
+// - bare self: equivalent to self Self
+// - auto-deref (ref T → T) only applies to self receivers (following Go)
 
 <type-annotation> ::= <type>
 
@@ -137,9 +149,9 @@
 <generic-params> ::= "[" <generic-param-list> "]"
 <generic-param-list> ::= <generic-param> ("," <generic-param>)* ","?
 <generic-param> ::= <type-identifier> <trait-constraints>
-                 | <lifetime>
-// Lifetime parameters appear alongside type parameters in generic parameter lists.
-// Example: ['a, T, U]  — 'a is a lifetime parameter, T and U are type parameters.
+// 说明：泛型参数列表中不允许生命周期参数（'a 或 '_）。
+// 生命周期只能出现在类型前缀中（如 ref '_ T），不能作为泛型参数声明。
+// 例：f['a] 和 f['_] 均为语法错误。
 <trait-constraints> ::= <trait-constraint> ("and" <trait-constraint>)*
 <trait-constraint> ::= <type-identifier>
                      | <generic-type>
@@ -523,6 +535,21 @@
 // Value coalescing: or else
 // Optional chaining: and then
 // Other: . , ; : ( ) [ ] { }
+
+// ============================================================================
+// Implicit Conversion Rules (semantic, not grammar)
+// ============================================================================
+
+// No implicit ref promotion (T → ref T) for function/method arguments.
+// No auto-deref (ref T → T) for function/method arguments.
+// Use explicit .ref / .val at call sites.
+// Auto-ref and auto-deref only apply to method receivers (self).
+// - self ref: auto-ref allowed (T → ref '_ T)
+// - self: auto-deref allowed (ref T → T, following Go's pointer receiver behavior)
+// - self ref Self / self Self: no auto-ref or auto-deref
+
+// Closures: let mut variables are captured by reference (byMutReference).
+// Mutations inside the closure are visible outside.
 
 // ============================================================================
 // Comments

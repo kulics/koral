@@ -2108,7 +2108,7 @@ extension TypeChecker {
         )
       }
 
-      let typedInner = try inferTypedExpression(inner)
+      let typedInner = try inferTypedExpression(inner, expectedType: innerExpected)
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
       if !isAddressable {
         if isLiteralExpression(inner) {
@@ -2117,7 +2117,8 @@ extension TypeChecker {
         throw SemanticError(.generic("cannot take ref of temporary value"))
       }
       if let innerExpected,
-         !implicitReferenceInnerMatches(innerExpected, actualType: typedInner.type) {
+         !implicitReferenceInnerMatches(innerExpected, actualType: typedInner.type),
+         !context.containsGenericParameter(innerExpected) {
         throw SemanticError.typeMismatch(expected: innerExpected.description, got: typedInner.type.description)
       }
       let shouldProduceMutable = canTakeMutableReference(to: typedInner)
