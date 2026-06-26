@@ -183,9 +183,8 @@ Koral uses `ref` and `ref mut` as managed reference types. `ref T` is a read-onl
 
 Implicit conversion rules:
 
-- **No implicit ref promotion for function arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly.
-- **No auto-deref for regular function arguments.** If a function expects `T`, passing `ref T` requires `.val` explicitly.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref).
+- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref, following Go's pointer receiver behavior).
 
 Receiver adjustment for methods and subscripts has one extra rule:
 

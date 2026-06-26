@@ -314,10 +314,13 @@ extension TypeChecker {
     case .inferredSelf:
       break
     case .reference(let inner, mutable: let mutable):
-      if mutable, case .mutableReference(let innerType) = type {
-        try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
-      } else if mutable {
-        try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
+      if mutable {
+        switch type {
+        case .mutableReference(let innerType), .mutableBorrowedReference(let innerType, _):
+          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
+        default:
+          try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
+        }
       } else if !mutable {
         switch type {
         case .reference(let innerType), .mutableReference(let innerType),

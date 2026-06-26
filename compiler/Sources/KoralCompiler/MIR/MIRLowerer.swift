@@ -2939,16 +2939,12 @@ private final class MIRFunctionBuilder {
     guard let expectedType else { return nil }
     switch expectedType {
     case .reference(let inner):
-      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
-        return .ref(place, kind: .shared, allocation: .heapOwned)
-      }
+      // Managed ref T: only pass through existing compatible refs, no implicit T → ref T
       if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: false) {
         return lowerBorrowedSourceValue(argument)
       }
     case .mutableReference(let inner):
-      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
-        return .ref(place, kind: .mutable, allocation: .heapOwned)
-      }
+      // Managed ref mut T: only pass through existing compatible refs, no implicit T → ref mut T
       if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: true) {
         return lowerBorrowedSourceValue(argument)
       }

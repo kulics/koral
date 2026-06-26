@@ -239,9 +239,8 @@ Reference creation rules:
 - `.ref` result type depends on the source's mutability: `let mut` binding → `ref mut T`, `let` binding → `ref T`, mutable path → `ref mut T`.
 - `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected by the compiler.
-- No implicit ref promotion for function arguments. If a function expects `ref T`, the caller must use `a.ref` explicitly.
-- No auto-deref for regular function arguments. If a function expects `T`, passing `ref T` requires `.val` explicitly.
-- Auto-ref and auto-deref only apply to method receivers (`self`): `self ref` methods accept values via auto-ref; `self` methods accept `ref T` via auto-deref.
+- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref`. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** `self ref` methods accept values via auto-ref; `self` methods accept `ref T` via auto-deref (following Go's pointer receiver behavior).
 - Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
 - Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `ref mut Trait` can call both `self ref mut` and `self ref` requirements.
 - `ref T` is read-only: `.val` read only. `ref mut T` supports `.val` read and `.val = expr` assignment.

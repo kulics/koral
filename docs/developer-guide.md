@@ -194,9 +194,8 @@ Koral distinguishes read-only references (`ref T`) from mutable references (`ref
     - Mutable path (e.g. `ref mut`'s `mut` field) → `ref mut T`
 - `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
 - `.ref` on rvalues is rejected.
-- **No implicit ref promotion for function arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly.
-- **No auto-deref for regular function arguments.** If a function expects `T`, passing `ref T` requires `.val` explicitly.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref).
+- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref, following Go's pointer receiver behavior).
 - `ref T` supports `.val` read only. `ref mut T` supports `.val` read and `.val = expr` assignment.
 - `ptr T` supports `.val` read only. `ptr mut T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
 - `box(expr)` returns `ref mut T` — an escaping managed reference from temporaries/literals.

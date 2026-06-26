@@ -18,75 +18,69 @@
 - 闭包无法捕获 `let mut` 变量
 - 方法调用存在 auto-ref（T → T ref），增加理解成本
 
-### 本轮规则变更
+### 本轮规则变更（已完成）
 
-#### 规则 1：删除函数参数与 receiver 的隐式 ref 提升
+#### 规则 1：删除函数参数与方法参数的隐式 ref 提升
 
-函数调用时，不再允许将 `T` 隐式提升为 `ref T` / `ref mut T`。
+函数调用和方法调用时，不再允许将 `T` 隐式提升为 `ref T` / `ref mut T`。
 
 - 期望 `ref T` 的参数，必须显式传入 `ref T` 类型的值
 - 使用 `.ref` 语法进行显式提升：`f(a.ref)` 而不是 `f(a)`
 - `.ref` 本身保留无上下文时默认 borrowed 的行为
-- 闭包调用参数保留隐式提升（见规则 5）
+- 同样禁止 auto-deref（`ref T` → `T`）：期望 `T` 的参数必须用 `.val` 显式解引用
+- 仅 receiver（self）保留 auto-ref 和 auto-deref
 
-#### 规则 2：`self ref Self` / `self ref mut Self` 语义明确为托管 receiver
+#### 规则 2：receiver 的 auto-ref / auto-deref 规则
 
-- `self ref` / `self ref mut`：borrowed receiver sugar（`'_`），保留 auto-ref
-- `self ref Self` / `self ref mut Self`：显式托管 receiver，禁止 auto-ref 和 auto-deref
+- `self ref` / `self ref mut`：borrowed receiver sugar（`'_`），保留 auto-ref（`T` → `ref '_ T`）
+- `self ref Self` / `self ref mut Self`：显式托管 receiver（`.reference`），禁止 auto-ref
 - `self Self`：值 receiver，禁止 auto-ref
 - `self`（bare）：暂时保留，等价于 `self Self`
+- auto-deref（`ref T` → `T`）仅对 self receiver 生效，跟随 Go 的 pointer receiver 设计
+- auto-ref 仅对 borrowed receiver（`self ref`）生效
 
-调用规则：
-- auto-deref 仅对 method receiver (self) 生效（`T ref` 可调用 `T` 的方法，跟随 Go 的设计）
-- auto-deref 不对普通函数参数生效（`T ref` 不能传给期望 `T` 的参数，必须用 `a.val` 显式解引用）
-- auto-ref 仅对 borrowed receiver (`self ref`) 生效（`T` 可隐式提升调用 `self ref` 方法）；managed receiver (`self ref Self`) 不允许 auto-ref
+#### 规则 3：泛型参数列表禁止命名生命周期参数
 
-#### 规则 3：泛型参数列表禁止生命周期参数
-
-- `f['a]` 语法报错，泛型参数列表中不允许 `'a`
-- `ref 'a T` 类型语法保留，但 `'a` 只能用 `'_`（匿名生命周期）
+- `f['a]` 语法报错，泛型参数列表中不允许命名 `'a`
+- `'_`（匿名生命周期）在泛型参数列表中仍然允许
+- `ref 'a T` 类型语法保留，但 `'a` 只能用 `'_`
 - 命名生命周期 `'a` 暂不支持，下一步再考虑泛型化能力
 
 #### 规则 4：闭包允许捕获 `let mut` 变量
 
-- 闭包捕获 `let mut a` 时，隐式提升为 by-reference 捕获
+- 闭包捕获 `let mut a` 时，隐式提升为 by-reference 捕获（`CaptureKind.byMutReference`）
 - 闭包内的修改对外部可见
 - 非 `let mut` 变量仍按当前规则捕获（by-value 或 by-reference 取决于类型）
 
-#### 规则 5：链式 ref 的 owner 正确性
+#### 规则 5：链式 ref 的 owner 正确性（已验证）
 
-- `a.b.c.ref` 中，如果 `a` 或 `b` 是 ref T，ref 的 owner 应该是原始 ref 源
+- `a.b.c.ref` 中，如果 `a` 或 `b` 是 ref T，ref 的 owner 是原始 ref 源
 - MIR 层 place lowering 已正确通过 deref 链追踪到原始 ref
-- 需要验证 MIR promotion 不会错误地将 ref 的 owner 设为中间节点
+- 已验证 MIR promotion 不会错误地将 ref 的 owner 设为中间节点
 
-#### 规则 6：auto-deref 保留，auto-ref 删除
+#### 规则 6：auto-deref 仅对 self receiver 生效
 
 - Go 的 `*T` 支持 auto-deref（调用 `T` 的方法）和 auto-ref（`T` 调用 `*T` 的方法）
-- Koral 跟随 Go 的 auto-deref，不跟随 auto-ref
-- 具体：
+- Koral 跟随 Go 的 auto-deref，但仅限 self receiver
+- 普通函数参数不允许 auto-deref：`f(a)` 其中 `a: ref T`，`f` 期望 `T` → 必须用 `f(a.val)`
+- 具体 self receiver 行为：
   - `T ref` 调用 `self Self` 方法：允许（auto-deref）
   - `T` 调用 `self ref Self` 方法：不允许（需要显式 `a.ref`）
-  - `T ref` 调用 `self ref Self` 方法：不允许（类型不匹配，需要 `a.val.ref` 或直接 `a` 如果类型恰好匹配）
+  - `T` 调用 `self ref` 方法：允许（auto-ref，仅 borrowed receiver）
 
-### 改造工作量
+### 已完成的改动
 
-| 改动点 | 文件 | 工作量 |
-|--------|------|--------|
-| 删除参数隐式 ref 提升 | `TypeCheckerExpressions.swift` `inferArgumentExpression` | 低 |
-| 删除 receiver auto-ref | `TypeCheckerExpressions.swift` `inferMethodCall` | 低 |
-| `self ref Self` 语义改 managed | `ParserDeclarations.swift` `parseSelfReceiverType` | 低 |
-| 泛型禁止 `'a` | `ParserDeclarations.swift` `parseTypeParameters` | 低 |
-| 闭包捕获 `let mut` | `TypeCheckerLambda.swift` + MIR closure lowering | 中 |
-| 链式 ref 验证 | MIR lowering + promoter | 低（验证为主） |
-
-### 优先级
-
-1. 删除参数隐式 ref 提升（影响面最广）
-2. 删除 receiver auto-ref
-3. `self ref Self` 语义修正
-4. 泛型禁止 `'a`
-5. 闭包捕获 `let mut`
-6. 链式 ref 验证
+| 改动点 | 文件 | 状态 |
+|--------|------|------|
+| 删除参数隐式 ref 提升 | `TypeCheckerExpressions.swift` `coerceArgumentType` | ✅ |
+| 删除 receiver auto-ref（仅保留 borrowed） | `TypeCheckerExpressions.swift` `coerceReceiverType` | ✅ |
+| 删除 generic-aware 隐式 ref/deref | `TypeCheckerExpressions.swift` `inferMethodCall` | ✅ |
+| `self ref Self` 语义已为 managed | `ParserDeclarations.swift` `parseSelfReceiverType` | ✅（原本就是） |
+| 泛型禁止命名 `'a` | `ParserDeclarations.swift` `parseTypeParameters` | ✅ |
+| 闭包捕获 `let mut` | `TypeCheckerLambda.swift` + `CodeGenMIR.swift` | ✅ |
+| MIR 删除 managed ref 隐式提升 | `MIRLowerer.swift` `lowerBorrowedReferenceArgument` | ✅ |
+| 泛型统一修复 mutable borrowed ref | `TypeCheckerGenerics.swift` `unify` | ✅ |
+| 链式 ref owner 验证 | MIR `lowerPlace` | ✅ |
 
 ---
 

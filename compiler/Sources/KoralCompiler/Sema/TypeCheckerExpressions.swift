@@ -591,16 +591,12 @@ extension TypeChecker {
   }
 
   /// Applies the standard coercion chain to a typed argument that doesn't match the expected type.
-  /// Supports: reference flavor conversion, auto-ref for borrowed references, and mutable reference widening.
-  /// Note: auto-deref (ref T → T) is NOT allowed for regular function arguments.
-  /// Auto-deref only applies to method receivers (self).
+  /// Supports: reference flavor conversion and mutable reference widening.
+  /// No implicit ref promotion (T → ref T) or auto-deref (ref T → T) for function arguments.
+  /// Use explicit .ref / .val at the call site instead.
   func coerceArgumentType(_ typedArg: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode {
     if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType) {
       return flavorConversion
-    }
-    if borrowedReferenceTypeComponents(expectedType) != nil,
-       let implicitRef = try makeImplicitReference(typedArg, expectedType: expectedType) {
-      return implicitRef
     }
     if canWidenMutableReference(typedArg, expectedType: expectedType) {
       return typedArg
@@ -618,9 +614,18 @@ extension TypeChecker {
     if let flavorConversion = makeReferenceFlavorConversion(base, expectedType: expectedType) {
       return flavorConversion
     }
-    if borrowedReferenceTypeComponents(expectedType) != nil,
-       let implicitRef = try makeImplicitReference(base, expectedType: expectedType) {
-      return implicitRef
+    // Auto-ref: T → ref '_ T (borrowed) for self ref receivers
+    if let (inner, lifetime, mutable) = borrowedReferenceTypeComponents(expectedType),
+       implicitReferenceInnerMatches(inner, actualType: base.type),
+       isAddressableForReference(base) {
+      if mutable && !canTakeMutableReference(to: base) {
+        let name = implicitSelfRefViolationName(base) ?? "<value>"
+        throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
+      }
+      let refType: Type = mutable
+        ? .mutableBorrowedReference(inner: base.type, lifetime: lifetime)
+        : .borrowedReference(inner: base.type, lifetime: lifetime)
+      return .referenceExpression(expression: base, type: refType)
     }
     if let implicitDeref = makeImplicitDereference(base, expectedType: expectedType) {
       return implicitDeref
@@ -4666,53 +4671,13 @@ extension TypeChecker {
           }()
 
           if typedArg.type != effectiveParamType {
-            var didAdjust = false
-
-            // Generic-aware implicit ref conversion.
-            if let (inner, mutable) = referenceTypeComponents(effectiveParamType) {
-              var trialBindings = methodTypeParamBindings
-              let innerMatches: Bool = {
-                if inner == typedArg.type { return true }
-                if hasMethodLevelGenerics && context.containsGenericParameter(inner) {
-                  return unifyTypes(inner, typedArg.type, bindings: &trialBindings)
-                }
-                return false
-              }()
-              if innerMatches {
-                if typedArg.valueCategory == .lvalue {
-                  guard canTakeImplicitReference(to: typedArg, mutable: mutable) else {
-                    let name = implicitSelfRefViolationName(typedArg) ?? "<value>"
-                    throw SemanticError(.cannotTakeRefOfImmutable(name), span: currentSpan)
-                  }
-                  methodTypeParamBindings = trialBindings
-                  typedArg = .referenceExpression(expression: typedArg, type: effectiveParamType)
-                  didAdjust = true
-                } else {
-                  throw SemanticError.invalidOperation(
-                    op: "implicit ref", type1: typedArg.type.description, type2: "rvalue")
-                }
-              }
-            }
-
-            // Generic-aware implicit deref conversion.
-            if !didAdjust,
-               let (inner, _) = referenceTypeComponents(typedArg.type) {
-              var trialBindings = methodTypeParamBindings
-              let paramMatches: Bool = {
-                if inner == effectiveParamType { return true }
-                if hasMethodLevelGenerics && context.containsGenericParameter(effectiveParamType) {
-                  return unifyTypes(effectiveParamType, inner, bindings: &trialBindings)
-                }
-                return false
-              }()
-              if paramMatches {
-                methodTypeParamBindings = trialBindings
-                typedArg = .derefExpression(expression: typedArg, type: inner)
-                didAdjust = true
-              }
-            }
-
-            if !didAdjust {
+            // Only allow reference flavor conversion and mutable ref widening.
+            // No implicit ref promotion (T → ref T) or auto-deref (ref T → T).
+            if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: effectiveParamType) {
+              typedArg = flavorConversion
+            } else if canWidenMutableReference(typedArg, expectedType: effectiveParamType) {
+              // ref mut → ref widening: pass through unchanged
+            } else {
               throw SemanticError.typeMismatch(
                 expected: effectiveParamType.description,
                 got: typedArg.type.description

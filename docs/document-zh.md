@@ -202,9 +202,8 @@ Koral 将 `ref` / `ref mut` 与 `ref 'a` / `ref 'a mut` 都作为受语言管理
 
 隐式转换规则：
 
-- **函数参数不允许隐式 ref 提升。** 如果函数期望 `ref T`，调用方必须用 `a.ref` 显式传入。
-- **普通参数不允许 auto-deref。** 如果函数期望 `T`，传入 `ref T` 需要显式用 `.val` 解引用。
-- **auto-ref 和 auto-deref 仅对 method receiver (self) 生效。** `self ref` 方法可接受值（auto-ref）；`self` 方法可接受 `ref T`（auto-deref）。
+- **函数参数和方法参数均不允许隐式 ref 提升或 auto-deref。** 如果函数期望 `ref T`，调用方必须用 `a.ref` 显式传入。如果函数期望 `T`，传入 `ref T` 需要显式用 `.val` 解引用。此规则适用于所有参数，包括方法参数。
+- **auto-ref 和 auto-deref 仅对 method receiver (self) 生效。** `self ref` 方法可接受值（auto-ref）；`self` 方法可接受 `ref T`（auto-deref，跟随 Go 的 pointer receiver 设计）。
 
 receiver 语义也同步固定：
 
