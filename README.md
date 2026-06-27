@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
-- Reference types: `ref` (read-only), `ref mut` (mutable), `ptr` (read-only), `ptr mut` (mutable), `weakref` (read-only weak), `weakref mut` (mutable weak)
+- Reference types: `ref` (managed read-only), `ref mut` (managed mutable), `ref '_` (borrowed read-only), `ref '_ mut` (borrowed mutable), `ptr` (read-only), `ptr mut` (mutable), `weakref` (read-only weak), `weakref mut` (mutable weak)
 
 ### Control Flow
 
@@ -236,8 +236,10 @@ let result = list.iterator()
 - `finally` for deterministic resource cleanup
 
 Reference creation rules:
-- `.ref` result type depends on the source's mutability: `let mut` binding → `ref mut T`, `let` binding → `ref T`, mutable path → `ref mut T`.
-- `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
+- Koral distinguishes managed references (`ref T`, `ref mut T`) from borrowed references (`ref '_ T`, `ref '_ mut T`). Both share the same runtime layout; the difference is frontend static semantics only — borrowed references cannot escape.
+- `.ref` uses "borrow-first" semantics: without an explicit managed expected type, `.ref` defaults to producing a borrowed reference. When the local context explicitly requires a managed `ref` / `ref mut`, the compiler promotes that `.ref` to a managed reference within the current function.
+- `.ref` result mutability depends on the source: `let mut` binding → `ref mut T`, `let` binding → `ref T`, mutable path → `ref mut T`.
+- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
 - `.ref` on rvalues is rejected by the compiler.
 - **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref`. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** `self ref` methods accept values via auto-ref; `self` methods accept `ref T` via auto-deref (following Go's pointer receiver behavior).
@@ -376,7 +378,6 @@ swift run koralc emit-c --package-config path/to/koral.json --target-module app:
 - `--deps-root <path>`: dependency root directory for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading the std manifest
-- `-m` / `-m=<N>`: print escape analysis diagnostics (Go-style; `-m -m` or higher level currently same output)
 
 ## Test
 

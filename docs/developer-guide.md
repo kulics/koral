@@ -122,10 +122,6 @@ swift run koralc emit-c --package-config path/to/koral.json --target-module app:
 
 # Disable stdlib preload
 swift run koralc build --package-config path/to/koral.json --target-module app::main --no-std
-
-# Print escape analysis diagnostics (Go-style)
-swift run koralc build --package-config path/to/koral.json --target-module app::main -m
-swift run koralc build --package-config path/to/koral.json --target-module app::main -m=2
 ```
 
 CLI shape in current implementation:
@@ -186,13 +182,15 @@ Notes:
 
 ## Reference Creation Semantics (`.ref` / `box`)
 
-Koral distinguishes read-only references (`ref T`) from mutable references (`ref mut T`), and read-only pointers (`ptr T`) from mutable pointers (`ptr mut T`):
+Koral distinguishes managed references (`ref T`, `ref mut T`) from borrowed references (`ref '_ T`, `ref '_ mut T`), and read-only pointers (`ptr T`) from mutable pointers (`ptr mut T`):
 
-- `x.ref` forms a managed reference from an existing lvalue. The result type depends on the source's mutability:
+- Managed references may escape; borrowed references must not escape. Both share the same runtime layout and retain/release behavior.
+- `x.ref` uses "borrow-first" semantics: without an explicit managed expected type, `.ref` defaults to producing a borrowed reference. When the local context requires managed, the compiler promotes within the current function.
+- `.ref` result mutability depends on the source's mutability:
     - `let mut` binding → `ref mut T`
     - `let` (immutable) binding → `ref T`
     - Mutable path (e.g. `ref mut`'s `mut` field) → `ref mut T`
-- `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
+- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
 - `.ref` on rvalues is rejected.
 - **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref, following Go's pointer receiver behavior).
@@ -204,10 +202,10 @@ Koral distinguishes read-only references (`ref T`) from mutable references (`ref
 
 ```koral
 let mut x = 10
-let rx ref mut Int = x.ref    // let mut → ref mut T
+let rx ref mut Int = x.ref    // managed expected type triggers local promotion
 
 let y = 10
-let ry ref Int = y.ref        // let → ref T (read-only)
+let ry ref '_ Int = y.ref     // defaults to borrowed reference
 
 let owned ref mut Int = box(42)   // box() returns ref mut T
 
@@ -611,7 +609,7 @@ resolveModule(entryFile:)
 | Declaration | Default Access |
 |-------------|----------------|
 | global function/type/trait | `protected` |
-| struct field | `protected` |
+| struct field | `public` |
 | enum case | `public` |
 | trait method | `public` |
 | given method | `protected` |
@@ -766,14 +764,6 @@ print(defIdMap.description)
 
 ```swift
 print(diagnosticError.renderForCLI())
-```
-
-### View Escape Analysis Diagnostics
-
-Use `-m` / `-m=<N>`:
-
-```bash
-swift run koralc build --package-config path/to/koral.json --target-module app::main -m
 ```
 
 ### Inspect Generated C

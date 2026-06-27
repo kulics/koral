@@ -60,7 +60,6 @@ Common options:
 - `--deps-root <path>`: dependency root for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading modules declared by `std/koral.json`
-- `-m` / `-m=<N>`: print escape-analysis diagnostics
 
 ## Basic Syntax
 
@@ -171,34 +170,41 @@ The compiler moves fields directly from the Pair value into the target variables
 
 #### Reference Creation Rules (`.ref` / `box`)
 
-Koral uses `ref` and `ref mut` as managed reference types. `ref T` is a read-only reference, while `ref mut T` is a mutable reference that supports `.val = expr` assignment:
+Koral distinguishes between managed references and borrowed references:
 
-- `x.ref` creates a managed reference from an existing lvalue. The result type depends on the source's mutability:
-  - `let mut` binding → `.ref` produces `ref mut T`
-  - `let` (immutable) binding → `.ref` produces `ref T`
-  - Mutable path (e.g. `ref mut`'s `mut` field) → `.ref` produces `ref mut T`
-- `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
-- `.ref` on rvalues is rejected.
-- To create a managed reference from a temporary/literal, use `box(expr)`, which returns `ref mut T`.
+- `ref T` / `ref mut T` are managed references.
+  - May escape; can be returned, stored in fields, containers, or enum payloads.
+- `ref '_ T` / `ref '_ mut T` are borrowed references (anonymous lifetime).
+  - Must not escape; cannot be returned, stored in fields, enum payloads, globals, or closure environments.
+  - Only allowed in function parameter and receiver positions.
+- Both share the same runtime layout and retain/release behavior; the difference is frontend static semantics only.
+- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
+
+`.ref` uses "borrow-first" semantics:
+
+- Only allowed on value paths, e.g. `x.ref`, `self.field.ref`.
+- `.ref` on rvalues is rejected (e.g. `make_value().ref` is an error).
+- Without an explicit managed expected type, `.ref` defaults to producing a borrowed reference.
+- When the local context explicitly requires a managed `ref` / `ref mut`, the compiler promotes that `.ref` to a managed reference within the current function.
+- `box(expr)` is explicit managed construction, returning `ref mut T`.
 
 Implicit conversion rules:
 
 - **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref, following Go's pointer receiver behavior).
 
-Receiver adjustment for methods and subscripts has one extra rule:
+Receiver adjustment rules:
 
-- A call whose receiver is declared as `self ref` may use an rvalue receiver expression. The compiler materializes a stable temporary for the duration of that call.
-- This special case applies only to receiver adjustment. It does **not** make `expr.ref` on rvalues legal.
-- `self ref mut` still requires a writable lvalue receiver; rvalues are rejected.
-- Because `self ref` on rvalues may materialize temporaries, such calls can introduce hidden retain/allocation cost.
+- `self ref` is a borrowed receiver; it accepts both lvalue and rvalue receiver expressions. For rvalue receivers, the compiler materializes a stable temporary for the duration of the call.
+- `self ref mut` is a borrowed mutable receiver; it still requires a writable lvalue receiver; rvalues are rejected.
+- `self ref` on rvalues may introduce hidden retain/allocation cost due to temporary materialization.
 
 ```koral
 let mut x = 10
-let rx ref mut Int = x.ref   // let mut → ref mut T
+let rx ref mut Int = x.ref   // managed expected type triggers local promotion
 
 let y = 10
-let ry ref Int = y.ref       // let → ref T
+let ry ref '_ Int = y.ref    // defaults to borrowed reference
 
 let owned ref mut Int = box(42) // box() returns ref mut T
 
@@ -484,28 +490,31 @@ Rules:
 
 ### Reference Types
 
-Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Koral distinguishes between read-only and mutable references:
+Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Koral distinguishes between managed references and borrowed references:
 
-- `ref T` — read-only reference. Supports `.val` read but NOT `.val = expr` assignment.
-- `ref mut T` — mutable reference. Supports both `.val` read and `.val = expr` assignment.
-- `ref mut T` implicitly converts to `ref T` (widening). The reverse is not allowed.
+- `ref T` — managed read-only reference. Supports `.val` read but NOT `.val = expr` assignment.
+- `ref mut T` — managed mutable reference. Supports both `.val` read and `.val = expr` assignment.
+- `ref '_ T` — borrowed read-only reference. Same runtime layout as `ref T`, but frontend forbids escaping.
+- `ref '_ mut T` — borrowed mutable reference. Same runtime layout as `ref mut T`, but frontend forbids escaping.
+- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
 
 Use the `.ref` postfix expression to create a reference. The result type depends on the source's mutability:
 
 ```koral
 let mut n = 42
-let a = n.ref            // let mut → ref mut T
+let a ref '_ mut Int = n.ref
 let b = a.val            // Dereference, gets 42
 a.val = 100              // Deref assignment (ref mut supports .val = expr)
-println(is_unique_mutable(a)) // True only for owning, uniquely-held refs
 
 let m = 42
-let c = m.ref            // let → ref T (read-only)
+let c ref '_ Int = m.ref
 let d = c.val            // Dereference read, gets 42
 // c.val = 100           // Error: ref does not support .val assignment
+
+let owned ref mut Int = n.ref // managed expected type triggers local promotion
 ```
 
-`ref` and `ref mut` denote managed reference types. `x.ref` forms one from an lvalue, with the result mutability determined by the source. The compiler first tries to keep such references in a stack-safe borrowed form; when a reference escapes its scope, it is promoted to a heap-backed reference-counted object. `box(expr)` returns `ref mut T` by intentionally producing an escaping managed reference. Conceptually, `box` is `box(mut v T) -> v.ref`: the escaping reference takes over ownership of that local storage, so the local is not dropped a second time.
+`ref` / `ref mut` and `ref '_` / `ref '_ mut` share the same ABI, memory layout, and retain/release behavior at runtime. The difference is only frontend semantics: borrowed references cannot escape, while managed references can be held long-term. `.ref` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does the compiler promote the construction to managed within the current function. `box(expr)` always explicitly constructs a managed `ref mut T`.
 
 Pointer types follow the same read-only / mutable distinction:
 
@@ -537,7 +546,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` and `ref mut` are Koral's managed reference types. `ref T` is read-only, `ref mut T` is mutable. They may be formed from lvalues (with mutability determined by the source) or by creating escaping managed references such as `box(expr)` (which returns `ref mut T`). When a local value is promoted into an escaping managed reference, destruction transfers to that reference owner instead of running a second value drop on the source local. Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self ref mut` still requires a writable lvalue. Implicit ref promotion (`T` → `ref T`) is not allowed for function arguments — callers must use `.ref` explicitly. Auto-deref (`ref T` → `T`) is not allowed for regular function arguments — callers must use `.val` explicitly. These implicit conversions only apply to method receivers (`self`). Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `ref` / `ref mut` are escaping managed references; `ref '_` / `ref '_ mut` are non-escaping borrowed references. Both share the same runtime layout and retain/release behavior; the difference is only frontend static semantics. `.ref` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does local promotion occur. `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `ref T`) is not allowed for function arguments — callers must use `.ref` explicitly. Auto-deref (`ref T` → `T`) is not allowed for regular function arguments — callers must use `.val` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self ref mut` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
