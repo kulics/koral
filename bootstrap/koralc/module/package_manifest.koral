@@ -296,10 +296,19 @@ private let add_manifest_modules(
 private let build_dependency_alias_rules(
     root_manifest PackageManifest,
     dependency_manifests Dict[String, PackageManifest],
-    existing_module_names Set[String],
+    existing_module_names List[String],
 ) Result[List[ResolvedModuleAliasRule]] = {
-    let mut rules List[ResolvedModuleAliasRule] = []
-    let mut claimed_alias_names = existing_module_names
+    let mut alias_count = 0(UInt)
+    let mut dep_count_iter = root_manifest.dependencies.iterator()
+    while dep_count_iter.next() is .Some(dep_entry) then {
+        alias_count += dep_entry.second.module_aliases.count()
+    }
+
+    let mut rules = List[ResolvedModuleAliasRule].with_capacity(alias_count)
+    let mut claimed_alias_names = List[String].with_capacity(existing_module_names.count() + alias_count)
+    for existing_name in existing_module_names then {
+        claimed_alias_names.push(existing_name)
+    }
 
     let mut dep_iter = root_manifest.dependencies.iterator()
     while dep_iter.next() is .Some(dep_entry) then {
@@ -334,7 +343,7 @@ private let build_dependency_alias_rules(
                     "Invalid manifest field 'dependencies.\(dep_entry.first).module_aliases.\(published_name)': alias '\(alias_name)' conflicts with an existing module name"
                 ))
             }
-            claimed_alias_names.insert(alias_name)
+            claimed_alias_names.push(alias_name)
 
             let mut alias_path_segments List[String] = []
             for segment in alias_segments then {
@@ -400,14 +409,13 @@ private let rewrite_module_requirement_names(
 private let validate_resolved_module_graph(
     modules_by_name Dict[String, ResolvedModuleSpec],
     name String,
-    visiting ref mut Set[String],
-    visited ref mut Set[String],
+    visited ref mut List[String],
     stack ref mut List[String],
 ) Result[Void] = {
     if visited.contains(name) then {
         return Result[Void].Ok({})
     }
-    if visiting.contains(name) then {
+    if stack.contains(name) then {
         let mut cycle = stack.join_to_string(" -> ")
         if not cycle.is_empty() then {
             cycle.push_string(" -> ")
@@ -420,29 +428,27 @@ private let validate_resolved_module_graph(
         return Result[Void].Error(box("Target module '\(name)' not found in resolved module graph"))
     }
 
-    visiting.insert(name)
     stack.push(name)
     for requirement in spec.requires then {
         if modules_by_name.get(requirement) is .None() then {
             return Result[Void].Error(box("Module '\(name)' depends on unknown module '\(requirement)'"))
         }
-        let _ = validate_resolved_module_graph(modules_by_name, requirement, visiting, visited, stack) or return
+        let _ = validate_resolved_module_graph(modules_by_name, requirement, visited, stack) or return
     }
     let _ = stack.pop()
-    visiting.remove(name)
-    visited.insert(name)
+    visited.push(name)
     return Result[Void].Ok({})
 }
 
 private let collect_reachable_modules(
     modules_by_name Dict[String, ResolvedModuleSpec],
     name String,
-    reachable ref mut Set[String],
+    reachable ref mut List[String],
 ) Void = {
     if reachable.contains(name) then {
         return
     }
-    reachable.insert(name)
+    reachable.push(name)
     let spec = modules_by_name.get(name) or else { return }
     for requirement in spec.requires then {
         collect_reachable_modules(modules_by_name, requirement, reachable)
@@ -494,10 +500,12 @@ public let load_resolved_package_graph(
         .None() then {},
     }
 
-    let mut existing_module_names = Set[String].new()
+    let mut existing_module_names = List[String].with_capacity(modules_by_name.count())
     let mut name_iter = modules_by_name.iterator()
     while name_iter.next() is .Some(entry) then {
-        existing_module_names.insert(entry.first)
+        if not existing_module_names.contains(entry.first) then {
+            existing_module_names.push(entry.first)
+        }
     }
     let alias_rules = build_dependency_alias_rules(root_manifest, dependency_manifests, existing_module_names) or return
     if not alias_rules.is_empty() then {
@@ -526,20 +534,21 @@ public let load_resolved_package_graph(
         return Result[ResolvedPackageGraph].Error(box("Target module '\(target_module_name)' not found in resolved module graph"))
     }
 
-    let mut visiting = Set[String].new()
-    let mut visited = Set[String].new()
-    let mut stack List[String] = []
+    let module_count = modules_by_name.count()
+    let mut visited = List[String].with_capacity(module_count)
+    let mut stack = List[String].with_capacity(module_count)
     let mut iter = modules_by_name.iterator()
     while iter.next() is .Some(entry) then {
-        let _ = validate_resolved_module_graph(modules_by_name, entry.first, visiting.ref, visited.ref, stack.ref) or return
+        let _ = validate_resolved_module_graph(modules_by_name, entry.first, visited.ref, stack.ref) or return
     }
 
-    let mut reachable = Set[String].new()
+    let mut reachable = List[String].with_capacity(module_count)
     collect_reachable_modules(modules_by_name, target_module_name, reachable.ref)
-    let mut reachable_names List[String] = []
-    let mut reachable_iter = reachable.iterator()
-    while reachable_iter.next() is .Some(name) then {
-        reachable_names.push(name)
+    let mut reachable_names = List[String].with_capacity(reachable.count())
+    for name in reachable then {
+        if not reachable_names.contains(name) then {
+            reachable_names.push(name)
+        }
     }
     reachable_names.sort()
 

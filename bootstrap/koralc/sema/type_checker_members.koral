@@ -134,7 +134,7 @@ given TypeChecker {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
                     return Option[Type].Some(sym.symbol_type)
                 }
-                let sym_name = self.context().symbol_name(sym)
+                let sym_name = self.context().symbol_name(sym.val)
                 if self.storage.global_scope.lookup_type(sym_name) is .Some(t) then {
                     return Option[Type].Some(t)
                 }
@@ -522,7 +522,9 @@ given TypeChecker {
                 println("[sema-given-member] file=\(self.storage.file_path) member=\(m.name)")
             }
             let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty()
-            let should_store_checked_body = retain_checked_template_bodies or not should_retain_template_body
+            let skip_template_typed_body_boxing = self.skip_template_typed_body_boxing_debug_enabled()
+            let should_store_checked_body = (retain_checked_template_bodies or not should_retain_template_body)
+                and not (skip_template_typed_body_boxing and should_retain_template_body)
             let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
             let prev_scope = self.storage.current_scope
             self.storage.current_scope = member_type_scope
@@ -616,14 +618,24 @@ given TypeChecker {
             let method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret)
             context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false))
             context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params))
-            let should_retain_program_body = retain_checked_template_bodies and not should_retain_template_body
-            let program_body = if should_retain_program_body then typed_body else Option[ref TypedExpr].None()
+            let skip_concrete_given_program_body_retention = self.skip_concrete_given_program_body_retention_debug_enabled()
+            let should_store_concrete_given_body = retain_checked_template_bodies
+                and not should_retain_template_body
+                and not skip_concrete_given_program_body_retention
+            when typed_body in {
+                .Some(body_ref) then {
+                    if should_store_concrete_given_body then {
+                        context.set_concrete_given_member_body(method_def_id, body_ref)
+                    }
+                },
+                .None() then {},
+            }
             out.push(box(TypedGivenMember(
                 method_def_id,
                 method_name,
                 typed_params,
                 ret,
-                program_body,
+                Option[ref TypedExpr].None(),
             )))
         }
         return out

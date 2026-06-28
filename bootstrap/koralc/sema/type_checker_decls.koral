@@ -79,13 +79,17 @@ given TypeChecker {
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     let stable_params = typed_params
                     let stable_ret = resolved_ret
-                    let stable_body = box(typed_body)
                     let mut param_refs = List[ref Type].new()
                     for param in stable_params then {
                         param_refs.push(box(param.param_type))
                     }
                     let fn_type = make_function_type(param_refs, stable_ret)
                     let fn_sym = box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false))
+                    let stable_body = if retain_checked_template_bodies then {
+                        let mut context = self.context()
+                        context.set_concrete_function_body(fn_sym.def_id, box(typed_body))
+                        yield box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), stable_ret))
+                    } else box(typed_body)
                     yield TypedDecl.FunctionDecl(
                         access,
                         name,
@@ -118,12 +122,15 @@ given TypeChecker {
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn checked-body file=\(self.storage.file_path) name=\(name)")
                     }
+                    let generic_fn_checked_body = if self.skip_template_typed_body_boxing_debug_enabled()
+                        then Option[ref TypedExpr].None()
+                        else Option[ref TypedExpr].Some(box(typed_body))
                     self.register_generic_function_template(
                         name,
                         type_params,
                         params,
                         return_type,
-                        self.template_checked_body(Option[ref TypedExpr].Some(box(typed_body)), retain_checked_template_bodies),
+                        self.template_checked_body(generic_fn_checked_body, retain_checked_template_bodies),
                         Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
                         Option[Type].Some(resolved_ret),
                     )
@@ -371,6 +378,7 @@ given TypeChecker {
                         else self.resolve_type_with_bindings(target_type, bindings)
                     let resolved_trait_args = self.trait_type_args_with_bindings(trait_type, bindings)
                     self.record_explicit_trait_conformance(resolved_target, trait_name, resolved_trait_args)
+                    self.record_generic_trait_conformance_template(resolved_target, type_params, trait_name, resolved_trait_args)
                     self.maybe_record_iterator_conformance_with_bindings(resolved_target, trait_type, bindings)
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
@@ -446,9 +454,6 @@ given TypeChecker {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), typed_members)
-                    if retain_checked_template_bodies then {
-                        self.register_trait_tool_templates_for_concrete_type(resolved_target, type_params, trait_name, typed_members.ref)
-                    }
                     self.restore_generic_constraints(generic_constraint_snapshot)
                     yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span)
                 }

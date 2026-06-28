@@ -90,7 +90,7 @@ given MIRFunctionBuilder {
         }
         for capture in self.captured_symbols then {
             let local = self.make_local(
-                self.context.symbol_name(capture),
+                self.context.symbol_name(capture.val),
                 capture.symbol_type,
                 if capture.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(),
                 MIRStorage.Capture(),
@@ -312,9 +312,9 @@ given MIRFunctionBuilder {
                     },
                 }
             },
-            .Block(statements) then self.lower_block(statements, expression.expr_type),
+            .Block(statements) then self.lower_block(statements.ref, expression.expr_type),
             .IfExpr(condition, then_branch, else_branch) then self.lower_if_expression(condition, then_branch, else_branch, expression.expr_type),
-            .WhenExpr(subject, arms) then self.lower_when_expression(subject, arms, expression.expr_type),
+            .WhenExpr(subject, arms) then self.lower_when_expression(subject, arms.ref, expression.expr_type),
             .ArithmeticExpr(left, op, right) then Option[MIRExprResult].Some(self.lower_binary(left, right, expression.expr_type, MIRBinaryOperator.Arithmetic(op, true))),
             .WrappingArithmeticExpr(left, op, right) then Option[MIRExprResult].Some(self.lower_binary(left, right, expression.expr_type, MIRBinaryOperator.WrappingArithmetic(op))),
             .WrappingShiftExpr(left, op, right) then Option[MIRExprResult].Some(self.lower_binary(left, right, expression.expr_type, MIRBinaryOperator.WrappingShift(op))),
@@ -353,11 +353,11 @@ given MIRFunctionBuilder {
                     },
                 }
             },
-            .Call(callee, args) then self.lower_call(callee, args, expression.expr_type),
-            .GenericCall(function_symbol, _, args) then self.finish_call_from_typed_args(MIROperand.Function(function_symbol), args, expression.expr_type),
+            .Call(callee, args) then self.lower_call(callee, args.ref, expression.expr_type),
+            .GenericCall(function_symbol, _, args) then self.finish_call_from_typed_args(MIROperand.Function(function_symbol), args.ref, expression.expr_type),
             .StaticMethodCall(receiver_type, method_name, _, _, _, _) then Option[MIRExprResult].None(),
-            .TypeConstruction(identifier, _, args) then self.lower_type_construction(identifier, args, expression.expr_type),
-            .EnumConstruction(enum_type, case_name, args) then self.lower_enum_construction(enum_type, case_name, args),
+            .TypeConstruction(identifier, _, args) then self.lower_type_construction(identifier, args.ref, expression.expr_type),
+            .EnumConstruction(enum_type, case_name, args) then self.lower_enum_construction(enum_type, case_name, args.ref),
             .MethodReference(base_expr, _, method, _, _, _) then {
                 // If the method takes only self (1 param), call it with base as receiver.
                 // If it takes more params, return as a function value.
@@ -384,7 +384,7 @@ given MIRFunctionBuilder {
                 yield Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, ValueCategory.RValue(), Option[MIROperand].Some(MIROperand.Function(method)), Option[MIRPlace].None()))
             },
             .TraitObjectConversion(inner, trait_type, concrete_type) then self.lower_trait_object_conversion(inner, trait_type, concrete_type, expression.expr_type),
-            .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then self.lower_trait_method_call(receiver, trait_type, method_name, method_index, args, expression.expr_type),
+            .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then self.lower_trait_method_call(receiver, trait_type, method_name, method_index, args.ref, expression.expr_type),
             .IntrinsicCall(node) then self.lower_intrinsic_call(node),
             .LambdaExpr(params, return_type, body) then self.lower_lambda_expression(params, return_type, body, expression.expr_type),
             .GenericInstantiation(_, _) then self.void_result(),
@@ -459,7 +459,7 @@ given MIRFunctionBuilder {
                 }
                 yield false
             },
-            .Block(statements) then self.typed_statements_contain_yield(statements),
+            .Block(statements) then self.typed_statements_contain_yield(statements.ref),
             .IfExpr(condition, then_branch, else_branch) then {
                 let else_has = when else_branch in {
                     .Some(value) then self.typed_expr_contains_yield(value),
@@ -598,7 +598,7 @@ given MIRFunctionBuilder {
                 },
                 .WhenStmt(subject, arms, _) then {
                     if is_last and has_result then {
-                        last_result = self.lower_when_expression(subject, arms, block_type)
+                        last_result = self.lower_when_expression(subject, arms.ref, block_type)
                         when result_local in {
                             .Some(local_id) then when last_result in {
                                 .Some(value) then self.assign_branch_result(value, local_id),
@@ -665,7 +665,7 @@ given MIRFunctionBuilder {
             },
             .IfStmt(condition, then_branch, else_branch, _) then { let _ = self.lower_if_expression(condition, then_branch, else_branch, Type.VoidType()) },
             .WhileStmt(condition, body, _) then self.lower_while(condition, body),
-            .WhenStmt(subject, arms, _) then { let _ = self.lower_when_expression(subject, arms, Type.VoidType()) },
+            .WhenStmt(subject, arms, _) then { let _ = self.lower_when_expression(subject, arms.ref, Type.VoidType()) },
             .ReturnStmt(value, _) then self.lower_return(value),
             .BreakStmt(_) then self.lower_break(),
             .ContinueStmt(_) then self.lower_continue(),
@@ -688,7 +688,7 @@ given MIRFunctionBuilder {
             let _ = self.lower_expression(value)
             return
         }
-        let local = self.make_local(self.context.symbol_name(symbol), symbol.symbol_type, if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(symbol))
+        let local = self.make_local(self.context.symbol_name(symbol.val), symbol.symbol_type, if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(symbol))
         self.local_by_def_id.insert(symbol.def_id.id, local.id)
         self.append_statement(MIRStatement.Declare(local.id))
         self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), self.lower_value(value)))
@@ -735,7 +735,7 @@ given MIRFunctionBuilder {
         let field_place = MIRPlace.Field(box(pair_place), box(field_symbol))
         when symbol in {
             .Some(sym) then {
-                let local = self.make_local(self.context.symbol_name(sym), sym.symbol_type, if sym.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(sym))
+                    let local = self.make_local(self.context.symbol_name(sym.val), sym.symbol_type, if sym.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(sym))
                 self.local_by_def_id.insert(sym.def_id.id, local.id)
                 self.append_statement(MIRStatement.Declare(local.id))
                 self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), MIRValue.PlaceRead(field_place, MIROwnershipUse.Move())))
@@ -834,7 +834,8 @@ given MIRFunctionBuilder {
         let mut index = finalies.count()
         while index > 0(UInt) then {
             index -= 1
-            let _ = self.lower_expression(finalies[index])
+            let finally_expr = finalies[index].val
+            let _ = self.lower_expression(box(finally_expr))
             if self.current_block_is_terminated() then { return }
         }
     }
@@ -945,6 +946,8 @@ given MIRFunctionBuilder {
         let matched_type = when subject_type in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             _ then subject_type,
@@ -1254,8 +1257,8 @@ given MIRFunctionBuilder {
                 .None() then self.pattern_compare(subject_place, subject_type, MIROperand.Constant(MIRConstant.Integer(value, subject_type)), ComparisonOperator.Equal()),
             },
             .NegativeIntegerLiteral(value) then self.pattern_compare(subject_place, subject_type, MIROperand.Constant(MIRConstant.Integer("-\(value)", subject_type)), ComparisonOperator.Equal()),
-            .EnumCase(case_name, tag_index, elements) then self.lower_enum_case_pattern_condition(subject_place, subject_type, case_name, tag_index, elements),
-            .StructPattern(_, elements) then self.lower_struct_pattern_condition(subject_place, subject_type, elements),
+            .EnumCase(case_name, tag_index, elements) then self.lower_enum_case_pattern_condition(subject_place, subject_type, case_name, tag_index, elements.ref),
+            .StructPattern(_, elements) then self.lower_struct_pattern_condition(subject_place, subject_type, elements.ref),
             .ComparisonPattern(op, value) then {
                 let comparison_op = when op in {
                     .Greater() then ComparisonOperator.Greater(),
@@ -1555,7 +1558,7 @@ given MIRFunctionBuilder {
                 let binding_type = self.pattern_binding_type(symbol, subject_type)
                 if binding_type is not .VoidType() then {
                     let place = if binding_type == subject_type then subject_place else matched_place
-                    let binding_name = self.context.symbol_name(symbol)
+                        let binding_name = self.context.symbol_name(symbol.val)
                     self.pattern_place_by_def_id.insert(symbol.def_id.id, place)
                     self.pattern_place_by_name.insert(binding_name, place)
                 }
@@ -1763,7 +1766,7 @@ given MIRFunctionBuilder {
                 .None() then {},
             }
         }
-        return self.context.symbol_name(method)
+        return self.context.symbol_name(method.val)
     }
 
     private receiver_lookup_type(self ref Self, t Type) Type = {
@@ -1891,6 +1894,8 @@ given MIRFunctionBuilder {
         let inner_type = when normalized_base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             .MutablePointerType(inner) then inner.val,
@@ -2112,8 +2117,9 @@ given MIRFunctionBuilder {
         let mut index UInt = 0
         while index < args.count() then {
             let expected_type = if index < param_types.count() then Option[Type].Some(param_types[index]) else Option[Type].None()
-            values.push(box(self.lower_call_argument(args[index], expected_type)))
-            ownerships.push(self.ownership_use(args[index]))
+            let arg = args[index]
+            values.push(box(self.lower_call_argument(arg, expected_type)))
+            ownerships.push(self.ownership_use(arg))
             index += 1
         }
         return Pair[List[ref MIRValue], List[MIROwnershipUse]](values, ownerships)
@@ -2279,7 +2285,7 @@ given MIRFunctionBuilder {
             values.push(box(self.lower_value(arg)))
             ownerships.push(self.ownership_use(arg))
         }
-        let aggregate_type = self.recover_type_construction_result_type(identifier, args, result_type)
+        let aggregate_type = self.recover_type_construction_result_type(identifier, args.val, result_type)
         let result = self.materialize(MIRValue.Aggregate(MIRAggregate(aggregate_type, values, ownerships)), aggregate_type)
         return Option[MIRExprResult].Some(MIRExprResult(aggregate_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
     }
@@ -2501,7 +2507,7 @@ given MIRFunctionBuilder {
                     .Some(place) then { return Option[MIRPlace].Some(place) },
                     .None() then {},
                 }
-                let name = self.context.symbol_name(symbol)
+                let name = self.context.symbol_name(symbol.val)
                 when self.pattern_place_by_name.get(name) in {
                     .Some(place) then { return Option[MIRPlace].Some(place) },
                     .None() then {},
@@ -2552,6 +2558,8 @@ given MIRFunctionBuilder {
                 let mut current_type = when base.expr_type in {
                     .ReferenceType(inner) then inner.val,
                     .MutableReferenceType(inner) then inner.val,
+                    .BorrowedReferenceType(inner, _) then inner.val,
+                    .MutableBorrowedReferenceType(inner, _) then inner.val,
                     .WeakReferenceType(inner) then inner.val,
                     .MutableWeakReferenceType(inner) then inner.val,
                     .PointerType(inner) then inner.val,
@@ -2680,7 +2688,7 @@ given MIRFunctionBuilder {
     }
 
     private capture_place(self ref mut Self, symbol ref Symbol) MIRPlace = {
-        let name = self.context.symbol_name(symbol)
+        let name = self.context.symbol_name(symbol.val)
         when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
             .Some(place) then { return place },
             .None() then {},
@@ -2710,7 +2718,7 @@ given MIRFunctionBuilder {
     private collect_captures_expr(self ref mut Self, expr ref TypedExpr, param_names Set[String], out ref mut List[ref Symbol]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
-                let name = self.context.symbol_name(symbol)
+                let name = self.context.symbol_name(symbol.val)
                 let is_local_capture = if self.pattern_place_by_def_id.get(symbol.def_id.id) is .Some(_)
                     then true
                     else if self.pattern_place_by_name.get(name) is .Some(_)
@@ -2907,6 +2915,8 @@ given MIRFunctionBuilder {
         return when container in {
             .ReferenceType(inner) then inner.val,
             .MutableReferenceType(inner) then inner.val,
+            .BorrowedReferenceType(inner, _) then inner.val,
+            .MutableBorrowedReferenceType(inner, _) then inner.val,
             .WeakReferenceType(inner) then inner.val,
             .MutableWeakReferenceType(inner) then inner.val,
             .PointerType(inner) then inner.val,

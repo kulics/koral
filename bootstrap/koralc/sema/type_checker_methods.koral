@@ -661,6 +661,111 @@ given TypeChecker {
         }
     }
 
+    private infer_type_bindings_persistent(self, pattern Type, concrete Type, bindings Dict[String, Type]) Dict[String, Type] = {
+        let normalized_pattern = self.normalize_type_for_bindings(pattern)
+        let normalized_concrete = self.normalize_type_for_bindings(concrete)
+        return when normalized_pattern in {
+            .GenericParameter(name) then {
+                yield when bindings.get(name) in {
+                    .Some(existing) then if self.same_expr_type(existing, normalized_concrete) then bindings else bindings,
+                    .None() then {
+                        let mut next_bindings = bindings
+                        next_bindings.insert(name, normalized_concrete)
+                        yield next_bindings
+                    },
+                }
+            },
+            .ReferenceType(p_inner) then when normalized_concrete in {
+                .ReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .BorrowedReferenceType(c_inner, _) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .MutableReferenceType(p_inner) then when normalized_concrete in {
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .BorrowedReferenceType(p_inner, _) then when normalized_concrete in {
+                .ReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .BorrowedReferenceType(c_inner, _) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .MutableBorrowedReferenceType(p_inner, _) then when normalized_concrete in {
+                .MutableReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableBorrowedReferenceType(c_inner, _) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .WeakReferenceType(p_inner) then when normalized_concrete in {
+                .WeakReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutableWeakReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .MutableWeakReferenceType(p_inner) then when normalized_concrete in {
+                .MutableWeakReferenceType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .PointerType(p_inner) then when normalized_concrete in {
+                .PointerType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                .MutablePointerType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .MutablePointerType(p_inner) then when normalized_concrete in {
+                .MutablePointerType(c_inner) then self.infer_type_bindings_persistent(p_inner.val, c_inner.val, bindings),
+                _ then bindings,
+            },
+            .FunctionType(p_params, p_ret) then when normalized_concrete in {
+                .FunctionType(c_params, c_ret) then {
+                    if p_params.count() <> c_params.count() then {
+                        return bindings
+                    }
+                    let mut current_bindings = bindings
+                    let mut i UInt = 0
+                    while i < p_params.count() then {
+                        current_bindings = self.infer_type_bindings_persistent(p_params[i].val.param_type, c_params[i].val.param_type, current_bindings)
+                        i += 1
+                    }
+                    yield self.infer_type_bindings_persistent(p_ret.val, c_ret.val, current_bindings)
+                },
+                _ then bindings,
+            },
+            .GenericStruct(p_template, p_args) then when normalized_concrete in {
+                .GenericStruct(c_template, c_args) then {
+                    if not (p_template == c_template and p_args.count() == c_args.count()) then {
+                        return bindings
+                    }
+                    let mut current_bindings = bindings
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        current_bindings = self.infer_type_bindings_persistent(p_args[i].val, c_args[i].val, current_bindings)
+                        i += 1
+                    }
+                    yield current_bindings
+                },
+                _ then bindings,
+            },
+            .GenericEnum(p_template, p_args) then when normalized_concrete in {
+                .GenericEnum(c_template, c_args) then {
+                    if not (p_template == c_template and p_args.count() == c_args.count()) then {
+                        return bindings
+                    }
+                    let mut current_bindings = bindings
+                    let mut i UInt = 0
+                    while i < p_args.count() then {
+                        current_bindings = self.infer_type_bindings_persistent(p_args[i].val, c_args[i].val, current_bindings)
+                        i += 1
+                    }
+                    yield current_bindings
+                },
+                _ then bindings,
+            },
+            _ then bindings,
+        }
+    }
+
     private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
         return when t in {
             .GenericParameter(name) then when bindings.get(name) in {
@@ -888,7 +993,7 @@ given TypeChecker {
                         }
                     }
                     bindings.insert("Self", base_type)
-                    self.bind_extension_template_conformance_trait_args(inner_type, template, bindings.ref)
+                    self.bind_extension_template_conformance_trait_args(inner_type, template.val, bindings.ref)
                     let mut typed_params = List[TypedParam].new()
                     for param in template.method.params then {
                         typed_params.push(
@@ -1052,7 +1157,7 @@ given TypeChecker {
         let mut bindings = Dict[String, Type].new()
         if self.method_param_count(raw_method) > 0(UInt) then {
             let self_param_type = self.method_param_type(raw_method, 0(UInt)) or else Type.Unknown()
-            self.infer_type_bindings(self_param_type, receiver_type, bindings)
+            self.infer_type_bindings(self_param_type, receiver_type, bindings.ref)
         }
         let concrete_self = when receiver_type in {
             .MutableReferenceType(inner) then inner.val,
@@ -1159,7 +1264,7 @@ given TypeChecker {
                 or self.type_matches_expected_pattern(concrete_self_type, self_param_type),
         }
         if is_self_param then {
-            self.infer_type_bindings(self_param_type, receiver_type, bindings)
+            self.infer_type_bindings(self_param_type, receiver_type, bindings.ref)
         }
         bindings.insert("Self", concrete_self_type)
         let bound_self_type = self.apply_type_bindings(self_param_type, bindings)
@@ -1209,7 +1314,7 @@ given TypeChecker {
         }
         for template in templates then {
             let mut bindings = Dict[String, Type].new()
-            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
+            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings.ref) then {
                 continue
             }
 
@@ -1389,7 +1494,7 @@ given TypeChecker {
             }
 
             let mut bindings = Dict[String, Type].new()
-            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings) then {
+            if not self.conformance_type_key_matches(template.target_type, normalized_receiver, bindings.ref) then {
                 continue
             }
 
@@ -1832,7 +1937,7 @@ given TypeChecker {
             return List[Type].new()
         }
         let mut bindings = Dict[String, Type].new()
-        self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, bindings)
+        self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, bindings.ref)
         let mut out = List[Type].new()
         let mut i = 1(UInt)
         while i < self.method_param_count(method) then {
@@ -1896,7 +2001,7 @@ given TypeChecker {
     private resolve_signature_method_type_bindings(self, receiver_type Type, method Symbol, method_type_args List[Type]) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         if self.method_param_count(method) > 0 then {
-            self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, bindings)
+            self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), receiver_type, bindings.ref)
         }
         if method_type_args.is_empty() then {
             return bindings
@@ -1920,7 +2025,7 @@ given TypeChecker {
         let mut arg_i UInt = 0
         while arg_i < args.count() and arg_i + 1(UInt) < self.method_param_count(method) then {
             let param_type = self.method_param_type(method, arg_i + 1(UInt)) or else Type.Unknown()
-            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings)
+            self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings.ref)
             arg_i += 1
         }
         return bindings
@@ -2320,7 +2425,7 @@ given TypeChecker {
             if self.method_param_count(method) > 0(UInt) then {
                 let concrete_receiver_type = self.concrete_receiver_for_method(receiver_type, method)
                 let mut bindings = Dict[String, Type].new()
-                self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), concrete_receiver_type, bindings)
+                self.infer_type_bindings(self.method_param_type(method, 0(UInt)) or else Type.Unknown(), concrete_receiver_type, bindings.ref)
                 let mut out = List[Type].new()
                 let mut i UInt = 1
                 while i < self.method_param_count(method) then {
@@ -2567,7 +2672,7 @@ given TypeChecker {
                 if self.context().get_function_return_type(sym.def_id) is .Some(return_type) then {
                     return return_type
                 }
-                let sym_name = self.context().symbol_name(sym)
+                let sym_name = self.context().symbol_name(sym.val)
                 return when sym.symbol_type in {
                     .FunctionType(_, ret) then ret.val,
                     .StructureType(_) then sym.symbol_type,
@@ -2590,14 +2695,14 @@ given TypeChecker {
                 if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
                     return return_type
                 }
-                return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method))
+                return self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method.val))
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                let method_name = self.context().symbol_name(method)
+                let method_name = self.context().symbol_name(method.val)
                 let qualified_return_type = self.resolve_qualified_method_return_type(trait_name, method_name, base.expr_type)
                 return when qualified_return_type in {
-                    .Unknown() then self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method)),
+                    .Unknown() then self.resolve_method_return_type(base.expr_type, self.context().symbol_name(method.val)),
                     _ then qualified_return_type,
                 }
             },
@@ -2614,7 +2719,7 @@ given TypeChecker {
                 if self.context().get_function_return_type(method.def_id) is .Some(return_type) then {
                     return return_type
                 }
-                return self.resolve_method_return_type(receiver_type, self.context().symbol_name(method))
+                return self.resolve_method_return_type(receiver_type, self.context().symbol_name(method.val))
             },
             .GenericInstantiation(_, _) then {
                 return callee.expr_type
@@ -2681,7 +2786,7 @@ given TypeChecker {
                 return out
             },
             .MethodReference(base, _, method, _, _, _) then {
-                let method_name = self.context().symbol_name(method)
+                let method_name = self.context().symbol_name(method.val)
                 let mut out = List[Type].new()
                 for param_type in self.resolve_method_param_types(base.expr_type, method_name) then {
                     out.push(param_type)
@@ -2690,7 +2795,7 @@ given TypeChecker {
             },
             .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                let method_name = self.context().symbol_name(method)
+                let method_name = self.context().symbol_name(method.val)
                 let trait_params = self.resolve_trait_method_param_types(trait_name, method_name, base.expr_type)
                 if trait_params.is_empty() then {
                     let mut out = List[Type].new()

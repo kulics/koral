@@ -17,15 +17,25 @@
 /// 避免 ~500 字节的 DefIdMap 在栈上复制。
 public type CompilerContext(
     mut def_id_map ref mut DefIdMap,
+    mut concrete_function_bodies ref mut Dict[UInt, ref TypedExpr],
+    mut concrete_given_member_bodies ref mut Dict[UInt, ref TypedExpr],
 )
 
 given CompilerContext {
     public new() CompilerContext = {
-        return CompilerContext(box(DefIdMap.new()))
+        return CompilerContext(
+            box(DefIdMap.new()),
+            box(Dict[UInt, ref TypedExpr].new()),
+            box(Dict[UInt, ref TypedExpr].new()),
+        )
     }
 
     public from_def_id_map(map ref mut DefIdMap) CompilerContext = {
-        return CompilerContext(map)
+        return CompilerContext(
+            map,
+            box(Dict[UInt, ref TypedExpr].new()),
+            box(Dict[UInt, ref TypedExpr].new()),
+        )
     }
 
     // ── DefIdMap 查询 ─────────────────────────────────────────────────────
@@ -798,6 +808,49 @@ given CompilerContext {
         }
 
         return join_strings(parts, "_")
+    }
+
+    // ── Concrete function/given-member body cache ───────────────────────────
+
+    public get_concrete_function_body(self ref, def_id DefId) Option[ref TypedExpr] = {
+        return self.concrete_function_bodies.get(def_id.id)
+    }
+
+    public set_concrete_function_body(self ref, def_id DefId, body ref TypedExpr) Void = {
+        self.concrete_function_bodies.insert(def_id.id, body)
+    }
+
+    public take_concrete_function_body(self ref, def_id DefId) Option[ref TypedExpr] = {
+        let body = self.concrete_function_bodies.get(def_id.id)
+        when body in {
+            .Some(_) then self.concrete_function_bodies.remove(def_id.id),
+            .None() then {},
+        }
+        return body
+    }
+
+    public get_concrete_given_member_body(self ref, def_id DefId) Option[ref TypedExpr] = {
+        return self.concrete_given_member_bodies.get(def_id.id)
+    }
+
+    public set_concrete_given_member_body(self ref, def_id DefId, body ref TypedExpr) Void = {
+        self.concrete_given_member_bodies.insert(def_id.id, body)
+    }
+
+    public take_concrete_given_member_body(self ref, def_id DefId) Option[ref TypedExpr] = {
+        let body = self.concrete_given_member_bodies.get(def_id.id)
+        when body in {
+            .Some(_) then self.concrete_given_member_bodies.remove(def_id.id),
+            .None() then {},
+        }
+        return body
+    }
+
+    /// Drop and replace concrete body caches with empty dicts to free memory.
+    /// Call after monomorphization — MIR lowering and codegen don't need these.
+    public drop_concrete_bodies(self ref mut) Void = {
+        self.concrete_function_bodies = box(Dict[UInt, ref TypedExpr].new())
+        self.concrete_given_member_bodies = box(Dict[UInt, ref TypedExpr].new())
     }
 }
 

@@ -237,6 +237,62 @@ given TypeChecker {
         return false
     }
 
+    protected clear_variable_symbol_types_each_decl_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_CLEAR_VARIABLE_SYMBOL_TYPES_EACH_DECL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_typed_decl_retention_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_TYPED_DECL_RETENTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_trait_tool_template_backfill_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_TRAIT_TOOL_TEMPLATE_BACKFILL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_checked_decl_substitution_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_CHECKED_DECL_SUBSTITUTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_template_typed_body_boxing_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_TEMPLATE_TYPED_BODY_BOXING") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected skip_concrete_given_program_body_retention_debug_enabled(self) Bool = {
+        let _ = self
+        if env("KORAL_DEBUG_SKIP_CONCRETE_GIVEN_PROGRAM_BODY_RETENTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+            return true
+        }
+        return false
+    }
+
+    protected drop_template_body_debug_enabled(self) Bool = {
+        let file_filter = env("KORAL_DEBUG_DROP_TEMPLATE_BODY_FILE_CONTAINS")
+        return when file_filter in {
+            .Some(value) then self.storage.file_path.contains(value),
+            .None() then false,
+        }
+    }
+
     protected skip_call_family_debug_enabled(self) Bool = {
         let _ = self
         if env("KORAL_DEBUG_SKIP_CALL_FAMILY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
@@ -346,6 +402,9 @@ given TypeChecker {
     }
 
     protected template_checked_body(self, body Option[ref TypedExpr], retain_checked_template_bodies Bool) Option[ref TypedExpr] = {
+        if self.drop_template_body_debug_enabled() then {
+            return Option[ref TypedExpr].None()
+        }
         return if retain_checked_template_bodies then when body in {
             .Some(typed_body) then Option[ref TypedExpr].Some(typed_body),
             .None() then Option[ref TypedExpr].None(),
@@ -468,7 +527,10 @@ given TypeChecker {
             .Call(callee, _) then self.typed_expr_span(callee),
             .GenericCall(function_symbol, _, args) then {
                 let function_span = self.context().get_span(function_symbol.def_id) or else unknown_span()
-                yield if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args[0(UInt)])
+                yield if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else {
+                    let first_arg = args[0(UInt)].val
+                    yield self.typed_expr_span(box(first_arg))
+                }
             },
             .MemberPath(base, _) then self.typed_expr_span(base),
             .MethodReference(base, _, method, _, _, _) then {
@@ -494,13 +556,22 @@ given TypeChecker {
             .LambdaExpr(_, _, body) then self.typed_expr_span(body),
             .StaticMethodCall(_, _, method, _, _, args) then {
                 let method_span = self.context().get_span(method.def_id) or else unknown_span()
-                yield if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args[0(UInt)])
+                yield if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else {
+                    let first_arg = args[0(UInt)].val
+                    yield self.typed_expr_span(box(first_arg))
+                }
             },
             .TypeConstruction(identifier, _, args) then {
                 let type_span = self.context().get_span(identifier.def_id) or else unknown_span()
-                yield if is_known_span(type_span) then type_span else if args.is_empty() then unknown_span() else self.typed_expr_span(args[0(UInt)])
+                yield if is_known_span(type_span) then type_span else if args.is_empty() then unknown_span() else {
+                    let first_arg = args[0(UInt)].val
+                    yield self.typed_expr_span(box(first_arg))
+                }
             },
-            .EnumConstruction(_, _, args) then if args.is_empty() then unknown_span() else self.typed_expr_span(args[0(UInt)]),
+            .EnumConstruction(_, _, args) then if args.is_empty() then unknown_span() else {
+                let first_arg = args[0(UInt)].val
+                yield self.typed_expr_span(box(first_arg))
+            },
             .TraitMethodPlaceholder(base, _, method, _, _) then {
                 let base_span = self.typed_expr_span(base)
                 yield if is_known_span(base_span) then base_span else self.context().get_span(method.def_id) or else unknown_span()
@@ -934,6 +1005,7 @@ given TypeChecker {
     public check_program(self ref mut, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
         let mut typed_decls = List[ref TypedDecl].new()
+        let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled()
         for decl in program.declarations then {
             when decl in {
                 .GivenNotTraitDecl(target_type, type_params, trait_name, span) then {
@@ -942,7 +1014,7 @@ given TypeChecker {
                 _ then {
                     let td = self.check_decl(decl, retain_checked_template_bodies)
                     let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
-                    if retain_checked_template_bodies then when finalized_decl in {
+                    if retain_checked_template_bodies and not skip_typed_decl_retention then when finalized_decl in {
                         .Some(resolved) then typed_decls.push(box(resolved)),
                         .None() then {},
                     }
@@ -1004,11 +1076,13 @@ given TypeChecker {
         let mut typed_decls = List[ref TypedDecl].new()
         let total_nodes = nodes.count()
         let mut checked_decl_count = 0(UInt)
+        let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled()
         let skip_decl_check = self.skip_decl_check_debug_enabled()
         let skip_function_decl_check = self.skip_function_decl_check_debug_enabled()
         let skip_let_decl_check = self.skip_let_decl_check_debug_enabled()
         let skip_given_decl_check = self.skip_given_decl_check_debug_enabled()
         let reset_constraint_solver_each_decl = self.reset_constraint_solver_each_decl_debug_enabled()
+        let clear_variable_symbol_types_each_decl = self.clear_variable_symbol_types_each_decl_debug_enabled()
         let skip_call_family = self.skip_call_family_debug_enabled()
         let skip_member_path = self.skip_member_path_debug_enabled()
         for pair in nodes then {
@@ -1037,7 +1111,7 @@ given TypeChecker {
                     if not skip_this_decl then {
                         let td = self.check_decl(pair.first.decl, retain_checked_template_bodies)
                         let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
-                        if retain_checked_template_bodies then when finalized_decl in {
+                        if retain_checked_template_bodies and not skip_typed_decl_retention then when finalized_decl in {
                             .Some(resolved) then typed_decls.push(box(resolved)),
                             .None() then {},
                         }
@@ -1048,7 +1122,7 @@ given TypeChecker {
             if reset_constraint_solver_each_decl then {
                 self.storage.constraint_solver.clear_debug_state()
             }
-            if not retain_checked_template_bodies then {
+            if clear_variable_symbol_types_each_decl or not retain_checked_template_bodies then {
                 let decl_end_def_id = self.context().next_def_id()
                 let mut context = self.context()
                 context.clear_variable_symbol_types_in_range(decl_start_def_id, decl_end_def_id)
@@ -1068,10 +1142,16 @@ given TypeChecker {
 
     private finalize_checked_decl_constraints(self ref mut, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
         let subst_result = self.storage.constraint_solver.solve()
+        let skip_checked_decl_substitution = self.skip_checked_decl_substitution_debug_enabled()
         return when subst_result in {
             .Ok(subst) then {
                 let resolved_decl = when typed_decl in {
-                    .Some(td) then Option[TypedDecl].Some(self.apply_subst_to_decl(subst, td)),
+                    .Some(td) then {
+                        if not subst.mapping.is_empty() then {
+                            self.refresh_concrete_given_member_bodies(subst, td)
+                        }
+                        yield if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(subst, td))
+                    },
                     .None() then Option[TypedDecl].None(),
                 }
                 self.storage.constraint_solver.clear_debug_state()
@@ -1085,13 +1165,54 @@ given TypeChecker {
                 }
                 let partial_subst = TypeSubstitution(resolved_bindings)
                 let resolved_decl = when typed_decl in {
-                    .Some(td) then Option[TypedDecl].Some(self.apply_subst_to_decl(partial_subst, td)),
+                    .Some(td) then {
+                        if not partial_subst.mapping.is_empty() then {
+                            self.refresh_concrete_given_member_bodies(partial_subst, td)
+                        }
+                        yield if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(partial_subst, td))
+                    },
                     .None() then Option[TypedDecl].None(),
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                 self.storage.constraint_solver.clear_debug_state()
                 yield resolved_decl
             },
+        }
+    }
+
+    private refresh_concrete_given_member_bodies(self ref mut, subst TypeSubstitution, typed_decl TypedDecl) Void = {
+        when typed_decl in {
+            .FunctionDecl(_, _, _, _, _, _, id) then {
+                let mut context = self.context()
+                when context.get_concrete_function_body(id.def_id) in {
+                    .Some(body) then {
+                        context.set_concrete_function_body(id.def_id, self.apply_subst_to_expr(subst, body))
+                    },
+                    .None() then {},
+                }
+            },
+            .GivenDecl(_, members, _) then {
+                self.refresh_concrete_given_member_body_list(subst, members)
+            },
+            .GivenTraitDecl(_, _, _, members, _) then {
+                self.refresh_concrete_given_member_body_list(subst, members)
+            },
+            .IntrinsicGivenDecl(_, members, _) then {
+                self.refresh_concrete_given_member_body_list(subst, members)
+            },
+            _ then {},
+        }
+    }
+
+    private refresh_concrete_given_member_body_list(self ref mut, subst TypeSubstitution, members List[ref TypedGivenMember]) Void = {
+        let mut context = self.context()
+        for member_ref in members then {
+            when context.get_concrete_given_member_body(member_ref.def_id) in {
+                .Some(body) then {
+                    context.set_concrete_given_member_body(member_ref.def_id, self.apply_subst_to_expr(subst, body))
+                },
+                .None() then {},
+            }
         }
     }
 

@@ -171,11 +171,13 @@ given TypeChecker {
         let operands = chain.first
         let ops = chain.second
 
-        let mut current = self.check_operand_expr_ref(operands[0(UInt)], expected, scope)
+        let first_operand = operands[0(UInt)].val
+        let mut current = self.check_operand_expr_ref(box(first_operand), expected, scope)
 
         let mut i UInt = 1
         while i < operands.count() then {
-            let typed_right = self.check_operand_expr_ref(operands[i], .Some(current.expr_type), scope)
+            let next_operand = operands[i].val
+            let typed_right = self.check_operand_expr_ref(box(next_operand), .Some(current.expr_type), scope)
             let op_i = ops[i - 1(UInt)]
             current = make_typed_expr(TypedExprKind.BitwiseExpr(box(current), op_i, box(typed_right)), current.expr_type)
             i += 1
@@ -274,10 +276,10 @@ given TypeChecker {
         }
         let mut local_ids = Set[UInt].new()
         let mut reported_ids = Set[UInt].new()
-        self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids)
+        self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids.ref)
     }
 
-    private is_lambda_captured_symbol(self, symbol ref Symbol, local_names ref Set[String], local_ids ref Set[UInt]) Bool = {
+    private is_lambda_captured_symbol(self, symbol ref Symbol, local_names Set[String], local_ids Set[UInt]) Bool = {
         let is_variable = when symbol.kind in {
             .Variable(_) then true,
             _ then false,
@@ -285,7 +287,7 @@ given TypeChecker {
         if not is_variable then {
             return false
         }
-        let symbol_name = self.context().symbol_name(symbol)
+        let symbol_name = self.context().symbol_name(symbol.val)
         if local_names.contains(symbol_name) or local_ids.contains(symbol.def_id.id) then {
             return false
         }
@@ -303,7 +305,7 @@ given TypeChecker {
             make_diagnostic(
                 DiagnosticStage.Semantic(),
                 self.storage.file_path,
-                "Cannot capture mutable variable '\(self.context().symbol_name(symbol))'"
+                "Cannot capture mutable variable '\(self.context().symbol_name(symbol.val))'"
             )
         )
     }
@@ -311,7 +313,7 @@ given TypeChecker {
     private collect_pattern_binding_names(self, pattern ref TypedPattern, names ref mut Set[String]) Void = {
         when pattern in {
             .Variable(symbol) then {
-                let symbol_name = self.context().symbol_name(symbol)
+                let symbol_name = self.context().symbol_name(symbol.val)
                 if not (symbol_name == "_") then {
                     names.insert(symbol_name)
                 }
@@ -338,7 +340,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_captures_in_stmt(self, stmt TypedStatement, local_names ref Set[String], local_ids ref Set[UInt], reported_ids ref mut Set[UInt]) Void = {
+    private validate_lambda_captures_in_stmt(self, stmt ref TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids ref mut Set[UInt]) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
@@ -391,7 +393,7 @@ given TypeChecker {
         }
     }
 
-    private validate_lambda_captures_in_expr(self, expr ref TypedExpr, local_names ref Set[String], local_ids ref Set[UInt], reported_ids ref mut Set[UInt]) Void = {
+    private validate_lambda_captures_in_expr(self, expr ref TypedExpr, local_names Set[String], local_ids Set[UInt], reported_ids ref mut Set[UInt]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -414,21 +416,21 @@ given TypeChecker {
                     when stmt in {
                         .LetStmt(symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
-                            block_local_names.insert(self.context().symbol_name(symbol))
+                            block_local_names.insert(self.context().symbol_name(symbol.val))
                             block_local_ids.insert(symbol.def_id.id)
                         },
                         .PairLetStmt(_, first_symbol, second_symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
                             when first_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(self.context().symbol_name(symbol))
+                                    block_local_names.insert(self.context().symbol_name(symbol.val))
                                     block_local_ids.insert(symbol.def_id.id)
                                 },
                                 .None() then {},
                             }
                             when second_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(self.context().symbol_name(symbol))
+                                    block_local_names.insert(self.context().symbol_name(symbol.val))
                                     block_local_ids.insert(symbol.def_id.id)
                                 },
                                 .None() then {},

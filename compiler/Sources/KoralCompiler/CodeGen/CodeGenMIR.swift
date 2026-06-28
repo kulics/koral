@@ -846,14 +846,13 @@ final class MIRFunctionCodeEmitter {
     }
 
     if codeGen.needsDrop(destinationType) {
-      let prepared = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(destinationType))
-      codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: prepared, isLvalue: false)
       codeGen.appendDropStatement(for: destinationType, value: access.path, indent: codeGen.indent)
-      // When assigning through a deref (pointer/ref), the old value is released
-      // but the new value must be retained. Use copy semantics (retain) for
-      // deref places; for other non-local places (field access), move is fine.
-      let storeIsLvalue = isDerefPlace(place)
-      codeGen.emitCopyOrMove(type: destinationType, source: prepared, dest: access.path, isLvalue: storeIsLvalue)
+      // Move the value directly into the destination.  `emitCopyOrMove` with
+      // `isLvalue: false` generates a plain C struct assignment (no retain).
+      // The `prepared` temp from `emitValue` already holds the value with the
+      // correct refcount, so moving it balances the refcount: the destination
+      // takes ownership and the source local is consumed.
+      codeGen.emitCopyOrMove(type: destinationType, source: valueEmission.expression, dest: access.path, isLvalue: false)
       consumeMovedSource(valueToEmit)
       emitCleanups(access.cleanups)
       emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
@@ -1823,8 +1822,6 @@ final class MIRFunctionCodeEmitter {
     let pointeeType = resolver.type(of: place) ?? .void
     let pointeeCType = codeGen.cTypeName(pointeeType)
     let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
-    let shouldTransfer = allocation == .heapOwned && canTransferOwnedHeapReference(place: place)
-
     // Merged layout: allocate control block + payload in one malloc
     codeGen.addIndent()
     codeGen.appendToBuffer("\(result).control = malloc(sizeof(struct __koral_Control) + sizeof(\(pointeeCType)));\n")
@@ -1836,15 +1833,16 @@ final class MIRFunctionCodeEmitter {
     codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->weak_count = 1;\n")
     codeGen.addIndent()
     codeGen.appendToBuffer("((struct __koral_Control*)\(result).control)->ptr = \(result).ptr;\n")
+    // Always use copy semantics when boxing. Move-transfer is unsafe because the
+    // source local may still be live (e.g. in a loop body) and accessible after
+    // the box is created. A raw struct copy does not retain ref-counted fields,
+    // leading to use-after-free when the old storage is freed during mutation.
     codeGen.emitCopyOrMove(
       type: pointeeType,
       source: access.path,
       dest: "*(\(pointeeCType)*)\(result).ptr",
-      isLvalue: !shouldTransfer
+      isLvalue: true
     )
-    if shouldTransfer {
-      consumeMovedPlace(place)
-    }
     switch pointeeType {
     case .structure(let defId):
       let typeName = codeGen.cIdentifierByDefId[codeGen.defIdKey(defId)] ?? codeGen.context.getCIdentifier(defId) ?? "T_\(defId.id)"

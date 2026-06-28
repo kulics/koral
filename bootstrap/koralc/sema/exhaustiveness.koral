@@ -30,7 +30,7 @@ given ExhaustivenessChecker {
 
         // 检查是否有通配符/绑定模式（catchall）
         let mut has_catchall = false
-        for p in self.patterns then {
+        for p in self.patterns.iterator() then {
             if is_catchall(p) then {
                 has_catchall = true
             }
@@ -176,7 +176,7 @@ given ExhaustivenessChecker {
         let pattern_count = self.patterns.count()
         let mut pattern_index UInt = 0
 
-        for p in self.patterns then {
+        for p in self.patterns.iterator() then {
             if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
                 pattern_index += 1
                 continue
@@ -195,8 +195,7 @@ given ExhaustivenessChecker {
             }
 
             // 收集当前模式中的 enum case 名称
-            let mut pattern_cases = Set[String].new()
-            collect_enum_cases(p, pattern_cases.ref)
+            let pattern_cases = collect_enum_cases(p)
 
             if not pattern_cases.is_empty() then {
                 // 检查是否有已覆盖的 case
@@ -317,8 +316,11 @@ given ExhaustivenessChecker {
 
         // 收集被覆盖的 case（递归处理 or 模式）
         let mut covered = Set[String].new()
-        for p in self.patterns then {
-            collect_enum_cases(p, covered.ref)
+        for p in self.patterns.iterator() then {
+            let pattern_cases = collect_enum_cases(p)
+            for case_name in pattern_cases.iterator() then {
+                covered.insert(case_name)
+            }
         }
 
         // 找出缺失的 case
@@ -349,7 +351,7 @@ given ExhaustivenessChecker {
         let mut has_true = false
         let mut has_false = false
 
-        for p in self.patterns then {
+        for p in self.patterns.iterator() then {
             when p in {
                 .BoolLiteral(value) then {
                     if value then { has_true = true }
@@ -475,15 +477,23 @@ private let unreachable_case_covered_message(case_name String) String = {
 }
 
 // 递归收集 or 模式中覆盖的 enum case 名称
-public let collect_enum_cases(pattern ref TypedPattern, covered ref mut Set[String]) Void = {
+public let collect_enum_cases(pattern ref TypedPattern) Set[String] = {
+    let mut covered = Set[String].new()
     when pattern in {
         .EnumCase(case_name, _, _) then {
             covered.insert(case_name)
         },
         .OrPattern(left, right) then {
-            collect_enum_cases(left, covered)
-            collect_enum_cases(right, covered)
+            let left_cases = collect_enum_cases(left)
+            for case_name in left_cases.iterator() then {
+                covered.insert(case_name)
+            }
+            let right_cases = collect_enum_cases(right)
+            for case_name in right_cases.iterator() then {
+                covered.insert(case_name)
+            }
         },
         _ then {},
     }
+    return covered
 }

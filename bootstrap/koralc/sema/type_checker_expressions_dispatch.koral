@@ -278,8 +278,11 @@ given TypeChecker {
                 let pattern_subject_type = when typed_subj.expr_type in {
                     .MutableReferenceType(inner) then inner.val,
                     .ReferenceType(inner) then inner.val,
+                    .BorrowedReferenceType(inner, _) then inner.val,
+                    .MutableBorrowedReferenceType(inner, _) then inner.val,
                     .WeakReferenceType(inner) then inner.val,
                     .MutableWeakReferenceType(inner) then inner.val,
+                    .GenericParameter(name) then when scope.lookup_type(name) in { .Some(resolved) then resolved, .None() then typed_subj.expr_type },
                     _ then typed_subj.expr_type,
                 }
                 let exhaustiveness_subject_type = self.concretize_default_literal_type(pattern_subject_type)
@@ -676,7 +679,7 @@ given TypeChecker {
                 let implicit_static_receiver_opt = self.resolve_implicit_static_receiver_type(expected, member_name)
                 let implicit_static_type_name = self.implicit_static_receiver_type_name(implicit_static_receiver_opt)
                 let param_types = self.implicit_member_param_types(implicit_static_receiver_opt, implicit_static_type_name, expected, member_name)
-                let typed_args = self.check_implicit_member_args(args, param_types, scope)
+                let typed_args = self.check_implicit_member_args(args.ref, param_types, scope)
                 yield self.lower_implicit_member_expr_from_typed_args(implicit_static_receiver_opt, member_name, typed_args, expected)
             },
             .NamedArgument(_, inner, _) then self.check_expr_scoped_ref(inner, expected, scope),
@@ -1395,7 +1398,8 @@ given TypeChecker {
                 yield when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
                     .Some(kind) then when kind in {
                         .Pointer(element_type, _) then {
-                            let typed_index = self.check_expr_scoped_ref(args[0], Option[Type].Some(Type.UIntType()), scope)
+                            let index_arg = args[0].val
+                            let typed_index = self.check_expr_scoped_ref(box(index_arg), Option[Type].Some(Type.UIntType()), scope)
                             let pointer_base_type = self.builtin_subscript_base_type(typed_base.expr_type)
                             let pointer_expr = when typed_base.expr_type in {
                                 .ReferenceType(_) then make_typed_expr(TypedExprKind.DerefExpr(box(typed_base)), pointer_base_type),
@@ -1963,6 +1967,24 @@ given TypeChecker {
                         yield when inner_ref.val in {
                             .OpaqueType(def_id) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on an opaque type ptr")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    .BorrowedReferenceType(inner_ref, _) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then inner_ref.val,
+                        }
+                    },
+                    .MutableBorrowedReferenceType(inner_ref, _) then {
+                        yield when inner_ref.val in {
+                            .TraitObject(_, _) then {
+                                self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then inner_ref.val,

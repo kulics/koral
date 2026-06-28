@@ -601,13 +601,20 @@ given Parser {
                         return .Error(box("Function type must include a return type"))
                     }
                     let mut param_types = List[ref TypeNode].new()
+                    let mut return_type_opt = Option[ref TypeNode].None()
                     let mut i UInt = 0
-                    while i + 1 < args.count() then {
-                        param_types.push(args[i])
+                    for arg in args then {
+                        if i + 1 < args.count() then {
+                            param_types.push(arg)
+                        } else {
+                            return_type_opt = Option[ref TypeNode].Some(arg)
+                        }
                         i += 1
                     }
-                    let return_type = args[args.count() - 1]
-                    return .Ok(TypeNode.FunctionType(param_types, return_type))
+                    return when return_type_opt in {
+                        .Some(return_type) then .Ok(TypeNode.FunctionType(param_types, return_type)),
+                        .None() then .Error(box("Function type must include a return type")),
+                    }
                 }
 
                 if not self.is_upper_first(module_or_name) then {
@@ -662,21 +669,18 @@ given Parser {
                 },
             }
 
-            // 泛型类型参数必须跟约束（生命周期参数除外）
+            // Reject lifetime parameters in generic parameter lists
             let is_lifetime_param = param_name.starts_with("'")
-            if not is_lifetime_param and not self.is_type_start() then {
+            if is_lifetime_param then {
+                return .Error(box("Lifetime parameters are not supported in generic parameter lists. Use '_ (anonymous lifetime) directly in ref types instead."))
+            }
+            if not self.is_type_start() then {
                 let t = self.current()
                 let mut message = "Type parameter '"
                 message.push_string(param_name)
                 message.push_string("' requires a constraint at ")
                 message.push_string(self.token_position_text(t))
                 return .Error(box(message))
-            }
-            if is_lifetime_param and not self.is_type_start() then {
-                // Lifetime parameter with no constraints — add as bare parameter
-                params.push(TypeParameter(param_name, List[ref TypeNode].new()))
-                if self.current().kind is .Comma() then { self.advance() }
-                continue
             }
             let mut constraints = List[ref TypeNode].new()
             let first_constraint = self.parse_type() or else {
@@ -804,9 +808,7 @@ given Parser {
         }
 
         let name = self.expect_identifier("let declaration") or return
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse type parameter error"))
-        }
+        let type_params = self.parse_type_parameters() or return
 
         if self.current().kind is .LParen() then {
             if is_mut then {
@@ -934,9 +936,7 @@ given Parser {
             message.push_string("' must start with an uppercase letter")
             return .Error(box(message))
         }
-        let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse type parameter error"))
-        }
+        let type_params = self.parse_type_parameters() or return
 
         when self.current().kind in {
             .Assign() then {

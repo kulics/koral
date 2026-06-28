@@ -1,6 +1,9 @@
 given TypeChecker {
 
     private apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
+        if subst.mapping.is_empty() then {
+            return decl
+        }
         return when decl in {
             .LetDecl(access, name, mutable, decl_type, initializer, span, id) then {
                 yield TypedDecl.LetDecl(access, name, mutable, subst.apply(decl_type), self.apply_subst_to_expr(subst, initializer), span, id)
@@ -111,7 +114,7 @@ given TypeChecker {
         return Symbol(symbol.def_id, subst.apply(symbol.symbol_type), symbol.kind)
     }
 
-    private apply_subst_to_statement(self, subst TypeSubstitution, stmt TypedStatement) TypedStatement = {
+    private apply_subst_to_statement(self, subst TypeSubstitution, stmt ref TypedStatement) TypedStatement = {
         return when stmt in {
             .LetStmt(symbol, value, span) then {
                 yield TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), self.apply_subst_to_expr(subst, value), span)
@@ -166,8 +169,8 @@ given TypeChecker {
                 }
                 yield TypedStatement.ReturnStmt(new_value, span)
             },
-            .BreakStmt(_) then stmt,
-            .ContinueStmt(_) then stmt,
+            .BreakStmt(span) then TypedStatement.BreakStmt(span),
+            .ContinueStmt(span) then TypedStatement.ContinueStmt(span),
             .FinallyStmt(expr, span) then {
                 yield TypedStatement.FinallyStmt(self.apply_subst_to_expr(subst, expr), span)
             },
@@ -248,7 +251,8 @@ given TypeChecker {
                         .None() then Option[Type].None(),
                     }
                     yield if name <> "Pair" or args.count() <= index then Option[Type].None() else {
-                        let typed_arg = self.check_expr_scoped_ref(args[index], expected_type, scope)
+                        let arg_expr = args[index].val
+                        let typed_arg = self.check_expr_scoped_ref(box(arg_expr), expected_type, scope)
                         yield Option[Type].Some(self.concretize_default_literal_type(typed_arg.expr_type))
                     }
                 },
@@ -284,8 +288,10 @@ given TypeChecker {
                     if name <> "Pair" or args.count() <> 2(UInt) then {
                         yield binding_type
                     }
-                    let first_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(args[0(UInt)], .None(), scope).expr_type)
-                    let second_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(args[1(UInt)], .None(), scope).expr_type)
+                    let first_arg = args[0(UInt)].val
+                    let second_arg = args[1(UInt)].val
+                    let first_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(box(first_arg), .None(), scope).expr_type)
+                    let second_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(box(second_arg), .None(), scope).expr_type)
                     let mut pair_args = List[ref Type].new()
                     pair_args.push(box(first_type))
                     pair_args.push(box(second_type))
@@ -468,6 +474,9 @@ given TypeChecker {
 
     // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
     private apply_subst_to_expr(self, subst TypeSubstitution, expr ref TypedExpr) ref TypedExpr = {
+        if subst.mapping.is_empty() then {
+            return expr
+        }
         let new_type = subst.apply(expr.expr_type)
         let new_kind = self.apply_subst_to_expr_kind(subst, expr.expr_kind)
         return box(TypedExpr(new_kind, new_type))
