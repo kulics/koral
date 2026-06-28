@@ -404,12 +404,31 @@ private let collect_trait_conformance_bindings_for_template_binding(
             when normalized_actual in {
                 .ReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
                 .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .BorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .MutableReferenceType(pattern_inner) then {
             when normalized_actual in {
                 .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .BorrowedReferenceType(pattern_inner, _) then {
+            when normalized_actual in {
+                .ReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .BorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutableBorrowedReferenceType(pattern_inner, _) then {
+            when normalized_actual in {
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings_for_template_binding(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
@@ -687,6 +706,18 @@ public let instantiate_extension_method(
             }
         },
         .MutableReferenceType(inner) then {
+            effective_template_name = "MutRef"
+            if effective_type_args.is_empty() then {
+                effective_type_args.push(box(inner.val))
+            }
+        },
+        .BorrowedReferenceType(inner, _) then {
+            effective_template_name = "Ref"
+            if effective_type_args.is_empty() then {
+                effective_type_args.push(box(inner.val))
+            }
+        },
+        .MutableBorrowedReferenceType(inner, _) then {
             effective_template_name = "MutRef"
             if effective_type_args.is_empty() then {
                 effective_type_args.push(box(inner.val))
@@ -1072,12 +1103,31 @@ private let collect_trait_conformance_bindings(mono ref Monomorphizer, pattern T
             when normalized_actual in {
                 .ReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
                 .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .BorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
         .MutableReferenceType(pattern_inner) then {
             when normalized_actual in {
                 .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .BorrowedReferenceType(pattern_inner, _) then {
+            when normalized_actual in {
+                .ReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .BorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                _ then {},
+            }
+        },
+        .MutableBorrowedReferenceType(pattern_inner, _) then {
+            when normalized_actual in {
+                .MutableReferenceType(actual_inner) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
+                .MutableBorrowedReferenceType(actual_inner, _) then collect_trait_conformance_bindings(mono, pattern_inner.val, actual_inner.val, bindings),
                 _ then {},
             }
         },
@@ -1306,6 +1356,14 @@ public let instantiate_trait_vtable_methods(
             concrete_template_name = "MutRef"
             extension_type_args.push(box(inner.val))
         },
+        .BorrowedReferenceType(inner, _) then {
+            concrete_template_name = "Ref"
+            extension_type_args.push(box(inner.val))
+        },
+        .MutableBorrowedReferenceType(inner, _) then {
+            concrete_template_name = "MutRef"
+            extension_type_args.push(box(inner.val))
+        },
         .PointerType(inner) then {
             concrete_template_name = "Ptr"
             extension_type_args.push(box(inner.val))
@@ -1478,6 +1536,8 @@ public let instantiate_trait_vtable_methods(
         when parameterized_concrete_type in {
             .ReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
             .MutableReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .BorrowedReferenceType(inner, _) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
+            .MutableBorrowedReferenceType(inner, _) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
             .WeakReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
             .MutableWeakReferenceType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
             .PointerType(inner) then instantiate_trait_vtable_methods(mono, inner.val, trait_name, trait_type_args),
