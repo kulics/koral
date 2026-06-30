@@ -954,18 +954,31 @@ given MIRFunctionCodeEmitter {
                 if call.arguments.count() == 1 then {
                     let ownership = if has_ownerships then call.argument_ownerships[0(UInt)] else MIROwnershipUse.Move()
                     let emission = self.emit_direct_call_argument(call.arguments[0(UInt)].val, ownership)
-                    let expression = self.emit_direct_call_1(function_name, emission.expression, call.result_type)
+                    // Auto-wrap: if the function parameter expects a borrowed reference
+                    // but the argument is a raw value, wrap it in a stack borrow.
+                    let arg_type = self.type_of_value(call.arguments[0(UInt)].val)
+                    let expected_param_type = self.codegen.function_type_param_type(symbol.symbol_type, 0(UInt)) or else Type.Unknown()
+                    let needs_wrap = is_borrowed_reference_like_type(expected_param_type) and not is_borrowed_reference_like_type(arg_type)
+                    let final_emission = if needs_wrap then self.wrap_value_as_stack_borrow(emission.expression, arg_type, expected_param_type) else emission
+                    let expression = self.emit_direct_call_1(function_name, final_emission.expression, call.result_type)
                     if ownership is .Move() or ownership is .Take() then {
                         self.consume_moved_source(call.arguments[0(UInt)].val)
                     }
-                    self.emit_residual_cleanups(emission, self.call_arg_consumed(ownership, call.arguments[0(UInt)].val))
+                    self.emit_residual_cleanups(final_emission, self.call_arg_consumed(ownership, call.arguments[0(UInt)].val))
                     return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type))
                 }
                 if call.arguments.count() == 2 then {
                     let first_ownership = if has_ownerships then call.argument_ownerships[0(UInt)] else MIROwnershipUse.Move()
                     let second_ownership = if has_ownerships then call.argument_ownerships[1(UInt)] else MIROwnershipUse.Move()
-                    let first = self.emit_direct_call_argument(call.arguments[0(UInt)].val, first_ownership)
-                    let second = self.emit_direct_call_argument(call.arguments[1(UInt)].val, second_ownership)
+                    let first_emission = self.emit_direct_call_argument(call.arguments[0(UInt)].val, first_ownership)
+                    let second_emission = self.emit_direct_call_argument(call.arguments[1(UInt)].val, second_ownership)
+                    // Auto-wrap borrowed reference parameters.
+                    let first_type = self.type_of_value(call.arguments[0(UInt)].val)
+                    let second_type = self.type_of_value(call.arguments[1(UInt)].val)
+                    let first_expected = self.codegen.function_type_param_type(symbol.symbol_type, 0(UInt)) or else Type.Unknown()
+                    let second_expected = self.codegen.function_type_param_type(symbol.symbol_type, 1(UInt)) or else Type.Unknown()
+                    let first = if is_borrowed_reference_like_type(first_expected) and not is_borrowed_reference_like_type(first_type) then self.wrap_value_as_stack_borrow(first_emission.expression, first_type, first_expected) else first_emission
+                    let second = if is_borrowed_reference_like_type(second_expected) and not is_borrowed_reference_like_type(second_type) then self.wrap_value_as_stack_borrow(second_emission.expression, second_type, second_expected) else second_emission
                     let expression = self.emit_direct_call_2(function_name, first.expression, second.expression, call.result_type)
                     if first_ownership is .Move() or first_ownership is .Take() then {
                         self.consume_moved_source(call.arguments[0(UInt)].val)
@@ -981,6 +994,20 @@ given MIRFunctionCodeEmitter {
             _ then {},
         }
 
+        // Get function parameter types for borrowed-reference wrapping.
+        let fn_param_types = when call.callee in {
+            .Function(sym) then {
+                let mut pts = List[Type].new()
+                when sym.symbol_type in {
+                    .FunctionType(params, _) then {
+                        for p in params then { pts.push(p.param_type) }
+                    },
+                    _ then {},
+                }
+                yield pts
+            },
+            _ then List[Type].new(),
+        }
         let mut arg_values = List[String].new()
         let mut emissions = List[MIRValueEmission].new()
         let mut ownerships = List[MIROwnershipUse].new()
@@ -990,8 +1017,17 @@ given MIRFunctionCodeEmitter {
             let ownership = if has_ownerships then call.argument_ownerships[arg_i] else MIROwnershipUse.Move()
             ownerships.push(ownership)
             let emission = self.emit_direct_call_argument(arg.val, ownership)
-            emissions.push(emission)
-            arg_values.push(emission.expression)
+            // Auto-wrap: if the function parameter expects a borrowed reference
+            // but the argument is a raw value, wrap it in a stack borrow.
+            let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(fn_param_types[arg_i]) and not is_borrowed_reference_like_type(self.type_of_value(arg.val))
+            if needs_wrap then {
+                let wrapped = self.wrap_value_as_stack_borrow(emission.expression, self.type_of_value(arg.val), fn_param_types[arg_i])
+                emissions.push(wrapped)
+                arg_values.push(wrapped.expression)
+            } else {
+                emissions.push(emission)
+                arg_values.push(emission.expression)
+            }
             arg_i += 1
         }
         let expression = when call.callee in {
@@ -1505,6 +1541,28 @@ given MIRFunctionCodeEmitter {
         }
         code.push_string("}")
         return code
+    }
+
+    // Wrap a raw value expression in a stack-borrow __koral_Ref.
+    // Used when a function expects a borrowed reference but the MIR passes a raw value.
+    private wrap_value_as_stack_borrow(self ref mut Self, value_expr String, value_type Type, ref_type Type) MIRValueEmission = {
+        let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(ref_type))
+        // Create a temporary to hold the value so we can take its address.
+        let value_temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(value_type))
+        self.codegen.add_indent()
+        self.codegen.buffer.push_string(value_temp)
+        self.codegen.buffer.push_string(" = ")
+        self.codegen.buffer.push_string(value_expr)
+        self.codegen.buffer.push_string(";\n")
+        self.codegen.add_indent()
+        self.codegen.buffer.push_string(result)
+        self.codegen.buffer.push_string(".ptr = &")
+        self.codegen.buffer.push_string(value_temp)
+        self.codegen.buffer.push_string(";\n")
+        self.codegen.add_indent()
+        self.codegen.buffer.push_string(result)
+        self.codegen.buffer.push_string(".control = NULL;\n")
+        return MIRValueEmission(result, Option[ref MIRValueCleanup].None())
     }
 
     private emit_reference(self ref mut Self, place MIRPlace, kind MIRReferenceKind, allocation MIRReferenceAllocation) MIRValueEmission = {

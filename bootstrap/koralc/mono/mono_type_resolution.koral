@@ -3831,9 +3831,6 @@ private let bind_generic_function_call_callee(
             let template = when template_opt in {
                 .Some(t) then t,
                 .None() then {
-                    if symbol.def_id.id > 0 and not has_generic_parameter(resolve_parameterized_type(mono, symbol.symbol_type)) and not has_ambiguous_remap then {
-                        return callee
-                    }
                     let symbol_name = mono.storage.context.symbol_name(symbol.val)
                     yield when mono.storage.generic_templates.lookup_function(symbol_name) in {
                         .Some(by_name) then by_name,
@@ -3868,6 +3865,18 @@ private let bind_generic_function_call_callee(
                 let arg_expr = args[i]
                 let actual = infer_generic_function_call_argument_type(mono, arg_expr)
                 collect_generic_bindings_from_type_node(mono, expected_node, actual, template.type_parameters, inferred.ref)
+                // Direct inference fallback: if collect_generic_bindings_from_type_node
+                // didn't bind (ref mut Dict may not persist), try direct identifier matching.
+                if inferred.count() == 0 then {
+                    when expected_node in {
+                        .Identifier(name) then {
+                            if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(actual) then {
+                                inferred.insert(name, actual)
+                            }
+                        },
+                        _ then {},
+                    }
+                }
                 i += 1
             }
 

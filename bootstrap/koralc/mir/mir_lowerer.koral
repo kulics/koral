@@ -315,10 +315,35 @@ given MIRLowerer {
     }
 
     private make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
+        // Collect trait members without ref mut (ref mut doesn't persist in bootstrap codegen).
+        // Use iterative approach with explicit work list.
         let mut ordered_members = List[TypedTraitMember].new()
         let mut visited_traits = Set[String].new()
         let mut seen_methods = Set[String].new()
-        self.collect_ordered_trait_members(request.trait_name, ordered_members.ref, visited_traits.ref, seen_methods.ref)
+        let mut work_stack = List[String].new()
+        work_stack.push(request.trait_name)
+        while not work_stack.is_empty() then {
+            let trait_name = work_stack.pop() or else { continue }
+            if visited_traits.contains(trait_name) then { continue }
+            visited_traits.insert(trait_name)
+            when self.program.traits.get(trait_name) in {
+                .Some(trait_info) then {
+                    // Push parent traits in reverse order so we process them first
+                    let mut pi = trait_info.parent_traits.count()
+                    while pi > 0(UInt) then {
+                        pi -= 1(UInt)
+                        work_stack.push(trait_info.parent_traits[pi].name)
+                    }
+                    for member in trait_info.members then {
+                        if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
+                            seen_methods.insert(member.name)
+                            ordered_members.push(member)
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
 
         let bindings = self.trait_member_type_bindings(request)
         let mut methods = List[MIRTraitVTableMethod].new()
@@ -326,31 +351,6 @@ given MIRLowerer {
             methods.push(self.make_trait_vtable_method(self.apply_type_bindings_to_trait_member(member, bindings)))
         }
         return methods
-    }
-
-    private collect_ordered_trait_members(
-        self,
-        trait_name String,
-        ordered ref mut List[TypedTraitMember],
-        visited_traits ref mut Set[String],
-        seen_methods ref mut Set[String],
-    ) Void = {
-        if visited_traits.contains(trait_name) then { return }
-        visited_traits.insert(trait_name)
-        when self.program.traits.get(trait_name) in {
-            .Some(trait_info) then {
-                for parent in trait_info.parent_traits then {
-                    self.collect_ordered_trait_members(parent.name, ordered, visited_traits, seen_methods)
-                }
-                for member in trait_info.members then {
-                    if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
-                        seen_methods.insert(member.name)
-                        ordered.push(member)
-                    }
-                }
-            },
-            .None() then {},
-        }
     }
 
     private trait_member_has_receiver(self, member TypedTraitMember) Bool = {
@@ -387,6 +387,8 @@ given MIRLowerer {
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
             .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(inner.val, bindings))),
             .MutablePointerType(inner) then Type.MutablePointerType(box(self.apply_type_bindings(inner.val, bindings))),
+            .BorrowedReferenceType(inner, lifetime) then Type.BorrowedReferenceType(box(self.apply_type_bindings(inner.val, bindings)), lifetime),
+            .MutableBorrowedReferenceType(inner, lifetime) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(inner.val, bindings)), lifetime),
             .FunctionType(params, return_type) then {
                 let mut bound_params = List[ref Type].new()
                 for param in params then {
