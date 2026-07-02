@@ -305,6 +305,15 @@ private let contains_string(values List[String], target String) Bool = {
     return false
 }
 
+private let contains_module_path(paths List[List[String]], target List[String]) Bool = {
+    for path in paths then {
+        if string_list_eq(path, target) then {
+            return true
+        }
+    }
+    return false
+}
+
 private let collect_unique_module_paths_from_pairs(pairs List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
     let mut seen = Set[String].new()
     let mut out = List[List[String]].new()
@@ -395,6 +404,9 @@ private let load_manifest_modules_into_prepared(
     let mut iter = manifest.modules.iterator()
     while iter.next() is .Some(entry) then {
         let spec = entry.second
+        if contains_module_path(loaded_module_paths, spec.path_segments) then {
+            continue
+        }
         let unit = resolver.resolve_module_with_path(spec.entry_path, Option[List[String]].Some(spec.path_segments)) or return
         let pairs = unit.collect_all_nodes_with_path()
         let is_std = when package_kind in {
@@ -407,7 +419,11 @@ private let load_manifest_modules_into_prepared(
             for pair in pairs then { user_pairs.push(pair) }
         }
         merged_graph.merge(unit.import_graph())
-        loaded_module_paths.push(spec.path_segments)
+        for pair in pairs then {
+            if not contains_module_path(loaded_module_paths, pair.second) then {
+                loaded_module_paths.push(pair.second)
+            }
+        }
         for link in manifest.links then { linked_libraries.push(link) }
         for link in spec.links then { linked_libraries.push(link) }
         if root_module_path.is_empty() and not entry.first.contains("::") then {
@@ -463,6 +479,7 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
     let mut user_pairs = List[Pair[LoadedNode, List[String]]].new()
     let mut merged_graph = ImportGraph.new()
     let mut linked_libraries = List[String].new()
+    let mut loaded_module_paths = List[List[String]].new()
 
     let mut module_names_to_load = List[String].new()
     let mut all_module_names = List[String].new()
@@ -486,6 +503,9 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
         let spec = package_graph.modules_by_name.get(module_name) or else {
             return Result[PreparedCompilation].Error(box("Target module '\(module_name)' not found in resolved module graph"))
         }
+        if contains_module_path(loaded_module_paths, spec.path_segments) then {
+            continue
+        }
         resolver.set_manifest_module_aliases(spec.visible_module_aliases)
         let unit = resolver.resolve_module_with_path(spec.entry_file, Option[List[String]].Some(spec.path_segments)) or return
         resolver.set_manifest_module_aliases(List[ResolvedModuleAliasRule].new())
@@ -500,6 +520,11 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
             for pair in pairs then { user_pairs.push(pair) }
         }
         merged_graph.merge(unit.import_graph())
+        for pair in pairs then {
+            if not contains_module_path(loaded_module_paths, pair.second) then {
+                loaded_module_paths.push(pair.second)
+            }
+        }
         for link in spec.links then { linked_libraries.push(link) }
     }
 
@@ -775,6 +800,11 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
         result.instantiation_requests,
         result.generic_templates,
         context,
+        result.global_scope,
+        result.import_graph,
+        result.method_table,
+        result.trait_registry,
+        result.conformance_index,
     )
     let mut mono_program = mono.ref.monomorphize()
     profile_phase("\(phase_prefix): monomorphize", mono_start)
@@ -784,7 +814,7 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
 
     debug_phase("\(phase_prefix): mir lower")
     let mir_start = MonoTime.now()
-    let mut lowerer = MIRLowerer.new(mono_program.ref, context)
+    let mut lowerer = MIRLowerer.new(mono_program.ref, context.ref)
     let mut mir_program = lowerer.lower()
     profile_phase("\(phase_prefix): mir lower", mir_start)
 

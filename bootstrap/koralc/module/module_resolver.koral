@@ -303,7 +303,13 @@ given ModuleResolver {
         for using_decl in pending then {
             when using_decl in {
                 .Module(path_segments, items) then {
-                    self.record_module_using(path_segments, items, module, unit, normalized_file)
+                    when self.record_module_using(path_segments, items, module, unit, normalized_file) in {
+                        .Ok(_) then {},
+                        .Error(e) then {
+                            self.storage.resolving_files.pop()
+                            return Result[Void].Error(e)
+                        },
+                    }
                 },
                 .File(file_name) then {
                     when self.resolve_file_merge(file_name, module, unit, normalized_file) in {
@@ -369,7 +375,7 @@ given ModuleResolver {
         module ModuleInfo,
         unit CompilationUnit,
         current_file String,
-    ) Void = {
+    ) Result[Void] = {
         let import_source_file = Option[String].Some(current_file)
         let target_path = self.resolve_manifest_aliased_module_path(path_segments)
         for item in items then {
@@ -394,7 +400,58 @@ given ModuleResolver {
                 },
             }
         }
+        when self.resolve_local_module_import(target_path, module, unit) in {
+            .Ok(_) then {},
+            .Error(e) then { return Result[Void].Error(e) },
+        }
         let _ = self
+        return Result[Void].Ok({})
+    }
+
+    private resolve_local_module_import(self, target_path List[String], module ModuleInfo, unit CompilationUnit) Result[Void] = {
+        let current_path = module.path()
+        if target_path.count() <= current_path.count() then {
+            return Result[Void].Ok({})
+        }
+        let mut idx UInt = 0
+        while idx < current_path.count() then {
+            if target_path[idx] <> current_path[idx] then {
+                return Result[Void].Ok({})
+            }
+            idx += 1
+        }
+
+        let module_key = join_path(target_path, ".")
+        if unit.has_module(module_key) then {
+            return Result[Void].Ok({})
+        }
+
+        let mut relative_segments = List[String].new()
+        let mut rel_idx = current_path.count()
+        while rel_idx < target_path.count() then {
+            relative_segments.push(target_path[rel_idx])
+            rel_idx += 1
+        }
+        if relative_segments.is_empty() then {
+            return Result[Void].Ok({})
+        }
+
+        let mut dir_path = module.directory().into_path()
+        let mut seg_idx UInt = 0
+        while seg_idx + 1(UInt) < relative_segments.count() then {
+            dir_path = dir_path.join(module_identifier_to_file_name(relative_segments[seg_idx]))
+            seg_idx += 1(UInt)
+        }
+        let leaf_name = module_identifier_to_file_name(relative_segments[relative_segments.count() - 1(UInt)])
+        let entry_file = dir_path.join(leaf_name).join(leaf_name + ".koral").normalize().to_string()
+
+        if not path_exist(entry_file.into_path()) then {
+            return Result[Void].Error(box("Module '\(join_path(target_path, "::"))' not found at '\(entry_file)'"))
+        }
+
+        let child_module = ModuleInfo.new(target_path, entry_file, false)
+        unit.add_module(child_module)
+        return self.resolve_file(entry_file, child_module, unit)
     }
 
     // Resolve file merge: using "file_name"

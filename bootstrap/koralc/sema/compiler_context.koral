@@ -17,8 +17,18 @@
 /// 避免 ~500 字节的 DefIdMap 在栈上复制。
 public type CompilerContext(
     mut def_id_map ref mut DefIdMap,
+    mut concrete_global_initializers ref mut Dict[UInt, ref TypedExpr],
     mut concrete_function_bodies ref mut Dict[UInt, ref TypedExpr],
+    mut concrete_function_sources ref mut Dict[UInt, ConcreteExprSource],
     mut concrete_given_member_bodies ref mut Dict[UInt, ref TypedExpr],
+    mut concrete_given_member_sources ref mut Dict[UInt, ConcreteExprSource],
+)
+
+public type ConcreteExprSource(
+    body ref Expr,
+    source_file String,
+    package_id String,
+    module_path List[String],
 )
 
 given CompilerContext {
@@ -27,6 +37,9 @@ given CompilerContext {
             box(DefIdMap.new()),
             box(Dict[UInt, ref TypedExpr].new()),
             box(Dict[UInt, ref TypedExpr].new()),
+            box(Dict[UInt, ConcreteExprSource].new()),
+            box(Dict[UInt, ref TypedExpr].new()),
+            box(Dict[UInt, ConcreteExprSource].new()),
         )
     }
 
@@ -35,6 +48,9 @@ given CompilerContext {
             map,
             box(Dict[UInt, ref TypedExpr].new()),
             box(Dict[UInt, ref TypedExpr].new()),
+            box(Dict[UInt, ConcreteExprSource].new()),
+            box(Dict[UInt, ref TypedExpr].new()),
+            box(Dict[UInt, ConcreteExprSource].new()),
         )
     }
 
@@ -306,7 +322,7 @@ given CompilerContext {
                 for case_info in cases then {
                     if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
                         for param in case_info.params then {
-                            specs.push(FunctionParamSpec(param.name, param.named))
+                            specs.push(FunctionParamSpec(param.name, false, param.named))
                         }
                     }
                 }
@@ -524,7 +540,7 @@ given CompilerContext {
     // ── 类型查询 ──────────────────────────────────────────────────────────
 
     /// 获取类型的人类可读名称
-    public get_type_name(self, t Type) String = {
+    public get_type_name(self ref, t Type) String = {
         return when t in {
             .StructureType(def_id) then {
                 yield when self.def_id_map.get_name(def_id) in {
@@ -552,7 +568,7 @@ given CompilerContext {
     }
 
     /// 获取类型的调试名称（含泛型参数展开）
-    public get_debug_name(self, t Type) String = {
+    public get_debug_name(self ref, t Type) String = {
         return when t in {
             .IntType() then "Int",
             .Int8Type() then "Int8",
@@ -656,7 +672,7 @@ given CompilerContext {
     // ── 类型变量查询 ──────────────────────────────────────────────────────
 
     /// 检查类型是否包含类型变量
-    public contains_type_variable(self, t Type) Bool = {
+    public contains_type_variable(self ref, t Type) Bool = {
         return when t in {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
@@ -690,7 +706,7 @@ given CompilerContext {
 
     /// 检查类型是否包含泛型参数
     public contains_generic_parameter(self ref, t Type) Bool = {
-        return type_contains_generic_parameter(t, self.val)
+        return type_contains_generic_parameter(t, self)
     }
 
     /// 检查类型表面是否仍提及未解析的泛型占位。
@@ -701,7 +717,7 @@ given CompilerContext {
     // ── Layout Key 生成 ───────────────────────────────────────────────────
 
     /// 生成类型的布局键（用于 C 标识符生成）
-    public get_layout_key(self, t Type) String = {
+    public get_layout_key(self ref, t Type) String = {
         return when t in {
             .IntType() then "I",
             .Int8Type() then "I8",
@@ -755,7 +771,7 @@ given CompilerContext {
         }
     }
 
-    private layout_key_for_def_id(self, def_id DefId) String = {
+    private layout_key_for_def_id(self ref, def_id DefId) String = {
         let name_opt = self.def_id_map.get_name(def_id)
         let module_opt = self.def_id_map.get_module_path(def_id)
         let access_opt = self.def_id_map.get_access(def_id)
@@ -812,6 +828,23 @@ given CompilerContext {
 
     // ── Concrete function/given-member body cache ───────────────────────────
 
+    public get_concrete_global_initializer(self ref, def_id DefId) Option[ref TypedExpr] = {
+        return self.concrete_global_initializers.get(def_id.id)
+    }
+
+    public set_concrete_global_initializer(self ref, def_id DefId, initializer ref TypedExpr) Void = {
+        self.concrete_global_initializers.insert(def_id.id, initializer)
+    }
+
+    public take_concrete_global_initializer(self ref, def_id DefId) Option[ref TypedExpr] = {
+        let initializer = self.concrete_global_initializers.get(def_id.id)
+        when initializer in {
+            .Some(_) then self.concrete_global_initializers.remove(def_id.id),
+            .None() then {},
+        }
+        return initializer
+    }
+
     public get_concrete_function_body(self ref, def_id DefId) Option[ref TypedExpr] = {
         return self.concrete_function_bodies.get(def_id.id)
     }
@@ -827,6 +860,23 @@ given CompilerContext {
             .None() then {},
         }
         return body
+    }
+
+    public get_concrete_function_source(self ref, def_id DefId) Option[ConcreteExprSource] = {
+        return self.concrete_function_sources.get(def_id.id)
+    }
+
+    public set_concrete_function_source(self ref, def_id DefId, source ConcreteExprSource) Void = {
+        self.concrete_function_sources.insert(def_id.id, source)
+    }
+
+    public take_concrete_function_source(self ref, def_id DefId) Option[ConcreteExprSource] = {
+        let source = self.concrete_function_sources.get(def_id.id)
+        when source in {
+            .Some(_) then self.concrete_function_sources.remove(def_id.id),
+            .None() then {},
+        }
+        return source
     }
 
     public get_concrete_given_member_body(self ref, def_id DefId) Option[ref TypedExpr] = {
@@ -846,11 +896,31 @@ given CompilerContext {
         return body
     }
 
+    public get_concrete_given_member_source(self ref, def_id DefId) Option[ConcreteExprSource] = {
+        return self.concrete_given_member_sources.get(def_id.id)
+    }
+
+    public set_concrete_given_member_source(self ref, def_id DefId, source ConcreteExprSource) Void = {
+        self.concrete_given_member_sources.insert(def_id.id, source)
+    }
+
+    public take_concrete_given_member_source(self ref, def_id DefId) Option[ConcreteExprSource] = {
+        let source = self.concrete_given_member_sources.get(def_id.id)
+        when source in {
+            .Some(_) then self.concrete_given_member_sources.remove(def_id.id),
+            .None() then {},
+        }
+        return source
+    }
+
     /// Drop and replace concrete body caches with empty dicts to free memory.
     /// Call after monomorphization — MIR lowering and codegen don't need these.
     public drop_concrete_bodies(self ref mut) Void = {
+        self.concrete_global_initializers = box(Dict[UInt, ref TypedExpr].new())
         self.concrete_function_bodies = box(Dict[UInt, ref TypedExpr].new())
+        self.concrete_function_sources = box(Dict[UInt, ConcreteExprSource].new())
         self.concrete_given_member_bodies = box(Dict[UInt, ref TypedExpr].new())
+        self.concrete_given_member_sources = box(Dict[UInt, ConcreteExprSource].new())
     }
 }
 

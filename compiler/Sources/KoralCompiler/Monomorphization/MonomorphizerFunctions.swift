@@ -13,6 +13,27 @@ extension Monomorphizer {
         [name]
     }
 
+    private func preservedPassKind(
+        for parameterType: TypeNode
+    ) -> PassKind {
+        switch parameterType {
+        case .reference(_, let mutable),
+             .borrowedReference(_, _, let mutable):
+            return mutable ? .byMutRef : .byRef
+        default:
+            return .byVal
+        }
+    }
+
+    private func preservedParameters(
+        resolvedParams: [Symbol],
+        declaredParams: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+    ) -> [Parameter] {
+        zip(resolvedParams, declaredParams).map { resolved, declared in
+            Parameter(type: resolved.type, kind: preservedPassKind(for: declared.type))
+        }
+    }
+
     internal func instantiateReferenceLikeExtensionMethod(
         on selfType: Type,
         name: String,
@@ -305,9 +326,10 @@ extension Monomorphizer {
         
         // Create function type
         let functionType = Type.function(
-            parameters: resolvedParams.map {
-                Parameter(type: $0.type, kind: passKindForParameterType($0.type))
-            },
+            parameters: preservedParameters(
+                resolvedParams: resolvedParams,
+                declaredParams: resolvedTemplate.parameters
+            ),
             returns: resolvedReturnType)
         
         // Skip code generation if function type still contains generic parameters
@@ -546,9 +568,10 @@ extension Monomorphizer {
         
         // Create function type
         let functionType = Type.function(
-            parameters: params.map {
-                Parameter(type: $0.type, kind: passKindForParameterType($0.type))
-            },
+            parameters: preservedParameters(
+                resolvedParams: params,
+                declaredParams: method.parameters
+            ),
             returns: returnType
         )
         
@@ -706,9 +729,10 @@ extension Monomorphizer {
         }
         
         let funcType = Type.function(
-            parameters: params.map {
-                Parameter(type: $0.type, kind: passKindForParameterType($0.type))
-            },
+            parameters: preservedParameters(
+                resolvedParams: params,
+                declaredParams: method.parameters
+            ),
             returns: returnType
         )
         
@@ -1717,14 +1741,17 @@ extension Monomorphizer {
         let patternReturn: Type
         if let checkedParameters = methodInfo.checkedParameters,
            let checkedReturnType = methodInfo.checkedReturnType {
-            patternParams = checkedParameters.map { param in
-                Parameter(type: substituteType(param.type, substitution: substitution), kind: passKindForParameterType(substituteType(param.type, substitution: substitution)))
+            patternParams = zip(checkedParameters, methodInfo.method.parameters).map { param, declared in
+                Parameter(
+                    type: substituteType(param.type, substitution: substitution),
+                    kind: preservedPassKind(for: declared.type)
+                )
             }
             patternReturn = substituteType(checkedReturnType, substitution: substitution)
         } else {
             let params = try methodInfo.method.parameters.map { param -> Parameter in
                 let paramType = try resolveTypeNode(param.type, substitution: substitution)
-                return Parameter(type: paramType, kind: passKindForParameterType(paramType))
+                return Parameter(type: paramType, kind: preservedPassKind(for: param.type))
             }
             patternParams = params
             patternReturn = try resolveTypeNode(methodInfo.method.returnType, substitution: substitution)
@@ -1787,14 +1814,17 @@ extension Monomorphizer {
         let patternReturn: Type
         if let checkedParameters = methodInfo.checkedParameters,
            let checkedReturnType = methodInfo.checkedReturnType {
-            patternParams = checkedParameters.map { param in
-                Parameter(type: substituteType(param.type, substitution: substitution), kind: passKindForParameterType(substituteType(param.type, substitution: substitution)))
+            patternParams = zip(checkedParameters, methodInfo.method.parameters).map { param, declared in
+                Parameter(
+                    type: substituteType(param.type, substitution: substitution),
+                    kind: preservedPassKind(for: declared.type)
+                )
             }
             patternReturn = substituteType(checkedReturnType, substitution: substitution)
         } else {
             patternParams = try methodInfo.method.parameters.map { param in
                 let paramType = try resolveTypeNode(param.type, substitution: substitution)
-                return Parameter(type: paramType, kind: passKindForParameterType(paramType))
+                return Parameter(type: paramType, kind: preservedPassKind(for: param.type))
             }
             patternReturn = try resolveTypeNode(methodInfo.method.returnType, substitution: substitution)
         }

@@ -2,13 +2,13 @@ using std::os { env }
 
 public type MIRLowerer(
     program ref mut MonomorphizedProgram,
-    context CompilerContext,
+    context ref CompilerContext,
     mut pending_work_items List[ref MIRFunctionWorkItem],
     mut streaming_nodes_prepared Bool,
 )
 
 given MIRLowerer {
-    public new(program ref mut MonomorphizedProgram, context CompilerContext) MIRLowerer =
+    public new(program ref mut MonomorphizedProgram, context ref CompilerContext) MIRLowerer =
         MIRLowerer(program, context, List[ref MIRFunctionWorkItem].new(), false)
 
     public metadata_program(self) ref MIRProgram = {
@@ -113,7 +113,7 @@ given MIRLowerer {
         let program = box(MIRProgram(
             globals,
             List[ref MIRFunction].new(),
-            self.context,
+            self.context.val,
             self.program.static_method_by_key,
             self.program.traits,
             self.program.receiver_method_dispatch,
@@ -156,22 +156,36 @@ given MIRLowerer {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier)
+                let mut context = self.context
+                let source_initializer = context.take_concrete_global_initializer(identifier.def_id) or else initializer
                 self.pending_work_items.push(box(MIRFunctionWorkItem(
                     init_function,
                     List[TypedParam].new(),
                     identifier.symbol_type,
                     MIRFunctionKind.Global(),
-                    initializer,
+                    source_initializer,
                 )))
             },
             .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                 if self.should_lower_function(identifier) then {
+                    let mut context = self.context
+                    let source_body = when context.take_concrete_function_body(identifier.def_id) in {
+                        .Some(existing_body) then existing_body,
+                        .None() then when context.take_concrete_function_source(identifier.def_id) in {
+                            .Some(source) then {
+                                let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                yield resolve_program_body_expression(self.program, self.context, box(rechecked))
+                            },
+                            .None() then body,
+                        },
+                    }
                     self.pending_work_items.push(box(MIRFunctionWorkItem(
                         identifier,
                         params,
                         return_type,
                         MIRFunctionKind.Global(),
-                        body,
+                        source_body,
                     )))
                 }
             },
@@ -180,13 +194,31 @@ given MIRLowerer {
                 let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
-                    when member_ref.body in {
+                    let mut context = self.context
+                    when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
                                 methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
                             }
                         },
-                        .None() then {},
+                        .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
+                            .Some(source) then {
+                                if self.should_lower_function(symbol) then {
+                                    let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                    let resolved_body = resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                    methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                }
+                            },
+                            .None() then when member_ref.body in {
+                                .Some(body) then {
+                                    if self.should_lower_function(symbol) then {
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
+                                    }
+                                },
+                                .None() then {},
+                            },
+                        },
                     }
                 }
                 while not methods_reversed.is_empty() then {
@@ -200,13 +232,67 @@ given MIRLowerer {
                 let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
-                    when member_ref.body in {
+                    let mut context = self.context
+                    when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
                                 methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
                             }
                         },
-                        .None() then {},
+                        .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
+                            .Some(source) then {
+                                if self.should_lower_function(symbol) then {
+                                    let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                    let resolved_body = resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                    methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                }
+                            },
+                            .None() then when member_ref.body in {
+                                .Some(body) then {
+                                    if self.should_lower_function(symbol) then {
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
+                                    }
+                                },
+                                .None() then {},
+                            },
+                        },
+                    }
+                }
+                while not methods_reversed.is_empty() then {
+                    self.pending_work_items.push(methods_reversed.pop() or else { break })
+                }
+            },
+            .IntrinsicGivenDecl(target_type, members, _) then {
+                let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
+                let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
+                for member_ref in members then {
+                    let symbol = self.make_given_member_symbol(member_ref)
+                    let mut context = self.context
+                    when context.take_concrete_given_member_body(member_ref.def_id) in {
+                        .Some(body) then {
+                            if self.should_lower_function(symbol) then {
+                                methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
+                            }
+                        },
+                        .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
+                            .Some(source) then {
+                                if self.should_lower_function(symbol) then {
+                                    let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                    let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
+                                    let resolved_body = resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                    methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                }
+                            },
+                            .None() then when member_ref.body in {
+                                .Some(body) then {
+                                    if self.should_lower_function(symbol) then {
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, body)))
+                                    }
+                                },
+                                .None() then {},
+                            },
+                        },
                     }
                 }
                 while not methods_reversed.is_empty() then {
@@ -271,7 +357,7 @@ given MIRLowerer {
 
     private make_global_initializer_symbol(self, identifier ref Symbol) ref Symbol = {
         let function_type = Type.FunctionType(List[ref FunctionParamEntry].new(), box(identifier.symbol_type))
-        let mut context = self.context
+        let mut context = self.context.val
         return box(context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
             self.context.get_module_path(identifier.def_id) or else List[String].new(),
@@ -433,6 +519,12 @@ given MIRLowerer {
                 self_by_value = when param.param_type in {
                     .ReferenceType(_) then false,
                     .MutableReferenceType(_) then false,
+                    .BorrowedReferenceType(_, _) then false,
+                    .MutableBorrowedReferenceType(_, _) then false,
+                    .WeakReferenceType(_) then false,
+                    .MutableWeakReferenceType(_) then false,
+                    .PointerType(_) then false,
+                    .MutablePointerType(_) then false,
                     _ then true,
                 }
             }
@@ -449,9 +541,9 @@ type MIRReferenceAllocationPromoter(
 
 type MIRReferenceAllocationFunctionPromoter(
     function ref MIRFunction,
-    parameter_types_by_def_id Dict[UInt, List[Type]],
-    parameter_types_by_name Dict[String, List[Type]],
-    context CompilerContext,
+    parameter_types_by_def_id Dict[UInt, List[ref FunctionParamEntry]],
+    parameter_types_by_name Dict[String, List[ref FunctionParamEntry]],
+    context ref CompilerContext,
     receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     local_types_by_id Dict[UInt, Type],
@@ -473,7 +565,7 @@ given MIRReferenceAllocationPromoter {
                 function.ref,
                 parameter_types_by_def_id,
                 parameter_types_by_name,
-                self.program.context,
+                self.program.context.ref,
                 self.program.receiver_method_dispatch,
                 self.program.concrete_callables_by_def_id,
             )
@@ -491,20 +583,20 @@ given MIRReferenceAllocationPromoter {
         ))
     }
 
-    private build_parameter_types_by_def_id(self) Dict[UInt, List[Type]] = {
-        let mut map = Dict[UInt, List[Type]].new()
+    private build_parameter_types_by_def_id(self) Dict[UInt, List[ref FunctionParamEntry]] = {
+        let mut map = Dict[UInt, List[ref FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
             let function = function_ref.val
-            map.insert(function.identifier.def_id.id, self.function_param_types(function.ref))
+            map.insert(function.identifier.def_id.id, self.function_param_entries(function.ref))
         }
         return map
     }
 
-    private build_parameter_types_by_name(self) Dict[String, List[Type]] = {
-        let mut map = Dict[String, List[Type]].new()
+    private build_parameter_types_by_name(self) Dict[String, List[ref FunctionParamEntry]] = {
+        let mut map = Dict[String, List[ref FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
             let function = function_ref.val
-            let param_types = self.function_param_types(function.ref)
+            let param_types = self.function_param_entries(function.ref)
             for name in self.callable_name_aliases(function.identifier) then {
                 when map.get(name) in {
                     .Some(_) then {},
@@ -554,21 +646,25 @@ given MIRReferenceAllocationPromoter {
         return names
     }
 
-    private function_param_types(self, function ref MIRFunction) List[Type] = {
-        let mut types = List[Type].new()
-        for param in function.params then {
-            types.push(param.param_type)
+    private function_param_entries(self, function ref MIRFunction) List[ref FunctionParamEntry] = {
+        when function.identifier.symbol_type in {
+            .FunctionType(params, _) then { return params },
+            _ then {},
         }
-        return types
+        let mut params = List[ref FunctionParamEntry].new()
+        for param in function.params then {
+            params.push(box(make_function_param_entry(param.param_type)))
+        }
+        return params
     }
 }
 
 given MIRReferenceAllocationFunctionPromoter {
     public new(
         function ref MIRFunction,
-        parameter_types_by_def_id Dict[UInt, List[Type]],
-        parameter_types_by_name Dict[String, List[Type]],
-        context CompilerContext,
+        parameter_types_by_def_id Dict[UInt, List[ref FunctionParamEntry]],
+        parameter_types_by_name Dict[String, List[ref FunctionParamEntry]],
+        context ref CompilerContext,
         receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
         concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     ) MIRReferenceAllocationFunctionPromoter = {
@@ -677,19 +773,19 @@ given MIRReferenceAllocationFunctionPromoter {
     }
 
     private promote_call_arguments(self ref mut, arguments List[ref MIRValue], callee MIROperand, result_type Type) List[ref MIRValue] = {
-        let param_types = when callee in {
-            .Function(symbol) then self.parameter_types_for_call(symbol),
-            _ then List[Type].new(),
+        let params = when callee in {
+            .Function(symbol) then self.parameters_for_call(symbol),
+            _ then List[ref FunctionParamEntry].new(),
         }
-        if param_types.is_empty() then {
+        if params.is_empty() then {
             return arguments
         }
         let mut promoted = List[ref MIRValue].new()
         let mut index = 0(UInt)
         while index < arguments.count() then {
             let argument = arguments[index].val
-            let param_type = if index < param_types.count()
-                then Option[Type].Some(param_types[index])
+            let param_type = if index < params.count() and params[index].pass_kind is .ByValue()
+                then Option[Type].Some(params[index].param_type)
                 else Option[Type].None()
             promoted.push(box(self.promote_value(argument, param_type)))
             index += 1
@@ -697,29 +793,33 @@ given MIRReferenceAllocationFunctionPromoter {
         return promoted
     }
 
-    private parameter_types_for_call(self ref, symbol ref Symbol) List[Type] = {
+    private parameters_for_call(self ref, symbol ref Symbol) List[ref FunctionParamEntry] = {
         when self.parameter_types_by_def_id.get(symbol.def_id.id) in {
-            .Some(types) then { return types },
+            .Some(types) then {
+                let mut params = List[ref FunctionParamEntry].new()
+                for t in types then { params.push(box(t.val)) }
+                return params
+            },
             .None() then {},
         }
         for name in self.callable_name_aliases(symbol) then {
             when self.parameter_types_by_name.get(name) in {
-                .Some(types) then { return types },
+                .Some(types) then {
+                    let mut params = List[ref FunctionParamEntry].new()
+                    for t in types then { params.push(box(t.val)) }
+                    return params
+                },
                 .None() then {},
             }
         }
         let function_type = self.context.get_function_type(symbol.def_id) or else symbol.symbol_type
         when function_type in {
             .FunctionType(params, _) then {
-                let mut types = List[Type].new()
-                for param in params then {
-                    types.push(param.val.param_type)
-                }
-                return types
+                return params
             },
             _ then {},
         }
-        return List[Type].new()
+        return List[ref FunctionParamEntry].new()
     }
 
     private promote_intrinsic(self ref mut, node MIRIntrinsic) MIRIntrinsic = {

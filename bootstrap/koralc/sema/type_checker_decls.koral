@@ -46,10 +46,25 @@ given TypeChecker {
                 if resolved is .TraitObject(_, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
+                if self.contains_borrowed_reference_type(resolved) then {
+                    self.storage.diagnostics.push(
+                        make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "global variable type cannot contain borrowed reference type '\(self.context().type_display_name(resolved))'"
+                        )
+                    )
+                }
                 let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
+                let stable_initializer = if retain_checked_template_bodies then {
+                    let mut context = self.context()
+                    let placeholder_id = self.get_or_allocate_top_level_def_id(name, DefKind.Variable(), access, span)
+                    context.set_concrete_global_initializer(placeholder_id, box(typed_init))
+                    yield box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved))
+                } else box(typed_init)
                 let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
                 let sym = box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable))
-                yield TypedDecl.LetDecl(access, name, mutable, resolved, box(typed_init), span, sym)
+                yield TypedDecl.LetDecl(access, name, mutable, resolved, stable_initializer, span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 // Enter function context — cleanup via finally (Swift: withNewScope pattern)
@@ -73,6 +88,15 @@ given TypeChecker {
                 finally { self.restore_generic_constraints(generic_constraint_snapshot) }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
+                    if self.contains_borrowed_reference_type(resolved_ret) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "function return type cannot contain borrowed reference type '\(self.context().type_display_name(resolved_ret))'"
+                            )
+                        )
+                    }
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
                     let typed_params = self.check_params(params)
                     let mut fn_scope = self.make_fn_scope(typed_params)
@@ -87,7 +111,10 @@ given TypeChecker {
                     let fn_sym = box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false))
                     let stable_body = if retain_checked_template_bodies then {
                         let mut context = self.context()
-                        context.set_concrete_function_body(fn_sym.def_id, box(typed_body))
+                        context.set_concrete_function_source(
+                            fn_sym.def_id,
+                            ConcreteExprSource(body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
+                        )
                         yield box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), stable_ret))
                     } else box(typed_body)
                     yield TypedDecl.FunctionDecl(
@@ -109,6 +136,15 @@ given TypeChecker {
                     self.storage.current_scope = generic_type_scope
                     let typed_params = self.check_params(params)
                     let resolved_ret = self.resolve_type(return_type)
+                    if self.contains_borrowed_reference_type(resolved_ret) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "function return type cannot contain borrowed reference type '\(self.context().type_display_name(resolved_ret))'"
+                            )
+                        )
+                    }
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
                     let mut fn_scope = self.make_generic_fn_scope(typed_params, type_params)
                     // Keep current_scope pointing to fn_scope during body checking
@@ -222,6 +258,17 @@ given TypeChecker {
                     }
                     yield self.check_fields_in_scope(fields, type_scope)
                 }
+                for field in typed_fields then {
+                    if self.contains_borrowed_reference_type(field.field_type) then {
+                        self.storage.diagnostics.push(
+                            make_diagnostic(
+                                DiagnosticStage.Semantic(),
+                                self.storage.file_path,
+                                "struct field '\(field.name)' cannot contain borrowed reference type '\(self.context().type_display_name(field.field_type))'"
+                            )
+                        )
+                    }
+                }
                 yield if type_params.is_empty() then {
                     let fallback_type = Type.StructureType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()), access, span))
                     let type_sym = box(self.make_top_level_type_symbol(
@@ -244,6 +291,19 @@ given TypeChecker {
                         type_scope.define_generic_param(tp.name)
                     }
                     yield self.check_enum_cases_in_scope(cases, type_scope)
+                }
+                for enum_case in typed_cases then {
+                    for field in enum_case.fields then {
+                        if self.contains_borrowed_reference_type(field.field_type) then {
+                            self.storage.diagnostics.push(
+                                make_diagnostic(
+                                    DiagnosticStage.Semantic(),
+                                    self.storage.file_path,
+                                    "enum payload '\(name).\(enum_case.name).\(field.name)' cannot contain borrowed reference type '\(self.context().type_display_name(field.field_type))'"
+                                )
+                            )
+                        }
+                    }
                 }
                 yield if type_params.is_empty() then {
                     let fallback_type = Type.EnumType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()), access, span))

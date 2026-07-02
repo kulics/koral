@@ -237,6 +237,8 @@ given CodeGen {
                 self_by_value = when bound_type in {
                     .ReferenceType(_) then false,
                     .MutableReferenceType(_) then false,
+                    .BorrowedReferenceType(_, _) then false,
+                    .MutableBorrowedReferenceType(_, _) then false,
                     .WeakReferenceType(_) then false,
                     .MutableWeakReferenceType(_) then false,
                     .PointerType(_) then false,
@@ -269,6 +271,8 @@ given CodeGen {
             },
             .ReferenceType(inner_ref) then Type.ReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
             .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
+            .BorrowedReferenceType(inner_ref, lifetime) then Type.BorrowedReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val)), lifetime),
+            .MutableBorrowedReferenceType(inner_ref, lifetime) then Type.MutableBorrowedReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val)), lifetime),
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
             .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
             .PointerType(inner_ref) then Type.PointerType(box(self.normalize_vtable_receiver_type(inner_ref.val))),
@@ -282,6 +286,8 @@ given CodeGen {
         return when resolved in {
             .ReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             .MutableReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .BorrowedReferenceType(inner, _) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
+            .MutableBorrowedReferenceType(inner, _) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             .WeakReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             .MutableWeakReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
             .PointerType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(inner.val)),
@@ -723,7 +729,7 @@ given CodeGen {
                             let param_count = self.function_type_param_count(function_type)
                             while param_index < param_count then {
                                 let param_type = self.function_type_param_type(function_type, param_index) or else Type.Unknown()
-                                let param_spec = if param_index < param_specs.count() then param_specs[param_index] else FunctionParamSpec("", false)
+                                let param_spec = if param_index < param_specs.count() then param_specs[param_index] else FunctionParamSpec("", false, false)
                                 let original_param = if param_index < member.parameters.count()
                                     then Option[MIRTraitVTableParameter].Some(member.parameters[param_index])
                                     else Option[MIRTraitVTableParameter].None()

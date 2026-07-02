@@ -2010,7 +2010,10 @@ given MIRFunctionCodeEmitter {
                 yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[ref MIRValueCleanup].None())
             },
             .Global(def_id) then {
-                let name = self.codegen.c_identifier_opt(def_id) or else self.codegen.sanitize_codegen_identifier(self.context_name(def_id))
+                let name = when self.codegen.context.get_symbol(def_id) in {
+                    .Some(symbol) then self.codegen.c_identifier_for_symbol_value(symbol),
+                    .None() then self.codegen.c_identifier_opt(def_id) or else self.codegen.sanitize_codegen_identifier(self.context_name(def_id)),
+                }
                 yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[ref MIRValueCleanup].None())
             },
             .Field(base, field) then {
@@ -2216,12 +2219,10 @@ given MIRFunctionCodeEmitter {
                     self.consume_moved_place(place)
                 }
             },
-            .Ref(place, _, allocation) then {
-                when allocation in {
-                    .HeapOwned() then self.consume_moved_place(place),
-                    _ then {},
-                }
-            },
+            // Heap-owned ref values already decide whether ownership transfer is
+            // allowed inside emit_heap_reference(). Consuming again here would
+            // incorrectly treat field/member-path boxing as moving the root local.
+            .Ref(_, _, _) then {},
             _ then {},
         }
     }

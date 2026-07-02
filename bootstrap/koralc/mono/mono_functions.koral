@@ -24,6 +24,14 @@
 //   m. Remove from instantiating_functions
 //   n. Return the InstantiatedFunction
 //
+private let pass_kind_from_type_node(node TypeNode) FunctionParamPassKind = {
+    return when node in {
+        .Reference(_, mutable) then if mutable then FunctionParamPassKind.ByMutableReference() else FunctionParamPassKind.ByReference(),
+        .BorrowedReference(_, _, mutable) then if mutable then FunctionParamPassKind.ByMutableReference() else FunctionParamPassKind.ByReference(),
+        _ then FunctionParamPassKind.ByValue(),
+    }
+}
+
 public let instantiate_function(mono ref Monomorphizer, template ref GenericFunctionTemplate, args List[ref Type]) InstantiatedFunction = {
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
     //    and return a partial InstantiatedFunction with empty mangled name.
@@ -96,8 +104,18 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
         .None() then mono.resolve_type_node_impl(template.return_type, substitution),
     }
 
-    // h. Build the concrete FunctionType.
-    let function_type = make_function_type(concrete_param_types, concrete_return_type)
+    // h. Build the concrete FunctionType, preserving declared pass kinds.
+    let mut function_param_entries = List[ref FunctionParamEntry].new()
+    let mut function_param_index = 0(UInt)
+    while function_param_index < concrete_params.count() then {
+        let declared_param = template.parameters[function_param_index]
+        function_param_entries.push(box(FunctionParamEntry(
+            concrete_params[function_param_index].param_type,
+            pass_kind_from_type_node(declared_param.param_type)
+        )))
+        function_param_index += 1(UInt)
+    }
+    let function_type = Type.FunctionType(function_param_entries, box(concrete_return_type))
 
     let template_module_path = mono.storage.context.get_module_path(template.def_id) or else List[String].new()
     let template_source_file = mono.storage.context.get_source_file(template.def_id) or else ""
@@ -118,10 +136,11 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
     // Register the function signature in the DefIdMap.
     let mut param_specs = List[FunctionParamSpec].new()
     for p in concrete_params then {
-        param_specs.push(FunctionParamSpec(p.name, p.named))
+        param_specs.push(FunctionParamSpec(p.name, p.mutable, p.named))
     }
     mono.storage.context.set_symbol_info(def_id, SymbolInfo(function_type, SymbolKind.Function(), MethodKind.Normal(), false))
     mono.storage.context.set_param_specs(def_id, param_specs)
+    mono.storage.context.set_cname(def_id, mangled_name)
 
     // i. Create InstantiatedFunction and cache it BEFORE processing the body
     //    to support recursive functions.
@@ -185,6 +204,8 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
         .Some(body) then {
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
             let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
+            let mut context = mono.storage.context
+            context.set_concrete_function_body(def_id, resolved_concrete_body)
 
             // l. Create a FunctionDecl node and add to generated_nodes.
             let mut fn_param_type_refs = List[ref Type].new()
@@ -194,9 +215,9 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
                 mangled_name,
                 concrete_params,
                 concrete_return_type,
-                resolved_concrete_body,
+                box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), concrete_return_type)),
                 template_span,
-                box(Symbol(def_id, make_function_type(fn_param_type_refs, concrete_return_type), SymbolKind.Function())),
+                box(Symbol(def_id, function_type, SymbolKind.Function())),
             )
             mono.storage.generated_nodes.push(box(decl))
         },
@@ -932,7 +953,17 @@ public let instantiate_extension_method_from_entry(
             yield resolve_parameterized_type(mono, resolved_node_type)
         },
     }
-    let function_type = make_function_type(concrete_param_types, concrete_return_type)
+    let mut method_param_entries = List[ref FunctionParamEntry].new()
+    let mut method_param_index = 0(UInt)
+    while method_param_index < concrete_params.count() then {
+        let declared_param = resolved_template.method.params[method_param_index]
+        method_param_entries.push(box(FunctionParamEntry(
+            concrete_params[method_param_index].param_type,
+            pass_kind_from_type_node(declared_param.param_type)
+        )))
+        method_param_index += 1(UInt)
+    }
+    let function_type = Type.FunctionType(method_param_entries, box(concrete_return_type))
     let method_span = resolved_template.method.span
 
     // e. Allocate a new DefId for the concrete method with full metadata so
@@ -949,17 +980,18 @@ public let instantiate_extension_method_from_entry(
     // Register the function signature.
     let mut param_specs = List[FunctionParamSpec].new()
     for p in concrete_params then {
-        param_specs.push(FunctionParamSpec(p.name, p.named))
+        param_specs.push(FunctionParamSpec(p.name, p.mutable, p.named))
     }
     mono.storage.context.set_symbol_info(def_id, SymbolInfo(function_type, SymbolKind.Function(), MethodKind.Normal(), false))
     mono.storage.context.set_param_specs(def_id, param_specs)
+    mono.storage.context.set_cname(def_id, mangled_name)
 
     // Build the result symbol.
     let result_symbol = Symbol(def_id, function_type, SymbolKind.Function())
-    // Include method type args in logical_name to avoid C name collisions
-    // when the same method is instantiated with different type args.
-    // Use mangled_name which already includes method type args.
-    let logical_name_with_args = mangled_name
+    // Keep the semantic method name for receiver lookup. Concrete C naming
+    // comes from the DefId/c_identifier path, while typed lookup keys carry
+    // any method type arguments separately.
+    let logical_name_with_args = resolved_template.method.name
     // Only set owner_type for actual instance methods (first param is self/source).
     // Standalone functions like box() should not get method-style C naming.
     let mut has_receiver = false
@@ -1012,16 +1044,16 @@ public let instantiate_extension_method_from_entry(
             mono.storage.extension_body_resolution_depth += 1
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
             let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
-            let mut fn_param_type_refs2 = List[ref Type].new()
-            for cp in concrete_params then { fn_param_type_refs2.push(box(cp.param_type)) }
+            let mut context = mono.storage.context
+            context.set_concrete_function_body(def_id, resolved_concrete_body)
             let decl = TypedDecl.FunctionDecl(
                 resolved_template.method.access,
                 mangled_name,
                 concrete_params,
                 concrete_return_type,
-                resolved_concrete_body,
+                box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), concrete_return_type)),
                 method_span,
-                box(Symbol(def_id, Type.FunctionType(types_to_param_entries(fn_param_type_refs2), box(concrete_return_type)), SymbolKind.Function())),
+                box(Symbol(def_id, function_type, SymbolKind.Function())),
             )
             mono.storage.generated_nodes.push(box(decl))
             mono.storage.extension_body_resolution_depth -= 1

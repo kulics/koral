@@ -307,7 +307,45 @@ private let synthetic_args_from_expected_method_type(
             let mut start_idx UInt = 0
             if not param_types.is_empty() then {
                 let first_param_type = resolve_parameterized_type(mono, param_types[0(UInt)].val)
-                if layout_key(first_param_type) == layout_key(resolved_receiver_type) then {
+                let receiver_matches = if layout_key(first_param_type) == layout_key(resolved_receiver_type) then {
+                    yield true
+                } else when first_param_type in {
+                    .ReferenceType(lhs) then when resolved_receiver_type in {
+                        .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .BorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        _ then false,
+                    },
+                    .MutableReferenceType(lhs) then when resolved_receiver_type in {
+                        .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        _ then false,
+                    },
+                    .BorrowedReferenceType(lhs, _) then when resolved_receiver_type in {
+                        .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .BorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        _ then false,
+                    },
+                    .MutableBorrowedReferenceType(lhs, _) then when resolved_receiver_type in {
+                        .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        _ then false,
+                    },
+                    .WeakReferenceType(lhs) then when resolved_receiver_type in {
+                        .WeakReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        .MutableWeakReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        _ then false,
+                    },
+                    .MutableWeakReferenceType(lhs) then when resolved_receiver_type in {
+                        .MutableWeakReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                        _ then false,
+                    },
+                    _ then false,
+                }
+                if receiver_matches then {
                     start_idx = 1
                 }
             }
@@ -369,6 +407,13 @@ private let substitution_lookup_receiver_method_symbol(
         .Some(bound) then { return Option[Symbol].Some(bound) },
         .None() then {},
     }
+    let rebound = bind_receiver_method_symbol(mono, receiver_type, method, expected_method_type_opt)
+    if rebound.def_id.id > 0 and (
+        rebound.def_id.id <> method.def_id.id
+        or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type))
+    ) then {
+        return Option[Symbol].Some(rebound)
+    }
     return Option[Symbol].None()
 }
 
@@ -429,10 +474,25 @@ private let substitution_method_has_compatible_ref_like_receiver(
                 .ReferenceType(lhs) then when resolved_base_type in {
                     .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
                     .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .BorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
                     _ then false,
                 },
                 .MutableReferenceType(lhs) then when resolved_base_type in {
                     .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    _ then false,
+                },
+                .BorrowedReferenceType(lhs, _) then when resolved_base_type in {
+                    .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .BorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    _ then false,
+                },
+                .MutableBorrowedReferenceType(lhs, _) then when resolved_base_type in {
+                    .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
+                    .MutableBorrowedReferenceType(rhs, _) then layout_key(resolve_parameterized_type(mono, lhs.val)) == layout_key(resolve_parameterized_type(mono, rhs.val)),
                     _ then false,
                 },
                 .WeakReferenceType(lhs) then when resolved_base_type in {
@@ -1422,6 +1482,8 @@ private let lookup_exact_receiver_method_symbol(
         } else when resolved_receiver_type in {
             .ReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, inner.val)),
             .MutableReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, inner.val)),
+            .BorrowedReferenceType(inner, _) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, inner.val)),
+            .MutableBorrowedReferenceType(inner, _) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, inner.val)),
             .WeakReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, inner.val)),
             .MutableWeakReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, inner.val)),
             _ then false,
@@ -1498,6 +1560,14 @@ let bind_receiver_method_symbol(
             _ then {},
         },
         .MutableReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref.val) in {
+            .TraitObject(_, _) then { return method },
+            _ then {},
+        },
+        .BorrowedReferenceType(inner_ref, _) then when resolve_parameterized_type(mono, inner_ref.val) in {
+            .TraitObject(_, _) then { return method },
+            _ then {},
+        },
+        .MutableBorrowedReferenceType(inner_ref, _) then when resolve_parameterized_type(mono, inner_ref.val) in {
             .TraitObject(_, _) then { return method },
             _ then {},
         },
@@ -1587,6 +1657,63 @@ let bind_receiver_method_symbol(
                         yield if shared_rebound.def_id.id > 0 then shared_rebound else bind_receiver_method_symbol(mono, inner.val, method, expected_method_type_opt)
                     },
                 }
+            },
+        },
+        .BorrowedReferenceType(inner, _) then when lookup_exact_receiver_method_symbol(mono, resolved_receiver_type, method, expected_method_type_opt) in {
+            .Some(bound) then bound,
+            .None() then {
+                when expected_method_type_opt in {
+                    .Some(expected_method_type) then {
+                        let rebound = bind_receiver_method_symbol_for_expected_type(
+                            mono,
+                            resolved_receiver_type,
+                            method,
+                            expected_method_type,
+                        )
+                        if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then {
+                            return rebound
+                        }
+                    },
+                    .None() then {},
+                }
+                let rebound = try_bind_generic_method_call(
+                    mono,
+                    resolved_receiver_type,
+                    method,
+                    List[ref TypedExpr].new(),
+                    expected_return_type,
+                ).val
+                yield if rebound.def_id.id <> method.def_id.id then rebound else bind_receiver_method_symbol(mono, inner.val, method, expected_method_type_opt)
+            },
+        },
+        .MutableBorrowedReferenceType(inner, _) then when lookup_exact_receiver_method_symbol(mono, resolved_receiver_type, method, expected_method_type_opt) in {
+            .Some(bound) then bound,
+            .None() then {
+                when expected_method_type_opt in {
+                    .Some(expected_method_type) then {
+                        let rebound = bind_receiver_method_symbol_for_expected_type(
+                            mono,
+                            resolved_receiver_type,
+                            method,
+                            expected_method_type,
+                        )
+                        if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then {
+                            return rebound
+                        }
+                    },
+                    .None() then {},
+                }
+                let rebound = try_bind_generic_method_call(
+                    mono,
+                    resolved_receiver_type,
+                    method,
+                    List[ref TypedExpr].new(),
+                    expected_return_type,
+                ).val
+                if rebound.def_id.id <> method.def_id.id then {
+                    return rebound
+                }
+                yield bind_receiver_method_symbol(mono, inner.val, method, expected_method_type_opt)
             },
         },
         .WeakReferenceType(_) then {

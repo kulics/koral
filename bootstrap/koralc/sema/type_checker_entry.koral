@@ -6,20 +6,25 @@ public let type_check(program Program, file_path String) BodyCheckerOutput = {
 
     if collector.diagnostics.has_errors() then {
         diagnostics.merge(collector.diagnostics)
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
+        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), collector.global_scope, ImportGraph.new(), MethodTable.new(), TraitRegistry.new(), Dict[String, List[GenericTraitConformanceTemplate]].new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
     }
 
     let mut checker = TypeChecker.new(collector.global_scope, collector.context, file_path)
     let typed = checker.check_program(program, true)
 
     if checker.has_errors() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates.val, checker.storage.instantiation_requests)
+        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), collector.global_scope, ImportGraph.new(), checker.storage.method_table, checker.storage.trait_registry, checker.storage.conformance_index, checker.storage.diagnostics, checker.storage.generic_templates.val, checker.storage.instantiation_requests)
     }
 
     let context = checker.compiler_context()
     return BodyCheckerOutput(
         Option[TypedProgram].Some(typed),
         context,
+        collector.global_scope,
+        ImportGraph.new(),
+        checker.storage.method_table,
+        checker.storage.trait_registry,
+        checker.storage.conformance_index,
         diagnostics,
         checker.storage.generic_templates.val,
         checker.storage.instantiation_requests,
@@ -82,9 +87,11 @@ private let run_body_checker_pass(input BodyCheckerInput, retain_checked_templat
     }
 
     let typed = Option[TypedProgram].Some(checker.check_loaded_nodes(input.type_resolver_output.resolver_output.loaded_nodes_with_path, retain_checked_template_bodies))
+    let global_scope = input.type_resolver_output.collector_output.global_scope
+    let import_graph = input.type_resolver_output.resolver_output.import_graph
 
     if checker.has_errors() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), checker.storage.diagnostics, checker.storage.generic_templates.val, checker.storage.instantiation_requests)
+        return BodyCheckerOutput(Option[TypedProgram].None(), checker.compiler_context(), global_scope, import_graph, checker.storage.method_table, checker.storage.trait_registry, checker.storage.conformance_index, checker.storage.diagnostics, checker.storage.generic_templates.val, checker.storage.instantiation_requests)
     }
 
     let mut diagnostics = DiagnosticCollector.new()
@@ -97,12 +104,17 @@ private let run_body_checker_pass(input BodyCheckerInput, retain_checked_templat
     }
 
     if diagnostics.has_errors() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), context, diagnostics, checker.storage.generic_templates.val, checker.storage.instantiation_requests)
+        return BodyCheckerOutput(Option[TypedProgram].None(), context, global_scope, import_graph, checker.storage.method_table, checker.storage.trait_registry, checker.storage.conformance_index, diagnostics, checker.storage.generic_templates.val, checker.storage.instantiation_requests)
     }
 
     return BodyCheckerOutput(
         typed,
         context,
+        global_scope,
+        import_graph,
+        checker.storage.method_table,
+        checker.storage.trait_registry,
+        checker.storage.conformance_index,
         diagnostics,
         checker.storage.generic_templates.val,
         checker.storage.instantiation_requests,
@@ -113,7 +125,7 @@ private let type_check_resolver_output(resolver_output ModuleResolverOutput, use
     let name_input = NameCollectorInput(resolver_output, user_file_path)
     let name_pass = run_name_collector_pass(name_input)
     if name_pass.output is .None() then {
-        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), name_pass.diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
+        return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), Scope.new_root(), resolver_output.import_graph, MethodTable.new(), TraitRegistry.new(), Dict[String, List[GenericTraitConformanceTemplate]].new(), name_pass.diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
     }
 
     let type_input = TypeResolverInput(
@@ -143,7 +155,7 @@ public let type_check_entry_file(user_file_path String, no_std Bool) BodyChecker
         .Error(err) then {
             let mut diagnostics = DiagnosticCollector.new()
             diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), user_file_path, err.message()))
-            return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
+            return BodyCheckerOutput(Option[TypedProgram].None(), CompilerContext.new(), Scope.new_root(), ImportGraph.new(), MethodTable.new(), TraitRegistry.new(), Dict[String, List[GenericTraitConformanceTemplate]].new(), diagnostics, GenericTemplateRegistry.new(), Set[InstantiationRequest].new())
         },
     }
     return type_check_resolver_output(build_module_resolver_output(resolved_graph), user_file_path, true)

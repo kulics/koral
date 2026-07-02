@@ -19,6 +19,8 @@ given TypeChecker {
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then inner_ref.val,
                     .ReferenceType(inner_ref) then inner_ref.val,
+                    .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
+                    .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
                     .WeakReferenceType(inner_ref) then inner_ref.val,
                     .MutableWeakReferenceType(inner_ref) then inner_ref.val,
                     .MutablePointerType(inner_ref) then inner_ref.val,
@@ -39,6 +41,8 @@ given TypeChecker {
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then inner_ref.val,
                     .ReferenceType(inner_ref) then inner_ref.val,
+                    .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
+                    .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
                     .WeakReferenceType(inner_ref) then inner_ref.val,
                     .MutableWeakReferenceType(inner_ref) then inner_ref.val,
                     .MutablePointerType(inner_ref) then inner_ref.val,
@@ -310,6 +314,20 @@ given TypeChecker {
         )
     }
 
+    private report_borrowed_lambda_capture(self, symbol ref Symbol, reported_ids ref mut Set[UInt]) Void = {
+        if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(symbol.def_id.id) then {
+            return
+        }
+        reported_ids.insert(symbol.def_id.id)
+        self.storage.diagnostics.push(
+            make_diagnostic(
+                DiagnosticStage.Semantic(),
+                self.storage.file_path,
+                "Cannot capture borrowed reference '\(self.context().symbol_name(symbol.val))'"
+            )
+        )
+    }
+
     private collect_pattern_binding_names(self, pattern ref TypedPattern, names ref mut Set[String]) Void = {
         when pattern in {
             .Variable(symbol) then {
@@ -397,6 +415,7 @@ given TypeChecker {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
+                    self.report_borrowed_lambda_capture(symbol, reported_ids)
                     self.report_mutable_lambda_capture(symbol, reported_ids)
                 }
             },

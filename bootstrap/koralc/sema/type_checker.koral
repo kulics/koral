@@ -661,6 +661,52 @@ given TypeChecker {
         }
     }
 
+    private contains_borrowed_reference_type(self, t Type) Bool = {
+        return when t in {
+            .BorrowedReferenceType(_, _) then true,
+            .MutableBorrowedReferenceType(_, _) then true,
+            .ReferenceType(inner) then self.contains_borrowed_reference_type(inner.val),
+            .MutableReferenceType(inner) then self.contains_borrowed_reference_type(inner.val),
+            .PointerType(inner) then self.contains_borrowed_reference_type(inner.val),
+            .MutablePointerType(inner) then self.contains_borrowed_reference_type(inner.val),
+            .WeakReferenceType(inner) then self.contains_borrowed_reference_type(inner.val),
+            .MutableWeakReferenceType(inner) then self.contains_borrowed_reference_type(inner.val),
+            .FunctionType(params, return_type) then {
+                for param in params then {
+                    if self.contains_borrowed_reference_type(param.param_type) then {
+                        return true
+                    }
+                }
+                yield self.contains_borrowed_reference_type(return_type.val)
+            },
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    if self.contains_borrowed_reference_type(arg.val) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .GenericEnum(_, args) then {
+                for arg in args then {
+                    if self.contains_borrowed_reference_type(arg.val) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            .TraitObject(_, args) then {
+                for arg in args then {
+                    if self.contains_borrowed_reference_type(arg.val) then {
+                        return true
+                    }
+                }
+                yield false
+            },
+            _ then false,
+        }
+    }
+
     private ffi_type_error(self, t Type) String = {
         return when t in {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
@@ -1002,6 +1048,59 @@ given TypeChecker {
         return false
     }
 
+    private retained_given_member_skeleton(self, member ref TypedGivenMember) ref TypedGivenMember = {
+        let _ = self
+        return box(TypedGivenMember(
+            member.def_id,
+            member.name,
+            List[TypedParam].new(),
+            Type.Unknown(),
+            Option[ref TypedExpr].None(),
+        ))
+    }
+
+    private retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
+        return when typed_decl in {
+            .FunctionDecl(access, name, _, _, body, span, id) then {
+                yield TypedDecl.FunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), body, span, id)
+            },
+            .IntrinsicFunctionDecl(access, name, _, _, span, id) then {
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), span, id)
+            },
+            .ForeignFunctionDecl(access, name, _, _, span, id) then {
+                yield TypedDecl.ForeignFunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), span, id)
+            },
+            .TypeStructDecl(access, name, _, span, id) then {
+                yield TypedDecl.TypeStructDecl(access, name, List[TypedField].new(), span, id)
+            },
+            .TypeEnumDecl(access, name, _, span, id) then {
+                yield TypedDecl.TypeEnumDecl(access, name, List[TypedEnumCase].new(), span, id)
+            },
+            .GivenDecl(target_type, members, span) then {
+                let mut skeleton_members = List[ref TypedGivenMember].new()
+                for member_ref in members then {
+                    skeleton_members.push(self.retained_given_member_skeleton(member_ref))
+                }
+                yield TypedDecl.GivenDecl(target_type, skeleton_members, span)
+            },
+            .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
+                let mut skeleton_members = List[ref TypedGivenMember].new()
+                for member_ref in members then {
+                    skeleton_members.push(self.retained_given_member_skeleton(member_ref))
+                }
+                yield TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, skeleton_members, span)
+            },
+            .IntrinsicGivenDecl(target_type, members, span) then {
+                let mut skeleton_members = List[ref TypedGivenMember].new()
+                for member_ref in members then {
+                    skeleton_members.push(self.retained_given_member_skeleton(member_ref))
+                }
+                yield TypedDecl.IntrinsicGivenDecl(target_type, skeleton_members, span)
+            },
+            _ then typed_decl,
+        }
+    }
+
     public check_program(self ref mut, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
         let mut typed_decls = List[ref TypedDecl].new()
@@ -1015,7 +1114,7 @@ given TypeChecker {
                     let td = self.check_decl(decl, retain_checked_template_bodies)
                     let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
                     if retain_checked_template_bodies and not skip_typed_decl_retention then when finalized_decl in {
-                        .Some(resolved) then typed_decls.push(box(resolved)),
+                        .Some(resolved) then typed_decls.push(box(self.retained_decl_skeleton(resolved))),
                         .None() then {},
                     }
                 },
@@ -1112,7 +1211,7 @@ given TypeChecker {
                         let td = self.check_decl(pair.first.decl, retain_checked_template_bodies)
                         let finalized_decl = self.finalize_checked_decl_constraints(if retain_checked_template_bodies then Option[TypedDecl].Some(td) else Option[TypedDecl].None())
                         if retain_checked_template_bodies and not skip_typed_decl_retention then when finalized_decl in {
-                            .Some(resolved) then typed_decls.push(box(resolved)),
+                            .Some(resolved) then typed_decls.push(box(self.retained_decl_skeleton(resolved))),
                             .None() then {},
                         }
                     }
@@ -1148,7 +1247,7 @@ given TypeChecker {
                 let resolved_decl = when typed_decl in {
                     .Some(td) then {
                         if not subst.mapping.is_empty() then {
-                            self.refresh_concrete_given_member_bodies(subst, td)
+                            self.refresh_concrete_stored_exprs(subst, td)
                         }
                         yield if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(subst, td))
                     },
@@ -1167,7 +1266,7 @@ given TypeChecker {
                 let resolved_decl = when typed_decl in {
                     .Some(td) then {
                         if not partial_subst.mapping.is_empty() then {
-                            self.refresh_concrete_given_member_bodies(partial_subst, td)
+                            self.refresh_concrete_stored_exprs(partial_subst, td)
                         }
                         yield if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(partial_subst, td))
                     },
@@ -1180,8 +1279,17 @@ given TypeChecker {
         }
     }
 
-    private refresh_concrete_given_member_bodies(self ref mut, subst TypeSubstitution, typed_decl TypedDecl) Void = {
+    private refresh_concrete_stored_exprs(self ref mut, subst TypeSubstitution, typed_decl TypedDecl) Void = {
         when typed_decl in {
+            .LetDecl(_, _, _, _, _, _, id) then {
+                let mut context = self.context()
+                when context.get_concrete_global_initializer(id.def_id) in {
+                    .Some(initializer) then {
+                        context.set_concrete_global_initializer(id.def_id, self.apply_subst_to_expr(subst, initializer))
+                    },
+                    .None() then {},
+                }
+            },
             .FunctionDecl(_, _, _, _, _, _, id) then {
                 let mut context = self.context()
                 when context.get_concrete_function_body(id.def_id) in {

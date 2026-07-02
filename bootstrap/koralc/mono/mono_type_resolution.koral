@@ -5120,6 +5120,16 @@ private let infer_extension_method_type_args(
                 .MutableReferenceType(_) then actual_type,
                 _ then Type.MutableReferenceType(box(actual_type)),
             },
+            .BorrowedReferenceType(_, lifetime) then when actual_type in {
+                .BorrowedReferenceType(_, _) then actual_type,
+                .ReferenceType(_) then actual_type,
+                _ then Type.BorrowedReferenceType(box(actual_type), lifetime),
+            },
+            .MutableBorrowedReferenceType(_, lifetime) then when actual_type in {
+                .MutableBorrowedReferenceType(_, _) then actual_type,
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableBorrowedReferenceType(box(actual_type), lifetime),
+            },
             _ then actual_type,
         }
         if not unify_generic_type_pattern(
@@ -5213,6 +5223,16 @@ private let infer_method_type_args_from_symbol_type(
             .MutableReferenceType(_) then when actual_type in {
                 .MutableReferenceType(_) then actual_type,
                 _ then Type.MutableReferenceType(box(actual_type)),
+            },
+            .BorrowedReferenceType(_, lifetime) then when actual_type in {
+                .BorrowedReferenceType(_, _) then actual_type,
+                .ReferenceType(_) then actual_type,
+                _ then Type.BorrowedReferenceType(box(actual_type), lifetime),
+            },
+            .MutableBorrowedReferenceType(_, lifetime) then when actual_type in {
+                .MutableBorrowedReferenceType(_, _) then actual_type,
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableBorrowedReferenceType(box(actual_type), lifetime),
             },
             _ then actual_type,
         }
@@ -5535,6 +5555,16 @@ public let try_bind_generic_method_call(
             type_args.push(box(inner.val))
             autoderef_fallback = Option[Type].Some(inner.val)
         },
+        .BorrowedReferenceType(inner, _) then {
+            template_name_opt = Option[String].Some("Ref")
+            type_args.push(box(inner.val))
+            autoderef_fallback = Option[Type].Some(inner.val)
+        },
+        .MutableBorrowedReferenceType(inner, _) then {
+            template_name_opt = Option[String].Some("MutRef")
+            type_args.push(box(inner.val))
+            autoderef_fallback = Option[Type].Some(inner.val)
+        },
         .PointerType(inner) then {
             template_name_opt = Option[String].Some("Ptr")
             type_args.push(box(inner.val))
@@ -5840,6 +5870,8 @@ public let try_bind_generic_method_call_by_name(
         },
         .ReferenceType(inner) then { autoderef_fallback = Option[Type].Some(inner.val) },
         .MutableReferenceType(inner) then { autoderef_fallback = Option[Type].Some(inner.val) },
+        .BorrowedReferenceType(inner, _) then { autoderef_fallback = Option[Type].Some(inner.val) },
+        .MutableBorrowedReferenceType(inner, _) then { autoderef_fallback = Option[Type].Some(inner.val) },
         _ then {},
     }
 
@@ -7147,12 +7179,24 @@ private let match_declared_static_receiver_member(
         if member_ref.name <> method_name then {
             continue
         }
-        let mut member_is_concrete = not has_generic_parameter(resolved_target_type) and not has_generic_parameter(member_ref.return_type)
-        for param in member_ref.params then {
-            if has_generic_parameter(param.param_type) then {
-                member_is_concrete = false
-                break
-            }
+        let mut member_is_concrete = not has_generic_parameter(resolved_target_type)
+        when mono.storage.context.get_function_type(member_ref.def_id) in {
+            .Some(function_type) then {
+                if has_generic_parameter(function_type) then {
+                    member_is_concrete = false
+                }
+            },
+            .None() then {
+                if has_generic_parameter(member_ref.return_type) then {
+                    member_is_concrete = false
+                }
+                for param in member_ref.params then {
+                    if has_generic_parameter(param.param_type) then {
+                        member_is_concrete = false
+                        break
+                    }
+                }
+            },
         }
         if not member_is_concrete then {
             continue
@@ -7371,6 +7415,30 @@ private let enqueue_extension_method_for_static_call(
 
 // ── resolve_types_in_global_node ──────────────────────────────────────────────
 
+private let resolve_global_node_source_params(mono ref Monomorphizer, def_id DefId, fallback List[TypedParam]) List[TypedParam] = {
+    let param_specs = mono.storage.context.get_param_specs(def_id) or else List[FunctionParamSpec].new()
+    return when mono.storage.context.get_function_type(def_id) in {
+        .Some(function_type) then when function_type in {
+            .FunctionType(param_entries, _) then {
+                let mut params = List[TypedParam].new()
+                let mut index UInt = 0
+                for entry in param_entries then {
+                    let spec = if index < param_specs.count() then param_specs[index] else FunctionParamSpec("", false, false)
+                    params.push(TypedParam(spec.name, spec.mutable, entry.param_type, spec.named))
+                    index += 1
+                }
+                yield params
+            },
+            _ then fallback,
+        },
+        .None() then fallback,
+    }
+}
+
+private let resolve_global_node_source_return_type(mono ref Monomorphizer, def_id DefId, fallback Type) Type = {
+    return mono.storage.context.get_function_return_type(def_id) or else fallback
+}
+
 // Resolve parameterized types in all global nodes.
 // Processes: function params, return types, struct fields, enum case params,
 // and given declaration methods.
@@ -7380,43 +7448,73 @@ public let resolve_types_in_global_node(mono ref Monomorphizer, node ref TypedDe
         // FunctionDecl: resolve param types, return type, and body.
         // Must resolve body types so no GenericStruct/GenericEnum reach CodeGen.
         .FunctionDecl(access, name, params, return_type, body, span, id) then {
+            let source_params = resolve_global_node_source_params(mono, id.def_id, params)
             let mut resolved_params = List[TypedParam].new()
-            for p in params then {
+            for p in source_params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
                 resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
             }
-            let resolved_return = resolve_parameterized_type(mono, return_type)
-            let source_body = mono.storage.context.take_concrete_function_body(id.def_id) or else body
+            let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, id.def_id, return_type))
+            if mono.storage.context.get_concrete_function_body(id.def_id) is .Some(_) then {
+                return TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved_return)), span, id)
+            }
+            if mono.storage.context.get_concrete_function_source(id.def_id) is .Some(_) then {
+                return TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved_return)), span, id)
+            }
+            let source_body = when mono.storage.context.take_concrete_function_body(id.def_id) in {
+                .Some(existing_body) then existing_body,
+                .None() then when mono.storage.context.take_concrete_function_source(id.def_id) in {
+                    .Some(source) then {
+                        let mut checker = TypeChecker.new(mono.storage.global_scope, mono.storage.context.val, source.source_file)
+                        yield box(checker.recheck_concrete_function_body(resolved_params, resolved_return, source, mono.storage.import_graph, mono.storage.generic_templates, mono.storage.method_table, mono.storage.trait_registry, mono.storage.conformance_index))
+                    },
+                    .None() then body,
+                },
+            }
             let resolved_body = resolve_types_in_expression(mono, source_body)
-            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, resolved_body, span, id)
+            let mut context = mono.storage.context
+            context.set_concrete_function_body(id.def_id, resolved_body)
+            yield TypedDecl.FunctionDecl(access, name, resolved_params, resolved_return, box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved_return)), span, id)
         },
 
         // IntrinsicFunctionDecl: resolve param types and return type.
         .IntrinsicFunctionDecl(access, name, params, return_type, span, id) then {
+            let source_params = resolve_global_node_source_params(mono, id.def_id, params)
             let mut resolved_params = List[TypedParam].new()
-            for p in params then {
+            for p in source_params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
                 resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
             }
-            let resolved_return = resolve_parameterized_type(mono, return_type)
+            let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, id.def_id, return_type))
             yield TypedDecl.IntrinsicFunctionDecl(access, name, resolved_params, resolved_return, span, id)
         },
 
         // ForeignFunctionDecl: resolve param types and return type.
         .ForeignFunctionDecl(access, name, params, return_type, span, id) then {
+            let source_params = resolve_global_node_source_params(mono, id.def_id, params)
             let mut resolved_params = List[TypedParam].new()
-            for p in params then {
+            for p in source_params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
                 resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
             }
-            let resolved_return = resolve_parameterized_type(mono, return_type)
+            let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, id.def_id, return_type))
             yield TypedDecl.ForeignFunctionDecl(access, name, resolved_params, resolved_return, span, id)
         },
 
         // TypeStructDecl: resolve field types.
         .TypeStructDecl(access, name, fields, span, id) then {
+            let source_fields = when mono.storage.context.get_struct_fields(id.def_id) in {
+                .Some(existing) then {
+                    let mut hydrated = List[TypedField].new()
+                    for field in existing then {
+                        hydrated.push(TypedField(field.access, field.name, field.mutable, field.field_type, field.named))
+                    }
+                    yield hydrated
+                },
+                .None() then fields,
+            }
             let mut resolved_fields = List[TypedField].new()
-            for f in fields then {
+            for f in source_fields then {
                 let resolved_type = resolve_parameterized_type(mono, f.field_type)
                 collect_vtable_request_if_needed(mono, resolved_type)
                 resolved_fields.push(TypedField(f.access, f.name, f.mutable, resolved_type, f.named))
@@ -7426,8 +7524,22 @@ public let resolve_types_in_global_node(mono ref Monomorphizer, node ref TypedDe
 
         // TypeEnumDecl: resolve case param types.
         .TypeEnumDecl(access, name, cases, span, id) then {
+            let source_cases = when mono.storage.context.get_enum_cases(id.def_id) in {
+                .Some(existing) then {
+                    let mut hydrated = List[TypedEnumCase].new()
+                    for case_info in existing then {
+                        let mut fields = List[TypedEnumCaseField].new()
+                        for param in case_info.params then {
+                            fields.push(TypedEnumCaseField(param.name, param.param_type, param.named))
+                        }
+                        hydrated.push(TypedEnumCase(case_info.name, fields))
+                    }
+                    yield hydrated
+                },
+                .None() then cases,
+            }
             let mut resolved_cases = List[TypedEnumCase].new()
-            for c in cases then {
+            for c in source_cases then {
                 let mut resolved_fields = List[TypedEnumCaseField].new()
                 for f in c.fields then {
                     let resolved_type = resolve_parameterized_type(mono, f.field_type)
@@ -7443,22 +7555,40 @@ public let resolve_types_in_global_node(mono ref Monomorphizer, node ref TypedDe
             let resolved_target = resolve_parameterized_type(mono, target_type)
             let mut resolved_members = List[ref TypedGivenMember].new()
             for m_ref in members then {
+                let source_params = resolve_global_node_source_params(mono, m_ref.def_id, m_ref.params)
                 let mut resolved_params = List[TypedParam].new()
-                for p in m_ref.params then {
+                for p in source_params then {
                     let resolved_type = resolve_parameterized_type(mono, p.param_type)
                         resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
                 }
-                let resolved_return = resolve_parameterized_type(mono, m_ref.return_type)
+                let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, m_ref.def_id, m_ref.return_type))
+                if mono.storage.context.get_concrete_given_member_body(m_ref.def_id) is .Some(_) then {
+                    resolved_members.push(box(TypedGivenMember(m_ref.def_id, m_ref.name, resolved_params, resolved_return, Option[ref TypedExpr].None())))
+                    continue
+                }
+                
                 let source_body = when m_ref.body in {
                     .Some(body) then {
                         yield Option[ref TypedExpr].Some(body)
                     },
-                    .None() then mono.storage.context.take_concrete_given_member_body(m_ref.def_id),
+                    .None() then when mono.storage.context.take_concrete_given_member_body(m_ref.def_id) in {
+                        .Some(existing_body) then Option[ref TypedExpr].Some(existing_body),
+                        .None() then when mono.storage.context.take_concrete_given_member_source(m_ref.def_id) in {
+                            .Some(source) then {
+                                let mut checker = TypeChecker.new(mono.storage.global_scope, mono.storage.context.val, source.source_file)
+                                let rebuilt_body = checker.recheck_concrete_given_member_body(resolved_target, resolved_params, resolved_return, source, mono.storage.import_graph, mono.storage.generic_templates, mono.storage.method_table, mono.storage.trait_registry, mono.storage.conformance_index)
+                                yield Option[ref TypedExpr].Some(box(rebuilt_body))
+                            },
+                            .None() then Option[ref TypedExpr].None(),
+                        },
+                    },
                 }
                 let resolved_body = when source_body in {
                     .Some(body) then {
                         let body_result = resolve_types_in_expression(mono, body)
-                        yield Option[ref TypedExpr].Some(body_result)
+                        let mut context = mono.storage.context
+                        context.set_concrete_given_member_body(m_ref.def_id, body_result)
+                        yield Option[ref TypedExpr].None()
                     },
                     .None() then Option[ref TypedExpr].None(),
                 }
@@ -7476,22 +7606,40 @@ public let resolve_types_in_global_node(mono ref Monomorphizer, node ref TypedDe
             }
             let mut resolved_members = List[ref TypedGivenMember].new()
             for m_ref in members then {
+                let source_params = resolve_global_node_source_params(mono, m_ref.def_id, m_ref.params)
                 let mut resolved_params = List[TypedParam].new()
-                for p in m_ref.params then {
+                for p in source_params then {
                     let resolved_type = resolve_parameterized_type(mono, p.param_type)
                         resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
                 }
-                let resolved_return = resolve_parameterized_type(mono, m_ref.return_type)
+                let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, m_ref.def_id, m_ref.return_type))
+                if mono.storage.context.get_concrete_given_member_body(m_ref.def_id) is .Some(_) then {
+                    resolved_members.push(box(TypedGivenMember(m_ref.def_id, m_ref.name, resolved_params, resolved_return, Option[ref TypedExpr].None())))
+                    continue
+                }
+
                 let source_body = when m_ref.body in {
                     .Some(body) then {
                         yield Option[ref TypedExpr].Some(body)
                     },
-                    .None() then mono.storage.context.take_concrete_given_member_body(m_ref.def_id),
+                    .None() then when mono.storage.context.take_concrete_given_member_body(m_ref.def_id) in {
+                        .Some(existing_body) then Option[ref TypedExpr].Some(existing_body),
+                        .None() then when mono.storage.context.take_concrete_given_member_source(m_ref.def_id) in {
+                            .Some(source) then {
+                                let mut checker = TypeChecker.new(mono.storage.global_scope, mono.storage.context.val, source.source_file)
+                                let rebuilt_body = checker.recheck_concrete_given_member_body(resolved_target, resolved_params, resolved_return, source, mono.storage.import_graph, mono.storage.generic_templates, mono.storage.method_table, mono.storage.trait_registry, mono.storage.conformance_index)
+                                yield Option[ref TypedExpr].Some(box(rebuilt_body))
+                            },
+                            .None() then Option[ref TypedExpr].None(),
+                        },
+                    },
                 }
                 let resolved_body = when source_body in {
                     .Some(body) then {
                         let body_result = resolve_types_in_expression(mono, body)
-                        yield Option[ref TypedExpr].Some(body_result)
+                        let mut context = mono.storage.context
+                        context.set_concrete_given_member_body(m_ref.def_id, body_result)
+                        yield Option[ref TypedExpr].None()
                     },
                     .None() then Option[ref TypedExpr].None(),
                 }
@@ -7505,18 +7653,39 @@ public let resolve_types_in_global_node(mono ref Monomorphizer, node ref TypedDe
             let resolved_target = resolve_parameterized_type(mono, target_type)
             let mut resolved_members = List[ref TypedGivenMember].new()
             for m_ref in members then {
+                let source_params = resolve_global_node_source_params(mono, m_ref.def_id, m_ref.params)
                 let mut resolved_params = List[TypedParam].new()
-                for p in m_ref.params then {
+                for p in source_params then {
                     let resolved_type = resolve_parameterized_type(mono, p.param_type)
                         resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
                 }
-                let resolved_return = resolve_parameterized_type(mono, m_ref.return_type)
+                let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, m_ref.def_id, m_ref.return_type))
+                if mono.storage.context.get_concrete_given_member_body(m_ref.def_id) is .Some(_) then {
+                    resolved_members.push(box(TypedGivenMember(m_ref.def_id, m_ref.name, resolved_params, resolved_return, Option[ref TypedExpr].None())))
+                    continue
+                }
+
                 let source_body = when m_ref.body in {
                     .Some(body) then Option[ref TypedExpr].Some(body),
-                    .None() then mono.storage.context.take_concrete_given_member_body(m_ref.def_id),
+                    .None() then when mono.storage.context.take_concrete_given_member_body(m_ref.def_id) in {
+                        .Some(existing_body) then Option[ref TypedExpr].Some(existing_body),
+                        .None() then when mono.storage.context.take_concrete_given_member_source(m_ref.def_id) in {
+                            .Some(source) then {
+                                let mut checker = TypeChecker.new(mono.storage.global_scope, mono.storage.context.val, source.source_file)
+                                let rebuilt_body = checker.recheck_concrete_given_member_body(resolved_target, resolved_params, resolved_return, source, mono.storage.import_graph, mono.storage.generic_templates, mono.storage.method_table, mono.storage.trait_registry, mono.storage.conformance_index)
+                                yield Option[ref TypedExpr].Some(box(rebuilt_body))
+                            },
+                            .None() then Option[ref TypedExpr].None(),
+                        },
+                    },
                 }
                 let resolved_body = when source_body in {
-                    .Some(body) then Option[ref TypedExpr].Some(resolve_types_in_expression(mono, body)),
+                    .Some(body) then {
+                        let body_result = resolve_types_in_expression(mono, body)
+                        let mut context = mono.storage.context
+                        context.set_concrete_given_member_body(m_ref.def_id, body_result)
+                        yield Option[ref TypedExpr].None()
+                    },
                     .None() then Option[ref TypedExpr].None(),
                 }
                 resolved_members.push(box(TypedGivenMember(m_ref.def_id, m_ref.name, resolved_params, resolved_return, resolved_body)))
@@ -7527,8 +7696,14 @@ public let resolve_types_in_global_node(mono ref Monomorphizer, node ref TypedDe
         // LetDecl: resolve decl type and initializer expression.
         .LetDecl(access, name, mutable, decl_type, initializer, span, id) then {
             let resolved_type = resolve_parameterized_type(mono, decl_type)
-            let resolved_initializer = resolve_types_in_expression(mono, initializer)
-            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, resolved_initializer, span, id)
+            if mono.storage.context.get_concrete_global_initializer(id.def_id) is .Some(_) then {
+                return TypedDecl.LetDecl(access, name, mutable, resolved_type, box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved_type)), span, id)
+            }
+            let source_initializer = mono.storage.context.take_concrete_global_initializer(id.def_id) or else initializer
+            let resolved_initializer = resolve_types_in_expression(mono, source_initializer)
+            let mut context = mono.storage.context
+            context.set_concrete_global_initializer(id.def_id, resolved_initializer)
+            yield TypedDecl.LetDecl(access, name, mutable, resolved_type, box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved_type)), span, id)
         },
 
         // ForeignLetDecl: resolve decl type.

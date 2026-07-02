@@ -240,6 +240,7 @@ enum MIRReferenceKind {
 enum MIRReferenceAllocation {
   case stackBorrow
   case heapOwned
+  case heapOwnedMove
 }
 
 struct MIRCompoundAssignment {

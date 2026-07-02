@@ -130,6 +130,9 @@ given CodeGen {
         }
 
         let prefix = c_escape_prefix()
+        if name.starts_with("__koral_") or name.starts_with("__mir_") then {
+            return name
+        }
         if name.starts_with("_k__") then {
             return name
         }
@@ -736,24 +739,58 @@ given CodeGen {
     method_owner_type(self, method_def_id DefId) Option[Type] = {
         return when self.concrete_callable_info(method_def_id) in {
             .Some(info) then info.owner_type,
-            .None() then Option[Type].None(),
+            .None() then {
+                for global in self.program.globals then {
+                    when global in {
+                        .Given(target_type, _, _, methods) then {
+                            for method in methods then {
+                                if method.def_id.id == method_def_id.id then {
+                                    return Option[Type].Some(target_type)
+                                }
+                            }
+                        },
+                        _ then {},
+                    }
+                }
+                yield Option[Type].None()
+            },
         }
     }
 
     private compute_callable_c_name_uncached(self, symbol ref Symbol) String = {
+        let is_top_level_main = symbol.kind is .Function()
+            and self.context.symbol_name(symbol.val) == "main"
+            and self.method_owner_type(symbol.def_id) is .None()
+        if is_top_level_main then {
+            return "__koral_user_main"
+        }
         return when self.concrete_callable_info(symbol.def_id) in {
             .Some(info) then when self.c_identifier_opt(symbol.def_id) in {
-                .Some(c_id) then c_id,
-                .None() then when info.owner_type in {
-                    .Some(owner_type) then {
-                        let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                        yield self.compose_method_c_name(owner_c_name, info.logical_name)
+                .Some(c_id) then self.sanitize_codegen_identifier(c_id),
+                .None() then when self.context.get_name(symbol.def_id) in {
+                    .Some(name) then when info.owner_type in {
+                        .Some(owner_type) then {
+                            let sanitized_name = self.sanitize_codegen_identifier(name)
+                            let sanitized_logical = self.sanitize_codegen_identifier(info.logical_name)
+                            if sanitized_name == sanitized_logical then {
+                                let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                                yield self.compose_method_c_name(owner_c_name, info.logical_name)
+                            }
+                            yield sanitized_name
+                        },
+                        .None() then self.sanitize_codegen_identifier(name),
                     },
-                    .None() then info.logical_name,
+                    .None() then when info.owner_type in {
+                        .Some(owner_type) then {
+                            let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                            yield self.compose_method_c_name(owner_c_name, info.logical_name)
+                        },
+                        .None() then info.logical_name,
+                    },
                 },
             },
             .None() then when self.c_identifier_opt(symbol.def_id) in {
-                .Some(c_id) then c_id,
+                .Some(c_id) then self.sanitize_codegen_identifier(c_id),
                 .None() then when self.method_owner_type(symbol.def_id) in {
                     .Some(owner_type) then {
                         let raw_method_name = self.context.symbol_name(symbol.val)
@@ -1171,8 +1208,8 @@ given CodeGen {
     /// - 局部变量使用 `{name}_{defId}` 格式
     public qualified_name_value(self, symbol Symbol) String = {
         if self.is_foreign_function_def_id(symbol.def_id) then {
-            return when self.c_identifier_opt(symbol.def_id) in {
-                .Some(c_id) then c_id,
+            return when self.context.get_cname(symbol.def_id) in {
+                .Some(c_name) then c_name,
                 .None() then self.context.symbol_name(symbol),
             }
         }
@@ -1212,6 +1249,13 @@ given CodeGen {
 
     /// 获取 Symbol 的 C 标识符（用于声明）
     public c_identifier_for_symbol_value(self, symbol Symbol) String = {
+        if self.is_foreign_function_def_id(symbol.def_id) then {
+            return when self.context.get_cname(symbol.def_id) in {
+                .Some(c_name) then c_name,
+                .None() then self.context.symbol_name(symbol),
+            }
+        }
+
         if self.is_foreign_global_var_def_id(symbol.def_id) then {
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,

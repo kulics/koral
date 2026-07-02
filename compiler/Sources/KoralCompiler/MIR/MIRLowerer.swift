@@ -951,7 +951,7 @@ private final class MIRFunctionBuilder {
       if case .referenceExpression(let inner, let type) = value,
          let place = lowerPlace(inner) {
         let operand = materialize(
-          .ref(place, kind: referenceKind(for: type), allocation: .heapOwned),
+          .ref(place, kind: referenceKind(for: type), allocation: .heapOwnedMove),
           type: type
         )
         emitScopeExits(fromDepth: 0)
@@ -3121,7 +3121,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func passKindForType(_ type: Type) -> PassKind {
-    .byVal
+    passKindForParameterType(type)
   }
 
   private func finishCall(

@@ -38,7 +38,7 @@ public type ConcreteCallableInfo(
     trait_conformance Option[String],
 )
 
-private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
+private let mono_receiver_lookup_type(context ref CompilerContext, t Type) Type = {
     return when t in {
         .OpaqueType(def_id) then {
             yield when context.lookup_type(def_id) in {
@@ -60,7 +60,7 @@ private let mono_receiver_lookup_type(context CompilerContext, t Type) Type = {
 
 /// Get the simple type name for a type, matching Swift's context.getName(defId).
 /// Used as the type-name component in method lookup keys ("typeName.methodName").
-protected let mono_type_simple_name(context CompilerContext, t Type) String = {
+protected let mono_type_simple_name(context ref CompilerContext, t Type) String = {
     return when t in {
         .StructureType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
         .EnumType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
@@ -84,7 +84,7 @@ protected let mono_type_simple_name(context CompilerContext, t Type) String = {
     }
 }
 
-private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id DefId) Option[String] = {
+private let mono_concrete_layout_key_for_def_id(context ref CompilerContext, def_id DefId) Option[String] = {
     let name = context.get_name(def_id) or else { return Option[String].None() }
     let module_path = context.get_module_path(def_id) or else List[String].new()
     let is_private = when context.get_access(def_id) in {
@@ -123,7 +123,7 @@ private let mono_concrete_layout_key_for_def_id(context CompilerContext, def_id 
     return Option[String].Some(out)
 }
 
-private let mono_concrete_layout_key_for_type(context CompilerContext, t Type) String = {
+private let mono_concrete_layout_key_for_type(context ref CompilerContext, t Type) String = {
     return when t in {
         .ReferenceType(inner) then "ref_\(mono_concrete_layout_key_for_type(context, inner.val))",
         .MutableReferenceType(inner) then "mutref_\(mono_concrete_layout_key_for_type(context, inner.val))",
@@ -165,7 +165,7 @@ private let mono_concrete_layout_key_for_type(context CompilerContext, t Type) S
     }
 }
 
-private let concrete_receiver_method_lookup_key(context CompilerContext, receiver_type Type, method_name String) String = {
+private let concrete_receiver_method_lookup_key(context ref CompilerContext, receiver_type Type, method_name String) String = {
     let normalized = mono_receiver_lookup_type(context, receiver_type)
     let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
     return "\(receiver_key).\(method_name)"
@@ -179,7 +179,7 @@ private let push_concrete_receiver_lookup_alias(alias_list List[String], alias S
     return updated
 }
 
-private let concrete_receiver_lookup_aliases(context CompilerContext, t Type) List[String] = {
+private let concrete_receiver_lookup_aliases(context ref CompilerContext, t Type) List[String] = {
     let mut aliases = List[String].new()
     aliases = push_concrete_receiver_lookup_alias(aliases, mono_concrete_layout_key_for_type(context, t))
 
@@ -209,7 +209,7 @@ private let concrete_receiver_lookup_aliases(context CompilerContext, t Type) Li
     return aliases
 }
 
-private let concrete_trait_method_lookup_key(context CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
+private let concrete_trait_method_lookup_key(context ref CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
     let normalized = mono_receiver_lookup_type(context, receiver_type)
     let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
     return "\(receiver_key)|\(trait_name)|\(method_name)"
@@ -242,10 +242,49 @@ public type MonomorphizedProgram(
     mut global_nodes List[ref TypedDecl],
     traits Dict[String, TraitDeclInfo],
     vtable_requests List[VtableRequest],
-    receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
-    concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    static_method_by_key Dict[String, DefId],
+    mut receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
+    mut concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
+    mut static_method_by_key Dict[String, DefId],
+    generic_templates GenericTemplateRegistry,
+    global_scope Scope,
+    import_graph ImportGraph,
+    method_table MethodTable,
+    trait_registry TraitRegistry,
+    conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    mut extension_methods Dict[String, Dict[String, ConcreteMethodEntry]],
+    mut extension_method_def_ids Dict[String, DefId],
+    mut remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
 )
+
+given MonomorphizedProgram {
+    public merge_generated_node(self ref mut, node ref TypedDecl) Void = {
+        self.global_nodes.push(node)
+    }
+
+    public merge_concrete_callable(self ref mut, def_id DefId, info ConcreteCallableInfo) Void = {
+        self.concrete_callables_by_def_id.insert(def_id, info)
+    }
+
+    public merge_receiver_method_dispatch(self ref mut, def_id DefId, info ReceiverMethodDispatchInfo) Void = {
+        self.receiver_method_dispatch.insert(def_id, info)
+    }
+
+    public merge_extension_method_map(self ref mut, key String, value Dict[String, ConcreteMethodEntry]) Void = {
+        self.extension_methods.insert(key, value)
+    }
+
+    public merge_extension_method_def_id(self ref mut, key String, def_id DefId) Void = {
+        self.extension_method_def_ids.insert(key, def_id)
+    }
+
+    public merge_remapped_function_def_ids(self ref mut, key UInt, values List[Pair[DefId, Type]]) Void = {
+        self.remapped_function_def_ids.insert(key, values)
+    }
+
+    public merge_static_method_lookup_entry(self ref mut, key String, def_id DefId) Void = {
+        self.static_method_by_key.insert(key, def_id)
+    }
+}
 
 // ── TypeCheckerOutput ─────────────────────────────────────────────────────────
 
@@ -261,6 +300,11 @@ public type TypeCheckerOutput(
     instantiation_requests Set[InstantiationRequest],
     generic_templates GenericTemplateRegistry,
     context CompilerContext,
+    global_scope Scope,
+    import_graph ImportGraph,
+    method_table MethodTable,
+    trait_registry TraitRegistry,
+    conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
 )
 
 // ── MonomorphizerStorage ──────────────────────────────────────────────────────
@@ -293,6 +337,13 @@ protected type MonomorphizerStorage(
     mut remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
     mut receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mut vtable_requests List[VtableRequest],
+
+    // ── Cross-module metadata ─────────────────────────────────────────────
+    global_scope Scope,
+    import_graph ImportGraph,
+    method_table MethodTable,
+    trait_registry TraitRegistry,
+    conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
 
     // ── Work queue ───────────────────────────────────────────────────────────
     mut pending_requests Queue[InstantiationRequest],
@@ -443,8 +494,13 @@ given Monomorphizer {
         instantiation_requests Set[InstantiationRequest],
         generic_templates GenericTemplateRegistry,
         context CompilerContext,
+        global_scope Scope,
+        import_graph ImportGraph,
+        method_table MethodTable,
+        trait_registry TraitRegistry,
+        conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
     ) Monomorphizer = {
-        let input = TypeCheckerOutput(program, instantiation_requests, generic_templates, context)
+        let input = TypeCheckerOutput(program, instantiation_requests, generic_templates, context, global_scope, import_graph, method_table, trait_registry, conformance_index)
         return Monomorphizer.new(box(input))
     }
 
@@ -492,6 +548,12 @@ given Monomorphizer {
             Dict[UInt, List[Pair[DefId, Type]]].new(),
             input.generic_templates.receiver_method_dispatch,
             List[VtableRequest].new(),
+            // cross-module metadata
+            input.global_scope,
+            input.import_graph,
+            input.method_table,
+            input.trait_registry,
+            input.conformance_index,
             // work queue
             requests,
             Set[InstantiationKey].new(),
@@ -712,8 +774,62 @@ given Monomorphizer {
             self.storage.receiver_method_dispatch,
             concrete_callables,
             static_lookup,
+            self.storage.generic_templates,
+            self.storage.global_scope,
+            self.storage.import_graph,
+            self.storage.method_table,
+            self.storage.trait_registry,
+            self.storage.conformance_index,
+            self.storage.extension_methods,
+            self.storage.extension_method_def_ids,
+            self.storage.remapped_function_def_ids,
         )
 
+    }
+
+    // ── Resolve body expression in program context ─────────────────────────────
+
+    // Resolve types in a body expression using the program's monomorphization context.
+    // This is used for rechecking concrete function/initializer bodies that were
+    // deferred during the initial monomorphization pass.
+    public resolve_program_body_expression(program ref mut MonomorphizedProgram, context ref CompilerContext, expr ref TypedExpr) ref TypedExpr = {
+        let existing_node_count = 0(UInt)
+        let s = box(MonomorphizerStorage(
+            program.generic_templates,
+            List[ref TypedDecl].new(),
+            Dict[String, Type].new(),
+            Dict[String, InstantiatedFunction].new(),
+            Dict[String, Symbol].new(),
+            Dict[Type, Type].new(),
+            Set[Type].new(),
+            Set[String].new(),
+            List[ref TypedDecl].new(),
+            existing_node_count,
+            Dict[String, TemplateInfo].new(),
+            program.extension_methods,
+            program.extension_method_def_ids,
+            program.concrete_callables_by_def_id,
+            Dict[String, List[DefId]].new(),
+            program.remapped_function_def_ids,
+            program.receiver_method_dispatch,
+            List[VtableRequest].new(),
+            Queue[InstantiationRequest].new(),
+            Set[InstantiationKey].new(),
+            Set[InstantiationKey].new(),
+            Set[InstantiationKey].new(),
+            Set[InstantiationKey].new(),
+            Set[String].new(),
+            Set[String].new(),
+            0,
+            0,
+            context,
+        ))
+        let mono = Monomorphizer(s)
+        let resolved = resolve_types_in_expression(mono, expr)
+        for node in mono.storage.generated_nodes then {
+            program.merge_generated_node(node)
+        }
+        return resolved
     }
 
     // ── Stub methods (implemented in later tasks) ─────────────────────────────
@@ -1129,7 +1245,7 @@ given Monomorphizer {
 
 // ── MonomorphizedProgram printing ─────────────────────────────────────────────
 
-private let mono_type_name(t Type, context CompilerContext) String = {
+private let mono_type_name(t Type, context ref CompilerContext) String = {
     return when t in {
         .StructureType(def_id) then {
             yield when context.get_name(def_id) in {
@@ -1147,7 +1263,7 @@ private let mono_type_name(t Type, context CompilerContext) String = {
     }
 }
 
-private let print_mono_node(node TypedDecl, context CompilerContext) Void = {
+private let print_mono_node(node TypedDecl, context ref CompilerContext) Void = {
     when node in {
         .FunctionDecl(access, name, params, return_type, body, span, _) then {
             println("  fn \(name)(...): \(mono_type_name(return_type, context))")
@@ -1177,7 +1293,7 @@ private let print_mono_node(node TypedDecl, context CompilerContext) Void = {
     }
 }
 
-public let print_monomorphized_program(program MonomorphizedProgram, context CompilerContext) Void = {
+public let print_monomorphized_program(program MonomorphizedProgram, context ref CompilerContext) Void = {
     let node_count = program.global_nodes.count()
     let vtable_count = program.vtable_requests.count()
     println("MonomorphizedProgram {")

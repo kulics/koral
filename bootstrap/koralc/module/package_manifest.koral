@@ -443,16 +443,26 @@ private let validate_resolved_module_graph(
 private let collect_reachable_modules(
     modules_by_name Dict[String, ResolvedModuleSpec],
     name String,
-    reachable ref mut List[String],
-) Void = {
-    if reachable.contains(name) then {
-        return
+) List[String] = {
+    let mut reachable = List[String].new()
+    let mut pending = List[String].new()
+    pending.push(name)
+
+    while not pending.is_empty() then {
+        let current = pending.pop() or else { continue }
+        if reachable.contains(current) then {
+            continue
+        }
+        reachable.push(current)
+        let spec = modules_by_name.get(current) or else { continue }
+        let mut index = spec.requires.count()
+        while index > 0(UInt) then {
+            index -= 1(UInt)
+            pending.push(spec.requires[index])
+        }
     }
-    reachable.push(name)
-    let spec = modules_by_name.get(name) or else { return }
-    for requirement in spec.requires then {
-        collect_reachable_modules(modules_by_name, requirement, reachable)
-    }
+
+    return reachable
 }
 
 public let load_resolved_package_graph(
@@ -542,8 +552,7 @@ public let load_resolved_package_graph(
         let _ = validate_resolved_module_graph(modules_by_name, entry.first, visited.ref, stack.ref) or return
     }
 
-    let mut reachable = List[String].with_capacity(module_count)
-    collect_reachable_modules(modules_by_name, target_module_name, reachable.ref)
+    let reachable = collect_reachable_modules(modules_by_name, target_module_name)
     let mut reachable_names = List[String].with_capacity(reachable.count())
     for name in reachable then {
         if not reachable_names.contains(name) then {

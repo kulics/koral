@@ -1,4 +1,54 @@
 given TypeChecker {
+    private type_construction_arg_types(self, constructed_type Type) List[Type] = {
+        return when constructed_type in {
+            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mut types = List[Type].new()
+                    for field in fields then {
+                        types.push(field.field_type)
+                    }
+                    yield types
+                },
+                .None() then List[Type].new(),
+            },
+            .GenericStruct(template_name, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
+                    .Some(fields) then {
+                        let mut bindings = Dict[String, Type].new()
+                        let mut index UInt = 0
+                        let param_count = struct_template.type_parameters.count()
+                        let arg_count = args.count()
+                        let n = if param_count < arg_count then param_count else arg_count
+                        while index < n then {
+                            bindings.insert(struct_template.type_parameters[index].name, args[index].val)
+                            index += 1
+                        }
+                        let mut types = List[Type].new()
+                        for field in fields then {
+                            types.push(self.apply_type_bindings(field.field_type, bindings))
+                        }
+                        yield types
+                    },
+                    .None() then List[Type].new(),
+                },
+                .None() then List[Type].new(),
+            },
+            _ then List[Type].new(),
+        }
+    }
+
+    private recheck_type_construction_args(self, args List[ref Expr], constructed_type Type, scope Scope) List[ref TypedExpr] = {
+        let expected_types = self.type_construction_arg_types(constructed_type)
+        let mut typed_args = List[ref TypedExpr].new()
+        let mut index UInt = 0
+        for arg in args then {
+            let expected_type = if index < expected_types.count() then Option[Type].Some(expected_types[index]) else Option[Type].None()
+            typed_args.push(box(self.check_expr_scoped_ref(arg, expected_type, scope)))
+            index += 1
+        }
+        return typed_args
+    }
+
     private should_suppress_missing_member_call_diagnostic(self, typed_callee TypedExpr) Bool = {
         let _ = self
         return when typed_callee.expr_kind in {
@@ -653,6 +703,7 @@ given TypeChecker {
                     if params.count() > 0(UInt) then {
                         yield when params[0(UInt)].val.param_type in {
                             .MutableReferenceType(_) then true,
+                            .MutableBorrowedReferenceType(_, _) then true,
                             _ then false,
                         }
                     } else {
@@ -1161,14 +1212,16 @@ given TypeChecker {
             .GenericInstantiation(base_type, type_args) then {
                 if ret_type is .GenericStruct(_, _) or ret_type is .StructureType(_) then {
                     let identifier = self.type_construction_symbol_for_type(base_type, ret_type)
-                    return make_typed_expr(TypedExprKind.TypeConstruction(identifier, type_args, typed_args), ret_type)
+                    let constructor_args = self.recheck_type_construction_args(args, ret_type, scope)
+                    return make_typed_expr(TypedExprKind.TypeConstruction(identifier, type_args, constructor_args), ret_type)
                 }
             },
             .Variable(sym) then {
                 if sym.kind is .TypeSymbol() then {
                     if ret_type is .StructureType(_) or ret_type is .GenericStruct(_, _) then {
                         let identifier = box(Symbol(sym.def_id, ret_type, SymbolKind.TypeSymbol()))
-                        return make_typed_expr(TypedExprKind.TypeConstruction(identifier, List[Type].new(), typed_args), ret_type)
+                        let constructor_args = self.recheck_type_construction_args(args, ret_type, scope)
+                        return make_typed_expr(TypedExprKind.TypeConstruction(identifier, List[Type].new(), constructor_args), ret_type)
                     }
                 }
             },

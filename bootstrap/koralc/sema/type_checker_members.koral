@@ -2,7 +2,7 @@ given TypeChecker {
     private function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
         let mut specs = List[FunctionParamSpec].new()
         for param in params then {
-            specs.push(FunctionParamSpec(param.name, param.named))
+            specs.push(FunctionParamSpec(param.name, param.mutable, param.named))
         }
         return specs
     }
@@ -10,7 +10,7 @@ given TypeChecker {
     private function_param_specs_from_params(self, params List[Param]) List[FunctionParamSpec] = {
         let mut specs = List[FunctionParamSpec].new()
         for param in params then {
-            specs.push(FunctionParamSpec(param.name, param.named))
+            specs.push(FunctionParamSpec(param.name, param.mutable, param.named))
         }
         return specs
     }
@@ -625,7 +625,15 @@ given TypeChecker {
             when typed_body in {
                 .Some(body_ref) then {
                     if should_store_concrete_given_body then {
-                        context.set_concrete_given_member_body(method_def_id, body_ref)
+                        when m.body in {
+                            .Some(source_body) then {
+                                context.set_concrete_given_member_source(
+                                    method_def_id,
+                                    ConcreteExprSource(source_body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
+                                )
+                            },
+                            .None() then context.set_concrete_given_member_body(method_def_id, body_ref),
+                        }
                     }
                 },
                 .None() then {},
@@ -647,6 +655,112 @@ given TypeChecker {
             _ then {},
         }
         return self.resolve_type_with_self(return_type, target_type)
+    }
+
+
+    public recheck_concrete_given_member_body(
+        self ref mut,
+        target_type Type,
+        params List[TypedParam],
+        return_type Type,
+        source ConcreteExprSource,
+        import_graph ImportGraph,
+        generic_templates GenericTemplateRegistry,
+        method_table MethodTable,
+        trait_registry TraitRegistry,
+        conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    ) TypedExpr = {
+        self.storage.file_path = source.source_file
+        self.storage.module_path = source.module_path
+        self.storage.package_id = source.package_id
+        self.storage.import_graph = Option[ImportGraph].Some(import_graph)
+        self.storage.generic_templates = box(generic_templates)
+        self.storage.method_table = method_table
+        self.storage.trait_registry = trait_registry
+        self.storage.conformance_index = conformance_index
+        let prev_function_return_context = self.storage.function_return_context
+        let prev_in_loop = self.storage.in_loop
+        let prev_in_finally = self.storage.in_finally
+        let prev_yield_targets = self.storage.yield_targets
+        let prev_scope = self.storage.current_scope
+        self.storage.function_return_context.expected_return_type = Option[Type].Some(return_type)
+        self.storage.function_return_context.inferred_return_type = Option[Type].None()
+        self.storage.function_return_context.is_inferring = false
+        self.storage.in_loop = false
+        self.storage.in_finally = false
+        self.storage.yield_targets = List[ref mut YieldTarget].new()
+        let mut method_scope = self.make_method_scope(params, target_type, List[TypeParameter].new())
+        self.storage.current_scope = method_scope
+        let result = self.check_expr_scoped_ref(source.body, .Some(return_type), method_scope)
+        let finalized = when self.storage.constraint_solver.solve() in {
+            .Ok(subst) then {
+                let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, box(result))
+                self.storage.constraint_solver.clear_debug_state()
+                yield resolved
+            },
+            .Error(e) then {
+                self.storage.constraint_solver.clear_debug_state()
+                panic("failed to recheck concrete given body: \(e.message())")
+            },
+        }
+        self.storage.current_scope = prev_scope
+        self.storage.function_return_context = prev_function_return_context
+        self.storage.in_loop = prev_in_loop
+        self.storage.in_finally = prev_in_finally
+        self.storage.yield_targets = prev_yield_targets
+        return finalized
+    }
+
+    public recheck_concrete_function_body(
+        self ref mut,
+        params List[TypedParam],
+        return_type Type,
+        source ConcreteExprSource,
+        import_graph ImportGraph,
+        generic_templates GenericTemplateRegistry,
+        method_table MethodTable,
+        trait_registry TraitRegistry,
+        conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    ) TypedExpr = {
+        self.storage.file_path = source.source_file
+        self.storage.module_path = source.module_path
+        self.storage.package_id = source.package_id
+        self.storage.import_graph = Option[ImportGraph].Some(import_graph)
+        self.storage.generic_templates = box(generic_templates)
+        self.storage.method_table = method_table
+        self.storage.trait_registry = trait_registry
+        self.storage.conformance_index = conformance_index
+        let prev_function_return_context = self.storage.function_return_context
+        let prev_in_loop = self.storage.in_loop
+        let prev_in_finally = self.storage.in_finally
+        let prev_yield_targets = self.storage.yield_targets
+        let prev_scope = self.storage.current_scope
+        self.storage.function_return_context.expected_return_type = Option[Type].Some(return_type)
+        self.storage.function_return_context.inferred_return_type = Option[Type].None()
+        self.storage.function_return_context.is_inferring = false
+        self.storage.in_loop = false
+        self.storage.in_finally = false
+        self.storage.yield_targets = List[ref mut YieldTarget].new()
+        let mut fn_scope = self.make_fn_scope(params)
+        self.storage.current_scope = fn_scope
+        let result = self.check_expr_scoped_ref(source.body, .Some(return_type), fn_scope)
+        let finalized = when self.storage.constraint_solver.solve() in {
+            .Ok(subst) then {
+                let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, box(result))
+                self.storage.constraint_solver.clear_debug_state()
+                yield resolved
+            },
+            .Error(e) then {
+                self.storage.constraint_solver.clear_debug_state()
+                panic("failed to recheck concrete function body: \(e.message())")
+            },
+        }
+        self.storage.current_scope = prev_scope
+        self.storage.function_return_context = prev_function_return_context
+        self.storage.in_loop = prev_in_loop
+        self.storage.in_finally = prev_in_finally
+        self.storage.yield_targets = prev_yield_targets
+        return finalized
     }
 
     private make_method_scope(self, params List[TypedParam], self_type Type, type_params List[TypeParameter]) Scope = {

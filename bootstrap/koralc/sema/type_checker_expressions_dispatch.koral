@@ -1748,8 +1748,8 @@ given TypeChecker {
                     then Type.MutableReferenceType(box(typed_inner.expr_type))
                     else Type.ReferenceType(box(typed_inner.expr_type)),
                 _ then if is_mutable
-                    then Type.MutableReferenceType(box(typed_inner.expr_type))
-                    else Type.ReferenceType(box(typed_inner.expr_type)),
+                    then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), "'_")
+                    else Type.BorrowedReferenceType(box(typed_inner.expr_type), "'_"),
             },
             .None() then if is_mutable
                 then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), "'_")
@@ -1858,10 +1858,18 @@ given TypeChecker {
                         )
                     )
                 }
-                let ref_type = if should_produce_mutable then {
-                    yield Type.MutableReferenceType(box(typed_inner.expr_type))
-                } else {
-                    yield Type.ReferenceType(box(typed_inner.expr_type))
+                let ref_type = when expected in {
+                    .Some(et) then when et in {
+                        .ReferenceType(_) or .MutableReferenceType(_) then if should_produce_mutable
+                            then Type.MutableReferenceType(box(typed_inner.expr_type))
+                            else Type.ReferenceType(box(typed_inner.expr_type)),
+                        _ then if should_produce_mutable
+                            then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), "'_")
+                            else Type.BorrowedReferenceType(box(typed_inner.expr_type), "'_"),
+                    },
+                    .None() then if should_produce_mutable
+                        then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type), "'_")
+                        else Type.BorrowedReferenceType(box(typed_inner.expr_type), "'_"),
                 }
                 yield make_typed_expr(TypedExprKind.RefExpr(typed_inner_ref), ref_type)
             },
