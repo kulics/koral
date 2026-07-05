@@ -24,6 +24,168 @@ private let is_void_like_type(t Type) Bool = {
 
 given CodeGen {
 
+    private register_type_declaration_for_used_type(self ref mut Self, decl_map ref mut Dict[String, TypeDeclaration], seen ref mut Set[String], t Type) Void = {
+        let concrete_type = self.concretize_codegen_type(t)
+        let visit_key = self.concrete_layout_key_for_type(concrete_type)
+        if seen.contains(visit_key) then { return }
+        seen.insert(visit_key)
+
+        when concrete_type in {
+            .ReferenceType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .MutableReferenceType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .BorrowedReferenceType(inner, _) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .MutableBorrowedReferenceType(inner, _) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .PointerType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .MutablePointerType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .WeakReferenceType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .MutableWeakReferenceType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                return
+            },
+            .FunctionType(params, return_type) then {
+                for entry in params then {
+                    self.register_type_declaration_for_used_type(decl_map, seen, entry.param_type)
+                }
+                self.register_type_declaration_for_used_type(decl_map, seen, return_type.val)
+                return
+            },
+            .StructureType(def_id) then {
+                when self.concrete_struct_fields_from_def(def_id) in {
+                    .Some(fields) then {
+                        let c_name = self.c_identifier_for_symbol(box(Symbol(def_id, concrete_type, SymbolKind.TypeSymbol())))
+                        if not decl_map.contains_key(c_name) then {
+                            decl_map.insert(c_name, TypeDeclaration.Structure(c_name, fields))
+                        }
+                        for field in fields then {
+                            self.register_type_declaration_for_used_type(decl_map, seen, field.field_type)
+                        }
+                    },
+                    .None() then {},
+                }
+                return
+            },
+            .EnumType(def_id) then {
+                when self.concrete_enum_cases_from_def(def_id) in {
+                    .Some(cases) then {
+                        let c_name = self.c_identifier_for_symbol(box(Symbol(def_id, concrete_type, SymbolKind.TypeSymbol())))
+                        if not decl_map.contains_key(c_name) then {
+                            decl_map.insert(c_name, TypeDeclaration.Enum(c_name, cases))
+                        }
+                        for case_info in cases then {
+                            for field in case_info.fields then {
+                                self.register_type_declaration_for_used_type(decl_map, seen, field.field_type)
+                            }
+                        }
+                    },
+                    .None() then {},
+                }
+                return
+            },
+            .GenericStruct(template, _) then {
+                when self.find_type_def_id_by_layout_or_template(concrete_type, template) in {
+                    .Some(def_id) then {
+                        self.register_type_declaration_for_used_type(decl_map, seen, Type.StructureType(def_id))
+                    },
+                    .None() then {},
+                }
+                return
+            },
+            .GenericEnum(template, _) then {
+                when self.find_type_def_id_by_layout_or_template(concrete_type, template) in {
+                    .Some(def_id) then {
+                        self.register_type_declaration_for_used_type(decl_map, seen, Type.EnumType(def_id))
+                    },
+                    .None() then {},
+                }
+                return
+            },
+            _ then { return },
+        }
+    }
+
+    private collect_used_type_declarations(self ref mut Self, decl_map ref mut Dict[String, TypeDeclaration]) Void = {
+        let mut seen = Set[String].new()
+
+        for global in self.program.globals then {
+            when global in {
+                .ForeignFunction(_, params, return_type) then {
+                    for param in params then {
+                        self.register_type_declaration_for_used_type(decl_map, seen.ref, param.param_type)
+                    }
+                    self.register_type_declaration_for_used_type(decl_map, seen.ref, return_type)
+                },
+                .ForeignStruct(_, fields) then {
+                    for field in fields then {
+                        self.register_type_declaration_for_used_type(decl_map, seen.ref, field.field_type)
+                    }
+                },
+                .ForeignGlobalVariable(_, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, seen.ref, decl_type),
+                .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, seen.ref, decl_type),
+                .StructDeclaration(_, fields) then {
+                    for field in fields then {
+                        self.register_type_declaration_for_used_type(decl_map, seen.ref, field.field_type)
+                    }
+                },
+                .EnumDeclaration(_, cases) then {
+                    for case_info in cases then {
+                        for field in case_info.fields then {
+                            self.register_type_declaration_for_used_type(decl_map, seen.ref, field.field_type)
+                        }
+                    }
+                },
+                .Function(_, params, return_type, _) then {
+                    for param in params then {
+                        self.register_type_declaration_for_used_type(decl_map, seen.ref, param.param_type)
+                    }
+                    self.register_type_declaration_for_used_type(decl_map, seen.ref, return_type)
+                },
+                .Given(target_type, _, trait_type_args, methods) then {
+                    self.register_type_declaration_for_used_type(decl_map, seen.ref, target_type)
+                    for trait_arg in trait_type_args then {
+                        self.register_type_declaration_for_used_type(decl_map, seen.ref, trait_arg)
+                    }
+                    for method in methods then {
+                        self.register_type_declaration_for_used_type(decl_map, seen.ref, method.symbol_type)
+                    }
+                },
+                .TraitVTable(_) then {},
+                .TemplatePlaceholder(_) then {},
+                .ForeignType(_) then {},
+            }
+        }
+
+        for function_ref in self.program.functions then {
+            for param in function_ref.params then {
+                self.register_type_declaration_for_used_type(decl_map, seen.ref, param.param_type)
+            }
+            self.register_type_declaration_for_used_type(decl_map, seen.ref, function_ref.return_type)
+            for local in function_ref.locals then {
+                self.register_type_declaration_for_used_type(decl_map, seen.ref, local.local_type)
+            }
+        }
+    }
+
     private concrete_struct_fields_from_def(self, def_id DefId) Option[List[TypedField]] = {
         when self.concrete_struct_fields_from_program(def_id) in {
             .Some(fields) then { return Option[List[TypedField]].Some(fields) },
@@ -367,6 +529,8 @@ given CodeGen {
                 _ then {},
             }
         }
+
+        self.collect_used_type_declarations(decl_map.ref)
 
         // 第二步：构建依赖图
         let mut all_names = List[String].new()

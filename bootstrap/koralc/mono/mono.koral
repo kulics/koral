@@ -602,7 +602,7 @@ given Monomorphizer {
             },
             _ then target_type,
         }
-        let type_keys = concrete_receiver_lookup_aliases(self.storage.context, resolved_type)
+        let type_keys = concrete_receiver_lookup_aliases(self.storage.context.ref, resolved_type)
 
         for m_ref in members then {
             if given_member_has_generic_parameter(m_ref) then {
@@ -620,6 +620,144 @@ given Monomorphizer {
         }
     }
 
+    private enqueue_forced_drop_request_for_type_def(self ref Self, def_id DefId) Void = {
+        let mapped_type = self.storage.context.lookup_type(def_id)
+
+        let template_name = when self.storage.context.get_template_name(def_id) in {
+            .Some(name) then name,
+            .None() then when mapped_type in {
+                .Some(mapped) then when mapped in {
+                    .GenericStruct(template, _) then template,
+                    .GenericEnum(template, _) then template,
+                    _ then { return },
+                },
+                .None() then { return },
+            },
+        }
+
+        let type_args_raw = when self.storage.context.get_type_arguments(def_id) in {
+            .Some(args) then args,
+            .None() then when mapped_type in {
+                .Some(mapped) then when mapped in {
+                    .GenericStruct(_, args) then {
+                        let mut unpacked = List[Type].new()
+                        for arg in args then {
+                            unpacked.push(arg.val)
+                        }
+                        yield unpacked
+                    },
+                    .GenericEnum(_, args) then {
+                        let mut unpacked = List[Type].new()
+                        for arg in args then {
+                            unpacked.push(arg.val)
+                        }
+                        yield unpacked
+                    },
+                    _ then { return },
+                },
+                .None() then { return },
+            },
+        }
+
+        let mut type_args = List[ref Type].new()
+        for type_arg in type_args_raw then {
+            if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
+                return
+            }
+            type_args.push(box(type_arg))
+        }
+
+        let base_type = when mapped_type in {
+            .Some(mapped) then mapped,
+            .None() then when self.storage.context.get_kind(def_id) in {
+                .Some(kind) then when kind in {
+                    .TypeDef(type_kind) then when type_kind in {
+                        .Structure() then Type.StructureType(def_id),
+                        .Enum() then Type.EnumType(def_id),
+                        _ then { return },
+                    },
+                    _ then { return },
+                },
+                .None() then { return },
+            },
+        }
+
+        if has_generic_parameter(base_type) or is_placeholder_inferred_type(base_type) then {
+            return
+        }
+
+        when self.storage.generic_templates.lookup_extension_methods(template_name) in {
+            .Some(ext_templates) then {
+                for ext_template in ext_templates then {
+                    let is_drop_trait = when ext_template.conformance_trait_name in {
+                        .Some(trait_name) then trait_name == "Drop" or trait_name.ends_with(".Drop"),
+                        .None() then false,
+                    }
+                    if ext_template.method.name <> "drop" and not is_drop_trait then {
+                        continue
+                    }
+
+                    let req = InstantiationRequest(
+                        InstantiationKind.ExtensionMethod(
+                            template_name,
+                            base_type,
+                            ext_template,
+                            type_args,
+                            List[ref Type].new(),
+                        ),
+                        0,
+                        "",
+                    )
+                    let key = req.deduplication_key()
+                    if not self.storage.processed_request_keys.contains(key) and not self.storage.pending_request_keys.contains(key) then {
+                        self.storage.pending_request_keys.insert(key)
+                        self.storage.pending_requests.push(req)
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+
+    private enqueue_forced_drop_request_for_extension_base(
+        self ref Self,
+        template_name String,
+        base_type Type,
+        type_args List[ref Type],
+    ) Void = {
+        when self.storage.generic_templates.lookup_extension_methods(template_name) in {
+            .Some(ext_templates) then {
+                for ext_template in ext_templates then {
+                    let is_drop_trait = when ext_template.conformance_trait_name in {
+                        .Some(trait_name) then trait_name == "Drop" or trait_name.ends_with(".Drop"),
+                        .None() then false,
+                    }
+                    if ext_template.method.name <> "drop" and not is_drop_trait then {
+                        continue
+                    }
+
+                    let req = InstantiationRequest(
+                        InstantiationKind.ExtensionMethod(
+                            template_name,
+                            base_type,
+                            ext_template,
+                            type_args,
+                            List[ref Type].new(),
+                        ),
+                        0,
+                        "",
+                    )
+                    let key = req.deduplication_key()
+                    if not self.storage.processed_request_keys.contains(key) and not self.storage.pending_request_keys.contains(key) then {
+                        self.storage.pending_request_keys.insert(key)
+                        self.storage.pending_requests.push(req)
+                    }
+                }
+            },
+            .None() then {},
+        }
+    }
+
     // ── Main monomorphization loop ────────────────────────────────────────────
 
     // Execute the full monomorphization pass and return a MonomorphizedProgram.
@@ -632,6 +770,14 @@ given Monomorphizer {
     //   5. Assemble and return MonomorphizedProgram
     //
     public monomorphize(self ref Self) MonomorphizedProgram = {
+        // Seed forced Drop-method instantiation for already-materialized
+        // concrete generic nominal types tracked only in CompilerContext.
+        let mut seed_def_id UInt = 1
+        while seed_def_id < self.storage.context.next_def_id() then {
+            self.enqueue_forced_drop_request_for_type_def(DefId(seed_def_id))
+            seed_def_id += 1
+        }
+
         // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
         // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
         // so that resolve_static_method_call_to_call can find them.
@@ -684,6 +830,9 @@ given Monomorphizer {
                     self.instantiate_function_impl(template, args)
                 },
                 .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
+                    if template.method.name <> "drop" then {
+                        self.enqueue_forced_drop_request_for_extension_base(template_name, base_type, type_args)
+                    }
                     self.instantiate_extension_method_impl(base_type, template_name, template, type_args, method_type_args)
                 },
                 .TraitMethod(base_type, method_name, method_type_args) then {
@@ -813,6 +962,11 @@ given Monomorphizer {
             program.remapped_function_def_ids,
             program.receiver_method_dispatch,
             List[VtableRequest].new(),
+            program.global_scope,
+            program.import_graph,
+            program.method_table,
+            program.trait_registry,
+            program.conformance_index,
             Queue[InstantiationRequest].new(),
             Set[InstantiationKey].new(),
             Set[InstantiationKey].new(),
@@ -822,12 +976,27 @@ given Monomorphizer {
             Set[String].new(),
             0,
             0,
-            context,
+            context.val,
         ))
         let mono = Monomorphizer(s)
-        let resolved = resolve_types_in_expression(mono, expr)
+        let resolved = resolve_types_in_expression(mono.ref, expr)
         for node in mono.storage.generated_nodes then {
             program.merge_generated_node(node)
+        }
+        for entry in mono.storage.concrete_callables_by_def_id.iterator() then {
+            program.merge_concrete_callable(entry.first, entry.second)
+        }
+        for entry in mono.storage.receiver_method_dispatch.iterator() then {
+            program.merge_receiver_method_dispatch(entry.first, entry.second)
+        }
+        for entry in mono.storage.extension_methods.iterator() then {
+            program.merge_extension_method_map(entry.first, entry.second)
+        }
+        for entry in mono.storage.extension_method_def_ids.iterator() then {
+            program.merge_extension_method_def_id(entry.first, entry.second)
+        }
+        for entry in mono.storage.remapped_function_def_ids.iterator() then {
+            program.merge_remapped_function_def_ids(entry.first, entry.second)
         }
         return resolved
     }
@@ -915,7 +1084,7 @@ given Monomorphizer {
                             .Some(info) then info.method_name,
                             .None() then m_ref.name,
                         }
-                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, method_name)
+                        let key = concrete_receiver_method_lookup_key(self.storage.context.ref, target_type, method_name)
                         if not lookup.contains_key(key) then {
                             lookup.insert(key, m_ref.def_id)
                         }
@@ -928,14 +1097,14 @@ given Monomorphizer {
                             .Some(info) then info.method_name,
                             .None() then m_ref.name,
                         }
-                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, method_name)
+                        let key = concrete_receiver_method_lookup_key(self.storage.context.ref, target_type, method_name)
                         lookup.insert(key, m_ref.def_id)
                     }
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
                     for m_ref in members then {
                         if given_member_has_generic_parameter(m_ref) then { continue }
-                        let key = concrete_receiver_method_lookup_key(self.storage.context, target_type, m_ref.name)
+                        let key = concrete_receiver_method_lookup_key(self.storage.context.ref, target_type, m_ref.name)
                         if not lookup.contains_key(key) then {
                             lookup.insert(key, m_ref.def_id)
                         }
@@ -950,7 +1119,7 @@ given Monomorphizer {
             let def_id = entry.first
             let concrete = entry.second
             let owner_type = concrete.owner_type or else { continue }
-            let key = concrete_receiver_method_lookup_key(self.storage.context, owner_type, concrete.logical_name)
+            let key = concrete_receiver_method_lookup_key(self.storage.context.ref, owner_type, concrete.logical_name)
             lookup.insert(key, def_id)
         }
 
@@ -1001,7 +1170,7 @@ given Monomorphizer {
             when concrete.trait_conformance in {
                 .Some(trait_name) then {
                     let owner_type = concrete.owner_type or else { continue }
-                    let key = concrete_trait_method_lookup_key(self.storage.context, owner_type, trait_name, concrete.logical_name)
+                    let key = concrete_trait_method_lookup_key(self.storage.context.ref, owner_type, trait_name, concrete.logical_name)
                     let should_insert = when lookup.get(key) in {
                         .Some(existing_def_id) then not materialized.contains(existing_def_id.id) and materialized.contains(def_id.id),
                         .None() then true,
@@ -1042,7 +1211,7 @@ given Monomorphizer {
                 if self.storage.context.lookup_type(def_id) is .Some(mapped_type) then {
                     let display_name = self.storage.context.type_display_name(mapped_type)
                     self.append_codegen_def_id_name_index(index.ref, display_name, def_id)
-                    self.append_codegen_def_id_name_index(index.ref, mono_concrete_layout_key_for_type(self.storage.context, mapped_type), def_id)
+                    self.append_codegen_def_id_name_index(index.ref, mono_concrete_layout_key_for_type(self.storage.context.ref, mapped_type), def_id)
                 }
             }
             id += 1
@@ -1105,7 +1274,7 @@ given Monomorphizer {
                 }
             },
             .GenericStruct(template, _) then {
-                let layout_name = mono_concrete_layout_key_for_type(self.storage.context, t)
+                let layout_name = mono_concrete_layout_key_for_type(self.storage.context.ref, t)
                 yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
@@ -1115,7 +1284,7 @@ given Monomorphizer {
                 }
             },
             .GenericEnum(template, _) then {
-                let layout_name = mono_concrete_layout_key_for_type(self.storage.context, t)
+                let layout_name = mono_concrete_layout_key_for_type(self.storage.context.ref, t)
                 yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
@@ -1136,7 +1305,7 @@ given Monomorphizer {
                     },
                 }
             },
-            .ReferenceType(_) then mono_concrete_layout_key_for_type(self.storage.context, t),
+            .ReferenceType(_) then mono_concrete_layout_key_for_type(self.storage.context.ref, t),
             .IntType() then "Int",
             .Int8Type() then "Int8",
             .Int16Type() then "Int16",
@@ -1150,7 +1319,7 @@ given Monomorphizer {
             .Float32Type() then "Float32",
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
-            _ then mono_concrete_layout_key_for_type(self.storage.context, t),
+            _ then mono_concrete_layout_key_for_type(self.storage.context.ref, t),
         }
     }
 

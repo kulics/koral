@@ -826,6 +826,94 @@ given CodeGen {
         return local_types
     }
 
+    private collect_trait_object_conversions_in_intrinsic(self ref, node MIRIntrinsic, out ref mut List[MIRTraitObjectConversion]) Void = {
+        when node in {
+            .AllocMemory(count, _) then self.collect_trait_object_conversions_in_value(count.val, out),
+            .DeallocMemory(pointer) then self.collect_trait_object_conversions_in_value(pointer.val, out),
+            .CopyMemory(dest, source, count) then {
+                self.collect_trait_object_conversions_in_value(dest.val, out)
+                self.collect_trait_object_conversions_in_value(source.val, out)
+                self.collect_trait_object_conversions_in_value(count.val, out)
+            },
+            .MoveMemory(dest, source, count) then {
+                self.collect_trait_object_conversions_in_value(dest.val, out)
+                self.collect_trait_object_conversions_in_value(source.val, out)
+                self.collect_trait_object_conversions_in_value(count.val, out)
+            },
+            .IsUniqueMutable(value) then self.collect_trait_object_conversions_in_value(value.val, out),
+            .RefCount(value) then self.collect_trait_object_conversions_in_value(value.val, out),
+            .MakeRef(pointer, owner, _) then {
+                self.collect_trait_object_conversions_in_value(pointer.val, out)
+                self.collect_trait_object_conversions_in_value(owner.val, out)
+            },
+            .MakeMutRef(pointer, owner, _) then {
+                self.collect_trait_object_conversions_in_value(pointer.val, out)
+                self.collect_trait_object_conversions_in_value(owner.val, out)
+            },
+            .DowngradeRef(value, _) then self.collect_trait_object_conversions_in_value(value.val, out),
+            .DowngradeMutRef(value, _) then self.collect_trait_object_conversions_in_value(value.val, out),
+            .UpgradeRef(value, _) then self.collect_trait_object_conversions_in_value(value.val, out),
+            .UpgradeMutRef(value, _) then self.collect_trait_object_conversions_in_value(value.val, out),
+            .InitMemory(pointer, value) then {
+                self.collect_trait_object_conversions_in_value(pointer.val, out)
+                self.collect_trait_object_conversions_in_value(value.val, out)
+            },
+            .DeinitMemory(pointer) then self.collect_trait_object_conversions_in_value(pointer.val, out),
+            .TakeMemory(pointer, _) then self.collect_trait_object_conversions_in_value(pointer.val, out),
+            .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                self.collect_trait_object_conversions_in_value(out_handle.val, out)
+                self.collect_trait_object_conversions_in_value(out_tid.val, out)
+                self.collect_trait_object_conversions_in_value(closure.val, out)
+                self.collect_trait_object_conversions_in_value(stack_size.val, out)
+            },
+            .NullPtr(_) then {},
+        }
+    }
+
+    private collect_trait_object_conversions_in_value(self ref, value MIRValue, out ref mut List[MIRTraitObjectConversion]) Void = {
+        when value in {
+            .Call(call) then {
+                for argument in call.arguments then {
+                    self.collect_trait_object_conversions_in_value(argument.val, out)
+                }
+            },
+            .Aggregate(aggregate) then {
+                for field in aggregate.fields then {
+                    self.collect_trait_object_conversions_in_value(field.val, out)
+                }
+            },
+            .EnumCase(construction) then {
+                for argument in construction.arguments then {
+                    self.collect_trait_object_conversions_in_value(argument.val, out)
+                }
+            },
+            .EnumTag(tag) then self.collect_trait_object_conversions_in_value(tag.subject.val, out),
+            .TraitObjectConversion(conversion) then {
+                out.push(conversion)
+                self.collect_trait_object_conversions_in_value(conversion.inner.val, out)
+            },
+            .TraitMethodCall(call) then {
+                self.collect_trait_object_conversions_in_value(call.receiver.val, out)
+                for argument in call.arguments then {
+                    self.collect_trait_object_conversions_in_value(argument.val, out)
+                }
+            },
+            .Intrinsic(node) then self.collect_trait_object_conversions_in_intrinsic(node, out),
+            _ then {},
+        }
+    }
+
+    private collect_trait_object_conversions_in_statement(self ref, statement MIRStatement, out ref mut List[MIRTraitObjectConversion]) Void = {
+        when statement in {
+            .Assign(_, value) then self.collect_trait_object_conversions_in_value(value, out),
+            .CompoundAssign(assignment) then self.collect_trait_object_conversions_in_value(assignment.value, out),
+            .Retain(value) then self.collect_trait_object_conversions_in_value(value, out),
+            .Release(value) then self.collect_trait_object_conversions_in_value(value, out),
+            .Evaluate(value) then self.collect_trait_object_conversions_in_value(value, out),
+            _ then {},
+        }
+    }
+
     private collect_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
         let mut requests = List[VtableCodegenRequest].new()
         for global in self.program.globals then {
@@ -841,6 +929,24 @@ given CodeGen {
                 _ then {},
             }
         }
+
+        let mut conversions = List[MIRTraitObjectConversion].new()
+        for function in self.program.functions then {
+            for block in function.blocks then {
+                for statement in block.statements then {
+                        self.collect_trait_object_conversions_in_statement(statement.val, conversions.ref)
+                }
+            }
+        }
+        for conversion in conversions then {
+            if conversion.trait_name.is_empty() then { continue }
+            if self.trait_target_type_name(conversion.concrete_type) is .Some(_) then { continue }
+            let trait_type_args = self.mir_type_args_to_ref_list(conversion.trait_type_args)
+            let methods = self.get_ordered_trait_members_for_vtable(conversion.trait_name, conversion.concrete_type, trait_type_args)
+            if methods.is_empty() then { continue }
+            requests.push(VtableCodegenRequest(conversion.concrete_type, conversion.trait_name, trait_type_args, methods))
+        }
+
         return requests
     }
 

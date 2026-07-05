@@ -214,14 +214,14 @@ private let enqueue_pending_request_if_needed(mono ref Monomorphizer, req Instan
 private let is_std_drop_trait_conformance(mono ref Monomorphizer, conformance_trait_name Option[String]) Bool = {
     return when conformance_trait_name in {
         .Some(trait_name) then {
-            if trait_name <> "Drop" then { return false }
+            if trait_name <> "Drop" and not trait_name.ends_with(".Drop") then { return false }
             yield when mono.storage.generic_templates.traits.get(trait_name) in {
                 .Some(info) then {
-                    if info.module_path.is_empty() then { return false }
+                    if info.module_path.is_empty() then { return true }
                     let root = info.module_path[0(UInt)]
                     yield root == "Std" or root == "std"
                 },
-                .None() then false,
+                .None() then true,
             }
         },
         .None() then false,
@@ -459,13 +459,14 @@ public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemp
     // l. Force instantiate drop if this type conforms to std Drop.
     //    All other extension methods are instantiated on-demand when called,
     //    via try_bind_generic_method_call during monomorphization.
-    when mono.storage.generic_templates.lookup_extension_methods(template.name) in {
+    let template_lookup_name = mono.storage.context.get_name(template.def_id) or else template.name
+    when mono.storage.generic_templates.lookup_extension_methods(template_lookup_name) in {
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
-                if is_std_drop_trait_conformance(mono, ext_template.conformance_trait_name) then {
+                if ext_template.method.name == "drop" or is_std_drop_trait_conformance(mono, ext_template.conformance_trait_name) then {
                     let ext_request = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
-                            template.name,
+                            template_lookup_name,
                             concrete_type,
                             ext_template,
                             args,
@@ -627,13 +628,14 @@ public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate
 
     // l. Force instantiate drop if this enum type conforms to std Drop.
     //    All other extension methods are instantiated on-demand when called.
-    when mono.storage.generic_templates.lookup_extension_methods(template.name) in {
+    let template_lookup_name = mono.storage.context.get_name(template.def_id) or else template.name
+    when mono.storage.generic_templates.lookup_extension_methods(template_lookup_name) in {
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
-                if is_std_drop_trait_conformance(mono, ext_template.conformance_trait_name) then {
+                if ext_template.method.name == "drop" or is_std_drop_trait_conformance(mono, ext_template.conformance_trait_name) then {
                     let ext_request = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
-                            template.name,
+                            template_lookup_name,
                             concrete_type,
                             ext_template,
                             args,

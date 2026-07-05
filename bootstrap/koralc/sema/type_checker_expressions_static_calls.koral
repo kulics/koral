@@ -1,4 +1,16 @@
+using std::os { env }
+
 given TypeChecker {
+    private semantic_method_name_for_symbol(self, method Symbol) String = {
+        if method.def_id.id > 0 then {
+            when self.storage.generic_templates.receiver_method_dispatch.get(method.def_id) in {
+                .Some(info) then { return info.method_name },
+                .None() then {},
+            }
+        }
+        return self.context().symbol_name(method)
+    }
+
     private type_construction_arg_types(self, constructed_type Type) List[Type] = {
         return when constructed_type in {
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
@@ -425,6 +437,47 @@ given TypeChecker {
             },
             _ then raw_declared_receiver_type,
         }
+        let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope) in {
+            .Some(t) then when t in {
+                .EnumType(def_id) then {
+                    yield if not receiver_type_arg_refs.is_empty() then {
+                        yield Option[Type].Some(Type.GenericEnum(effective_type_name, receiver_type_arg_refs))
+                    } else when expected in {
+                        .Some(et) then when et in {
+                            .GenericEnum(expected_template, _) then {
+                                yield if expected_template == effective_type_name then Option[Type].Some(et) else Option[Type].Some(t)
+                            },
+                            .EnumType(expected_def_id) then {
+                                yield if expected_def_id.id == def_id.id then Option[Type].Some(et) else Option[Type].Some(t)
+                            },
+                            _ then Option[Type].Some(t),
+                        },
+                        .None() then Option[Type].Some(t),
+                    }
+                },
+                .GenericEnum(template_name, existing_args) then {
+                    yield if not receiver_type_arg_refs.is_empty() then {
+                        yield Option[Type].Some(Type.GenericEnum(template_name, receiver_type_arg_refs))
+                    } else when expected in {
+                        .Some(et) then when et in {
+                            .GenericEnum(expected_template, _) then {
+                                yield if expected_template == template_name then Option[Type].Some(et) else Option[Type].Some(t)
+                            },
+                            _ then Option[Type].Some(t),
+                        },
+                        .None() then Option[Type].Some(t),
+                    }
+                },
+                _ then Option[Type].None(),
+            },
+            .None() then Option[Type].None(),
+        }
+        let enum_constructor_type_opt = when enum_type_opt in {
+            .Some(enum_type) then if self.static_member_is_enum_case(enum_type, method_name)
+                then Option[Type].Some(enum_type)
+                else Option[Type].None(),
+            .None() then Option[Type].None(),
+        }
         let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
         let static_param_types = when static_sig_opt in {
             .Some(sig) then {
@@ -446,8 +499,13 @@ given TypeChecker {
                 yield bound_params
             },
             .None() then {
-                let raw_static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
-                yield self.bind_static_method_param_types(effective_type_name, receiver_type_arg_refs, raw_static_param_types)
+                yield when enum_constructor_type_opt in {
+                    .Some(enum_type) then self.get_enum_case_field_types(enum_type, method_name),
+                    .None() then {
+                        let raw_static_param_types = self.resolve_static_method_param_types(effective_type_name, method_name)
+                        yield self.bind_static_method_param_types(effective_type_name, receiver_type_arg_refs, raw_static_param_types)
+                    },
+                }
             },
         }
         let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
@@ -532,34 +590,6 @@ given TypeChecker {
             }
             typed_args.push(box(typed_arg))
             static_arg_idx += 1
-        }
-        let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(effective_type_name, scope) in {
-            .Some(t) then when t in {
-                .EnumType(def_id) then {
-                    yield if not receiver_type_arg_refs.is_empty() then {
-                        yield Option[Type].Some(Type.GenericEnum(effective_type_name, receiver_type_arg_refs))
-                    } else when expected in {
-                        .Some(et) then when et in {
-                            .GenericEnum(expected_template, _) then {
-                                yield if expected_template == effective_type_name then Option[Type].Some(et) else Option[Type].Some(t)
-                            },
-                            .EnumType(expected_def_id) then {
-                                yield if expected_def_id.id == def_id.id then Option[Type].Some(et) else Option[Type].Some(t)
-                            },
-                            _ then Option[Type].Some(t),
-                        },
-                        .None() then Option[Type].Some(t),
-                    }
-                },
-                _ then Option[Type].None(),
-            },
-            .None() then Option[Type].None(),
-        }
-        let enum_constructor_type_opt = when enum_type_opt in {
-            .Some(enum_type) then if self.static_member_is_enum_case(enum_type, method_name)
-                then Option[Type].Some(enum_type)
-                else Option[Type].None(),
-            .None() then Option[Type].None(),
         }
         when enum_constructor_type_opt in {
             .Some(enum_type) then {
@@ -717,12 +747,6 @@ given TypeChecker {
     }
 
     private check_call_expr_ref(self, callee ref Expr, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
-        let trace_lerp = self.lerp_trace_debug_enabled()
-            and self.storage.file_path.ends_with("\\std\\math\\float.koral")
-            and expr_span(callee).start.line == 287
-        if trace_lerp then {
-            println("[lerp-trace] call-enter kind=\(self.describe_expr_shallow(callee)) args=\(args.count().to_string())")
-        }
         let mut call_args = List[ref Expr].new()
         for arg in args then {
             call_args.push(arg)
@@ -746,9 +770,6 @@ given TypeChecker {
         }
 
         if self.check_intrinsic_call_ref(callee, call_args.ref, expected, scope) is .Some(intrinsic_expr) then {
-            if trace_lerp then {
-                println("[lerp-trace] call-intrinsic result=\(self.display_type_name(intrinsic_expr.expr_type))")
-            }
             return intrinsic_expr
         }
 
@@ -844,9 +865,6 @@ given TypeChecker {
         }
 
         let typed_callee = self.check_call_callee_expr_ref(callee, scope)
-        if trace_lerp then {
-            println("[lerp-trace] call-callee-checked type=\(self.display_type_name(typed_callee.expr_type))")
-        }
         when callee in {
             .MemberPath(_, path, _) then {
                 if typed_callee.expr_type is .Unknown() and not path.is_empty() and path[path.count() - 1(UInt)] == "drop" then {
@@ -872,9 +890,6 @@ given TypeChecker {
         }
         let typed_callee_ref = box(typed_callee)
         if not self.validate_function_expression_argument_count(typed_callee_ref, call_args.ref) then {
-            if trace_lerp then {
-                println("[lerp-trace] call-argcount-invalid")
-            }
             return make_typed_expr(TypedExprKind.Call(typed_callee_ref, List[ref TypedExpr].new()), Type.Unknown())
         }
         let callee_param_specs = self.resolve_call_param_specs(callee, typed_callee_ref, scope)
@@ -900,18 +915,17 @@ given TypeChecker {
         when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
                 let method_val = method.val
-                let method_name = self.context().symbol_name(method_val)
-                // The MethodReference now carries the full FunctionType symbol
-                let method_symbol_type = method_val.symbol_type
+                let method_name = self.semantic_method_name_for_symbol(method_val)
                 let expected_self_type = self.resolve_method_self_type(base_ref.expr_type, method_name)
                 let prepared_base = self.prepare_call_receiver(base_ref.val, expected_self_type)
                 let adapted = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 let receiver_type = adapted.expr_type
                 cached_adapted_base_type = receiver_type
-                // Use the method symbol directly — it already has the full FunctionType
-                cached_method_sig = Option[Symbol].Some(method_val)
+                let bound_bindings = self.resolve_signature_method_type_bindings(receiver_type, method_val, List[Type].new())
+                let bound_method = self.bind_method_symbol_type(method_val, bound_bindings)
+                cached_method_sig = Option[Symbol].Some(bound_method)
                 method_param_types_for_inference = List[Type].new()
-                let param_types = when method_symbol_type in {
+                let param_types = when bound_method.symbol_type in {
                     .FunctionType(params, _) then param_entry_types(params),
                     _ then List[ref Type].new(),
                 }
@@ -920,7 +934,7 @@ given TypeChecker {
                     method_param_types_for_inference.push(param_types[param_i].val)
                     param_i += 1
                 }
-                method_call_bindings = self.resolve_signature_method_type_bindings(receiver_type, method_val, List[Type].new())
+                method_call_bindings = bound_bindings
                 has_method_call_bindings = true
             },
             .MemberPath(_, _) then when self.split_typed_member_path_call_callee(typed_callee) in {
@@ -981,9 +995,6 @@ given TypeChecker {
                 _ then {},
             }
         }
-        if trace_lerp then {
-            println("[lerp-trace] call-bindings-ready")
-        }
         let mut typed_args = List[ref TypedExpr].new()
         let mut arg_idx UInt = 0
         for a in call_args then {
@@ -1036,7 +1047,32 @@ given TypeChecker {
                 },
                 _ then self.check_expr_scoped_ref(a, param_expected, scope),
             }
-            let adjusted_arg = self.adapt_expr_to_expected_type_at(typed_arg, param_expected, Option[SourceSpan].Some(expr_span(a)))
+            let expected_requires_ref_like = when param_expected in {
+                .Some(expected_t) then when expected_t in {
+                    .ReferenceType(_) then true,
+                    .MutableReferenceType(_) then true,
+                    .BorrowedReferenceType(_, _) then true,
+                    .MutableBorrowedReferenceType(_, _) then true,
+                    _ then false,
+                },
+                .None() then false,
+            }
+            let actual_is_ref_like = when typed_arg.expr_type in {
+                .ReferenceType(_) then true,
+                .MutableReferenceType(_) then true,
+                .BorrowedReferenceType(_, _) then true,
+                .MutableBorrowedReferenceType(_, _) then true,
+                .WeakReferenceType(_) then true,
+                .MutableWeakReferenceType(_) then true,
+                .PointerType(_) then true,
+                .MutablePointerType(_) then true,
+                _ then false,
+            }
+            let adjusted_arg = if expected_requires_ref_like and not actual_is_ref_like then {
+                yield typed_arg
+            } else {
+                yield self.adapt_expr_to_expected_type_at(typed_arg, param_expected, Option[SourceSpan].Some(expr_span(a)))
+            }
             if param_expected is .Some(expected_t) then {
                 if not self.same_expr_type(adjusted_arg.expr_type, expected_t)
                    and not self.type_matches_expected_pattern(expected_t, adjusted_arg.expr_type)
@@ -1101,7 +1137,7 @@ given TypeChecker {
         let inferred_method_call_info = when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
                 // Use cached method signature if available, otherwise resolve
-                let method_name = self.context().symbol_name(method.val)
+                let method_name = self.semantic_method_name_for_symbol(method.val)
                 when cached_method_sig in {
                     .Some(sig) then {
                         // Reuse cached resolution — no re-resolve needed
@@ -1210,7 +1246,11 @@ given TypeChecker {
         }
         when typed_callee.expr_kind in {
             .GenericInstantiation(base_type, type_args) then {
-                if ret_type is .GenericStruct(_, _) or ret_type is .StructureType(_) then {
+                if ret_type is .GenericStruct(_, _)
+                    or ret_type is .StructureType(_)
+                    or ret_type is .GenericEnum(_, _)
+                    or ret_type is .EnumType(_)
+                then {
                     let identifier = self.type_construction_symbol_for_type(base_type, ret_type)
                     let constructor_args = self.recheck_type_construction_args(args, ret_type, scope)
                     return make_typed_expr(TypedExprKind.TypeConstruction(identifier, type_args, constructor_args), ret_type)
@@ -1218,7 +1258,11 @@ given TypeChecker {
             },
             .Variable(sym) then {
                 if sym.kind is .TypeSymbol() then {
-                    if ret_type is .StructureType(_) or ret_type is .GenericStruct(_, _) then {
+                    if ret_type is .StructureType(_)
+                        or ret_type is .GenericStruct(_, _)
+                        or ret_type is .EnumType(_)
+                        or ret_type is .GenericEnum(_, _)
+                    then {
                         let identifier = box(Symbol(sym.def_id, ret_type, SymbolKind.TypeSymbol()))
                         let constructor_args = self.recheck_type_construction_args(args, ret_type, scope)
                         return make_typed_expr(TypedExprKind.TypeConstruction(identifier, List[Type].new(), constructor_args), ret_type)
@@ -1251,10 +1295,34 @@ given TypeChecker {
             },
             _ then {},
         }
+        let generic_call_type_args = when generic_function_template_opt in {
+            .Some(template) then {
+                let mut resolved = List[Type].new()
+                for tp in template.type_parameters then {
+                    resolved.push(generic_function_bindings.get(tp.name) or else Type.GenericParameter(tp.name))
+                }
+                yield resolved
+            },
+            .None() then List[Type].new(),
+        }
+        when generic_function_template_opt in {
+            .Some(template) then if not template.type_parameters.is_empty() then when typed_callee.expr_kind in {
+                .Variable(sym) then when sym.kind in {
+                    .Function() then {
+                        let generic_symbol = box(Symbol(sym.def_id, typed_callee.expr_type, sym.kind))
+                        let generic_call = make_typed_expr(TypedExprKind.GenericCall(generic_symbol, generic_call_type_args, typed_args), ret_type)
+                        return generic_call
+                    },
+                    _ then {},
+                },
+                _ then {},
+            },
+            .None() then {},
+        }
         let structured_call_opt = when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, method_type_args, callee_method_type_args, _) then {
                 let base = base_ref.val
-                let method_name = self.context().symbol_name(method.val)
+                let method_name = self.semantic_method_name_for_symbol(method.val)
                 let base_type = base.expr_type
                 let normalized_base_type = base_type
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
@@ -1498,7 +1566,7 @@ given TypeChecker {
             _ then when typed_callee.expr_kind in {
             .TraitMethodPlaceholder(receiver, trait_type, method, _, _) then {
                 let trait_name = self.trait_name_from_type(trait_type)
-                let method_name = self.context().symbol_name(method.val)
+                let method_name = self.semantic_method_name_for_symbol(method.val)
                 let expected_self_type = self.resolve_trait_method_self_type(trait_name, method_name, receiver.expr_type)
                 let prepared_receiver = self.prepare_call_receiver(receiver.val, expected_self_type)
                 let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(prepared_receiver.first, expected_self_type, method_name)
@@ -1531,9 +1599,6 @@ given TypeChecker {
                     _ then make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
                 }
             } else make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), ret_type),
-        }
-        if trace_lerp then {
-            println("[lerp-trace] call-exit result=\(self.display_type_name(result.expr_type))")
         }
         return result
     }

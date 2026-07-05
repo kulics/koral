@@ -1,5 +1,3 @@
-using std::os { env }
-
 public type MIRLowerer(
     program ref mut MonomorphizedProgram,
     context ref CompilerContext,
@@ -168,6 +166,13 @@ given MIRLowerer {
             },
             .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                 if self.should_lower_function(identifier) then {
+                    let kind = when self.program.concrete_callables_by_def_id.get(identifier.def_id) in {
+                        .Some(info) then when info.owner_type in {
+                            .Some(owner_type) then MIRFunctionKind.Given(owner_type, info.trait_conformance, List[Type].new()),
+                            .None() then MIRFunctionKind.Global(),
+                        },
+                        .None() then MIRFunctionKind.Global(),
+                    }
                     let mut context = self.context
                     let source_body = when context.take_concrete_function_body(identifier.def_id) in {
                         .Some(existing_body) then existing_body,
@@ -175,7 +180,7 @@ given MIRLowerer {
                             .Some(source) then {
                                 let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                yield resolve_program_body_expression(self.program, self.context, box(rechecked))
+                                yield Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
                             },
                             .None() then body,
                         },
@@ -184,7 +189,7 @@ given MIRLowerer {
                         identifier,
                         params,
                         return_type,
-                        MIRFunctionKind.Global(),
+                        kind,
                         source_body,
                     )))
                 }
@@ -206,7 +211,7 @@ given MIRLowerer {
                                 if self.should_lower_function(symbol) then {
                                     let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                    let resolved_body = resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                    let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
                                 }
                             },
@@ -244,7 +249,7 @@ given MIRLowerer {
                                 if self.should_lower_function(symbol) then {
                                     let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                    let resolved_body = resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                    let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
                                 }
                             },
@@ -280,7 +285,7 @@ given MIRLowerer {
                                 if self.should_lower_function(symbol) then {
                                     let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                    let resolved_body = resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                    let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
                                 }
                             },
@@ -547,6 +552,7 @@ type MIRReferenceAllocationFunctionPromoter(
     receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     local_types_by_id Dict[UInt, Type],
+    local_storages_by_id Dict[UInt, MIRStorage],
 )
 
 given MIRReferenceAllocationPromoter {
@@ -669,8 +675,10 @@ given MIRReferenceAllocationFunctionPromoter {
         concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     ) MIRReferenceAllocationFunctionPromoter = {
         let mut local_types_by_id = Dict[UInt, Type].new()
+        let mut local_storages_by_id = Dict[UInt, MIRStorage].new()
         for local in function.locals then {
             local_types_by_id.insert(local.id.raw_value, local.local_type)
+            local_storages_by_id.insert(local.id.raw_value, local.storage)
         }
         return MIRReferenceAllocationFunctionPromoter(
             function,
@@ -680,6 +688,7 @@ given MIRReferenceAllocationFunctionPromoter {
             receiver_method_dispatch,
             concrete_callables_by_def_id,
             local_types_by_id,
+            local_storages_by_id,
         )
     }
 
@@ -722,7 +731,12 @@ given MIRReferenceAllocationFunctionPromoter {
 
     private destination_type_for_place(self ref, place MIRPlace) Option[Type] = {
         return when place in {
-            .Local(local) then Option[Type].Some(self.local_type(local)),
+            .Local(local) then when self.local_storage(local) in {
+                .Local() then Option[Type].None(),
+                .Temporary() then Option[Type].Some(self.local_type(local)),
+                .Parameter() then Option[Type].Some(self.local_type(local)),
+                .Capture() then Option[Type].Some(self.local_type(local)),
+            },
             .Global(def_id) then self.context.get_symbol_type(def_id),
             .Field(_, field) then Option[Type].Some(field.symbol_type),
             .EnumPayload(_, _, _, _, field_type) then Option[Type].Some(field_type),
@@ -1019,6 +1033,10 @@ given MIRReferenceAllocationFunctionPromoter {
 
     private local_type(self ref, local MIRLocalID) Type = {
         return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
+    }
+
+    private local_storage(self ref, local MIRLocalID) MIRStorage = {
+        return self.local_storages_by_id.get(local.raw_value) or else MIRStorage.Local()
     }
 
 }

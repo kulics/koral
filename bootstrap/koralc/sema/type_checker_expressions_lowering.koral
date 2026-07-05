@@ -2,9 +2,28 @@ given TypeChecker {
     private adapt_receiver_to_expected_self_type(self, receiver TypedExpr, expected_self_type Option[Type]) TypedExpr = {
         when expected_self_type in {
             .Some(expected_self) then when expected_self in {
+                .ReferenceType(inner) then {
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and self.receiver_is_ref_like(receiver.expr_type)
+                    then {
+                        return receiver
+                    }
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and not self.receiver_is_ref_like(receiver.expr_type)
+                    then {
+                        return receiver
+                    }
+                },
                 .BorrowedReferenceType(inner, _) then {
                     if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and self.is_implicit_ref_candidate_shape(box(receiver))
+                    then {
+                        return receiver
+                    }
+                },
+                .MutableReferenceType(inner) then {
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and self.receiver_is_ref_like(receiver.expr_type)
                     then {
                         return receiver
                     }
@@ -13,7 +32,9 @@ given TypeChecker {
                     if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and self.is_implicit_ref_candidate_shape(box(receiver))
                     then {
-                        return receiver
+                        if self.can_take_implicit_ref_receiver(box(receiver)) then {
+                            return receiver
+                        }
                     }
                 },
                 _ then {},
@@ -26,6 +47,22 @@ given TypeChecker {
     private adapt_receiver_to_expected_self_type_for_method(self, receiver TypedExpr, expected_self_type Option[Type], method_name String) TypedExpr = {
         when expected_self_type in {
             .Some(expected_self) then when expected_self in {
+                .ReferenceType(inner) then {
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and self.receiver_is_ref_like(receiver.expr_type)
+                    then {
+                        return receiver
+                    }
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and self.is_implicit_ref_candidate_shape(box(receiver))
+                    then {
+                        self.push_diagnostic_at_span(
+                            "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
+                            self.typed_expr_span(box(receiver))
+                        )
+                        return receiver
+                    }
+                },
                 .BorrowedReferenceType(inner, _) then {
                     if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and self.is_implicit_ref_candidate_shape(box(receiver))
@@ -34,6 +71,11 @@ given TypeChecker {
                     }
                 },
                 .MutableReferenceType(inner) then {
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and self.receiver_is_ref_like(receiver.expr_type)
+                    then {
+                        return receiver
+                    }
                     when receiver.expr_type in {
                         .ReferenceType(actual_inner) then {
                             if self.type_matches_expected_pattern(inner.val, actual_inner.val) then {
@@ -68,6 +110,18 @@ given TypeChecker {
                 .MutableBorrowedReferenceType(inner, _) then {
                     if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and self.is_implicit_ref_candidate_shape(box(receiver))
+                    then {
+                        if self.can_take_implicit_ref_receiver(box(receiver)) then {
+                            return receiver
+                        }
+                        self.push_diagnostic_at_span(
+                            "Cannot take 'ref' of immutable value: \(self.ref_target_typed_name(box(receiver))). Only 'let mut' lvalues (and lvalues reached through ref/pointer links) can use 'ref'.",
+                            self.typed_expr_span(box(receiver))
+                        )
+                        return receiver
+                    }
+                    if self.type_matches_expected_pattern(inner.val, receiver.expr_type)
+                        and self.receiver_is_ref_like(receiver.expr_type)
                     then {
                         return receiver
                     }
@@ -123,14 +177,38 @@ given TypeChecker {
         }
     }
 
+    private receiver_is_ref_like(self, receiver_type Type) Bool = {
+        return when receiver_type in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .BorrowedReferenceType(_, _) then true,
+            .MutableBorrowedReferenceType(_, _) then true,
+            _ then false,
+        }
+    }
+
     private receiver_needs_materialization(self, receiver TypedExpr, expected_self_type Option[Type]) Bool = {
         return when expected_self_type in {
             .Some(expected_self) then when expected_self in {
                 .ReferenceType(inner) then {
+                    when receiver.expr_type in {
+                        .ReferenceType(_) then { return false },
+                        .MutableReferenceType(_) then { return false },
+                        .BorrowedReferenceType(_, _) then { return false },
+                        .MutableBorrowedReferenceType(_, _) then { return false },
+                        _ then {},
+                    }
                     yield self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and not self.receiver_is_addressable_without_temp(receiver)
                 },
                 .BorrowedReferenceType(inner, _) then {
+                    when receiver.expr_type in {
+                        .ReferenceType(_) then { return false },
+                        .MutableReferenceType(_) then { return false },
+                        .BorrowedReferenceType(_, _) then { return false },
+                        .MutableBorrowedReferenceType(_, _) then { return false },
+                        _ then {},
+                    }
                     yield self.type_matches_expected_pattern(inner.val, receiver.expr_type)
                         and not self.receiver_is_addressable_without_temp(receiver)
                 },
@@ -147,6 +225,9 @@ given TypeChecker {
     }
 
     private prepare_call_receiver(self, receiver TypedExpr, expected_self_type Option[Type]) Pair[TypedExpr, Option[ref Symbol]] = {
+        if self.receiver_is_ref_like(receiver.expr_type) then {
+            return Pair[TypedExpr, Option[ref Symbol]](receiver, Option[ref Symbol].None())
+        }
         if self.receiver_needs_materialization(receiver, expected_self_type) then {
             let temp_symbol = self.make_receiver_temp_symbol("__recv", receiver.expr_type)
             let temp_var = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)

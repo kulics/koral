@@ -523,7 +523,7 @@ given TypeChecker {
             }
             let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty()
             let skip_template_typed_body_boxing = self.skip_template_typed_body_boxing_debug_enabled()
-            let should_store_checked_body = (retain_checked_template_bodies or not should_retain_template_body)
+            let should_store_checked_body = (retain_checked_template_bodies or should_retain_template_body)
                 and not (skip_template_typed_body_boxing and should_retain_template_body)
             let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
             let prev_scope = self.storage.current_scope
@@ -568,11 +568,11 @@ given TypeChecker {
                     yield Option[ref TypedExpr].None()
                 },
             }
-            let template_body = if should_retain_template_body
-            then {
+            let template_body = if should_retain_template_body then {
+                yield typed_body
+            } else {
                 yield self.template_checked_body(typed_body, retain_checked_template_bodies)
             }
-            else Option[ref TypedExpr].None()
             let method_name = "\(m.name)"
             let template_ret = if should_retain_template_body
             then ret
@@ -598,6 +598,23 @@ given TypeChecker {
                 let mut context = self.context()
                 context.set_symbol_info(generic_method_def_id, SymbolInfo(make_function_type(self.to_type_ref_list(generic_param_types), ret), SymbolKind.Function(), MethodKind.Normal(), false))
                 context.set_param_specs(generic_method_def_id, self.function_param_specs_from_typed_params(typed_params))
+                when typed_body in {
+                    .Some(body_ref) then context.set_concrete_given_member_body(generic_method_def_id, body_ref),
+                    .None() then {},
+                }
+                self.register_extension_method_template(
+                    self.extension_template_key(target_type),
+                    type_params,
+                    method_name,
+                    m.access,
+                    m.type_params,
+                    m.params,
+                    m.return_type,
+                    conformance_trait_name,
+                    template_body.ref,
+                    Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
+                    ret,
+                )
                 out.push(box(TypedGivenMember(
                     generic_method_def_id,
                     method_name,
@@ -608,7 +625,13 @@ given TypeChecker {
                 continue
             }
             let mut context = self.context()
-            let method_def_id = context.allocate(method_name, DefKind.Function())
+            let method_def_id = if conformance_trait_name is .None() and m.type_params.is_empty() then {
+                let type_key = self.extension_template_key(target_type)
+                yield when self.lookup_method_signature(type_key, method_name) in {
+                    .Some(existing_symbol) then existing_symbol.def_id,
+                    .None() then context.allocate(method_name, DefKind.Function()),
+                }
+            } else context.allocate(method_name, DefKind.Function())
             // Register method signature so mono can look it up by DefId
             let mut param_types = List[Type].new()
             for p in typed_params then {

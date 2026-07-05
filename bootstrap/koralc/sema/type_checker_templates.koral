@@ -315,6 +315,7 @@ given TypeChecker {
     // For concrete types, returns the type name.
     private extension_template_key(self, target_type Type) String = {
         return when target_type in {
+            .TraitObject(trait_name, _) then trait_name,
             .ReferenceType(_) then "Ref",
             .MutableReferenceType(_) then "MutRef",
             .PointerType(_) then "Ptr",
@@ -521,19 +522,14 @@ given TypeChecker {
         let type_key = self.extension_template_key(target_type)
         for member_ref in members.val then {
             let member = member_ref.val
-            if self.lookup_method_signature(type_key, member.name) is .Some(_) then {
-                continue
+            let mut param_types = List[ref Type].new()
+            for param in member.params then {
+                param_types.push(box(param.param_type))
             }
-
-            let member_access = self.context().get_access(member.def_id) or else AccessModifier.Protected()
-            let method_symbol = self.make_method_callable_symbol_with_visibility(
-                member.name,
-                member.params,
-                member.return_type,
-                member_access,
-                self.storage.module_path,
-                self.storage.file_path,
-                self.storage.package_id,
+            let method_symbol = Symbol(
+                member.def_id,
+                make_function_type(param_types, member.return_type),
+                SymbolKind.Function(),
             )
             self.storage.method_table.register(type_key, member.name, method_symbol)
             when target_type in {

@@ -35,6 +35,70 @@ given TypeChecker {
         }
     }
 
+    private receiver_wrapper_family(self, receiver_type Type) Int = {
+        return when self.normalize_method_receiver_type(receiver_type) in {
+            .MutableReferenceType(_) then 1,
+            .ReferenceType(_) then 1,
+            .MutableBorrowedReferenceType(_, _) then 2,
+            .BorrowedReferenceType(_, _) then 2,
+            .WeakReferenceType(_) then 3,
+            .MutableWeakReferenceType(_) then 3,
+            .PointerType(_) then 4,
+            .MutablePointerType(_) then 4,
+            _ then 0,
+        }
+    }
+
+    private receiver_wrapper_is_mutable(self, receiver_type Type) Bool = {
+        return when self.normalize_method_receiver_type(receiver_type) in {
+            .MutableReferenceType(_) then true,
+            .MutableBorrowedReferenceType(_, _) then true,
+            .MutableWeakReferenceType(_) then true,
+            .MutablePointerType(_) then true,
+            _ then false,
+        }
+    }
+
+    private receiver_wrapper_mutability_compatible(self, receiver_type Type, expected_self_type Type) Bool = {
+        let receiver_mutable = self.receiver_wrapper_is_mutable(receiver_type)
+        let expected_mutable = self.receiver_wrapper_is_mutable(expected_self_type)
+        if expected_mutable and not receiver_mutable then {
+            return false
+        }
+        return true
+    }
+
+    private method_symbol_accepts_receiver_shape(self, receiver_type Type, method Symbol) Bool = {
+        if self.method_param_count(method) == 0 then {
+            return true
+        }
+        let normalized_receiver = self.normalize_method_receiver_type(receiver_type)
+        let expected_self = self.method_param_type(method, 0(UInt)) or else normalized_receiver
+        let normalized_expected_self = self.normalize_method_receiver_type(
+            self.canonicalize_alias_type(self.concretize_default_literal_type(expected_self))
+        )
+        let receiver_family = self.receiver_wrapper_family(normalized_receiver)
+        let expected_family = self.receiver_wrapper_family(normalized_expected_self)
+        // Only enforce strict wrapper-shape matching when the receiver itself is
+        // already wrapper-like. Keep normal value->ref adaptation unchanged.
+        if receiver_family == 0 then {
+            return true
+        }
+        if receiver_family <> 0 then {
+            if expected_family == 0 then {
+                return false
+            }
+            if receiver_family <> expected_family then {
+                return false
+            }
+            if not self.receiver_wrapper_mutability_compatible(normalized_receiver, normalized_expected_self) then {
+                return false
+            }
+        }
+        return self.type_matches_expected_pattern(normalized_expected_self, normalized_receiver)
+            or self.type_matches_expected_pattern(normalized_receiver, normalized_expected_self)
+    }
+
     private bind_method_symbol_type(self, method Symbol, bindings Dict[String, Type]) Symbol = {
         return Symbol(method.def_id, self.apply_type_bindings(method.symbol_type, bindings), method.kind)
     }
@@ -53,17 +117,9 @@ given TypeChecker {
     }
 
     private rebuild_method_symbol(self, method_name String, base_method Symbol, param_types List[Type], return_type Type) Symbol = {
-        let param_specs = self.method_param_specs(base_method)
-        let mut typed_params = List[TypedParam].new()
-        let mut idx UInt = 0
-        while idx < param_types.count() then {
-            let spec = if idx < param_specs.count() then param_specs[idx] else FunctionParamSpec("", false, false)
-            let param_type = param_types[idx]
-            let mutable = pass_kind_from_type(param_type) is .ByMutableReference()
-            typed_params.push(TypedParam(spec.name, mutable, param_type, spec.named))
-            idx += 1
-        }
-        return self.make_method_callable_symbol(method_name, typed_params, return_type)
+        let _ = self
+        let _ = method_name
+        return Symbol(base_method.def_id, make_function_type(self.to_type_ref_list(param_types), return_type), base_method.kind)
     }
 
     protected builtin_subscript_base_type(self, t Type) Type = {
@@ -125,10 +181,20 @@ given TypeChecker {
     }
 
     protected build_builtin_subscript_helper_call(self, base TypedExpr, args List[ref TypedExpr], helper_name String) TypedExpr = {
-        let expected_self_type = self.resolve_method_self_type(base.expr_type, helper_name)
+        let normalized_base_type = self.builtin_subscript_base_type(base.expr_type)
+        self.maybe_record_extension_method_instantiation(normalized_base_type, helper_name, List[Type].new())
+        let method = self.resolve_method_signature(normalized_base_type, helper_name) or else {
+            self.push_diagnostic_at_span(
+                "Missing builtin subscript helper '\(helper_name)' for type '\(self.context().type_display_name(normalized_base_type))'",
+                self.typed_expr_span(box(base))
+            )
+            return self.empty_typed_block(Type.Unknown())
+        }
+
+        let expected_self_type = self.resolve_bound_method_self_type(base.expr_type, method)
         let prepared_base = self.prepare_call_receiver(base, expected_self_type)
         let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, helper_name)
-        let param_types = self.resolve_method_param_types(adapted_base.expr_type, helper_name)
+        let param_types = self.resolve_signature_param_types(adapted_base.expr_type, method)
 
         let mut typed_args = List[ref TypedExpr].new()
         let mut arg_idx UInt = 0
@@ -141,13 +207,19 @@ given TypeChecker {
             arg_idx += 1
         }
 
-        let normalized_base_type = self.builtin_subscript_base_type(base.expr_type)
-        self.maybe_record_extension_method_instantiation(normalized_base_type, helper_name, List[Type].new())
-        let return_type = self.resolve_method_return_type(adapted_base.expr_type, helper_name)
-        let method_symbol = self.make_method_symbol(helper_name, return_type)
+        let mut bindings = self.resolve_signature_method_type_bindings(adapted_base.expr_type, method, List[Type].new())
+        let mut param_idx UInt = 1
+        while param_idx < self.method_param_count(method) and (param_idx - 1(UInt)) < typed_args.count() then {
+            let param_type = self.method_param_type(method, param_idx) or else Type.Unknown()
+            self.infer_type_bindings(param_type, typed_args[param_idx - 1(UInt)].val.expr_type, bindings.ref)
+            param_idx += 1(UInt)
+        }
+
+        let bound_method = self.bind_method_symbol_type(method, bindings)
+        let return_type = self.apply_type_bindings(self.method_return_type(method), bindings)
         let callee = make_typed_expr(
-            TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
-            method_symbol.symbol_type,
+            TypedExprKind.MethodReference(box(adapted_base), adapted_base.expr_type, box(bound_method), List[Type].new(), List[Type].new(), .None()),
+            bound_method.symbol_type,
         )
         let call_expr = make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
         return self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)
@@ -1335,6 +1407,24 @@ given TypeChecker {
                 .None() then {},
             }
 
+            let raw_method_opt = self.lookup_method_signature(trait_name, method_name)
+            when raw_method_opt in {
+                .Some(raw_method) then {
+                    let mut bound_param_types = List[Type].new()
+                    for parameter_type in self.method_param_types(raw_method) then {
+                        let bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter_type, method_bindings), trait_name, receiver_type)
+                        bound_param_types.push(bound_type)
+                    }
+                    if not bound_param_types.is_empty() then {
+                        bound_param_types[0(UInt)] = self.concrete_receiver_for_method(receiver_type, raw_method)
+                    }
+                    let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(self.method_return_type(raw_method), method_bindings), trait_name, receiver_type)
+                    let bound_symbol_type = make_function_type(self.to_type_ref_list(bound_param_types), bound_return)
+                    return Option[Symbol].Some(Symbol(raw_method.def_id, bound_symbol_type, raw_method.kind))
+                },
+                .None() then {},
+            }
+
             when self.storage.trait_registry.flatten_methods(trait_name) in {
                 .Ok(methods) then {
                     when methods.get(method_name) in {
@@ -1352,26 +1442,9 @@ given TypeChecker {
                 },
                 .Error(_) then {},
             }
-            let raw_method_opt = self.lookup_method_signature(trait_name, method_name)
             if raw_method_opt is .None() then {
                 continue
             }
-            let raw_method = when raw_method_opt in {
-                .Some(method) then method,
-                .None() then Symbol(DefId(0(UInt)), Type.Unknown(), SymbolKind.Function()),
-            }
-
-            let mut bound_param_types = List[Type].new()
-            for parameter_type in self.method_param_types(raw_method) then {
-                let bound_type = self.bind_conformance_trait_self_type(self.apply_type_bindings(parameter_type, method_bindings), trait_name, receiver_type)
-                bound_param_types.push(bound_type)
-            }
-            if not bound_param_types.is_empty() then {
-                bound_param_types[0(UInt)] = self.concrete_receiver_for_method(receiver_type, raw_method)
-            }
-            let bound_return = self.bind_conformance_trait_self_type(self.apply_type_bindings(self.method_return_type(raw_method), method_bindings), trait_name, receiver_type)
-            let bound_symbol_type = make_function_type(self.to_type_ref_list(bound_param_types), bound_return)
-            return Option[Symbol].Some(Symbol(raw_method.def_id, bound_symbol_type, raw_method.kind))
         }
 
         return Option[Symbol].None()

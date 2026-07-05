@@ -61,8 +61,8 @@ public type CodeGen(
     // Vtable 追踪
     mut generated_vtable_instances Set[String],
 
-    // 当前正在生成的函数的类型前缀（如 "_k__T_Deque"），用于解析 self 方法调用
-    mut current_function_type_prefix Option[String],
+    // 当前正在生成的函数 owner 类型，用于在 codegen 中精确解析同 owner 方法调用
+    mut current_function_owner_type Option[Type],
 
     // 已输出函数实现名（避免同名函数重复定义）
     mut emitted_function_names Set[String],
@@ -98,8 +98,8 @@ given CodeGen {
             Option[Type].None(),
             // generated_vtable_instances
             Set[String].new(),
-            // current_function_type_prefix
-            Option[String].None(),
+            // current_function_owner_type
+            Option[Type].None(),
             // emitted_function_names
             Set[String].new(),
             // nested_function_definitions
@@ -752,8 +752,249 @@ given CodeGen {
                         _ then {},
                     }
                 }
+                when self.context.get_function_type(method_def_id) in {
+                    .Some(function_type) then {
+                        when self.receiver_owner_type_from_function_type(function_type) in {
+                            .Some(owner_type) then { return Option[Type].Some(owner_type) },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
                 yield Option[Type].None()
             },
+        }
+    }
+
+    private owner_base_lookup_key(self, t Type) String = {
+        let concrete_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
+        let base_type = when concrete_type in {
+            .ReferenceType(inner_ref) then inner_ref.val,
+            .MutableReferenceType(inner_ref) then inner_ref.val,
+            .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
+            .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
+            .WeakReferenceType(inner_ref) then inner_ref.val,
+            .MutableWeakReferenceType(inner_ref) then inner_ref.val,
+            _ then concrete_type,
+        }
+        return self.concrete_receiver_lookup_key(base_type)
+    }
+
+    private owner_types_match(self, lhs Type, rhs Type) Bool = {
+        let left_concrete = self.concretize_codegen_type(lhs)
+        let right_concrete = self.concretize_codegen_type(rhs)
+        let left_exact = self.concrete_receiver_lookup_key(left_concrete)
+        let right_exact = self.concrete_receiver_lookup_key(right_concrete)
+        if left_exact == right_exact then {
+            return true
+        }
+        return self.owner_base_lookup_key(left_concrete) == self.owner_base_lookup_key(right_concrete)
+    }
+
+    private callable_logical_name(self, def_id DefId) String = {
+        return when self.program.receiver_method_dispatch.get(def_id) in {
+            .Some(info) then info.method_name,
+            .None() then when self.program.concrete_callables_by_def_id.get(def_id) in {
+                .Some(info) then info.logical_name,
+                .None() then self.context.get_name(def_id) or else "",
+            },
+        }
+    }
+
+    private symbol_is_function_like(self, symbol ref Symbol) Bool = {
+        if symbol.kind is .Function() then {
+            return true
+        }
+        return symbol.symbol_type is .FunctionType(_, _)
+    }
+
+    private should_use_current_owner_resolution(self, symbol ref Symbol) Bool = {
+        if not self.symbol_is_function_like(symbol) then {
+            return false
+        }
+        if self.current_function_owner_type is .None() then {
+            return false
+        }
+        return when self.method_owner_type(symbol.def_id) in {
+            .Some(owner_type) then self.context.contains_generic_parameter(owner_type),
+            .None() then true,
+        }
+    }
+
+    private extract_helper_method_name_from_symbol(self, symbol_name String) Option[String] = {
+        let _ = self
+        let body = if symbol_name.starts_with("ref_") then symbol_name.substring(4..)
+            else if symbol_name.starts_with("mutref_") then symbol_name.substring(7..)
+            else ""
+        if body.is_empty() then {
+            return Option[String].None()
+        }
+        let mut markers = List[String].new()
+        markers.push("_R_")
+        markers.push("_T_")
+        markers.push("_K_")
+        markers.push("_V_")
+        markers.push("_E_")
+        markers.push("_U_")
+        for marker in markers then {
+            let index_opt = body.find_last(marker)
+            when index_opt in {
+                .Some(index) then {
+                    let start = index + marker.count()
+                    if start < body.count() then {
+                        return Option[String].Some(body.substring(start..))
+                    }
+                },
+                .None() then {},
+            }
+        }
+        return Option[String].None()
+    }
+
+    private current_owner_method_symbol(self, symbol ref Symbol) Option[Symbol] = {
+        if not self.symbol_is_function_like(symbol) then {
+            return Option[Symbol].None()
+        }
+        return when self.current_function_owner_type in {
+            .Some(owner_type) then {
+                let method_name = self.context.symbol_name(symbol.val)
+                when self.lookup_receiver_method_via_metadata(owner_type, method_name, Type.Unknown()) in {
+                    .Some(resolved) then { return Option[Symbol].Some(resolved) },
+                    .None() then {},
+                }
+
+                let helper_method_name_opt = self.extract_helper_method_name_from_symbol(method_name)
+                when helper_method_name_opt in {
+                    .Some(helper_method_name) then {
+                        when self.lookup_receiver_method_via_metadata(owner_type, helper_method_name, Type.Unknown()) in {
+                            .Some(resolved) then { return Option[Symbol].Some(resolved) },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+
+                for global in self.program.globals then {
+                    when global in {
+                        .Given(target_type, _, _, methods) then {
+                            if not self.owner_types_match(target_type, owner_type) then {
+                                continue
+                            }
+                            for method in methods then {
+                                let candidate_name = self.callable_logical_name(method.def_id)
+                                if candidate_name == method_name then {
+                                    return self.bound_concrete_method_symbol(method.def_id, owner_type, Type.Unknown())
+                                }
+                                when helper_method_name_opt in {
+                                    .Some(helper_method_name) then if candidate_name == helper_method_name then {
+                                        return self.bound_concrete_method_symbol(method.def_id, owner_type, Type.Unknown())
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        .Function(identifier, _, _, _) then {
+                            let candidate_name = self.callable_logical_name(identifier.def_id)
+                            let mut method_name_matches = candidate_name == method_name
+                            when helper_method_name_opt in {
+                                .Some(helper_method_name) then if candidate_name == helper_method_name then {
+                                    method_name_matches = true
+                                },
+                                .None() then {},
+                            }
+                            if method_name_matches then {
+                                when self.method_owner_type(identifier.def_id) in {
+                                    .Some(candidate_owner) then {
+                                        if self.owner_types_match(candidate_owner, owner_type) then {
+                                            return self.bound_concrete_method_symbol(identifier.def_id, owner_type, Type.Unknown())
+                                        }
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        _ then {},
+                    }
+                }
+
+                yield Option[Symbol].None()
+            },
+            .None() then Option[Symbol].None(),
+        }
+    }
+
+    private fallback_current_owner_method_c_name(self, symbol ref Symbol) Option[String] = {
+        if not self.symbol_is_function_like(symbol) then {
+            return Option[String].None()
+        }
+        if not self.should_use_current_owner_resolution(symbol) then {
+            return Option[String].None()
+        }
+        return when self.current_function_owner_type in {
+            .Some(owner_type) then {
+                let method_name = self.context.symbol_name(symbol.val)
+                let helper_method_name_opt = self.extract_helper_method_name_from_symbol(method_name)
+                when helper_method_name_opt in {
+                    .Some(helper_method_name) then {
+                        let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                        return Option[String].Some(self.compose_method_c_name(owner_c_name, helper_method_name))
+                    },
+                    .None() then {},
+                }
+                let mut selected_method_name_opt = Option[String].None()
+
+                for global in self.program.globals then {
+                    when global in {
+                        .Given(target_type, _, _, methods) then {
+                            if not self.owner_types_match(target_type, owner_type) then {
+                                continue
+                            }
+                            for method in methods then {
+                                let candidate_name = self.callable_logical_name(method.def_id)
+                                if candidate_name == method_name then {
+                                    selected_method_name_opt = Option[String].Some(candidate_name)
+                                }
+                                when helper_method_name_opt in {
+                                    .Some(helper_method_name) then if candidate_name == helper_method_name then {
+                                        selected_method_name_opt = Option[String].Some(helper_method_name)
+                                    },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        .Function(identifier, _, _, _) then {
+                            when self.method_owner_type(identifier.def_id) in {
+                                .Some(candidate_owner) then {
+                                    if self.owner_types_match(candidate_owner, owner_type) then {
+                                        let candidate_name = self.callable_logical_name(identifier.def_id)
+                                        if candidate_name == method_name then {
+                                            selected_method_name_opt = Option[String].Some(candidate_name)
+                                        }
+                                        when helper_method_name_opt in {
+                                            .Some(helper_method_name) then if candidate_name == helper_method_name then {
+                                                selected_method_name_opt = Option[String].Some(helper_method_name)
+                                            },
+                                            .None() then {},
+                                        }
+                                    }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        _ then {},
+                    }
+                }
+
+                let selected_method_name = when selected_method_name_opt in {
+                    .Some(name) then name,
+                    .None() then {
+                        return Option[String].None()
+                    },
+                }
+                let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                yield Option[String].Some(self.compose_method_c_name(owner_c_name, selected_method_name))
+            },
+            .None() then Option[String].None(),
         }
     }
 
@@ -798,15 +1039,15 @@ given CodeGen {
                         yield self.compose_method_c_name(owner_c_name, raw_method_name)
                     },
                     .None() then {
-                        let raw_name = self.qualified_name(symbol)
-                        yield when raw_name.find_last("_") in {
-                            .Some(split_index) then {
-                                let prefix = raw_name.substring(0..<split_index)
-                                let suffix = raw_name.substring(split_index + 1..<raw_name.count())
-                                yield self.compose_method_c_name(prefix, suffix)
-                            },
-                            .None() then raw_name,
+                        when self.current_owner_method_symbol(symbol) in {
+                            .Some(resolved_symbol) then { return self.callable_c_name(box(resolved_symbol)) },
+                            .None() then {},
                         }
+                        when self.fallback_current_owner_method_c_name(symbol) in {
+                            .Some(name) then { return name },
+                            .None() then {},
+                        }
+                        yield self.qualified_name(symbol)
                     },
                 },
             },
@@ -830,10 +1071,83 @@ given CodeGen {
     }
 
     callable_c_name(self, symbol ref Symbol) String = {
-        return when self.callable_c_name_cache.get(symbol.def_id.id) in {
+        when self.current_function_owner_type in {
+            .Some(owner_type) then {
+                when self.extract_helper_method_name_from_symbol(self.context.symbol_name(symbol.val)) in {
+                    .Some(helper_method_name) then {
+                        when self.method_owner_type(symbol.def_id) in {
+                            .Some(method_owner) then {
+                                if self.context.contains_generic_parameter(method_owner)
+                                    and self.owner_types_match(method_owner, owner_type)
+                                then {
+                                    let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                                    return self.compose_method_c_name(owner_c_name, helper_method_name)
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+
+                when self.method_owner_type(symbol.def_id) in {
+                    .Some(method_owner) then {
+                        if self.context.contains_generic_parameter(method_owner)
+                            and self.owner_types_match(method_owner, owner_type)
+                        then when self.context.get_function_type(symbol.def_id) in {
+                            .Some(function_type) then {
+                                if self.function_type_param_count(function_type) > 0(UInt) then {
+                                    let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
+                                    return self.compose_method_c_name(owner_c_name, self.context.symbol_name(symbol.val))
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        let resolved_name = if self.should_use_current_owner_resolution(symbol) then {
+            yield when self.current_owner_method_symbol(symbol) in {
+                .Some(resolved_symbol) then self.callable_c_name(box(resolved_symbol)),
+                .None() then when self.fallback_current_owner_method_c_name(symbol) in {
+                    .Some(name) then name,
+                    .None() then when self.callable_c_name_cache.get(symbol.def_id.id) in {
+                        .Some(name) then name,
+                        .None() then self.compute_callable_c_name_uncached(symbol),
+                    },
+                },
+            }
+        } else when self.callable_c_name_cache.get(symbol.def_id.id) in {
             .Some(name) then name,
             .None() then self.compute_callable_c_name_uncached(symbol),
         }
+
+        let resolved_runes = resolved_name.to_runes()
+        let is_generic_placeholder_name = resolved_runes.count() >= 3
+            and resolved_runes[0(UInt)] >= 'A'
+            and resolved_runes[0(UInt)] <= 'Z'
+            and resolved_runes[1(UInt)] == '_'
+        if is_generic_placeholder_name then {
+            let method_suffix = resolved_name.substring(2..)
+            when symbol.symbol_type in {
+                .FunctionType(params, _) then {
+                    if not params.is_empty() then {
+                        let receiver_type = params[0(UInt)].param_type
+                        if not self.context.contains_generic_parameter(receiver_type) then {
+                            let owner_c_name = self.emitted_type_c_name_fallback(receiver_type)
+                            return self.compose_method_c_name(owner_c_name, method_suffix)
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        return resolved_name
     }
 
     private receiver_owner_type_from_function_type(self, function_type Type) Option[Type] = {
@@ -1004,10 +1318,14 @@ given CodeGen {
 
     compose_method_c_name(self, type_c_name String, method_name String) String = {
         let sanitized_method = self.sanitize_codegen_identifier(method_name)
+        let escape_prefix = c_escape_prefix()
+        let method_component = if sanitized_method.starts_with(escape_prefix)
+            then sanitized_method.substring(escape_prefix.count()..)
+            else sanitized_method
         let prefix = "\(type_c_name)_"
-        let raw_name = if sanitized_method.starts_with(prefix)
-            then sanitized_method
-            else "\(type_c_name)_\(sanitized_method)"
+        let raw_name = if method_component.starts_with(prefix)
+            then method_component
+            else "\(type_c_name)_\(method_component)"
         return self.normalize_codegen_lookup_name(raw_name)
     }
 
@@ -1228,13 +1546,21 @@ given CodeGen {
         }
 
         if is_global then {
+            if self.should_use_current_owner_resolution(box(symbol)) then {
+                when self.current_owner_method_symbol(box(symbol)) in {
+                    .Some(resolved_symbol) then { return self.callable_c_name(box(resolved_symbol)) },
+                    .None() then {},
+                }
+                when self.fallback_current_owner_method_c_name(box(symbol)) in {
+                    .Some(name) then { return name },
+                    .None() then {},
+                }
+            }
             return when self.c_identifier_opt(symbol.def_id) in {
                 .Some(c_id) then c_id,
                 .None() then {
                     let symbol_name = self.context.symbol_name(symbol)
-                    yield if symbol.kind is .Function() and self.current_function_type_prefix is .Some(type_prefix)
-                        then "\(type_prefix)_\(self.sanitize_codegen_identifier(symbol_name))"
-                        else if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
+                    yield if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
                 },
             }
         }

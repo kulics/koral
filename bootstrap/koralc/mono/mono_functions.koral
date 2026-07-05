@@ -204,8 +204,7 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
         .Some(body) then {
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
             let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
-            let mut context = mono.storage.context
-            context.set_concrete_function_body(def_id, resolved_concrete_body)
+            mono.storage.context.set_concrete_function_body(def_id, resolved_concrete_body)
 
             // l. Create a FunctionDecl node and add to generated_nodes.
             let mut fn_param_type_refs = List[ref Type].new()
@@ -715,6 +714,8 @@ public let instantiate_extension_method(
         .MutablePointerType(_) then "MutPtr",
         .ReferenceType(_) then "Ref",
         .MutableReferenceType(_) then "MutRef",
+        .BorrowedReferenceType(_, _) then "BorrowRef",
+        .MutableBorrowedReferenceType(_, _) then "BorrowMutRef",
         .WeakReferenceType(_) then "WeakRef",
         .MutableWeakReferenceType(_) then "MutWeakRef",
         _ then mono.storage.context.type_display_name(resolved_base_type),
@@ -739,13 +740,13 @@ public let instantiate_extension_method(
             }
         },
         .BorrowedReferenceType(inner, _) then {
-            effective_template_name = "Ref"
+            effective_template_name = "BorrowRef"
             if effective_type_args.is_empty() then {
                 effective_type_args.push(box(inner.val))
             }
         },
         .MutableBorrowedReferenceType(inner, _) then {
-            effective_template_name = "MutRef"
+            effective_template_name = "BorrowMutRef"
             if effective_type_args.is_empty() then {
                 effective_type_args.push(box(inner.val))
             }
@@ -777,6 +778,11 @@ public let instantiate_extension_method(
         _ then {},
     }
 
+    let effective_base_type = normalize_borrowed_extension_base_type(
+        resolved_base_type,
+        effective_template_name,
+    )
+
     // 4. Resolve the latest template from the registry if checked_body is missing.
     //    InstantiationRequests may carry an earlier snapshot without a checked_body.
     let resolved_template = if template.checked_body is .Some(_) then template else {
@@ -796,10 +802,81 @@ public let instantiate_extension_method(
             }
     }
 
+    // Opportunistically materialize drop for the same concrete base when we
+    // instantiate any other extension method. This covers flows where a
+    // concrete generic type is only seen through method calls (e.g. Box[T].is_empty)
+    // and never receives an explicit struct/enum instantiation request.
+    if resolved_template.method.name <> "drop" then {
+        when mono.storage.generic_templates.lookup_extension_methods(effective_template_name) in {
+            .Some(ext_list) then {
+                for ext_ref in ext_list then {
+                    let is_drop_trait = when ext_ref.conformance_trait_name in {
+                        .Some(trait_name) then trait_name == "Drop" or trait_name.ends_with(".Drop"),
+                        .None() then false,
+                    }
+                    if ext_ref.method.name <> "drop" and not is_drop_trait then {
+                        continue
+                    }
+
+                    let mut drop_type_args = effective_type_args
+                    let mut inferred_args = List[ref Type].new()
+                    when resolved_base_type in {
+                        .GenericStruct(_, args) then {
+                            for arg in args then { inferred_args.push(arg) }
+                        },
+                        .GenericEnum(_, args) then {
+                            for arg in args then { inferred_args.push(arg) }
+                        },
+                        .StructureType(def_id) then {
+                            when mono.storage.context.get_type_arguments(def_id) in {
+                                .Some(args) then {
+                                    for arg in args then { inferred_args.push(box(arg)) }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        .EnumType(def_id) then {
+                            when mono.storage.context.get_type_arguments(def_id) in {
+                                .Some(args) then {
+                                    for arg in args then { inferred_args.push(box(arg)) }
+                                },
+                                .None() then {},
+                            }
+                        },
+                        _ then {},
+                    }
+                    if not inferred_args.is_empty() then {
+                        drop_type_args = inferred_args
+                    }
+
+                    let expected_count = ext_ref.type_params.count()
+                    if expected_count > 0(UInt) and drop_type_args.count() > expected_count then {
+                        let mut trimmed = List[ref Type].new()
+                        let mut i = 0(UInt)
+                        while i < expected_count then {
+                            trimmed.push(box(drop_type_args[i].val))
+                            i += 1(UInt)
+                        }
+                        drop_type_args = trimmed
+                    }
+
+                    let _ = mono.instantiate_extension_method_impl(
+                        resolved_base_type,
+                        effective_template_name,
+                        ext_ref,
+                        drop_type_args,
+                        List[ref Type].new(),
+                    )
+                }
+            },
+            .None() then {},
+        }
+    }
+
     // 5. Delegate to the inner implementation.
     return instantiate_extension_method_from_entry(
         mono,
-        resolved_base_type,
+        effective_base_type,
         structure_name,
         effective_template_name,
         effective_type_args,
@@ -809,6 +886,24 @@ public let instantiate_extension_method(
 }
 
 // ── instantiate_extension_method_from_entry ──────────────────────────────────
+
+private let normalize_borrowed_extension_base_type(
+    base_type Type,
+    template_name String,
+) Type = {
+    return when template_name in {
+        "Ref" then when base_type in {
+            .BorrowedReferenceType(inner, _) then Type.ReferenceType(inner),
+            .MutableBorrowedReferenceType(inner, _) then Type.ReferenceType(inner),
+            _ then base_type,
+        },
+        "MutRef" then when base_type in {
+            .MutableBorrowedReferenceType(inner, _) then Type.MutableReferenceType(inner),
+            _ then base_type,
+        },
+        _ then base_type,
+    }
+}
 
 // Inner implementation matching Swift's instantiateExtensionMethodFromEntry.
 // Receives already-resolved base_type, structure_name, and resolved template.
@@ -857,10 +952,7 @@ public let instantiate_extension_method_from_entry(
         .EnumType(did) then mono.storage.context.get_name(did) or else structure_name,
         _ then structure_name,
     }
-    let mangle_template_name = when resolved_template.conformance_trait_name in {
-        .Some(_) then concrete_lookup_type_name,
-        .None() then effective_template_name,
-    }
+    let mangle_template_name = effective_template_name
     // a. Generate the symbol name.
     let mangled_name = make_extension_method_layout_name(
         mono,
@@ -1003,6 +1095,55 @@ public let instantiate_extension_method_from_entry(
     mono.register_concrete_callable_if_absent(
         ConcreteCallableInfo(def_id, logical_name_with_args, effective_owner_type, resolved_template.conformance_trait_name)
     )
+    when effective_owner_type in {
+        .Some(owner_type) then {
+            mono.set_receiver_method_dispatch_if_absent(
+                def_id,
+                ReceiverMethodDispatchInfo(
+                    def_id,
+                    resolved_template.method.name,
+                    Option[ReceiverMethodOwner].Some(ReceiverMethodOwner.ConcreteType(mono.storage.context.type_display_name(owner_type))),
+                    resolved_template.conformance_trait_name,
+                )
+            )
+        },
+        .None() then {},
+    }
+
+    let mut remap_source_keys = List[String].new()
+    remap_source_keys.push(structure_name)
+    remap_source_keys.push(concrete_lookup_type_name)
+    when resolved_template.conformance_trait_name in {
+        .Some(trait_name) then remap_source_keys.push(trait_name),
+        .None() then {},
+    }
+    for source_key in remap_source_keys then {
+        when mono.storage.method_table.lookup(source_key, resolved_template.method.name) in {
+            .Some(original_symbol) then {
+                when mono.storage.remapped_function_def_ids.get(original_symbol.def_id.id) in {
+                    .Some(existing_list) then {
+                        let mut updated = existing_list
+                        let mut already_present = false
+                        for entry in updated then {
+                            if entry.first.id == def_id.id then {
+                                already_present = true
+                            }
+                        }
+                        if not already_present then {
+                            updated.push(Pair(def_id, function_type))
+                            mono.storage.remapped_function_def_ids.insert(original_symbol.def_id.id, updated)
+                        }
+                    },
+                    .None() then {
+                        let mut new_list = List[Pair[DefId, Type]].new()
+                        new_list.push(Pair(def_id, function_type))
+                        mono.storage.remapped_function_def_ids.insert(original_symbol.def_id.id, new_list)
+                    },
+                }
+            },
+            .None() then {},
+        }
+    }
 
     // f. Register in extension_method_def_ids with dual keys.
     //    Primary key: "concreteLookupTypeName.methodName"
@@ -1044,8 +1185,7 @@ public let instantiate_extension_method_from_entry(
             mono.storage.extension_body_resolution_depth += 1
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
             let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
-            let mut context = mono.storage.context
-            context.set_concrete_function_body(def_id, resolved_concrete_body)
+            mono.storage.context.set_concrete_function_body(def_id, resolved_concrete_body)
             let decl = TypedDecl.FunctionDecl(
                 resolved_template.method.access,
                 mangled_name,
@@ -1885,7 +2025,7 @@ public let instantiate_trait_placeholder_method(
                                         // a body — the conformance must provide one via GivenTraitDecl.
                                         let _ = mono.instantiate_extension_method_impl(
                                             resolved_base_type,
-                                            trait_entry_structure_name,
+                                            trait_name,
                                             tool_template_ref,
                                             inferred_trait_args,
                                             method_type_args,
@@ -1904,7 +2044,6 @@ public let instantiate_trait_placeholder_method(
                 }
             }
             mono.storage.in_progress_trait_placeholder_keys.remove(trait_placeholder_key)
-            mono.storage.resolved_trait_placeholder_keys.insert(trait_placeholder_key)
             return
         },
     }
@@ -1944,7 +2083,7 @@ public let instantiate_trait_placeholder_method(
                                     .Some(tool_template_ref) then {
                                         let _ = mono.instantiate_extension_method_impl(
                                             resolved_base_type,
-                                            trait_entry_structure_name,
+                                            trait_name,
                                             tool_template_ref,
                                             effective_trait_args,
                                             method_type_args,
@@ -1963,7 +2102,6 @@ public let instantiate_trait_placeholder_method(
                 }
             }
             mono.storage.in_progress_trait_placeholder_keys.remove(trait_placeholder_key)
-            mono.storage.resolved_trait_placeholder_keys.insert(trait_placeholder_key)
             return
         },
     }

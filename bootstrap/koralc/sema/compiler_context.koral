@@ -456,11 +456,45 @@ given CompilerContext {
     }
 
     public get_type_arguments(self ref, def_id DefId) Option[List[Type]] = {
-        return self.def_id_map.get_type_arguments(def_id)
+        when self.def_id_map.get_type_arguments(def_id) in {
+            .Some(args) then { return Option[List[Type]].Some(args) },
+            .None() then {},
+        }
+        return when self.def_id_map.lookup_type(def_id) in {
+            .Some(mapped) then when mapped in {
+                .GenericStruct(_, args) then {
+                    let mut unpacked = List[Type].new()
+                    for arg in args then {
+                        unpacked.push(arg.val)
+                    }
+                    yield Option[List[Type]].Some(unpacked)
+                },
+                .GenericEnum(_, args) then {
+                    let mut unpacked = List[Type].new()
+                    for arg in args then {
+                        unpacked.push(arg.val)
+                    }
+                    yield Option[List[Type]].Some(unpacked)
+                },
+                _ then Option[List[Type]].None(),
+            },
+            .None() then Option[List[Type]].None(),
+        }
     }
 
     public get_template_name(self ref, def_id DefId) Option[String] = {
-        return self.def_id_map.get_template_name(def_id)
+        when self.def_id_map.get_template_name(def_id) in {
+            .Some(name) then { return Option[String].Some(name) },
+            .None() then {},
+        }
+        return when self.def_id_map.lookup_type(def_id) in {
+            .Some(mapped) then when mapped in {
+                .GenericStruct(template, _) then Option[String].Some(template),
+                .GenericEnum(template, _) then Option[String].Some(template),
+                _ then Option[String].None(),
+            },
+            .None() then Option[String].None(),
+        }
     }
 
     // ── 类型定义更新 ──────────────────────────────────────────────────────

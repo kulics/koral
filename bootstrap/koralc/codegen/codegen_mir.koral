@@ -660,7 +660,7 @@ given MIRFunctionCodeEmitter {
         let emission = self.emit_value_source(value)
         let value_type = self.type_of_value(value)
         when value_type in {
-            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) or .TraitObject(_, _) then {
+            .ReferenceType(_) or .MutableReferenceType(_) or .TraitObject(_, _) then {
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("if (((")
                 self.codegen.buffer.push_string(emission.expression)
@@ -668,6 +668,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression)
                 self.codegen.buffer.push_string(").control)); }\n")
             },
+            .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) then {},
             .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("if (((")
@@ -932,6 +933,29 @@ given MIRFunctionCodeEmitter {
         return "koral_wrapping_\(op_name)_\(self.codegen.type_suffix(t))"
     }
 
+    private call_arguments_match_function_type(self ref, arguments List[ref MIRValue], function_type Type) Bool = {
+        return when function_type in {
+            .FunctionType(params, _) then {
+                if params.count() <> arguments.count() then {
+                    return false
+                }
+                let mut i UInt = 0
+                while i < arguments.count() then {
+                    let expected_param_type = self.codegen.function_type_param_type(function_type, i) or else Type.Unknown()
+                    let actual_param_type = self.type_of_value(arguments[i].val)
+                    let expected_key = self.codegen.concrete_layout_key_for_type(self.codegen.concretize_codegen_type(expected_param_type))
+                    let actual_key = self.codegen.concrete_layout_key_for_type(self.codegen.concretize_codegen_type(actual_param_type))
+                    if expected_key <> actual_key then {
+                        return false
+                    }
+                    i += 1
+                }
+                yield true
+            },
+            _ then false,
+        }
+    }
+
     private emit_unary(self ref mut Self, operation MIRUnaryOperation) MIRValueEmission = {
         let operand = self.emit_operand_expression(operation.operand)
         let result_type = operation.result_type
@@ -1031,7 +1055,10 @@ given MIRFunctionCodeEmitter {
             arg_i += 1
         }
         let expression = when call.callee in {
-            .Function(symbol) then self.emit_direct_call(self.codegen.callable_c_name(symbol), arg_values, call.result_type),
+            .Function(symbol) then {
+                let callee_name = self.codegen.callable_c_name(symbol)
+                yield self.emit_direct_call(callee_name, arg_values, call.result_type)
+            },
             _ then self.emit_closure_call(self.emit_operand_expression(call.callee), self.type_of_operand(call.callee), arg_values, call.result_type),
         }
         let mut consume_i UInt = 0
@@ -1828,9 +1855,26 @@ given MIRFunctionCodeEmitter {
         while ci < lambda.captures.count() then {
             let capture = lambda.captures[ci]
             let source = lambda.capture_sources[ci]
-            let access = self.emit_place_access(source)
-            capture_source_overrides.insert(capture.def_id.id, access.path)
-            when access.cleanup in {
+            let capture_emission = when capture.symbol_type in {
+                .ReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref.val
+                    then self.emit_borrowed_reference(source, capture.symbol_type)
+                    else {
+                        let access = self.emit_place_access(source)
+                        yield MIRValueEmission(access.path, access.cleanup)
+                    },
+                .MutableReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref.val
+                    then self.emit_borrowed_reference(source, capture.symbol_type)
+                    else {
+                        let access = self.emit_place_access(source)
+                        yield MIRValueEmission(access.path, access.cleanup)
+                    },
+                _ then {
+                    let access = self.emit_place_access(source)
+                    yield MIRValueEmission(access.path, access.cleanup)
+                },
+            }
+            capture_source_overrides.insert(capture.def_id.id, capture_emission.expression)
+            when capture_emission.cleanup in {
                 .Some(cleanup) then capture_source_cleanups.push(cleanup),
                 .None() then {},
             }
@@ -2815,6 +2859,26 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
 }
 
 given CodeGen {
+    private receiver_owner_type_from_typed_params(self ref Self, params List[TypedParam]) Option[Type] = {
+        let _ = self
+        if params.is_empty() then {
+            return Option[Type].None()
+        }
+        let first_param = params[0(UInt)]
+        if not (first_param.name == "self" or first_param.name == "source") then {
+            return Option[Type].None()
+        }
+        return when first_param.param_type in {
+            .ReferenceType(inner) then Option[Type].Some(inner.val),
+            .MutableReferenceType(inner) then Option[Type].Some(inner.val),
+            .BorrowedReferenceType(inner, _) then Option[Type].Some(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then Option[Type].Some(inner.val),
+            .WeakReferenceType(inner) then Option[Type].Some(inner.val),
+            .MutableWeakReferenceType(inner) then Option[Type].Some(inner.val),
+            _ then Option[Type].Some(first_param.param_type),
+        }
+    }
+
     public emit_mir_function_body(self ref mut Self, function ref MIRFunction) String = {
         let saved_indent = self.indent
         self.indent = "    "
@@ -2843,13 +2907,12 @@ given CodeGen {
             panic("Generic MIR function body reached codegen: \(self.context.symbol_name(function.identifier.val)) :: \(self.context.type_display_name(function.identifier.symbol_type))")
         }
 
-        let saved_type_prefix = self.current_function_type_prefix
+        let saved_owner_type = self.current_function_owner_type
         let concrete_return_type = self.concretize_codegen_type(function.return_type)
-        let new_prefix = when self.method_owner_type(function.identifier.def_id) in {
-            .Some(owner_type) then Option[String].Some(self.emitted_type_c_name_fallback(owner_type)),
-            .None() then self.extract_type_prefix_from_c_name(c_name),
+        self.current_function_owner_type = when function.kind in {
+            .Given(target_type, _, _) then Option[Type].Some(target_type),
+            .Global() then self.receiver_owner_type_from_typed_params(function.params),
         }
-        self.current_function_type_prefix = new_prefix
 
         let return_c_type = self.c_type_name(concrete_return_type)
         let params_str = self.build_param_list(function.params)
@@ -2871,7 +2934,7 @@ given CodeGen {
         self.buffer.push_string(body_text)
         self.buffer.push_string("}\n")
 
-        self.current_function_type_prefix = saved_type_prefix
+        self.current_function_owner_type = saved_owner_type
         return
     }
 }

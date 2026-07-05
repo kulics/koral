@@ -41,7 +41,7 @@ given CodeGen {
         }
         for local in function.locals then {
             if self.type_contains_generic(local.local_type) then {
-                panic("Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier.val)): \(local.name) :: \(self.context.type_display_name(local.local_type))")
+                panic("Generic MIR local reached codegen in \(self.context.symbol_name(function.identifier.val)): \(local.name) :: \(self.context.type_display_name(local.local_type)) return=\(self.context.type_display_name(function.return_type)) symbol=\(self.context.type_display_name(function.identifier.symbol_type))")
             }
         }
     }
@@ -268,6 +268,29 @@ given CodeGen {
                     },
                     .None() then {},
                 }
+            }
+        }
+
+        // Fallback: some concrete generic drop methods may be emitted as plain
+        // global functions but miss concrete-callable metadata linkage.
+        // If a direct "<Type>_drop" function exists in MIR functions, use it.
+        let fallback_name = "\(type_name)_drop"
+        for fn_ref in self.program.functions then {
+            let fn_name = self.context.symbol_name(fn_ref.identifier.val)
+            if fn_name == fallback_name then {
+                return Option[String].Some(self.callable_c_name(fn_ref.identifier))
+            }
+        }
+
+        // As a secondary fallback, scan MIR globals for explicit function entries.
+        for global in self.program.globals then {
+            when global in {
+                .Function(symbol, _, _, _) then {
+                    if self.context.symbol_name(symbol.val) == fallback_name then {
+                        return Option[String].Some(self.callable_c_name(symbol))
+                    }
+                },
+                _ then {},
             }
         }
 
@@ -723,28 +746,4 @@ given CodeGen {
     /// 例如 "_k__T_Deque_reserve" -> Some("_k__T_Deque")
     /// 例如 "Std_String_count" -> Some("Std_String")
     /// 例如 "HelloWorld_main" -> None (no underscore-separated method suffix)
-    extract_type_prefix_from_c_name(self, c_name String) Option[String] = {
-        // 从右向左找最后一个 '_' 分隔符，提取前缀
-        let bytes = c_name.to_bytes()
-        let len = bytes.count()
-        if len == 0 then { return Option[String].None() }
-        // 找最后一个 '_' 的位置
-        let mut last_underscore UInt = 0
-        let mut found = false
-        let mut i UInt = 0
-        while i < len then {
-            let b = bytes[i]
-            if b == 95(UInt8) then {  // '_' = 95
-                last_underscore = i
-                found = true
-            }
-            i += 1
-        }
-        if not found or last_underscore == 0 then {
-            return Option[String].None()
-        }
-        // 提取前缀（不含最后的 '_'）
-        let prefix = c_name.substring(0..<last_underscore)
-        return Option[String].Some(prefix)
-    }
 }
