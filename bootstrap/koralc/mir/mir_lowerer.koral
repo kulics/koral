@@ -180,7 +180,8 @@ given MIRLowerer {
                             .Some(source) then {
                                 let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                yield Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
+                                let resolved = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
+                                yield resolved
                             },
                             .None() then body,
                         },
@@ -555,12 +556,92 @@ type MIRReferenceAllocationFunctionPromoter(
     local_storages_by_id Dict[UInt, MIRStorage],
 )
 
+private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
+    return when value in {
+        .Ref(_, _, allocation) then allocation is .StackBorrow(),
+        .Call(call) then {
+            for argument in call.arguments then {
+                if mir_value_contains_stack_borrow_ref(argument.val) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                if mir_value_contains_stack_borrow_ref(field.val) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                if mir_value_contains_stack_borrow_ref(argument.val) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .TraitObjectConversion(conversion) then mir_value_contains_stack_borrow_ref(conversion.inner.val),
+        .TraitMethodCall(call) then {
+            if mir_value_contains_stack_borrow_ref(call.receiver.val) then {
+                return true
+            }
+            for argument in call.arguments then {
+                if mir_value_contains_stack_borrow_ref(argument.val) then {
+                    return true
+                }
+            }
+            yield false
+        },
+        .EnumTag(tag) then mir_value_contains_stack_borrow_ref(tag.subject.val),
+        .Intrinsic(node) then when node in {
+            .InitMemory(_, value) then mir_value_contains_stack_borrow_ref(value.val),
+            .SpawnThread(_, _, closure, _) then mir_value_contains_stack_borrow_ref(closure.val),
+            _ then false,
+        },
+        _ then false,
+    }
+}
+
+private let mir_statement_needs_reference_allocation_promotion(statement MIRStatement) Bool = {
+    return when statement in {
+        .Assign(_, value) then mir_value_contains_stack_borrow_ref(value),
+        .CompoundAssign(assignment) then mir_value_contains_stack_borrow_ref(assignment.value),
+        .Evaluate(value) then mir_value_contains_stack_borrow_ref(value),
+        _ then false,
+    }
+}
+
+private let mir_function_needs_reference_allocation_promotion(function ref MIRFunction) Bool = {
+    for block in function.blocks then {
+        for statement in block.statements then {
+            if mir_statement_needs_reference_allocation_promotion(statement.val) then {
+                return true
+            }
+        }
+    }
+    return false
+}
+
 given MIRReferenceAllocationPromoter {
     public new(program ref MIRProgram) MIRReferenceAllocationPromoter = {
         return MIRReferenceAllocationPromoter(program)
     }
 
     public promote(self ref mut) ref MIRProgram = {
+        let mut needs_promotion = false
+        for function_ref in self.program.functions then {
+            if mir_function_needs_reference_allocation_promotion(function_ref) then {
+                needs_promotion = true
+                break
+            }
+        }
+        if not needs_promotion then {
+            return self.program
+        }
+
         let parameter_types_by_def_id = self.build_parameter_types_by_def_id()
         let parameter_types_by_name = self.build_parameter_types_by_name()
 
@@ -693,6 +774,10 @@ given MIRReferenceAllocationFunctionPromoter {
     }
 
     public promote(self ref mut) ref MIRFunction = {
+        if not mir_function_needs_reference_allocation_promotion(self.function) then {
+            return self.function
+        }
+
         let mut blocks = List[ref MIRBasicBlock].new()
         for block in self.function.blocks then {
             let mut statements = List[ref MIRStatement].new()

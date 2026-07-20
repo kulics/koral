@@ -196,7 +196,29 @@ given TypeChecker {
     }
 
     protected lookup_current_file_def_id(self, name String) Option[DefId] = {
-        return self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path))
+        when self.context().lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path)) in {
+            .Some(def_id) then { return Option[DefId].Some(def_id) },
+            .None() then {},
+        }
+        let mut id UInt = 1
+        let next_def_id = self.context().next_def_id()
+        while id < next_def_id then {
+            let def_id = DefId(id)
+            when self.context().get_name(def_id) in {
+                .Some(def_name) then if def_name == name then {
+                    let def_module_path = self.context().get_module_path(def_id) or else List[String].new()
+                    let def_source_file = self.context().get_source_file(def_id)
+                    if string_list_eq(def_module_path, self.storage.module_path)
+                        and source_file_matches(def_source_file, Option[String].Some(self.storage.file_path))
+                    then {
+                        return Option[DefId].Some(def_id)
+                    }
+                },
+                .None() then {},
+            }
+            id += 1
+        }
+        return Option[DefId].None()
     }
 
     protected lookup_current_file_symbol(self, name String) Option[Symbol] = {

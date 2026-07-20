@@ -993,7 +993,7 @@ given TypeChecker {
                             if segment_type is .Unknown() then {
                                 let pointee = inner.val
                                 let raw_method = self.resolve_method_signature(pointee, seg)
-                                let visible_method = self.resolve_source_method_signature(pointee, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(pointee, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1034,7 +1034,7 @@ given TypeChecker {
                             if segment_type is .Unknown() then {
                                 let pointee = inner.val
                                 let raw_method = self.resolve_method_signature(pointee, seg)
-                                let visible_method = self.resolve_source_method_signature(pointee, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(pointee, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1052,7 +1052,7 @@ given TypeChecker {
                             let segment_type = self.resolve_member_type_ref(inner, seg)
                             if segment_type is .Unknown() then {
                                 let raw_method = self.resolve_method_signature(inner.val, seg)
-                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(inner.val, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1066,7 +1066,7 @@ given TypeChecker {
                             let segment_type = self.resolve_member_type_ref(inner, seg)
                             if segment_type is .Unknown() then {
                                 let raw_method = self.resolve_method_signature(inner.val, seg)
-                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(inner.val, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1080,7 +1080,7 @@ given TypeChecker {
                             let segment_type = self.resolve_member_type_ref(inner, seg)
                             if segment_type is .Unknown() then {
                                 let raw_method = self.resolve_method_signature(inner.val, seg)
-                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(inner.val, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1094,7 +1094,7 @@ given TypeChecker {
                             let segment_type = self.resolve_member_type_ref(inner, seg)
                             if segment_type is .Unknown() then {
                                 let raw_method = self.resolve_method_signature(inner.val, seg)
-                                let visible_method = self.resolve_source_method_signature(inner.val, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(inner.val, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1108,7 +1108,7 @@ given TypeChecker {
                             let segment_type = self.resolve_member_type(current_type, seg)
                             if segment_type is .Unknown() then {
                                 let raw_method = self.resolve_method_signature(current_type, seg)
-                                let visible_method = self.resolve_source_method_signature(current_type, seg)
+                                let visible_method = self.resolve_source_method_signature_from_raw(current_type, seg, raw_method)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, seg, expr_span(expr)),
@@ -1138,7 +1138,7 @@ given TypeChecker {
                 let expected_self_type = self.resolve_method_self_type(initial_typed_base.expr_type, method_name)
                 let typed_base = self.adapt_receiver_to_expected_self_type(initial_typed_base, expected_self_type)
                 let raw_method_signature = self.resolve_method_signature(typed_base.expr_type, method_name)
-                let source_method_signature = self.resolve_source_method_signature(typed_base.expr_type, method_name)
+                let source_method_signature = self.resolve_source_method_signature_from_raw(typed_base.expr_type, method_name, raw_method_signature)
                 let method_is_accessible = when raw_method_signature in {
                     .Some(sig) then {
                         yield not (
@@ -1155,7 +1155,10 @@ given TypeChecker {
                 for method_type_arg in method_type_args then {
                     resolved_method_type_args.push(self.resolve_type_in_scope(method_type_arg.val, scope))
                 }
-                let gmc_param_types = self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args)
+                let gmc_param_types = when raw_method_signature in {
+                    .Some(sig) then self.resolve_method_param_types_from_signature_with_method_type_args(typed_base.expr_type, sig, resolved_method_type_args),
+                    .None() then self.resolve_method_param_types_with_method_type_args(typed_base.expr_type, method_name, resolved_method_type_args),
+                }
                 let gmc_param_specs = when source_method_signature in {
                     .Some(sig) then self.drop_receiver_param_specs(sig),
                     .None() then List[FunctionParamSpec].new(),
@@ -1179,7 +1182,7 @@ given TypeChecker {
                     .None() then resolved_method_type_args,
                 }
                 self.maybe_record_extension_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
-                let ret_type = when source_method_signature in {
+                let ret_type = when raw_method_signature in {
                     .Some(sig) then {
                         yield self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, effective_method_type_args)
                     },
@@ -1235,16 +1238,11 @@ given TypeChecker {
                     )
                 } else {
                     let callee = when trait_constraint_opt in {
-                        .Some(trait_name) then if trait_dispatch_requires_object then {
+                        .Some(trait_name) then {
                             self.maybe_record_trait_method_instantiation(typed_base.expr_type, method_name, effective_method_type_args)
                             let trait_type = self.constrained_trait_object_type_for_dispatch(typed_base.expr_type, trait_name)
                             yield make_typed_expr(
                                 TypedExprKind.TraitMethodPlaceholder(box(typed_base), trait_type, box(method_symbol), effective_method_type_args, .None()),
-                                method_symbol.symbol_type,
-                            )
-                        } else {
-                            yield make_typed_expr(
-                                TypedExprKind.MethodReference(box(typed_base), typed_base.expr_type, box(method_symbol), List[Type].new(), effective_method_type_args, .None()),
                                 method_symbol.symbol_type,
                             )
                         },

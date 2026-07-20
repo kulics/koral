@@ -1,4 +1,49 @@
 given TypeChecker {
+
+    private should_use_trait_placeholder_for_eq_ord_receiver(self, receiver_type Type) Bool = {
+        return when receiver_type in {
+            .GenericParameter(_) then true,
+            .BorrowedReferenceType(inner, _) then self.contains_generic_parameter(inner.val),
+            .MutableBorrowedReferenceType(inner, _) then self.contains_generic_parameter(inner.val),
+            _ then false,
+        }
+    }
+
+    private method_symbol_matches_binary_call(self, method_symbol Symbol, base_type Type, rhs_type Type) Bool = {
+        return when method_symbol.symbol_type in {
+            .FunctionType(params, _) then {
+                if params.count() < 2(UInt) then {
+                    return false
+                }
+                let receiver_type = params[0(UInt)].val.param_type
+                let arg_type = params[1(UInt)].val.param_type
+                let receiver_matches = self.same_expr_type(receiver_type, base_type)
+                    or self.type_matches_expected_pattern(receiver_type, base_type)
+                let arg_matches = self.same_expr_type(arg_type, rhs_type)
+                    or self.type_matches_expected_pattern(arg_type, rhs_type)
+                return receiver_matches and arg_matches
+            },
+            _ then true,
+        }
+    }
+
+    private make_binary_method_placeholder_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
+        let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
+        let mut param_types = List[Type].new()
+        param_types.push(base_type)
+        param_types.push(rhs_type)
+        return Symbol(def_id, make_function_type(self.to_type_ref_list(param_types), fallback_return), SymbolKind.Function())
+    }
+
+    private resolved_or_placeholder_method_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
+        return when self.resolve_source_method_signature(base_type, method_name) in {
+            .Some(symbol) then if self.method_symbol_matches_binary_call(symbol, base_type, rhs_type)
+                then symbol
+                else self.make_binary_method_placeholder_symbol(base_type, rhs_type, method_name, fallback_return),
+            .None() then self.make_binary_method_placeholder_symbol(base_type, rhs_type, method_name, fallback_return),
+        }
+    }
+
     private is_numeric_literal_expr(self, expr TypedExpr) Bool = {
         return when expr.expr_kind in {
             .IntegerLiteral(_) then true,
@@ -738,7 +783,6 @@ given TypeChecker {
             .BoolType() then true,
             .MutablePointerType(_) then true,
             .PointerType(_) then true,
-            .TraitObject(_, _) then true,
             _ then false,
         }
     }
@@ -757,7 +801,6 @@ given TypeChecker {
             .UInt64Type() then true,
             .Float32Type() then true,
             .Float64Type() then true,
-            .TraitObject(_, _) then true,
             _ then false,
         }
     }
@@ -766,9 +809,20 @@ given TypeChecker {
         if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "operator 'equals'") then {
             return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
         }
+        if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
+            self.maybe_record_trait_method_instantiation(lhs.expr_type, "equals", List[Type].new())
+            let method_symbol = self.make_binary_method_placeholder_symbol(lhs.expr_type, rhs.expr_type, "equals", Type.BoolType())
+            let mut args = List[ref TypedExpr].new()
+            args.push(box(rhs))
+            let callee = make_typed_expr(
+                TypedExprKind.TraitMethodPlaceholder(box(lhs), Type.TraitObject("Eq", List[ref Type].new()), box(method_symbol), List[Type].new(), .None()),
+                method_symbol.symbol_type,
+            )
+            return make_typed_expr(TypedExprKind.Call(box(callee), args), Type.BoolType())
+        }
         self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "equals")
-        let method_symbol = self.make_method_symbol("equals", ret_type)
+        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, "equals", ret_type)
         let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
@@ -786,9 +840,20 @@ given TypeChecker {
         if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "operator 'compare'") then {
             return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
         }
+        if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
+            self.maybe_record_trait_method_instantiation(lhs.expr_type, "compare", List[Type].new())
+            let method_symbol = self.make_binary_method_placeholder_symbol(lhs.expr_type, rhs.expr_type, "compare", Type.IntType())
+            let mut args = List[ref TypedExpr].new()
+            args.push(box(rhs))
+            let callee = make_typed_expr(
+                TypedExprKind.TraitMethodPlaceholder(box(lhs), Type.TraitObject("Ord", List[ref Type].new()), box(method_symbol), List[Type].new(), .None()),
+                method_symbol.symbol_type,
+            )
+            return make_typed_expr(TypedExprKind.Call(box(callee), args), Type.IntType())
+        }
         self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "compare")
-        let method_symbol = self.make_method_symbol("compare", ret_type)
+        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, "compare", ret_type)
         let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
@@ -852,7 +917,7 @@ given TypeChecker {
     private build_arithmetic_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
-        let method_symbol = self.make_method_symbol(method_name, ret_type)
+        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type)
         let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
@@ -869,7 +934,7 @@ given TypeChecker {
     private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
-        let method_symbol = self.make_method_symbol(method_name, ret_type)
+        let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type)
         let mut args = List[ref TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {

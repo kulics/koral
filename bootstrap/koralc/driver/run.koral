@@ -1,6 +1,5 @@
 using std::os { .. }
 using std::proc { .. }
-using std::time { .. }
 
 private type InvocationOptions(
     command String,
@@ -185,18 +184,6 @@ private let read_source(file_path String) Option[String] = {
 private let debug_phase(message String) Void = {
     if env("KORAL_DEBUG_PHASE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
         eprintln("[phase] \(message)")
-    }
-}
-
-private let phase_timing_enabled() Bool =
-    when env("KORAL_PROFILE_PHASES") in {
-        .Some(value) then value == "1" or value == "true" or value == "TRUE",
-        .None() then false,
-    }
-
-private let profile_phase(message String, start MonoTime) Void = {
-    if phase_timing_enabled() then {
-        eprintln("[phase-ms] \(message) duration_ms=\(start.elapsed().as_milliseconds())")
     }
 }
 
@@ -606,19 +593,15 @@ private let prepare_compilation(options InvocationOptions) Result[PreparedCompil
 
 private let run_check(options InvocationOptions) Int = {
     debug_phase("check: type check")
-    let type_check_start = MonoTime.now()
     let prepared = prepare_compilation(options) or else {
         eprintln(it.message())
         return 1
     }
     let result = check_resolved_graph(prepared.graph, prepared.display_name)
-    profile_phase("check: type check", type_check_start)
 
     if result.diagnostics.has_errors() then {
         debug_phase("check: render diagnostics")
-        let render_start = MonoTime.now()
         print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
-        profile_phase("check: render diagnostics", render_start)
         return 1
     }
 
@@ -755,48 +738,12 @@ private let build_c_output_path(artifact_base_name String, default_output_dir Pa
     }
 }
 
-private let emit_c(options InvocationOptions, phase_prefix String, profile_total_phase Bool) Option[Pair[Path, List[String]]] = {
-    let total_start = MonoTime.now()
-
-    debug_phase("\(phase_prefix): type check")
-    let type_check_start = MonoTime.now()
-    let prepared = prepare_compilation(options) or else {
-        eprintln(it.message())
-        return Option[Pair[Path, List[String]]].None()
-    }
-    let semantic_result = check_resolved_graph(prepared.graph, prepared.display_name)
-    if semantic_result.diagnostics.has_errors() then {
-        debug_phase("\(phase_prefix): render diagnostics")
-        let render_start = MonoTime.now()
-        print_user_focused_diagnostic_records(semantic_result.diagnostics, prepared.display_name)
-        profile_phase("\(phase_prefix): render diagnostics", render_start)
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
-        }
-        return Option[Pair[Path, List[String]]].None()
-    }
-
-    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
-    profile_phase("\(phase_prefix): type check", type_check_start)
-
-    if result.diagnostics.has_errors() then {
-        debug_phase("\(phase_prefix): render diagnostics")
-        let render_start = MonoTime.now()
-        print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
-        profile_phase("\(phase_prefix): render diagnostics", render_start)
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
-        }
-        return Option[Pair[Path, List[String]]].None()
-    }
-
-    let typed_program = if result.typed_program is .Some(program) then program else { return Option[Pair[Path, List[String]]].None() }
+private let lower_mir_after_typecheck(result ref BodyCheckerOutput, typed_program ref TypedProgram, phase_prefix String) Pair[ref MIRProgram, CompilerContext] = {
     let mut context = result.context
 
     debug_phase("\(phase_prefix): monomorphize")
-    let mono_start = MonoTime.now()
     let mut mono = Monomorphizer.new_with_inputs(
-        typed_program,
+        typed_program.val,
         result.instantiation_requests,
         result.generic_templates,
         context,
@@ -807,75 +754,108 @@ private let emit_c(options InvocationOptions, phase_prefix String, profile_total
         result.conformance_index,
     )
     let mut mono_program = mono.ref.monomorphize()
-    profile_phase("\(phase_prefix): monomorphize", mono_start)
-
-    // Free concrete function bodies — MIR lowering and codegen don't need them
-    // context.drop_concrete_bodies()
 
     debug_phase("\(phase_prefix): mir lower")
-    let mir_start = MonoTime.now()
     let mut lowerer = MIRLowerer.new(mono_program.ref, context.ref)
-    let mut mir_program = lowerer.lower()
-    profile_phase("\(phase_prefix): mir lower", mir_start)
+    let mir_program = lowerer.lower()
+
+    // MIR lowering has consumed the concrete body caches; release them
+    // before codegen to reduce peak RSS from retained typecheck artifacts.
+    context.drop_concrete_bodies()
+
+    return Pair[ref MIRProgram, CompilerContext](mir_program, context)
+}
+
+type EmitCGenerationInput(
+    output_path Path,
+    linked_libraries List[String],
+    mir_program ref MIRProgram,
+    context CompilerContext,
+)
+
+private let prepare_emit_c_generation_input(options InvocationOptions, phase_prefix String) Option[EmitCGenerationInput] = {
+    debug_phase("\(phase_prefix): type check")
+    let prepared = prepare_compilation(options) or else {
+        eprintln(it.message())
+        return Option[EmitCGenerationInput].None()
+    }
+    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
+
+    if result.diagnostics.has_errors() then {
+        debug_phase("\(phase_prefix): render diagnostics")
+        print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
+        return Option[EmitCGenerationInput].None()
+    }
+
+    let typed_program = if result.typed_program is .Some(program) then program else { return Option[EmitCGenerationInput].None() }
 
     let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir)
 
     create_dir_all(output_path.dir_name()) or else {
         eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(it.message())")
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
-        }
+        return Option[EmitCGenerationInput].None()
+    }
+
+    let lowered = lower_mir_after_typecheck(result.ref, typed_program.ref, phase_prefix)
+    return Option[EmitCGenerationInput].Some(EmitCGenerationInput(
+        output_path,
+        prepared.linked_libraries,
+        lowered.first,
+        lowered.second,
+    ))
+}
+
+private let generate_c_from_mir(mir_program ref MIRProgram, context CompilerContext, phase_prefix String) String = {
+    let mut concrete_mir_program = mir_program
+
+    debug_phase("\(phase_prefix): codegen")
+    let mut cg = CodeGen.new(concrete_mir_program, context)
+    cg.ref.validate_inputs_for_generate()
+    cg.ref.generate_prelude_into_buffer()
+    cg.ref.emit_mir_function_implementations()
+    cg.ref.finalize_program_into_buffer()
+
+    let generated_c = cg.ref.into_generated_string()
+    return generated_c
+}
+
+private let emit_c(options InvocationOptions, phase_prefix String) Option[Pair[Path, List[String]]] = {
+    let generation_input = prepare_emit_c_generation_input(options, phase_prefix) or else {
         return Option[Pair[Path, List[String]]].None()
     }
 
-    debug_phase("\(phase_prefix): codegen")
-    let codegen_start = MonoTime.now()
-    let mut cg = CodeGen.new(mir_program, context)
-    let generated_c = cg.ref.generate()
-    profile_phase("\(phase_prefix): codegen", codegen_start)
+    let generated_c = generate_c_from_mir(generation_input.mir_program, generation_input.context, phase_prefix)
 
-    write_text_file(output_path, content: generated_c) or else {
-        eprintln("failed to write output file: \(output_path.to_string()): \(it.message())")
-        if profile_total_phase then {
-            profile_phase("\(phase_prefix): total", total_start)
-        }
+    write_text_file(generation_input.output_path, content: generated_c) or else {
+        eprintln("failed to write output file: \(generation_input.output_path.to_string()): \(it.message())")
         return Option[Pair[Path, List[String]]].None()
     }
 
     debug_phase("\(phase_prefix): done")
-    if profile_total_phase then {
-        profile_phase("\(phase_prefix): total", total_start)
-    }
-    return Option[Pair[Path, List[String]]].Some(Pair[Path, List[String]](output_path, prepared.linked_libraries))
+    return Option[Pair[Path, List[String]]].Some(Pair[Path, List[String]](generation_input.output_path, generation_input.linked_libraries))
 }
 
 private let run_emit_c(options InvocationOptions) Int = {
-    return when emit_c(options, "emit-c", true) in {
+    return when emit_c(options, "emit-c") in {
         .Some(_) then 0,
         .None() then 1,
     }
 }
 
 private let run_build(options InvocationOptions) Int = {
-    let total_start = MonoTime.now()
-    let output = emit_c(options, "build", false) or else { return 1 }
+    let output = emit_c(options, "build") or else { return 1 }
     let output_path = output.first
     let linked_libraries = output.second
 
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
     debug_phase("build: clang")
-    let clang_start = MonoTime.now()
     if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries) then {
         eprintln("clang compilation failed")
-        profile_phase("build: clang", clang_start)
-        profile_phase("build: total", total_start)
         return 1
     }
-    profile_phase("build: clang", clang_start)
 
     debug_phase("build: done")
-    profile_phase("build: total", total_start)
     println("Build successful: \(exe_path.to_string())")
     return 0
 }

@@ -84,6 +84,9 @@ given TypeChecker {
         type_params List[TypeParameterDecl],
         method MethodDeclaration,
         conformance_trait_name Option[String],
+        conformance_target_type Option[Type],
+        conformance_trait_args List[Type],
+        uses_trait_type_params Bool,
         source_file String,
         module_path List[String],
         package_id String,
@@ -95,6 +98,9 @@ given TypeChecker {
             self.copy_template_type_params(type_params),
             self.copy_method_declaration(method),
             conformance_trait_name,
+            self.copy_optional_type(conformance_target_type),
+            self.copy_type_list(conformance_trait_args),
+            uses_trait_type_params,
             source_file,
             self.copy_string_list(module_path),
             package_id,
@@ -109,6 +115,9 @@ given TypeChecker {
         type_params List[TypeParameterDecl],
         method MethodDeclaration,
         conformance_trait_name Option[String],
+        conformance_target_type Option[Type],
+        conformance_trait_args List[Type],
+        uses_trait_type_params Bool,
         source_file String,
         module_path List[String],
         package_id String,
@@ -121,6 +130,9 @@ given TypeChecker {
             type_params,
             method,
             conformance_trait_name,
+            conformance_target_type,
+            conformance_trait_args,
+            uses_trait_type_params,
             source_file,
             module_path,
             package_id,
@@ -128,6 +140,14 @@ given TypeChecker {
             checked_parameters,
             checked_return_type,
         )
+    }
+
+    private copy_type_list(self, values List[Type]) List[Type] = {
+        let mut copied = List[Type].with_capacity(values.count())
+        for value in values then {
+            copied.push(value)
+        }
+        return copied
     }
 
     private contains_generic_parameter(self, t Type) Bool = {
@@ -275,6 +295,8 @@ given TypeChecker {
             and current.type_params.count() == candidate.type_params.count()
             and current.method.type_params.count() == candidate.method.type_params.count()
             and current.conformance_trait_name == candidate.conformance_trait_name
+            and current.conformance_target_type == candidate.conformance_target_type
+            and current.conformance_trait_args == candidate.conformance_trait_args
     }
 
     private upsert_extension_template(self ref mut, key String, template ref GenericExtensionMethodTemplate) Void = {
@@ -350,6 +372,8 @@ given TypeChecker {
         self ref mut,
         type_key String,
         owner_type_params List[TypeParameter],
+        conformance_target_type Option[Type],
+        conformance_trait_args List[Type],
         method_name String,
         method_access AccessModifier,
         method_type_params List[TypeParameter],
@@ -379,6 +403,9 @@ given TypeChecker {
             self.to_template_type_params(owner_type_params),
             method_decl,
             conformance_trait_name,
+            conformance_target_type,
+            conformance_trait_args,
+            false,
             self.storage.file_path,
             self.storage.module_path,
             self.storage.package_id,
@@ -458,6 +485,9 @@ given TypeChecker {
                             concrete_type_params,
                             template_ref.method,
                             Option[String].Some(trait_name),
+                            Option[Type].Some(target_type),
+                            template_ref.conformance_trait_args,
+                            true,
                             template_ref.source_file,
                             template_ref.module_path,
                             template_ref.package_id,
@@ -478,6 +508,9 @@ given TypeChecker {
                                             concrete_type_params,
                                             template_ref.method,
                                             Option[String].Some(trait_name),
+                                            Option[Type].Some(target_type),
+                                            template_ref.conformance_trait_args,
+                                            true,
                                             template_ref.source_file,
                                             template_ref.module_path,
                                             template_ref.package_id,
@@ -498,6 +531,9 @@ given TypeChecker {
                                             concrete_type_params,
                                             template_ref.method,
                                             Option[String].Some(trait_name),
+                                            Option[Type].Some(target_type),
+                                            template_ref.conformance_trait_args,
+                                            true,
                                             template_ref.source_file,
                                             template_ref.module_path,
                                             template_ref.package_id,
@@ -584,6 +620,9 @@ given TypeChecker {
                     conformance.owner_type_params,
                     method_decl,
                     Option[String].Some(trait_name),
+                    Option[Type].Some(conformance.target_type),
+                    conformance.trait_arg_types,
+                    true,
                     self.storage.file_path,
                     self.storage.module_path,
                     self.storage.package_id,
@@ -604,6 +643,9 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     Option[String].Some(trait_name),
+                                    Option[Type].Some(conformance.target_type),
+                                    conformance.trait_arg_types,
+                                    true,
                                     self.storage.file_path,
                                     self.storage.module_path,
                                     self.storage.package_id,
@@ -624,6 +666,9 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     Option[String].Some(trait_name),
+                                    Option[Type].Some(conformance.target_type),
+                                    conformance.trait_arg_types,
+                                    true,
                                     self.storage.file_path,
                                     self.storage.module_path,
                                     self.storage.package_id,
@@ -670,10 +715,13 @@ given TypeChecker {
                     conformance.owner_type_params,
                     method_decl,
                     Option[String].Some(trait_name),
+                    Option[Type].Some(conformance.target_type),
+                    conformance.trait_arg_types,
+                    true,
                     self.storage.file_path,
                     self.storage.module_path,
                     self.storage.package_id,
-                    Option[ref TypedExpr].None(),
+                    checked_body,
                     Option[List[Symbol]].None(),
                     Option[Type].Some(checked_return_type),
                 ))
@@ -690,10 +738,13 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     Option[String].Some(trait_name),
+                                    Option[Type].Some(conformance.target_type),
+                                    conformance.trait_arg_types,
+                                    true,
                                     self.storage.file_path,
                                     self.storage.module_path,
                                     self.storage.package_id,
-                                    Option[ref TypedExpr].None(),
+                                    checked_body,
                                     Option[List[Symbol]].None(),
                                     Option[Type].Some(checked_return_type),
                                 ))
@@ -710,10 +761,13 @@ given TypeChecker {
                                     conformance.owner_type_params,
                                     method_decl,
                                     Option[String].Some(trait_name),
+                                    Option[Type].Some(conformance.target_type),
+                                    conformance.trait_arg_types,
+                                    true,
                                     self.storage.file_path,
                                     self.storage.module_path,
                                     self.storage.package_id,
-                                    Option[ref TypedExpr].None(),
+                                    checked_body,
                                     Option[List[Symbol]].None(),
                                     Option[Type].Some(checked_return_type),
                                 ))
@@ -823,6 +877,18 @@ given TypeChecker {
                             )
                         )
                     }
+                    if typed_params.is_empty() then {
+                        continue
+                    }
+                    let self_param_type = typed_params[0(UInt)].param_type
+                    if self.is_unresolved_expr_type(self_param_type) then {
+                        continue
+                    }
+                    let self_matches = self.same_expr_type(self_param_type, base_type)
+                        or self.type_matches_expected_pattern(base_type, self_param_type)
+                    if not self_matches then {
+                        continue
+                    }
                     let return_type = when template.checked_return_type in {
                         .Some(ret) then self.apply_type_bindings(ret, bindings),
                         .None() then Type.Unknown(),
@@ -912,13 +978,77 @@ given TypeChecker {
                 }
             },
             .StructureType(def_id) then {
-                if self.context().get_name(def_id) is .Some(name) then {
-                    template_name_opt = Option[String].Some(name)
+                when self.context().get_template_name(def_id) in {
+                    .Some(template_name) then {
+                        template_name_opt = Option[String].Some(template_name)
+                        when self.context().get_type_arguments(def_id) in {
+                            .Some(actual_args) then {
+                                for arg in actual_args then {
+                                    extension_type_args.push(box(arg))
+                                }
+                            },
+                            .None() then {
+                                when self.context().lookup_type(def_id) in {
+                                    .Some(mapped_type) then when mapped_type in {
+                                        .GenericStruct(_, mapped_args) then {
+                                            for arg in mapped_args then {
+                                                extension_type_args.push(box(arg.val))
+                                            }
+                                        },
+                                        .GenericEnum(_, mapped_args) then {
+                                            for arg in mapped_args then {
+                                                extension_type_args.push(box(arg.val))
+                                            }
+                                        },
+                                        _ then {},
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                        }
+                    },
+                    .None() then {
+                        if self.context().get_name(def_id) is .Some(name) then {
+                            template_name_opt = Option[String].Some(name)
+                        }
+                    },
                 }
             },
             .EnumType(def_id) then {
-                if self.context().get_name(def_id) is .Some(name) then {
-                    template_name_opt = Option[String].Some(name)
+                when self.context().get_template_name(def_id) in {
+                    .Some(template_name) then {
+                        template_name_opt = Option[String].Some(template_name)
+                        when self.context().get_type_arguments(def_id) in {
+                            .Some(actual_args) then {
+                                for arg in actual_args then {
+                                    extension_type_args.push(box(arg))
+                                }
+                            },
+                            .None() then {
+                                when self.context().lookup_type(def_id) in {
+                                    .Some(mapped_type) then when mapped_type in {
+                                        .GenericStruct(_, mapped_args) then {
+                                            for arg in mapped_args then {
+                                                extension_type_args.push(box(arg.val))
+                                            }
+                                        },
+                                        .GenericEnum(_, mapped_args) then {
+                                            for arg in mapped_args then {
+                                                extension_type_args.push(box(arg.val))
+                                            }
+                                        },
+                                        _ then {},
+                                    },
+                                    .None() then {},
+                                }
+                            },
+                        }
+                    },
+                    .None() then {
+                        if self.context().get_name(def_id) is .Some(name) then {
+                            template_name_opt = Option[String].Some(name)
+                        }
+                    },
                 }
             },
             .ReferenceType(inner) then {
@@ -966,6 +1096,9 @@ given TypeChecker {
                     template.type_params,
                     template.method,
                     template.conformance_trait_name,
+                    template.conformance_target_type,
+                    template.conformance_trait_args,
+                    template.uses_trait_type_params,
                     template.source_file,
                     template.module_path,
                     template.package_id,
@@ -1017,6 +1150,9 @@ given TypeChecker {
                         matched_template.type_params,
                         matched_template.method,
                         matched_template.conformance_trait_name,
+                        matched_template.conformance_target_type,
+                        matched_template.conformance_trait_args,
+                        matched_template.uses_trait_type_params,
                         matched_template.source_file,
                         matched_template.module_path,
                         matched_template.package_id,

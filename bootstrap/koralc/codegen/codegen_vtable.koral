@@ -296,6 +296,20 @@ given CodeGen {
         }
     }
 
+    private is_ref_like_codegen_type(self, t Type) Bool = {
+        return when t in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .BorrowedReferenceType(_, _) then true,
+            .MutableBorrowedReferenceType(_, _) then true,
+            .PointerType(_) then true,
+            .MutablePointerType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
     vtable_target_type_matches(self, requested_type Type, candidate_type Type) Bool = {
         let normalized_requested = self.normalize_vtable_receiver_type(requested_type)
         let normalized_candidate = self.normalize_vtable_receiver_type(candidate_type)
@@ -534,23 +548,24 @@ given CodeGen {
 
         let mut call_args = List[String].new()
         call_args.push("self_val")
-        let actual_function_type_opt = when self.context.get_function_type(actual_method_def_id) in {
-            .Some(function_type) then Option[Type].Some(self.bind_method_function_type(actual_method_def_id, concrete_type, function_type)),
-            .None() then Option[Type].None(),
-        }
         let mut extra_index UInt = 0
         for extra in extra_param_names then {
             let actual_call_arg = when extra_param_types.get(extra_index) in {
-                .Some(wrapper_param_type) then when actual_function_type_opt in {
-                    .Some(function_type) then {
-                        let actual_param_type = self.function_type_param_type(function_type, extra_index + 1(UInt)) or else wrapper_param_type
-                        let wrapper_c_type = self.c_type_name(wrapper_param_type)
-                        let actual_c_type = self.c_type_name(actual_param_type)
-                        yield if wrapper_c_type == "void*" and actual_c_type <> "void*"
-                            then "*(\(actual_c_type)*)\(extra)"
-                            else extra
-                    },
-                    .None() then extra,
+                .Some(wrapper_param_type) then {
+                    let actual_param_type = self.context.get_function_param_type(actual_method_def_id, extra_index + 1(UInt)) or else wrapper_param_type
+                    let wrapper_c_type = self.c_type_name(wrapper_param_type)
+                    let actual_c_type = self.c_type_name(actual_param_type)
+                    let mut actual_arg = extra
+                    if wrapper_c_type == "void*" and actual_c_type <> "void*" then {
+                        actual_arg = "*(\(actual_c_type)*)\(extra)"
+                    } else if self.is_ref_like_codegen_type(wrapper_param_type) and not self.is_ref_like_codegen_type(actual_param_type) then {
+                        actual_arg = when actual_param_type in {
+                            .StructureType(def_id) then "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)",
+                            .EnumType(def_id) then "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)",
+                            _ then "*(\(actual_c_type)*)\(extra).ptr",
+                        }
+                    }
+                    yield actual_arg
                 },
                 .None() then extra,
             }
@@ -1092,6 +1107,14 @@ given CodeGen {
     /// Requirements: 10.6
     public generate_trait_object_conversion_from_ref_value(self ref mut Self, ref_value String, trait_name String, concrete_type Type, retain_source Bool) String = {
         let normalized_concrete_type = concrete_type
+        let trait_object_like_source = when normalized_concrete_type in {
+            .TraitObject(_, _) then true,
+            .ReferenceType(inner) then inner.val is .TraitObject(_, _),
+            .MutableReferenceType(inner) then inner.val is .TraitObject(_, _),
+            .BorrowedReferenceType(inner, _) then inner.val is .TraitObject(_, _),
+            .MutableBorrowedReferenceType(inner, _) then inner.val is .TraitObject(_, _),
+            _ then false,
+        }
         let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
             .Some(name) then name,
             .None() then self.c_type_name(normalized_concrete_type),
@@ -1103,7 +1126,11 @@ given CodeGen {
         self.add_indent()
         self.buffer.push_string("\(result).control = \(ref_value).control;\n")
         self.add_indent()
-        self.buffer.push_string("\(result).vtable = &\(vtable_name);\n")
+        if trait_object_like_source then {
+            self.buffer.push_string("\(result).vtable = \(ref_value).vtable;\n")
+        } else {
+            self.buffer.push_string("\(result).vtable = &\(vtable_name);\n")
+        }
         if retain_source then {
             self.add_indent()
             self.buffer.push_string("__koral_retain(\(result).control);\n")

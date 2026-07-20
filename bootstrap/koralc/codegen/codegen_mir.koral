@@ -15,7 +15,7 @@ type MIRLocalLifetimePlan(
 type MIRFunctionEmitPlan(
     local_names List[String],
     non_owning_local_ids ref Dict[UInt, Bool],
-    init_flags List[String],
+    tracked_init_locals ref Dict[UInt, Bool],
     lifetime_plan ref MIRLocalLifetimePlan,
 )
 
@@ -53,6 +53,28 @@ private let is_non_owning_local_value(value MIRValue, target_type Type) Bool = {
 }
 
 private let compute_non_owning_mir_locals(function ref MIRFunction) ref Dict[UInt, Bool] = {
+    let mut saw_assignment_by_local = Dict[UInt, Bool].new()
+    let mut all_non_owning_by_local = Dict[UInt, Bool].new()
+
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Assign(place, value) then when place in {
+                    .Local(local_id) then {
+                        saw_assignment_by_local.insert(local_id.raw_value, true)
+                        let already_all_non_owning = all_non_owning_by_local.get(local_id.raw_value) or else true
+                        all_non_owning_by_local.insert(
+                            local_id.raw_value,
+                            already_all_non_owning and is_non_owning_local_value(value, function.locals[local_id.raw_value].local_type),
+                        )
+                    },
+                    _ then {},
+                },
+                _ then {},
+            }
+        }
+    }
+
     let mut result = Dict[UInt, Bool].new()
     for local in function.locals then {
         if local.storage is .Parameter() and is_borrowed_reference_like_type(local.local_type) then {
@@ -60,182 +82,234 @@ private let compute_non_owning_mir_locals(function ref MIRFunction) ref Dict[UIn
             continue
         }
 
-        let mut saw_assignment = false
-        let mut all_non_owning = true
-        for block in function.blocks then {
-            for statement in block.statements then {
-                when statement in {
-                    .Assign(place, value) then when place in {
-                        .Local(local_id) then {
-                            if local_id.raw_value == local.id.raw_value then {
-                                saw_assignment = true
-                                if not is_non_owning_local_value(value, local.local_type) then {
-                                    all_non_owning = false
-                                }
-                            }
-                        },
-                        _ then {},
-                    },
-                    _ then {},
-                }
-            }
-        }
-
-        if saw_assignment and all_non_owning then {
+        if (saw_assignment_by_local.get(local.id.raw_value) or else false)
+            and (all_non_owning_by_local.get(local.id.raw_value) or else false)
+        then {
             result.insert(local.id.raw_value, true)
         }
     }
     return box(result)
 }
 
-private let mir_current_scope_set(active_scopes ref List[MIRScopeID]) Set[UInt] = {
-    let mut scope_set = Set[UInt].new()
-    for scope in active_scopes then { scope_set.insert(scope.raw_value) }
-    return scope_set
+private let mir_active_scope_contains(active_scopes ref List[MIRScopeID], scope MIRScopeID) Bool = {
+    for active_scope in active_scopes then {
+        if active_scope.raw_value == scope.raw_value then {
+            return true
+        }
+    }
+    return false
+}
+
+private let mir_parent_scope(
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
+    scope MIRScopeID,
+) Option[MIRScopeID] = {
+    return when parent_scope_by_scope.get(scope.raw_value) in {
+        .Some(parent_scope) then Option[MIRScopeID].Some(parent_scope),
+        .None() then Option[MIRScopeID].None(),
+    }
+}
+
+private let mir_nearest_active_common_scope(
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
+    existing_scope MIRScopeID,
+    active_scopes ref List[MIRScopeID],
+) Option[MIRScopeID] = {
+    let mut scope_opt = Option[MIRScopeID].Some(existing_scope)
+    while scope_opt is .Some(_) then {
+        let scope = when scope_opt in {
+            .Some(existing) then existing,
+            .None() then MIRScopeID(0(UInt)),
+        }
+        if mir_active_scope_contains(active_scopes, scope) then {
+            return Option[MIRScopeID].Some(scope)
+        }
+        scope_opt = mir_parent_scope(parent_scope_by_scope, scope)
+    }
+    return Option[MIRScopeID].None()
 }
 
 private let mir_record_local_use(
-    use_scopes_by_local ref mut Dict[UInt, List[Set[UInt]]],
-    use_blocks_by_local ref mut Dict[UInt, Set[UInt]],
+    shared_use_scope_by_local ref mut Dict[UInt, MIRScopeID],
+    first_use_block_by_local ref mut Dict[UInt, UInt],
+    multiple_use_blocks_by_local ref mut Dict[UInt, Bool],
+    tracked_drop_local_ids ref Dict[UInt, Bool],
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
     local MIRLocalID,
     block MIRBlockID,
     active_scopes ref List[MIRScopeID],
 ) Void = {
-    let mut use_scopes = use_scopes_by_local.get(local.raw_value) or else List[Set[UInt]].new()
-    use_scopes.push(mir_current_scope_set(active_scopes))
-    use_scopes_by_local.insert(local.raw_value, use_scopes)
+    when tracked_drop_local_ids.get(local.raw_value) in {
+        .Some(_) then {
+            when shared_use_scope_by_local.get(local.raw_value) in {
+                .Some(shared_use_scope) then {
+                    when mir_nearest_active_common_scope(parent_scope_by_scope, shared_use_scope, active_scopes) in {
+                        .Some(common_scope) then shared_use_scope_by_local.insert(local.raw_value, common_scope),
+                        .None() then {
+                            let _ = shared_use_scope_by_local.remove(local.raw_value)
+                        },
+                    }
+                },
+                .None() then {
+                    if not active_scopes.is_empty() then {
+                        shared_use_scope_by_local.insert(local.raw_value, active_scopes[active_scopes.count() - 1(UInt)])
+                    }
+                },
+            }
+        },
+        .None() then {},
+    }
 
-    let mut use_blocks = use_blocks_by_local.get(local.raw_value) or else Set[UInt].new()
-    use_blocks.insert(block.raw_value)
-    use_blocks_by_local.insert(local.raw_value, use_blocks)
+    when first_use_block_by_local.get(local.raw_value) in {
+        .Some(first_use_block) then {
+            if first_use_block <> block.raw_value then {
+                multiple_use_blocks_by_local.insert(local.raw_value, true)
+            }
+        },
+        .None() then {
+            first_use_block_by_local.insert(local.raw_value, block.raw_value)
+        },
+    }
 }
 
 private let mir_walk_operand_uses(
-    use_scopes_by_local ref mut Dict[UInt, List[Set[UInt]]],
-    use_blocks_by_local ref mut Dict[UInt, Set[UInt]],
+    shared_use_scope_by_local ref mut Dict[UInt, MIRScopeID],
+    first_use_block_by_local ref mut Dict[UInt, UInt],
+    multiple_use_blocks_by_local ref mut Dict[UInt, Bool],
+    tracked_drop_local_ids ref Dict[UInt, Bool],
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
     operand MIROperand,
     block MIRBlockID,
     active_scopes ref List[MIRScopeID],
 ) Void = {
     when operand in {
-        .Local(local) then mir_record_local_use(use_scopes_by_local, use_blocks_by_local, local, block, active_scopes),
+        .Local(local) then mir_record_local_use(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, local, block, active_scopes),
         _ then {},
     }
 }
 
 private let mir_walk_place_uses(
-    use_scopes_by_local ref mut Dict[UInt, List[Set[UInt]]],
-    use_blocks_by_local ref mut Dict[UInt, Set[UInt]],
+    shared_use_scope_by_local ref mut Dict[UInt, MIRScopeID],
+    first_use_block_by_local ref mut Dict[UInt, UInt],
+    multiple_use_blocks_by_local ref mut Dict[UInt, Bool],
+    tracked_drop_local_ids ref Dict[UInt, Bool],
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
     place MIRPlace,
     block MIRBlockID,
     active_scopes ref List[MIRScopeID],
 ) Void = {
     when place in {
-        .Local(local) then mir_record_local_use(use_scopes_by_local, use_blocks_by_local, local, block, active_scopes),
+        .Local(local) then mir_record_local_use(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, local, block, active_scopes),
         .Global(_) then {},
-        .Field(base, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
-        .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
-        .Deref(base, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
-        .PointerElement(base, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, base.val, block, active_scopes),
+        .Field(base, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base.val, block, active_scopes),
+        .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base.val, block, active_scopes),
+        .Deref(base, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base.val, block, active_scopes),
+        .PointerElement(base, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, base.val, block, active_scopes),
     }
 }
 
 private let mir_walk_intrinsic_uses(
-    use_scopes_by_local ref mut Dict[UInt, List[Set[UInt]]],
-    use_blocks_by_local ref mut Dict[UInt, Set[UInt]],
+    shared_use_scope_by_local ref mut Dict[UInt, MIRScopeID],
+    first_use_block_by_local ref mut Dict[UInt, UInt],
+    multiple_use_blocks_by_local ref mut Dict[UInt, Bool],
+    tracked_drop_local_ids ref Dict[UInt, Bool],
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
     intrinsic_node MIRIntrinsic,
     block MIRBlockID,
     active_scopes ref List[MIRScopeID],
 ) Void = {
     when intrinsic_node in {
-        .AllocMemory(count, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, count.val, block, active_scopes),
-        .DeallocMemory(pointer) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes),
+        .AllocMemory(count, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, count.val, block, active_scopes),
+        .DeallocMemory(pointer) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer.val, block, active_scopes),
         .CopyMemory(dest, source, count) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, dest.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, source.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, count.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, dest.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, source.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, count.val, block, active_scopes)
         },
         .MoveMemory(dest, source, count) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, dest.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, source.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, count.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, dest.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, source.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, count.val, block, active_scopes)
         },
-        .IsUniqueMutable(value) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
-        .RefCount(value) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
+        .IsUniqueMutable(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes),
+        .RefCount(value) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes),
         .MakeRef(pointer, owner, _) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, owner.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, owner.val, block, active_scopes)
         },
         .MakeMutRef(pointer, owner, _) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, owner.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, owner.val, block, active_scopes)
         },
-        .DowngradeRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
-        .DowngradeMutRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
-        .UpgradeRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
-        .UpgradeMutRef(value, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes),
+        .DowngradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes),
+        .DowngradeMutRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes),
+        .UpgradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes),
+        .UpgradeMutRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes),
         .InitMemory(pointer, value) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, value.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, value.val, block, active_scopes)
         },
-        .DeinitMemory(pointer) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes),
-        .TakeMemory(pointer, _) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, pointer.val, block, active_scopes),
+        .DeinitMemory(pointer) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer.val, block, active_scopes),
+        .TakeMemory(pointer, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, pointer.val, block, active_scopes),
         .NullPtr(_) then {},
         .SpawnThread(out_handle, out_tid, closure, stack_size) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, out_handle.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, out_tid.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, closure.val, block, active_scopes)
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, stack_size.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, out_handle.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, out_tid.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, closure.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, stack_size.val, block, active_scopes)
         },
     }
 }
 
 private let mir_walk_value_uses(
-    use_scopes_by_local ref mut Dict[UInt, List[Set[UInt]]],
-    use_blocks_by_local ref mut Dict[UInt, Set[UInt]],
+    shared_use_scope_by_local ref mut Dict[UInt, MIRScopeID],
+    first_use_block_by_local ref mut Dict[UInt, UInt],
+    multiple_use_blocks_by_local ref mut Dict[UInt, Bool],
+    tracked_drop_local_ids ref Dict[UInt, Bool],
+    parent_scope_by_scope ref Dict[UInt, MIRScopeID],
     value MIRValue,
     block MIRBlockID,
     active_scopes ref List[MIRScopeID],
 ) Void = {
     when value in {
-        .Operand(operand) then mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operand, block, active_scopes),
-        .PlaceRead(place, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, place, block, active_scopes),
+        .Operand(operand) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operand, block, active_scopes),
+        .PlaceRead(place, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, place, block, active_scopes),
         .Binary(operation) then {
-            mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operation.left, block, active_scopes)
-            mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operation.right, block, active_scopes)
+            mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operation.left, block, active_scopes)
+            mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operation.right, block, active_scopes)
         },
-        .Unary(operation) then mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operation.operand, block, active_scopes),
+        .Unary(operation) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operation.operand, block, active_scopes),
         .Call(call) then {
-            mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, call.callee, block, active_scopes)
+            mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, call.callee, block, active_scopes)
             for argument in call.arguments then {
-                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, argument.val, block, active_scopes)
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, argument.val, block, active_scopes)
             }
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
-                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, field.val, block, active_scopes)
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, field.val, block, active_scopes)
             }
         },
         .EnumCase(construction) then {
             for argument in construction.arguments then {
-                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, argument.val, block, active_scopes)
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, argument.val, block, active_scopes)
             }
         },
-        .EnumTag(tag) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, tag.subject.val, block, active_scopes),
-        .TraitObjectConversion(conversion) then mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, conversion.inner.val, block, active_scopes),
+        .EnumTag(tag) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, tag.subject.val, block, active_scopes),
+        .TraitObjectConversion(conversion) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, conversion.inner.val, block, active_scopes),
         .TraitMethodCall(call) then {
-            mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, call.receiver.val, block, active_scopes)
+            mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, call.receiver.val, block, active_scopes)
             for argument in call.arguments then {
-                mir_walk_value_uses(use_scopes_by_local, use_blocks_by_local, argument.val, block, active_scopes)
+                mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, argument.val, block, active_scopes)
             }
         },
-        .Ref(place, _, _) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, place, block, active_scopes),
-        .Pointer(place) then mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, place, block, active_scopes),
-        .Cast(operand, _) then mir_walk_operand_uses(use_scopes_by_local, use_blocks_by_local, operand, block, active_scopes),
-        .Intrinsic(node) then mir_walk_intrinsic_uses(use_scopes_by_local, use_blocks_by_local, node, block, active_scopes),
+        .Ref(place, _, _) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, place, block, active_scopes),
+        .Pointer(place) then mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, place, block, active_scopes),
+        .Cast(operand, _) then mir_walk_operand_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, operand, block, active_scopes),
+        .Intrinsic(node) then mir_walk_intrinsic_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, node, block, active_scopes),
         .Lambda(lambda) then {
             for source in lambda.capture_sources then {
-                mir_walk_place_uses(use_scopes_by_local, use_blocks_by_local, source, block, active_scopes)
+                mir_walk_place_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, source, block, active_scopes)
             }
         },
     }
@@ -246,10 +320,12 @@ type MIRFunctionCodeEmitter(
     function ref MIRFunction,
     mut local_names List[String],
     mut non_owning_local_ids ref Dict[UInt, Bool],
-    mut init_flags List[String],
+    mut tracked_init_locals ref Dict[UInt, Bool],
     mut lifetime_plan ref MIRLocalLifetimePlan,
     mut lambda_counter UInt,
     mut nested_definitions String,
+    mut current_owner_callable_name_cache_prefix Option[String],
+    mut callable_name_cache Dict[UInt, String],
     mut consumed_locals Dict[UInt, Bool],
 )
 
@@ -259,7 +335,7 @@ private let build_mir_function_emit_plan(
 ) ref MIRFunctionEmitPlan = {
     let mut local_names = List[String].new()
     let mut non_owning_local_ids = compute_non_owning_mir_locals(function)
-    let mut init_flags = List[String].new()
+    let mut tracked_init_locals = Dict[UInt, Bool].new()
 
     for local in function.locals then {
         let name = when local.storage in {
@@ -278,18 +354,16 @@ private let build_mir_function_emit_plan(
             .None() then false,
         }
         local_names.push(name)
-        init_flags.push(
-            if local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) and not is_non_owning
-                then "__mir_init_\(local.id.raw_value)"
-                else ""
-        )
+        if local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) and not is_non_owning then {
+            tracked_init_locals.insert(local.id.raw_value, true)
+        }
     }
 
-    let lifetime_plan = build_mir_lifetime_plan(function, codegen, init_flags)
+    let lifetime_plan = build_mir_lifetime_plan(function, codegen, tracked_init_locals)
     return box(MIRFunctionEmitPlan(
         local_names,
         non_owning_local_ids,
-        init_flags,
+        box(tracked_init_locals),
         lifetime_plan,
     ))
 }
@@ -301,10 +375,15 @@ given MIRFunctionCodeEmitter {
             function,
             plan.local_names,
             plan.non_owning_local_ids,
-            plan.init_flags,
+            plan.tracked_init_locals,
             plan.lifetime_plan,
             0(UInt),
             String.new(),
+            when codegen.current_function_owner_type in {
+                .Some(owner_type) then Option[String].Some(codegen.concrete_receiver_lookup_key(owner_type)),
+                .None() then Option[String].None(),
+            },
+            Dict[UInt, String].new(),
             Dict[UInt, Bool].new(),
         )
     }
@@ -320,6 +399,37 @@ given MIRFunctionCodeEmitter {
         return self.nested_definitions
     }
 
+    private callable_name_for_symbol(self ref mut Self, symbol ref Symbol) String = {
+        when self.callable_name_cache.get(symbol.def_id.id) in {
+            .Some(name) then { return name },
+            .None() then {},
+        }
+
+        when self.current_owner_callable_name_cache_prefix in {
+            .Some(owner_key_prefix) then {
+                let global_cache_key = "\(owner_key_prefix)|\(symbol.def_id.id.to_string())"
+                when self.codegen.current_owner_callable_c_name_cache.get(global_cache_key) in {
+                    .Some(name) then {
+                        self.callable_name_cache.insert(symbol.def_id.id, name)
+                        return name
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+        let name = self.codegen.callable_c_name(symbol)
+        self.callable_name_cache.insert(symbol.def_id.id, name)
+        when self.current_owner_callable_name_cache_prefix in {
+            .Some(owner_key_prefix) then {
+                let global_cache_key = "\(owner_key_prefix)|\(symbol.def_id.id.to_string())"
+                self.codegen.current_owner_callable_c_name_cache.insert(global_cache_key, name)
+            },
+            .None() then {},
+        }
+        return name
+    }
+
     private local_info(self ref, local_id MIRLocalID) Option[ref MIRLocal] = {
         if local_id.raw_value < self.function.locals.count() then {
             return Option[ref MIRLocal].Some(self.function.locals[local_id.raw_value])
@@ -328,11 +438,8 @@ given MIRFunctionCodeEmitter {
     }
 
     private init_flag(self ref, local_id MIRLocalID) Option[String] = {
-        if local_id.raw_value < self.init_flags.count() then {
-            let flag = self.init_flags[local_id.raw_value]
-            if not flag.is_empty() then {
-                return Option[String].Some(flag)
-            }
+        if self.tracked_init_locals.get(local_id.raw_value) is .Some(_) then {
+            return Option[String].Some("__mir_init_\(local_id.raw_value)")
         }
         return Option[String].None()
     }
@@ -848,13 +955,17 @@ given MIRFunctionCodeEmitter {
 
     private emit_value_source(self ref mut Self, value MIRValue) MIRValueEmission = {
         return when value in {
-            .PlaceRead(place, ownership) then self.emit_place_read(place, ownership, true),
+            .PlaceRead(place, ownership) then {
+                let result = self.emit_place_read(place, ownership, true)
+                yield result
+            },
             _ then self.emit_value(value),
         }
     }
 
     private emit_operand_value(self ref mut Self, operand MIROperand) MIRValueEmission = {
-        return MIRValueEmission(self.emit_operand_expression(operand), Option[ref MIRValueCleanup].None())
+        let expression = self.emit_operand_expression(operand)
+        return MIRValueEmission(expression, Option[ref MIRValueCleanup].None())
     }
 
     private emit_operand_expression(self ref mut Self, operand MIROperand) String = {
@@ -970,7 +1081,8 @@ given MIRFunctionCodeEmitter {
         let has_ownerships = call.argument_ownerships.count() == call.arguments.count()
         when call.callee in {
             .Function(symbol) then {
-                let function_name = self.codegen.callable_c_name(symbol)
+                let function_name = self.callable_name_for_symbol(symbol)
+                let function_type = self.codegen.context.get_function_type(symbol.def_id) or else symbol.symbol_type
                 if call.arguments.count() == 0 then {
                     let expression = self.emit_direct_call_0(function_name, call.result_type)
                     return MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, call.result_type))
@@ -981,9 +1093,11 @@ given MIRFunctionCodeEmitter {
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
                     let arg_type = self.type_of_value(call.arguments[0(UInt)].val)
-                    let expected_param_type = self.codegen.function_type_param_type(symbol.symbol_type, 0(UInt)) or else Type.Unknown()
+                    let expected_param_type = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown()
                     let needs_wrap = is_borrowed_reference_like_type(expected_param_type) and not is_borrowed_reference_like_type(arg_type)
-                    let final_emission = if needs_wrap then self.wrap_value_as_stack_borrow(emission.expression, arg_type, expected_param_type) else emission
+                    let final_emission = if needs_wrap
+                        then self.wrap_value_as_stack_borrow(emission.expression, arg_type, expected_param_type)
+                        else self.unwrap_reference_like_argument_if_needed(emission, arg_type, expected_param_type)
                     let expression = self.emit_direct_call_1(function_name, final_emission.expression, call.result_type)
                     if ownership is .Move() or ownership is .Take() then {
                         self.consume_moved_source(call.arguments[0(UInt)].val)
@@ -999,10 +1113,14 @@ given MIRFunctionCodeEmitter {
                     // Auto-wrap borrowed reference parameters.
                     let first_type = self.type_of_value(call.arguments[0(UInt)].val)
                     let second_type = self.type_of_value(call.arguments[1(UInt)].val)
-                    let first_expected = self.codegen.function_type_param_type(symbol.symbol_type, 0(UInt)) or else Type.Unknown()
-                    let second_expected = self.codegen.function_type_param_type(symbol.symbol_type, 1(UInt)) or else Type.Unknown()
-                    let first = if is_borrowed_reference_like_type(first_expected) and not is_borrowed_reference_like_type(first_type) then self.wrap_value_as_stack_borrow(first_emission.expression, first_type, first_expected) else first_emission
-                    let second = if is_borrowed_reference_like_type(second_expected) and not is_borrowed_reference_like_type(second_type) then self.wrap_value_as_stack_borrow(second_emission.expression, second_type, second_expected) else second_emission
+                    let first_expected = self.codegen.function_type_param_type(function_type, 0(UInt)) or else Type.Unknown()
+                    let second_expected = self.codegen.function_type_param_type(function_type, 1(UInt)) or else Type.Unknown()
+                    let first = if is_borrowed_reference_like_type(first_expected) and not is_borrowed_reference_like_type(first_type)
+                        then self.wrap_value_as_stack_borrow(first_emission.expression, first_type, first_expected)
+                        else self.unwrap_reference_like_argument_if_needed(first_emission, first_type, first_expected)
+                    let second = if is_borrowed_reference_like_type(second_expected) and not is_borrowed_reference_like_type(second_type)
+                        then self.wrap_value_as_stack_borrow(second_emission.expression, second_type, second_expected)
+                        else self.unwrap_reference_like_argument_if_needed(second_emission, second_type, second_expected)
                     let expression = self.emit_direct_call_2(function_name, first.expression, second.expression, call.result_type)
                     if first_ownership is .Move() or first_ownership is .Take() then {
                         self.consume_moved_source(call.arguments[0(UInt)].val)
@@ -1022,7 +1140,8 @@ given MIRFunctionCodeEmitter {
         let fn_param_types = when call.callee in {
             .Function(sym) then {
                 let mut pts = List[Type].new()
-                when sym.symbol_type in {
+                let function_type = self.codegen.context.get_function_type(sym.def_id) or else sym.symbol_type
+                when function_type in {
                     .FunctionType(params, _) then {
                         for p in params then { pts.push(p.param_type) }
                     },
@@ -1043,20 +1162,24 @@ given MIRFunctionCodeEmitter {
             let emission = self.emit_direct_call_argument(arg.val, ownership)
             // Auto-wrap: if the function parameter expects a borrowed reference
             // but the argument is a raw value, wrap it in a stack borrow.
-            let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(fn_param_types[arg_i]) and not is_borrowed_reference_like_type(self.type_of_value(arg.val))
+            let arg_type = self.type_of_value(arg.val)
+            let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(fn_param_types[arg_i]) and not is_borrowed_reference_like_type(arg_type)
             if needs_wrap then {
-                let wrapped = self.wrap_value_as_stack_borrow(emission.expression, self.type_of_value(arg.val), fn_param_types[arg_i])
+                let wrapped = self.wrap_value_as_stack_borrow(emission.expression, arg_type, fn_param_types[arg_i])
                 emissions.push(wrapped)
                 arg_values.push(wrapped.expression)
             } else {
-                emissions.push(emission)
-                arg_values.push(emission.expression)
+                let final_emission = if arg_i < fn_param_types.count()
+                    then self.unwrap_reference_like_argument_if_needed(emission, arg_type, fn_param_types[arg_i])
+                    else emission
+                emissions.push(final_emission)
+                arg_values.push(final_emission.expression)
             }
             arg_i += 1
         }
         let expression = when call.callee in {
             .Function(symbol) then {
-                let callee_name = self.codegen.callable_c_name(symbol)
+                let callee_name = self.callable_name_for_symbol(symbol)
                 yield self.emit_direct_call(callee_name, arg_values, call.result_type)
             },
             _ then self.emit_closure_call(self.emit_operand_expression(call.callee), self.type_of_operand(call.callee), arg_values, call.result_type),
@@ -1572,6 +1695,20 @@ given MIRFunctionCodeEmitter {
 
     // Wrap a raw value expression in a stack-borrow __koral_Ref.
     // Used when a function expects a borrowed reference but the MIR passes a raw value.
+    private unwrap_reference_like_argument_if_needed(self ref mut Self, emission MIRValueEmission, arg_type Type, expected_type Type) MIRValueEmission = {
+        if not is_borrowed_reference_like_type(arg_type) or is_borrowed_reference_like_type(expected_type) then {
+            return emission
+        }
+
+        let expected_c_type = self.codegen.c_type_name(expected_type)
+        let expression = when expected_type in {
+            .StructureType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
+            .EnumType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
+            _ then "*(\(expected_c_type)*)\(emission.expression).ptr",
+        }
+        return MIRValueEmission(expression, emission.cleanup)
+    }
+
     private wrap_value_as_stack_borrow(self ref mut Self, value_expr String, value_type Type, ref_type Type) MIRValueEmission = {
         let result = self.codegen.next_temp_with_decl(self.codegen.c_type_name(ref_type))
         // Create a temporary to hold the value so we can take its address.
@@ -1857,7 +1994,7 @@ given MIRFunctionCodeEmitter {
             let source = lambda.capture_sources[ci]
             let capture_emission = when capture.symbol_type in {
                 .ReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref.val
-                    then self.emit_borrowed_reference(source, capture.symbol_type)
+                    then self.emit_heap_reference(source, capture.symbol_type)
                     else {
                         let access = self.emit_place_access(source)
                         yield MIRValueEmission(access.path, access.cleanup)
@@ -1919,7 +2056,99 @@ given MIRFunctionCodeEmitter {
             let field_name = self.capture_field_name(capture.val)
             let source = capture_source_overrides.get(capture.def_id.id) or else ""
             let dest = "\(env_var)->\(field_name)"
-            self.codegen.append_copy_or_move_assignment(capture.symbol_type, source, dest, true)
+            when capture.symbol_type in {
+                .ReferenceType(inner_ref) then {
+                    let pointee_type = inner_ref.val
+                    let pointee_c_type = self.codegen.c_type_name(pointee_type)
+                    let source_ptr = self.codegen.next_temp_with_decl("void*")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(" = ")
+                    self.codegen.buffer.push_string(source)
+                    self.codegen.buffer.push_string(";\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("if ((")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(").control != NULL) {\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("__koral_retain((")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(").control);\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("} else if ((")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(").ptr != NULL) {\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(source_ptr)
+                    self.codegen.buffer.push_string(" = (")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(").ptr;\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".control = malloc(sizeof(struct __koral_Control) + sizeof(")
+                    self.codegen.buffer.push_string(pointee_c_type)
+                    self.codegen.buffer.push_string("));\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".ptr = (char*)")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".control + sizeof(struct __koral_Control);\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("((struct __koral_Control*)")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".control)->strong_count = 1;\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("((struct __koral_Control*)")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".control)->weak_count = 1;\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("((struct __koral_Control*)")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".control)->ptr = ")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(".ptr;\n")
+                    let source_value_expr = when pointee_type in {
+                        .StructureType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(pointee_c_type)*)\(source_ptr))",
+                        .EnumType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(pointee_c_type)*)\(source_ptr))",
+                        _ then "*(\(pointee_c_type)*)\(source_ptr)",
+                    }
+                    self.codegen.append_copy_or_move_assignment(
+                        pointee_type,
+                        source_value_expr,
+                        "*(\(pointee_c_type)*)\(dest).ptr",
+                        true,
+                    )
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("}\n")
+                },
+                .MutableReferenceType(inner_ref) then {
+                    let _ = inner_ref
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(" = ")
+                    self.codegen.buffer.push_string(source)
+                    self.codegen.buffer.push_string(";\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("if ((")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(").control != NULL) {\n")
+                    self.codegen.add_indent()
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("__koral_retain((")
+                    self.codegen.buffer.push_string(dest)
+                    self.codegen.buffer.push_string(").control);\n")
+                    self.codegen.add_indent()
+                    self.codegen.buffer.push_string("}\n")
+                },
+                _ then self.codegen.append_copy_or_move_assignment(capture.symbol_type, source, dest, true),
+            }
             ci += 1
         }
 
@@ -1953,7 +2182,7 @@ given MIRFunctionCodeEmitter {
         let saved_buffer = self.codegen.buffer
         self.codegen.buffer = box(CodegenBuffer.new())
         body_emitter.ref.emit_body()
-        let body_text = self.codegen.buffer.to_string()
+        let body_text = self.codegen.buffer.into_string()
         self.codegen.buffer = saved_buffer
         let inner_nested = body_emitter.nested_definitions
         self.codegen.indent = saved_indent
@@ -2006,7 +2235,7 @@ given MIRFunctionCodeEmitter {
             }
         }
         body_emitter.ref.emit_body()
-        let body_text = self.codegen.buffer.to_string()
+        let body_text = self.codegen.buffer.into_string()
         self.codegen.buffer = saved_buffer
         let inner_nested = body_emitter.nested_definitions
         self.codegen.indent = saved_indent
@@ -2039,7 +2268,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer = box(CodegenBuffer.new())
                 self.codegen.add_indent()
                 self.codegen.append_drop_statement(capture.symbol_type, "env->\(field_name)")
-                self.nested_definitions.push_string(self.codegen.buffer.to_string())
+                self.nested_definitions.push_string(self.codegen.buffer.into_string())
                 self.codegen.buffer = saved_buffer
             }
         }
@@ -2369,6 +2598,7 @@ given MIRFunctionCodeEmitter {
     }
 
     private type_list_to_ref_list(self ref, args List[Type]) List[ref Type] = {
+        let _ = self
         let mut out = List[ref Type].new()
         for arg in args then { out.push(box(arg)) }
         return out
@@ -2401,8 +2631,6 @@ given MIRFunctionCodeEmitter {
     private emit_is_unique(self ref mut Self, value MIRValue) MIRValueEmission = {
         let emission = self.emit_value_source(value)
         let result = self.codegen.next_temp_with_decl("int")
-        // The value is ptr ref mut T — a raw pointer to the ref struct.
-        // Dereference to access the control block: ((struct __koral_Ref*)ptr)->control
         let value_type = self.type_of_value(value)
         let control = when value_type in {
             .MutablePointerType(_) or .PointerType(_) then "((struct __koral_Ref*)\(emission.expression))->control",
@@ -2725,7 +2953,36 @@ private let join_strings(values List[String], separator String) String = {
     return out
 }
 
-private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGen, init_flags List[String]) ref MIRLocalLifetimePlan = {
+private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGen, tracked_init_locals Dict[UInt, Bool]) ref MIRLocalLifetimePlan = {
+    let mut tracked_drop_local_ids = Dict[UInt, Bool].new()
+    let mut has_tracked_drop_locals = false
+    for local in function.locals then {
+        let has_init_flag = tracked_init_locals.get(local.id.raw_value) or else false
+        if has_init_flag then {
+            tracked_drop_local_ids.insert(local.id.raw_value, true)
+            has_tracked_drop_locals = true
+        }
+    }
+
+    // If no local in the function needs init/drop tracking, the full scope/use
+    // analysis below only burns transient Dict/List/Set allocations. In that
+    // case we can conservatively hoist declarations and skip the analysis.
+    if not has_tracked_drop_locals then {
+        let mut hoisted_declaration_locals = List[MIRLocalID].new()
+        for local in function.locals then {
+            if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) then {
+                hoisted_declaration_locals.push(local.id)
+            }
+        }
+        return box(MIRLocalLifetimePlan(
+            List[MIRLocalID].new(),
+            Dict[UInt, List[MIRLocalID]].new(),
+            hoisted_declaration_locals,
+            Dict[UInt, List[MIRLocalID]].new(),
+            Dict[UInt, Bool].new()
+        ))
+    }
+
     let mut root_locals = List[MIRLocalID].new()
     let mut locals_by_scope = Dict[UInt, List[MIRLocalID]].new()
     let mut hoisted_declaration_locals = List[MIRLocalID].new()
@@ -2735,8 +2992,9 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
     let mut declared_scope_by_local = Dict[UInt, MIRScopeID].new()
     let mut active_scopes = List[MIRScopeID].new()
     let mut declared_block_by_local = Dict[UInt, MIRBlockID].new()
-    let mut use_scopes_by_local = Dict[UInt, List[Set[UInt]]].new()
-    let mut use_blocks_by_local = Dict[UInt, Set[UInt]].new()
+    let mut shared_use_scope_by_local = Dict[UInt, MIRScopeID].new()
+    let mut first_use_block_by_local = Dict[UInt, UInt].new()
+    let mut multiple_use_blocks_by_local = Dict[UInt, Bool].new()
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
@@ -2763,56 +3021,52 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
                     if not active_scopes.is_empty() then {
                         declared_scope_by_local.insert(local_id.raw_value, active_scopes[active_scopes.count() - 1(UInt)])
                     }
-                    mir_record_local_use(use_scopes_by_local.ref, use_blocks_by_local.ref, local_id, block.id, active_scopes.ref)
+                    mir_record_local_use(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, local_id, block.id, active_scopes.ref)
                 },
                 .Assign(place, value) then {
-                    mir_walk_place_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, place, block.id, active_scopes.ref)
-                    mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref)
+                    mir_walk_place_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, place, block.id, active_scopes.ref)
+                    mir_walk_value_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, value, block.id, active_scopes.ref)
                 },
                 .CompoundAssign(assignment) then {
-                    mir_walk_place_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, assignment.target, block.id, active_scopes.ref)
-                    mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, assignment.value, block.id, active_scopes.ref)
+                    mir_walk_place_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, assignment.target, block.id, active_scopes.ref)
+                    mir_walk_value_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, assignment.value, block.id, active_scopes.ref)
                 },
-                .Drop(place) then mir_walk_place_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, place, block.id, active_scopes.ref),
-                .Retain(value) then mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref),
-                .Release(value) then mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref),
-                .Evaluate(value) then mir_walk_value_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, value, block.id, active_scopes.ref),
+                .Drop(place) then mir_walk_place_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, place, block.id, active_scopes.ref),
+                .Retain(value) then mir_walk_value_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, value, block.id, active_scopes.ref),
+                .Release(value) then mir_walk_value_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, value, block.id, active_scopes.ref),
+                .Evaluate(value) then mir_walk_value_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, value, block.id, active_scopes.ref),
                 .DebugSource(_) then {},
             }
         }
         when block.terminator in {
-            .Branch(condition, _, _) then mir_walk_operand_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, condition, block.id, active_scopes.ref),
-            .SwitchValue(operand, _, _) then mir_walk_operand_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, operand, block.id, active_scopes.ref),
+            .Branch(condition, _, _) then mir_walk_operand_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, condition, block.id, active_scopes.ref),
+            .SwitchValue(operand, _, _) then mir_walk_operand_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, operand, block.id, active_scopes.ref),
             .ReturnValue(operand) then when operand in {
-                .Some(op) then mir_walk_operand_uses(use_scopes_by_local.ref, use_blocks_by_local.ref, op, block.id, active_scopes.ref),
+                .Some(op) then mir_walk_operand_uses(shared_use_scope_by_local.ref, first_use_block_by_local.ref, multiple_use_blocks_by_local.ref, tracked_drop_local_ids.ref, parent_scope_by_scope.ref, op, block.id, active_scopes.ref),
                 .None() then {},
             },
             _ then {},
         }
     }
     for local in function.locals then {
-        if not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) then {
+        when tracked_drop_local_ids.get(local.id.raw_value) in {
+            .Some(_) then {
             let mut scope = when declared_scope_by_local.get(local.id.raw_value) in {
                 .Some(scope_id) then Option[MIRScopeID].Some(scope_id),
                 .None() then Option[MIRScopeID].None(),
             }
-            let use_scopes = use_scopes_by_local.get(local.id.raw_value) or else List[Set[UInt]].new()
+            let shared_use_scope_opt = shared_use_scope_by_local.get(local.id.raw_value)
             while scope is .Some(_) then {
                 let scope_id = when scope in {
                     .Some(existing) then existing,
                     .None() then MIRScopeID(0(UInt)),
                 }
-                let mut used_outside = false
-                for use_scope in use_scopes then {
-                    if not use_scope.contains(scope_id.raw_value) then {
-                        used_outside = true
-                    }
+                let retained_scope = when shared_use_scope_opt in {
+                    .Some(shared_use_scope) then shared_use_scope.raw_value == scope_id.raw_value,
+                    .None() then false,
                 }
-                if not used_outside then { break }
-                scope = when parent_scope_by_scope.get(scope_id.raw_value) in {
-                    .Some(parent_scope) then Option[MIRScopeID].Some(parent_scope),
-                    .None() then Option[MIRScopeID].None(),
-                }
+                if retained_scope then { break }
+                scope = mir_parent_scope(parent_scope_by_scope.ref, scope_id)
             }
             when scope in {
                 .Some(scope_id) then {
@@ -2822,14 +3076,16 @@ private let build_mir_lifetime_plan(function ref MIRFunction, codegen ref CodeGe
                 },
                 .None() then root_locals.push(local.id),
             }
+            },
+            .None() then {},
         }
     }
     for local in function.locals then {
         if local.storage is not .Parameter() and local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) then {
-            let has_init_flag = local.id.raw_value < init_flags.count() and not init_flags[local.id.raw_value].is_empty()
+            let has_init_flag = tracked_init_locals.get(local.id.raw_value) or else false
             let can_block_local = if not has_init_flag then when declared_block_by_local.get(local.id.raw_value) in {
-                .Some(declaration_block) then when use_blocks_by_local.get(local.id.raw_value) in {
-                    .Some(use_blocks) then use_blocks.count() == 1(UInt) and use_blocks.contains(declaration_block.raw_value),
+                .Some(declaration_block) then when first_use_block_by_local.get(local.id.raw_value) in {
+                    .Some(first_use_block) then first_use_block == declaration_block.raw_value and not (multiple_use_blocks_by_local.get(local.id.raw_value) or else false),
                     .None() then false,
                 },
                 .None() then false,
@@ -2879,7 +3135,7 @@ given CodeGen {
         }
     }
 
-    public emit_mir_function_body(self ref mut Self, function ref MIRFunction) String = {
+    public emit_mir_function_body(self ref mut Self, function ref MIRFunction) ref CodegenBuffer = {
         let saved_indent = self.indent
         self.indent = "    "
         let plan = build_mir_function_emit_plan(self, function)
@@ -2888,7 +3144,7 @@ given CodeGen {
         let saved_buffer = self.buffer
         self.buffer = box(CodegenBuffer.new())
         emitter.ref.emit_body()
-        let body_text = self.buffer.to_string()
+        let body_buffer = self.buffer
         self.buffer = saved_buffer
         // Collect nested definitions (lambda env structs, nested functions)
         let nested = emitter.get_nested_definitions()
@@ -2896,7 +3152,7 @@ given CodeGen {
             self.nested_function_definitions.push_string(nested)
         }
         self.indent = saved_indent
-        return body_text
+        return body_buffer
     }
 
     public emit_mir_global_function(self ref mut Self, function ref MIRFunction) Void = {
@@ -2917,7 +3173,7 @@ given CodeGen {
         let return_c_type = self.c_type_name(concrete_return_type)
         let params_str = self.build_param_list(function.params)
         // Generate the function body and collect nested definitions
-        let body_text = self.emit_mir_function_body(function)
+        let body_buffer = self.emit_mir_function_body(function)
 
         // Emit nested definitions (lambda functions, env structs) before the function
         if not self.nested_function_definitions.is_empty() then {
@@ -2931,7 +3187,7 @@ given CodeGen {
         self.buffer.push_string("(")
         self.buffer.push_string(params_str)
         self.buffer.push_string(") {\n")
-        self.buffer.push_string(body_text)
+        self.buffer.push_buffer(body_buffer)
         self.buffer.push_string("}\n")
 
         self.current_function_owner_type = saved_owner_type

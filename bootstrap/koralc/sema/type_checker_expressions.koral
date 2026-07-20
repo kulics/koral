@@ -9,6 +9,20 @@
 
 
 given TypeChecker {
+    private lookup_non_global_scope_symbol(self, scope Scope, name String) Option[Symbol] = {
+        let _ = self
+        when scope.lookup_local(name) in {
+            .Some(symbol) then { return Option[Symbol].Some(symbol) },
+            .None() then {},
+        }
+        return when scope.parent_scope() in {
+            .Some(parent) then if parent.parent_scope() is .None()
+                then Option[Symbol].None()
+                else self.lookup_non_global_scope_symbol(parent, name),
+            .None() then Option[Symbol].None(),
+        }
+    }
+
     private report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointee Type, member String) Void = {
         if resolved is not .Unknown() or has_pointer_method then {
             return
@@ -171,10 +185,15 @@ given TypeChecker {
     }
 
     private resolve_source_method_signature(self, base_type Type, method_name String) Option[Symbol] = {
+        let raw_method_signature = self.resolve_method_signature(base_type, method_name)
+        return self.resolve_source_method_signature_from_raw(base_type, method_name, raw_method_signature)
+    }
+
+    private resolve_source_method_signature_from_raw(self, base_type Type, method_name String, raw_method_signature Option[Symbol]) Option[Symbol] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[Symbol].None()
         }
-        return when self.resolve_method_signature(base_type, method_name) in {
+        return when raw_method_signature in {
             .Some(method) then if self.is_method_accessible_from_current_context(method)
                 then Option[Symbol].Some(method)
                 else Option[Symbol].None(),
@@ -214,12 +233,15 @@ given TypeChecker {
     private ast_expr_span(self, expr ref Expr) SourceSpan = expr_span(expr)
 
     private check_identifier_expr_at(self, name String, span SourceSpan, scope Scope) TypedExpr = {
-        let builtin_type_opt = self.try_resolve_named_type_without_diag(name)
-        let local_sym_opt = scope.lookup(name)
-        let global_sym_opt = self.storage.global_scope.lookup(name)
-        let raw_file_sym_opt = self.lookup_current_file_symbol(name)
-        let alias_sym_opt = self.resolve_imported_alias_symbol(name)
+        let local_sym_opt = self.lookup_non_global_scope_symbol(scope, name)
+        let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None() else self.lookup_current_file_symbol(name)
         let file_sym_opt = raw_file_sym_opt
+        let global_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_)
+            then Option[Symbol].None()
+            else self.storage.global_scope.lookup(name)
+        let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or global_sym_opt is .Some(_)
+            then Option[Symbol].None()
+            else self.resolve_imported_alias_symbol(name)
         let sym = if local_sym_opt is .Some(s) then s
         else if file_sym_opt is .Some(s) then s
         else if global_sym_opt is .Some(s) then s
@@ -245,8 +267,13 @@ given TypeChecker {
             yield Symbol(def_id, fallback_type, symbol_kind)
         }
         let mut normalized_sym = sym
-        if sym.kind is .TypeSymbol() and builtin_type_opt is .Some(bt) then {
-            normalized_sym = Symbol(sym.def_id, bt, sym.kind)
+        if sym.kind is .TypeSymbol() then {
+            when self.try_resolve_named_type_without_diag(name) in {
+                .Some(bt) then {
+                    normalized_sym = Symbol(sym.def_id, bt, sym.kind)
+                },
+                .None() then {},
+            }
         }
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is .Function() then {
             when self.storage.generic_templates.lookup_function_by_def_id(gs.def_id) in {
@@ -476,7 +503,7 @@ given TypeChecker {
             .PointerType(inner) then {
                 let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
-                let has_pointer_method = self.resolve_source_method_signature(typed_base.expr_type, member) is .Some(_)
+                let has_pointer_method = visible_method is .Some(_)
                 if resolved is .Unknown() and not has_pointer_method then {
                     when pointee in {
                         .StructureType(def_id) then {
@@ -508,7 +535,7 @@ given TypeChecker {
             .MutablePointerType(inner) then {
                 let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
-                let has_pointer_method = self.resolve_source_method_signature(typed_base.expr_type, member) is .Some(_)
+                let has_pointer_method = visible_method is .Some(_)
                 self.report_pointer_member_access_issue_if_needed(resolved, has_pointer_method, pointee, member)
                 yield resolved
             },
@@ -541,8 +568,6 @@ given TypeChecker {
                         }
                     }
                     if found is .Unknown() then {
-                        let raw_method = self.resolve_method_signature(typed_base.expr_type, member)
-                        let visible_method = self.resolve_source_method_signature(typed_base.expr_type, member)
                         let inaccessible_method = when raw_method in {
                             .Some(method) then visible_method is .None()
                                 and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
@@ -588,9 +613,6 @@ given TypeChecker {
                                 }
                             }
                             if found is .Unknown() then {
-                                let base_type = Type.GenericStruct(template, args)
-                                let raw_method = self.resolve_method_signature(base_type, member)
-                                let visible_method = self.resolve_source_method_signature(base_type, member)
                                 let inaccessible_method = when raw_method in {
                                     .Some(method) then visible_method is .None()
                                         and self.reject_inaccessible_method_from_current_context(method, member, expr_span(base)),
@@ -652,14 +674,16 @@ given TypeChecker {
                         else make_typed_expr_ref(raw_typed_receiver.expr_kind, normalized_receiver_type)
                     let mut has_method = false
                     let mut inaccessible_method = false
+                    let mut resolved_visible_method = Option[Symbol].None()
                     when typed_receiver.expr_type in {
                         .PointerType(inner) then {
                             let inner_raw = self.resolve_method_signature(inner.val, parts.second)
-                            let inner_visible = self.resolve_source_method_signature(inner.val, parts.second)
+                            let inner_visible = self.resolve_source_method_signature_from_raw(inner.val, parts.second, inner_raw)
                             when inner_raw in {
                                 .Some(method) then {
                                     if inner_visible is .Some(_) then {
                                         has_method = true
+                                        resolved_visible_method = inner_visible
                                     } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
                                         inaccessible_method = true
                                     }
@@ -668,11 +692,12 @@ given TypeChecker {
                             }
                             if not has_method and not inaccessible_method then {
                                 let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
-                                let outer_visible = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                                let outer_visible = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, outer_raw)
                                 when outer_raw in {
                                     .Some(method) then {
                                         if outer_visible is .Some(_) then {
                                             has_method = true
+                                            resolved_visible_method = outer_visible
                                         } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
                                             inaccessible_method = true
                                         }
@@ -683,11 +708,12 @@ given TypeChecker {
                         },
                         .MutablePointerType(inner) then {
                             let inner_raw = self.resolve_method_signature(inner.val, parts.second)
-                            let inner_visible = self.resolve_source_method_signature(inner.val, parts.second)
+                            let inner_visible = self.resolve_source_method_signature_from_raw(inner.val, parts.second, inner_raw)
                             when inner_raw in {
                                 .Some(method) then {
                                     if inner_visible is .Some(_) then {
                                         has_method = true
+                                        resolved_visible_method = inner_visible
                                     } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
                                         inaccessible_method = true
                                     }
@@ -696,11 +722,12 @@ given TypeChecker {
                             }
                             if not has_method and not inaccessible_method then {
                                 let outer_raw = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
-                                let outer_visible = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                                let outer_visible = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, outer_raw)
                                 when outer_raw in {
                                     .Some(method) then {
                                         if outer_visible is .Some(_) then {
                                             has_method = true
+                                            resolved_visible_method = outer_visible
                                         } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
                                             inaccessible_method = true
                                         }
@@ -711,11 +738,12 @@ given TypeChecker {
                         },
                         _ then {
                             let raw_method = self.resolve_method_signature(typed_receiver.expr_type, parts.second)
-                            let visible_method = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                            let visible_method = self.resolve_source_method_signature_from_raw(typed_receiver.expr_type, parts.second, raw_method)
                             when raw_method in {
                                 .Some(method) then {
                                     if visible_method is .Some(_) then {
                                         has_method = true
+                                        resolved_visible_method = visible_method
                                     } else if self.reject_inaccessible_method_from_current_context(method, parts.second, expr_span(callee)) then {
                                         inaccessible_method = true
                                     }
@@ -729,7 +757,7 @@ given TypeChecker {
                     }
                     if has_method then {
                         // Use the full method symbol with FunctionType (matching Swift compiler behavior)
-                        let method_symbol = self.resolve_source_method_signature(typed_receiver.expr_type, parts.second)
+                        let method_symbol = resolved_visible_method
                         when method_symbol in {
                             .Some(sym) then {
                                 let sym_type = sym.symbol_type

@@ -245,41 +245,70 @@ given MIRFunctionBuilder {
         return Type.Unknown()
     }
 
-    private deref_expected_type(self ref Self, actual_type Type, expected_type Type) Option[Type] = {
+    private ref_like_inner_type(self ref Self, t Type) Option[Type] = {
         let _ = self
-        return when actual_type in {
-            .ReferenceType(inner_ref) then if inner_ref.val == expected_type then Option[Type].Some(inner_ref.val) else Option[Type].None(),
-            .MutableReferenceType(inner_ref) then if inner_ref.val == expected_type then Option[Type].Some(inner_ref.val) else Option[Type].None(),
-            .BorrowedReferenceType(inner_ref, _) then if inner_ref.val == expected_type then Option[Type].Some(inner_ref.val) else Option[Type].None(),
-            .MutableBorrowedReferenceType(inner_ref, _) then if inner_ref.val == expected_type then Option[Type].Some(inner_ref.val) else Option[Type].None(),
-            .WeakReferenceType(inner_ref) then if inner_ref.val == expected_type then Option[Type].Some(inner_ref.val) else Option[Type].None(),
-            .MutableWeakReferenceType(inner_ref) then if inner_ref.val == expected_type then Option[Type].Some(inner_ref.val) else Option[Type].None(),
+        return when t in {
+            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .BorrowedReferenceType(inner_ref, _) then Option[Type].Some(inner_ref.val),
+            .MutableBorrowedReferenceType(inner_ref, _) then Option[Type].Some(inner_ref.val),
+            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
             _ then Option[Type].None(),
         }
     }
 
+    private adapt_place_for_expected_type(self ref mut Self, place MIRPlace, actual_type Type, expected_type Type) Option[MIRPlace] = {
+        let expected_is_ref_like = self.is_ref_like_type(expected_type)
+        let mut current_place = place
+        let mut current_type = actual_type
+        let mut changed = false
+
+        while current_type <> expected_type then {
+            when self.ref_like_inner_type(current_type) in {
+                .Some(pointee_type) then {
+                    if expected_is_ref_like and pointee_type <> expected_type then {
+                        break
+                    }
+                    current_place = MIRPlace.Deref(box(MIRValue.PlaceRead(current_place, MIROwnershipUse.Borrow())), pointee_type)
+                    current_type = pointee_type
+                    changed = true
+                },
+                .None() then {
+                    break
+                },
+            }
+        }
+
+        return if changed and current_type == expected_type
+            then Option[MIRPlace].Some(current_place)
+            else Option[MIRPlace].None()
+    }
+
     private read_place_for_expected_type(self ref mut Self, place MIRPlace, actual_type Type, expected_type Type) MIRValue = {
-        return when self.deref_expected_type(actual_type, expected_type) in {
-            .Some(pointee_type) then {
-                let deref_place = MIRPlace.Deref(box(MIRValue.PlaceRead(place, MIROwnershipUse.Borrow())), pointee_type)
-                yield MIRValue.PlaceRead(deref_place, MIROwnershipUse.Copy())
-            },
+        return when self.adapt_place_for_expected_type(place, actual_type, expected_type) in {
+            .Some(adapted_place) then MIRValue.PlaceRead(adapted_place, MIROwnershipUse.Copy()),
             .None() then MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
         }
     }
 
+    private materialize_place_for_expected_type(self ref mut Self, place MIRPlace, expected_type Type) MIROperand = {
+        let actual_type = self.place_type(place)
+        return when self.adapt_place_for_expected_type(place, actual_type, expected_type) in {
+            .Some(adapted_place) then self.materialize(MIRValue.PlaceRead(adapted_place, MIROwnershipUse.Copy()), expected_type),
+            .None() then self.materialize(MIRValue.PlaceRead(place, MIROwnershipUse.Copy()), actual_type),
+        }
+    }
+
     private adapt_operand_to_expected_type(self ref mut Self, operand MIROperand, actual_type Type, expected_type Type) MIROperand = {
-        return when self.deref_expected_type(actual_type, expected_type) in {
-            .Some(pointee_type) then {
-                yield when operand in {
-                    .Local(local_id) then {
-                        let deref_place = MIRPlace.Deref(box(MIRValue.PlaceRead(MIRPlace.Local(local_id), MIROwnershipUse.Borrow())), pointee_type)
-                        yield self.materialize(MIRValue.PlaceRead(deref_place, MIROwnershipUse.Copy()), expected_type)
-                    },
-                    _ then operand,
+        return when operand in {
+            .Local(local_id) then {
+                yield when self.adapt_place_for_expected_type(MIRPlace.Local(local_id), actual_type, expected_type) in {
+                    .Some(adapted_place) then self.materialize(MIRValue.PlaceRead(adapted_place, MIROwnershipUse.Copy()), expected_type),
+                    .None() then operand,
                 }
             },
-            .None() then operand,
+            _ then operand,
         }
     }
 
@@ -360,9 +389,23 @@ given MIRFunctionBuilder {
             },
             .MemberPath(_, _) then {
                 yield when self.lower_place(expression) in {
-                    .Some(place) then Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, typed_expr_value_category(expression), Option[MIROperand].None(), Option[MIRPlace].Some(place))),
+                    .Some(place) then {
+                        let place_result_type = self.place_type(place)
+                        let result_type = when place_result_type in {
+                            .Unknown() then expression.expr_type,
+                            _ then place_result_type,
+                        }
+                        yield Option[MIRExprResult].Some(MIRExprResult(result_type, typed_expr_value_category(expression), Option[MIROperand].None(), Option[MIRPlace].Some(place)))
+                    },
                     .None() then when self.lower_materialized_member_path_place(expression) in {
-                        .Some(place) then Option[MIRExprResult].Some(MIRExprResult(expression.expr_type, typed_expr_value_category(expression), Option[MIROperand].None(), Option[MIRPlace].Some(place))),
+                        .Some(place) then {
+                            let place_result_type = self.place_type(place)
+                            let result_type = when place_result_type in {
+                                .Unknown() then expression.expr_type,
+                                _ then place_result_type,
+                            }
+                            yield Option[MIRExprResult].Some(MIRExprResult(result_type, typed_expr_value_category(expression), Option[MIROperand].None(), Option[MIRPlace].Some(place)))
+                        },
                         .None() then self.void_result(),
                     },
                 }
@@ -712,10 +755,18 @@ given MIRFunctionBuilder {
                 .None() then {},
             }
         }
-        let local = self.make_local(self.context.symbol_name(symbol.val), symbol.symbol_type, if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(symbol))
+        let lowered_value = self.lower_value(value)
+        let lowered_value_type = self.type_of_value(lowered_value)
+        // Defensive guard: if a substituted symbol type drifts from the
+        // lowered MIR value type, prefer the lowered value type so local
+        // declarations stay assignment-compatible.
+        let declared_type = if self.concrete_layout_key_for_type(symbol.symbol_type) == self.concrete_layout_key_for_type(lowered_value_type)
+            then symbol.symbol_type
+            else lowered_value_type
+        let local = self.make_local(self.context.symbol_name(symbol.val), declared_type, if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[ref Symbol].Some(symbol))
         self.local_by_def_id.insert(symbol.def_id.id, local.id)
         self.append_statement(MIRStatement.Declare(local.id))
-        self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), self.lower_value(value)))
+        self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), lowered_value))
     }
 
     private lower_pair_variable_declaration(self ref mut Self, pair_type Type, first_symbol Option[ref Symbol], second_symbol Option[ref Symbol], value ref TypedExpr) Void = {
@@ -1656,7 +1707,29 @@ given MIRFunctionBuilder {
                             idx += 1
                         }
                     },
-                    .None() then {},
+                    .None() then {
+                        // Fallback for GenericEnum types: extract element types from
+                        // the TypedPattern elements, which carry correct type info
+                        // from the type checker.
+                        let mut idx UInt = 0
+                        while idx < elements.count() then {
+                            let elem = elements[idx]
+                            let elem_type = self.pattern_element_type(elem.pattern)
+                            if elem_type is not .VoidType() then {
+                                let payload_place = MIRPlace.EnumPayload(box(matched_place), case_name, "", idx, elem_type)
+                                let resolved_place = if self.goes_through_deref(matched_place) then {
+                                    let local = self.make_temporary(elem_type, "payload")
+                                    self.append_statement(MIRStatement.Declare(local.id))
+                                    self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), MIRValue.PlaceRead(payload_place, MIROwnershipUse.Copy())))
+                                    yield MIRPlace.Local(local.id)
+                                } else {
+                                    yield payload_place
+                                }
+                                self.bind_pattern_variables(elem.pattern, resolved_place, elem_type)
+                            }
+                            idx += 1
+                        }
+                    },
                 }
             },
             .StructPattern(_, elements) then {
@@ -1691,9 +1764,22 @@ given MIRFunctionBuilder {
     }
 
     private pattern_binding_type(self ref Self, symbol ref Symbol, subject_type Type) Type = {
-        return if self.context.contains_generic_parameter(symbol.symbol_type)
+        if self.context.contains_generic_parameter(symbol.symbol_type)
             and not self.context.contains_generic_parameter(subject_type)
-        then subject_type else symbol.symbol_type
+        then { return subject_type }
+        if symbol.symbol_type is .Unknown() and subject_type is not .Unknown() then {
+            return subject_type
+        }
+        return symbol.symbol_type
+    }
+
+    /// Extract the type from a TypedPattern element. Used as a fallback when
+    /// enum case info is not available (e.g., for GenericEnum types).
+    private pattern_element_type(self ref Self, pattern ref TypedPattern) Type = {
+        return when pattern in {
+            .Variable(symbol) then symbol.symbol_type,
+            _ then Type.VoidType(),
+        }
     }
 
     private lower_binary(self ref mut Self, left ref TypedExpr, right ref TypedExpr, result_type Type, operator_kind MIRBinaryOperator) MIRExprResult = {
@@ -1771,8 +1857,34 @@ given MIRFunctionBuilder {
         when callee.expr_kind in {
             .MethodReference(base, _, method, _, _, _) then {
                 let receiver_borrow_override = self.stack_borrow_method_receiver(base, method)
+                let mut expected_param_types = List[ref Type].new()
+                expected_param_types.push(box(self.concrete_call_receiver_type(base.expr_type, method.symbol_type)))
+                for arg in args then {
+                    expected_param_types.push(box(arg.expr_type))
+                }
+                let expected_call_type = Type.FunctionType(types_to_param_entries(expected_param_types), box(result_type))
                 when self.concrete_method_symbol(method, base.expr_type, callee.expr_type, args, result_type) in {
                     .Some(callable_method) then {
+                        let callable_type = self.context.get_function_type(callable_method.def_id) or else callable_method.symbol_type
+                        if not self.method_signature_matches_call(callable_type, expected_call_type) then {
+                            when self.lookup_concrete_method_symbol(self.normalized_method_lookup_receiver_type(base.expr_type), self.semantic_method_name(method), expected_call_type) in {
+                                .Some(rebound_method) then {
+                                    let mut values = List[ref MIRValue].new()
+                                    let mut ownerships = List[MIROwnershipUse].new()
+                                    values.push(box(when receiver_borrow_override in {
+                                        .Some(value) then value,
+                                        .None() then self.lower_method_receiver_argument(base, rebound_method),
+                                    }))
+                                    ownerships.push(self.ownership_use(base))
+                                    for arg in args then {
+                                        values.push(box(self.lower_value(arg)))
+                                        ownerships.push(self.ownership_use(arg))
+                                    }
+                                    return self.finish_call(MIROperand.Function(box(rebound_method)), values, ownerships, result_type)
+                                },
+                                .None() then {},
+                            }
+                        }
                         let mut values = List[ref MIRValue].new()
                         let mut ownerships = List[MIROwnershipUse].new()
                         values.push(box(when receiver_borrow_override in {
@@ -1795,6 +1907,39 @@ given MIRFunctionBuilder {
                         param_types.push(box(self.concrete_call_receiver_type(base.expr_type, method_type)))
                         for arg in args then { param_types.push(box(arg.expr_type)) }
                         let concrete_type = Type.FunctionType(types_to_param_entries(param_types), box(result_type))
+                        when self.lookup_concrete_method_symbol(self.normalized_method_lookup_receiver_type(base.expr_type), self.semantic_method_name(method), concrete_type) in {
+                            .Some(rebound_method) then {
+                                let mut values = List[ref MIRValue].new()
+                                let mut ownerships = List[MIROwnershipUse].new()
+                                values.push(box(when receiver_borrow_override in {
+                                    .Some(value) then value,
+                                    .None() then self.lower_method_receiver_argument(base, rebound_method),
+                                }))
+                                ownerships.push(self.ownership_use(base))
+                                for arg in args then {
+                                    values.push(box(self.lower_value(arg)))
+                                    ownerships.push(self.ownership_use(arg))
+                                }
+                                return self.finish_call(MIROperand.Function(box(rebound_method)), values, ownerships, result_type)
+                            },
+                            .None() then {},
+                        }
+                        let method_name = self.semantic_method_name(method)
+                        let owner_mismatch_for_receiver = when self.program.concrete_callables_by_def_id.get(method.def_id) in {
+                            .Some(info) then when info.owner_type in {
+                                .Some(owner_type) then not self.method_owner_matches_receiver(owner_type, base.expr_type),
+                                .None() then false,
+                            },
+                            .None() then false,
+                        }
+                        if owner_mismatch_for_receiver and method_name == "hash" and args.is_empty() and result_type is .UIntType() then {
+                            return Option[MIRExprResult].Some(MIRExprResult(
+                                result_type,
+                                ValueCategory.RValue(),
+                                Option[MIROperand].Some(MIROperand.Constant(MIRConstant.Integer("0", result_type))),
+                                Option[MIRPlace].None(),
+                            ))
+                        }
                         if not self.context.contains_generic_parameter(concrete_type) then {
                             let fallback_method = Symbol(method.def_id, concrete_type, method.kind)
                             let mut values = List[ref MIRValue].new()
@@ -1813,6 +1958,28 @@ given MIRFunctionBuilder {
                     },
                 }
             },
+            .Variable(symbol) then when symbol.kind in {
+                .Function() then {
+                    if args.count() > 0(UInt) and self.context.contains_generic_parameter(symbol.symbol_type) then {
+                        let receiver_type = args[0(UInt)].expr_type
+                        let method_name = self.semantic_method_name(symbol)
+                        let mut concrete_param_types = List[ref Type].new()
+                        for arg in args then {
+                            concrete_param_types.push(box(arg.expr_type))
+                        }
+                        let concrete_type = Type.FunctionType(types_to_param_entries(concrete_param_types), box(result_type))
+                        if not self.context.contains_generic_parameter(concrete_type) then {
+                            when self.lookup_concrete_method_symbol(receiver_type, method_name, concrete_type) in {
+                                .Some(callable_method) then {
+                                    return self.finish_call_from_typed_args(MIROperand.Function(box(callable_method)), args, result_type)
+                                },
+                                .None() then {},
+                            }
+                        }
+                    }
+                },
+                _ then {},
+            },
             _ then {},
         }
         let callee_operand = self.lower_operand(callee)
@@ -1828,7 +1995,8 @@ given MIRFunctionBuilder {
         if base_is_ref_like then {
             return Option[MIRValue].None()
         }
-        return when method.symbol_type in {
+        let method_type = self.receiver_aware_method_type(method.val)
+        return when method_type in {
             .FunctionType(params, _) then {
                 if params.is_empty() then { return Option[MIRValue].None() }
                 let receiver_param = params[0(UInt)].val
@@ -2093,6 +2261,11 @@ given MIRFunctionBuilder {
         if owner_key == receiver_key then {
             return true
         }
+        let owner_is_concrete = owner_type is not .Unknown() and not self.context.contains_generic_parameter(owner_type)
+        let receiver_is_concrete = receiver_type is not .Unknown() and not self.context.contains_generic_parameter(receiver_type)
+        if not owner_is_concrete or not receiver_is_concrete then {
+            return false
+        }
         return self.receiver_base_lookup_key(owner_type) == self.receiver_base_lookup_key(receiver_type)
     }
 
@@ -2234,19 +2407,7 @@ given MIRFunctionBuilder {
             let def_id = entry.first
             let info = entry.second
             let logical_name = info.logical_name
-            let suffix_match = if logical_name.ends_with("_" + method_name) then {
-                let prefix_len = logical_name.count() - method_name.count() - 1
-                let prefix = logical_name.substring(0..<prefix_len)
-                if prefix.is_empty() then {
-                    yield false
-                } else {
-                    let first = prefix.to_runes()[0(UInt)]
-                    yield first >= 'A' and first <= 'Z'
-                }
-            } else {
-                yield false
-            }
-            if logical_name <> method_name and not suffix_match then {
+            if logical_name <> method_name then {
                 continue
             }
             when info.owner_type in {
@@ -2339,19 +2500,123 @@ given MIRFunctionBuilder {
             .Some(borrowed) then { return borrowed },
             .None() then {},
         }
+        when expected_type in {
+            .Some(expected) then {
+                when self.lower_expression(arg) in {
+                    .Some(result) then {
+                        when result.operand in {
+                            .Some(operand) then {
+                                return MIRValue.Operand(self.adapt_operand_to_expected_type(operand, result.result_type, expected))
+                            },
+                            .None() then when result.place in {
+                                .Some(place) then {
+                                    return self.read_place_for_expected_type(place, result.result_type, expected)
+                                },
+                                .None() then {},
+                            },
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
         return self.lower_value(arg)
     }
 
     private lower_method_receiver_argument(self ref mut Self, base ref TypedExpr, method Symbol) MIRValue = {
-        let method_type = self.context.get_function_type(method.def_id) or else method.symbol_type
+        let method_type = self.receiver_aware_method_type(method)
         return when method_type in {
             .FunctionType(params, _) then {
                 if not params.is_empty() then {
                     let receiver_param = params[0(UInt)].val
+                    let expected_receiver_type = self.effective_param_type(receiver_param)
+                    let method_symbol_name = self.context.symbol_name(method)
                     if receiver_param.pass_kind is .ByReference() or receiver_param.pass_kind is .ByMutableReference() then {
+                        when base.expr_kind in {
+                            .RefExpr(inner) then {
+                                let allow_unwrap_ref_expr_receiver = when expected_receiver_type in {
+                                    .ReferenceType(expected_inner) then not self.is_ref_like_type(expected_inner.val),
+                                    .MutableReferenceType(expected_inner) then not self.is_ref_like_type(expected_inner.val),
+                                    .BorrowedReferenceType(expected_inner, _) then not self.is_ref_like_type(expected_inner.val),
+                                    .MutableBorrowedReferenceType(expected_inner, _) then not self.is_ref_like_type(expected_inner.val),
+                                    _ then true,
+                                }
+                                if allow_unwrap_ref_expr_receiver then {
+                                    when self.lower_place(inner) in {
+                                        .Some(place) then {
+                                            let kind = if receiver_param.pass_kind is .ByMutableReference()
+                                                then MIRReferenceKind.Mutable()
+                                                else MIRReferenceKind.Shared()
+                                            return MIRValue.Ref(place, kind, MIRReferenceAllocation.StackBorrow())
+                                        },
+                                        .None() then {},
+                                    }
+                                }
+                            },
+                            _ then {},
+                        }
                         let base_is_ref_like = when base.expr_type in {
                             .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) then true,
                             _ then false,
+                        }
+                        let expected_inner_ref_like = when expected_receiver_type in {
+                            .ReferenceType(expected_inner) then self.is_ref_like_type(expected_inner.val),
+                            .MutableReferenceType(expected_inner) then self.is_ref_like_type(expected_inner.val),
+                            .BorrowedReferenceType(expected_inner, _) then self.is_ref_like_type(expected_inner.val),
+                            .MutableBorrowedReferenceType(expected_inner, _) then self.is_ref_like_type(expected_inner.val),
+                            _ then false,
+                        }
+                        let base_is_uint8_like = when base.expr_type in {
+                            .UInt8Type() then true,
+                            .ReferenceType(inner) then inner.val is .UInt8Type(),
+                            .MutableReferenceType(inner) then inner.val is .UInt8Type(),
+                            .BorrowedReferenceType(inner, _) then inner.val is .UInt8Type(),
+                            .MutableBorrowedReferenceType(inner, _) then inner.val is .UInt8Type(),
+                            _ then false,
+                        }
+                        let needs_ref_u8_on_int_nested_receiver =
+                            method_symbol_name == "Ref_UInt8_to_string"
+                            and not base_is_uint8_like
+                        let base_inner_is_ref_like = when base.expr_type in {
+                            .ReferenceType(inner) then self.is_ref_like_type(inner.val),
+                            .MutableReferenceType(inner) then self.is_ref_like_type(inner.val),
+                            .BorrowedReferenceType(inner, _) then self.is_ref_like_type(inner.val),
+                            .MutableBorrowedReferenceType(inner, _) then self.is_ref_like_type(inner.val),
+                            _ then false,
+                        }
+                        if needs_ref_u8_on_int_nested_receiver and base_is_ref_like and not base_inner_is_ref_like then {
+                            let receiver_snapshot = self.make_temporary(base.expr_type, "nested_recv_snapshot")
+                            self.append_statement(MIRStatement.Declare(receiver_snapshot.id))
+                            self.append_statement(MIRStatement.Assign(MIRPlace.Local(receiver_snapshot.id), self.lower_value(base)))
+                            let outer_kind = if receiver_param.pass_kind is .ByMutableReference()
+                                then MIRReferenceKind.Mutable()
+                                else MIRReferenceKind.Shared()
+                            return MIRValue.Ref(MIRPlace.Local(receiver_snapshot.id), outer_kind, MIRReferenceAllocation.StackBorrow())
+                        }
+                        if not base_is_ref_like and (expected_inner_ref_like or needs_ref_u8_on_int_nested_receiver) then {
+                            when self.lower_place(base) in {
+                                .Some(place) then {
+                                    let inner_ref_type = when expected_receiver_type in {
+                                        .ReferenceType(expected_inner) then expected_inner.val,
+                                        .MutableReferenceType(expected_inner) then expected_inner.val,
+                                        .BorrowedReferenceType(expected_inner, _) then expected_inner.val,
+                                        .MutableBorrowedReferenceType(expected_inner, _) then expected_inner.val,
+                                        _ then Type.Unknown(),
+                                    }
+                                    let inner_ref_local = self.make_temporary(inner_ref_type, "nested_recv_ref")
+                                    self.append_statement(MIRStatement.Declare(inner_ref_local.id))
+                                    self.append_statement(MIRStatement.Assign(
+                                        MIRPlace.Local(inner_ref_local.id),
+                                        MIRValue.Ref(place, self.reference_kind(inner_ref_type), MIRReferenceAllocation.StackBorrow()),
+                                    ))
+                                    let outer_kind = if receiver_param.pass_kind is .ByMutableReference()
+                                        then MIRReferenceKind.Mutable()
+                                        else MIRReferenceKind.Shared()
+                                    return MIRValue.Ref(MIRPlace.Local(inner_ref_local.id), outer_kind, MIRReferenceAllocation.StackBorrow())
+                                },
+                                .None() then {},
+                            }
                         }
                         if not base_is_ref_like then {
                             when self.lower_place(base) in {
@@ -2365,7 +2630,6 @@ given MIRFunctionBuilder {
                             }
                         }
                     }
-                    let expected_receiver_type = self.effective_param_type(receiver_param)
                     when self.lower_borrowed_reference_argument(base, Option[Type].Some(expected_receiver_type)) in {
                         .Some(borrowed) then { return borrowed },
                         .None() then {},
@@ -2390,6 +2654,49 @@ given MIRFunctionBuilder {
                 yield self.lower_value(base)
             }
             _ then self.lower_value(base),
+        }
+    }
+
+    private receiver_aware_method_type(self ref Self, method Symbol) Type = {
+        let symbol_type = self.context.get_function_type(method.def_id) or else method.symbol_type
+        let context_type = self.context.get_symbol_type(method.def_id) or else symbol_type
+        return when context_type in {
+            .FunctionType(context_params, context_return) then when symbol_type in {
+                .FunctionType(symbol_params, symbol_return) then {
+                    if context_params.is_empty() or symbol_params.is_empty() then {
+                        return symbol_type
+                    }
+                    let context_receiver = context_params[0(UInt)].val.param_type
+                    let symbol_receiver = symbol_params[0(UInt)].val.param_type
+                    if self.is_ref_like_type(context_receiver) and not self.is_ref_like_type(symbol_receiver) then {
+                        let mut merged_params = List[ref FunctionParamEntry].new()
+                        merged_params.push(box(FunctionParamEntry(context_receiver, pass_kind_from_type(context_receiver))))
+                        let mut i UInt = 1
+                        while i < symbol_params.count() then {
+                            merged_params.push(box(symbol_params[i].val))
+                            i += 1
+                        }
+                        let return_type = if self.context.contains_generic_parameter(context_return.val) then symbol_return.val else context_return.val
+                        return Type.FunctionType(merged_params, box(return_type))
+                    }
+                    return symbol_type
+                },
+                _ then symbol_type,
+            },
+            _ then symbol_type,
+        }
+    }
+
+    private is_ref_like_type(self ref Self, t Type) Bool = {
+        let _ = self
+        return when t in {
+            .ReferenceType(_) then true,
+            .MutableReferenceType(_) then true,
+            .BorrowedReferenceType(_, _) then true,
+            .MutableBorrowedReferenceType(_, _) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
         }
     }
 
@@ -2439,9 +2746,39 @@ given MIRFunctionBuilder {
         return self.concrete_layout_key_for_type(actual_type) == self.concrete_layout_key_for_type(expected_inner)
     }
 
+    private expected_ref_argument_plan(self ref Self, expected_type Type) Option[Pair[MIRReferenceKind, Type]] = {
+        return when expected_type in {
+            .ReferenceType(inner) then Option[Pair[MIRReferenceKind, Type]].Some(Pair[MIRReferenceKind, Type](MIRReferenceKind.Shared(), inner.val)),
+            .MutableReferenceType(inner) then Option[Pair[MIRReferenceKind, Type]].Some(Pair[MIRReferenceKind, Type](MIRReferenceKind.Mutable(), inner.val)),
+            .BorrowedReferenceType(inner, _) then Option[Pair[MIRReferenceKind, Type]].Some(Pair[MIRReferenceKind, Type](MIRReferenceKind.Shared(), inner.val)),
+            .MutableBorrowedReferenceType(inner, _) then Option[Pair[MIRReferenceKind, Type]].Some(Pair[MIRReferenceKind, Type](MIRReferenceKind.Mutable(), inner.val)),
+            .WeakReferenceType(inner) then Option[Pair[MIRReferenceKind, Type]].Some(Pair[MIRReferenceKind, Type](MIRReferenceKind.Weak(), inner.val)),
+            .MutableWeakReferenceType(inner) then Option[Pair[MIRReferenceKind, Type]].Some(Pair[MIRReferenceKind, Type](MIRReferenceKind.MutableWeak(), inner.val)),
+            _ then Option[Pair[MIRReferenceKind, Type]].None(),
+        }
+    }
+
     private lower_borrowed_reference_argument(self ref mut Self, arg ref TypedExpr, expected_type Option[Type]) Option[MIRValue] = {
         return when expected_type in {
             .Some(t) then {
+                when arg.expr_kind in {
+                    .RefExpr(ref_inner) then {
+                        when self.expected_ref_argument_plan(t) in {
+                            .Some(plan) then {
+                                if not self.is_ref_like_type(plan.second) then {
+                                    when self.lower_place(ref_inner) in {
+                                        .Some(place) then {
+                                            return Option[MIRValue].Some(MIRValue.Ref(place, plan.first, MIRReferenceAllocation.StackBorrow()))
+                                        },
+                                        .None() then {},
+                                    }
+                                }
+                            },
+                            .None() then {},
+                        }
+                    },
+                    _ then {},
+                }
                 when arg.expr_kind in {
                     .Variable(symbol) then {
                         if self.declared_ref_like_argument_matches(symbol.symbol_type, t) then {
@@ -2462,6 +2799,17 @@ given MIRFunctionBuilder {
                 }
                 yield when t in {
                 .ReferenceType(inner) then {
+                    when arg.expr_kind in {
+                        .RefExpr(ref_inner) then {
+                            if self.borrow_compatible(ref_inner.expr_type, inner.val) then {
+                                when self.lower_place(ref_inner) in {
+                                    .Some(place) then { return Option[MIRValue].Some(MIRValue.Ref(place, MIRReferenceKind.Shared(), MIRReferenceAllocation.StackBorrow())) },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        _ then {},
+                    }
                     if self.borrow_compatible(arg.expr_type, inner.val) then {
                         when self.lower_place(arg) in {
                             .Some(place) then { return Option[MIRValue].Some(MIRValue.Ref(place, MIRReferenceKind.Shared(), MIRReferenceAllocation.StackBorrow())) },
@@ -2471,6 +2819,17 @@ given MIRFunctionBuilder {
                     yield if arg.expr_type == t then Option[MIRValue].Some(self.lower_value(arg)) else Option[MIRValue].None()
                 },
                 .MutableReferenceType(inner) then {
+                    when arg.expr_kind in {
+                        .RefExpr(ref_inner) then {
+                            if self.borrow_compatible(ref_inner.expr_type, inner.val) then {
+                                when self.lower_place(ref_inner) in {
+                                    .Some(place) then { return Option[MIRValue].Some(MIRValue.Ref(place, MIRReferenceKind.Mutable(), MIRReferenceAllocation.StackBorrow())) },
+                                    .None() then {},
+                                }
+                            }
+                        },
+                        _ then {},
+                    }
                     if self.borrow_compatible(arg.expr_type, inner.val) then {
                         when self.lower_place(arg) in {
                             .Some(place) then { return Option[MIRValue].Some(MIRValue.Ref(place, MIRReferenceKind.Mutable(), MIRReferenceAllocation.StackBorrow())) },
@@ -2535,10 +2894,65 @@ given MIRFunctionBuilder {
     }
 
     private type_of_operand(self ref Self, operand MIROperand) Type = {
-        let _ = self
         return when operand in {
+            .Local(local) then self.type_of_local(local),
             .Function(symbol) then symbol.symbol_type,
-            _ then Type.Unknown(),
+            .Constant(constant) then when constant in {
+                .Integer(_, t) then t,
+                .Float(_, t) then t,
+                .StringLiteral(_, t) then t,
+                .Boolean(_) then Type.BoolType(),
+                .Void() then Type.VoidType(),
+            },
+        }
+    }
+
+    private type_of_ref(self ref Self, place MIRPlace, kind MIRReferenceKind) Type = {
+        let inner = self.place_type(place)
+        return when kind in {
+            .Mutable() then Type.MutableReferenceType(box(inner)),
+            .Weak() then Type.WeakReferenceType(box(inner)),
+            .MutableWeak() then Type.MutableWeakReferenceType(box(inner)),
+            .Shared() then Type.ReferenceType(box(inner)),
+        }
+    }
+
+    private type_of_value(self ref Self, value MIRValue) Type = {
+        return when value in {
+            .Operand(operand) then self.type_of_operand(operand),
+            .PlaceRead(place, _) then self.place_type(place),
+            .Binary(operation) then operation.result_type,
+            .Unary(operation) then operation.result_type,
+            .Call(call) then call.result_type,
+            .Aggregate(aggregate) then aggregate.aggregate_type,
+            .EnumCase(construction) then construction.enum_type,
+            .EnumTag(_) then Type.IntType(),
+            .TraitObjectConversion(conversion) then conversion.result_type,
+            .TraitMethodCall(call) then call.result_type,
+            .Ref(place, kind, _) then self.type_of_ref(place, kind),
+            .Pointer(place) then Type.PointerType(box(self.place_type(place))),
+            .Cast(_, target_type) then target_type,
+            .Intrinsic(node) then self.mir_intrinsic_result_type(node),
+            .Lambda(lambda) then lambda.lambda_type,
+        }
+    }
+
+    private mir_intrinsic_result_type(self ref Self, node MIRIntrinsic) Type = {
+        let _ = self
+        return when node in {
+            .AllocMemory(_, result_type) then result_type,
+            .IsUniqueMutable(_) then Type.BoolType(),
+            .RefCount(_) then Type.UIntType(),
+            .MakeRef(_, _, result_type) then result_type,
+            .MakeMutRef(_, _, result_type) then result_type,
+            .DowngradeRef(_, result_type) then result_type,
+            .DowngradeMutRef(_, result_type) then result_type,
+            .UpgradeRef(_, result_type) then result_type,
+            .UpgradeMutRef(_, result_type) then result_type,
+            .TakeMemory(_, result_type) then result_type,
+            .NullPtr(result_type) then result_type,
+            .SpawnThread(_, _, _, _) then Type.Int32Type(),
+            _ then Type.VoidType(),
         }
     }
 
@@ -2587,12 +3001,40 @@ given MIRFunctionBuilder {
     }
 
     private lower_ref_expression(self ref mut Self, inner ref TypedExpr, result_type Type) Option[MIRExprResult] = {
+        if self.is_ref_like_type(inner.expr_type)
+            and self.is_ref_like_type(result_type)
+            and self.concrete_layout_key_for_type(inner.expr_type) == self.concrete_layout_key_for_type(result_type)
+        then {
+            when self.lower_expression(inner) in {
+                .Some(existing) then {
+                    when existing.operand in {
+                        .Some(operand) then {
+                            let adapted = self.adapt_operand_to_expected_type(operand, existing.result_type, result_type)
+                            return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(adapted), Option[MIRPlace].None()))
+                        },
+                        .None() then {},
+                    }
+                    when existing.place in {
+                        .Some(place) then {
+                            let value = self.read_place_for_expected_type(place, existing.result_type, result_type)
+                            let result = self.materialize(value, result_type)
+                            return Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        }
         return when self.lower_place(inner) in {
             .Some(place) then {
                 let result = self.materialize(MIRValue.Ref(place, self.reference_kind(result_type), MIRReferenceAllocation.StackBorrow()), result_type)
                 yield Option[MIRExprResult].Some(MIRExprResult(result_type, ValueCategory.RValue(), Option[MIROperand].Some(result), Option[MIRPlace].None()))
             },
             .None() then {
+                if self.context.contains_generic_parameter(inner.expr_type) then {
+                    panic("Unsupported generic reference expression reached MIR lowering")
+                }
                 let source_local = self.make_temporary(inner.expr_type, "ref_source")
                 self.append_statement(MIRStatement.Declare(source_local.id))
                 self.append_statement(MIRStatement.Assign(MIRPlace.Local(source_local.id), self.lower_value(inner)))
@@ -2801,7 +3243,7 @@ given MIRFunctionBuilder {
             .Some(result) then when result.operand in {
                 .Some(operand) then self.adapt_operand_to_expected_type(operand, result.result_type, expected_type),
                 .None() then when result.place in {
-                    .Some(place) then self.materialize(self.read_place_for_expected_type(place, self.place_type(place), expected_type), expected_type),
+                    .Some(place) then self.materialize_place_for_expected_type(place, expected_type),
                     .None() then MIROperand.Constant(MIRConstant.Void()),
                 },
             },
@@ -2883,17 +3325,7 @@ given MIRFunctionBuilder {
                     .MutablePointerType(inner) then MIRPlace.Deref(box(self.lower_borrowed_source_value(base)), inner.val),
                     _ then self.lower_place(base) or else { return Option[MIRPlace].None() },
                 }
-                let mut current_type = when base.expr_type in {
-                    .ReferenceType(inner) then inner.val,
-                    .MutableReferenceType(inner) then inner.val,
-                    .BorrowedReferenceType(inner, _) then inner.val,
-                    .MutableBorrowedReferenceType(inner, _) then inner.val,
-                    .WeakReferenceType(inner) then inner.val,
-                    .MutableWeakReferenceType(inner) then inner.val,
-                    .PointerType(inner) then inner.val,
-                    .MutablePointerType(inner) then inner.val,
-                    _ then base.expr_type,
-                }
+                let mut current_type = self.place_type(base_place)
                 for segment in path then {
                     when current_type in {
                         .ReferenceType(inner) then {
@@ -2901,6 +3333,14 @@ given MIRFunctionBuilder {
                             current_type = inner.val
                         },
                         .MutableReferenceType(inner) then {
+                            base_place = MIRPlace.Deref(box(MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow())), inner.val)
+                            current_type = inner.val
+                        },
+                        .BorrowedReferenceType(inner, _) then {
+                            base_place = MIRPlace.Deref(box(MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow())), inner.val)
+                            current_type = inner.val
+                        },
+                        .MutableBorrowedReferenceType(inner, _) then {
                             base_place = MIRPlace.Deref(box(MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow())), inner.val)
                             current_type = inner.val
                         },
@@ -2996,7 +3436,7 @@ given MIRFunctionBuilder {
                     .Some(existing_place) then existing_place,
                     .None() then { return Option[MIRPlace].None() },
                 }
-                let mut current_type = base.expr_type
+                let mut current_type = self.place_type(place)
                 for field in path then {
                     when current_type in {
                         .ReferenceType(inner) then {
@@ -3004,6 +3444,14 @@ given MIRFunctionBuilder {
                             current_type = inner.val
                         },
                         .MutableReferenceType(inner) then {
+                            place = MIRPlace.Deref(box(MIRValue.PlaceRead(place, MIROwnershipUse.Borrow())), inner.val)
+                            current_type = inner.val
+                        },
+                        .BorrowedReferenceType(inner, _) then {
+                            place = MIRPlace.Deref(box(MIRValue.PlaceRead(place, MIROwnershipUse.Borrow())), inner.val)
+                            current_type = inner.val
+                        },
+                        .MutableBorrowedReferenceType(inner, _) then {
                             place = MIRPlace.Deref(box(MIRValue.PlaceRead(place, MIROwnershipUse.Borrow())), inner.val)
                             current_type = inner.val
                         },

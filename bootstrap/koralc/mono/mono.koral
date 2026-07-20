@@ -323,6 +323,21 @@ protected type MonomorphizerStorage(
     mut resolved_parameterized_types Dict[Type, Type],
     mut resolving_parameterized_type_keys Set[Type],
     mut generated_layouts Set[String],
+    mut fuzzy_extension_methods_cache Dict[String, List[ref GenericExtensionMethodTemplate]],
+    mut fuzzy_extension_methods_missing Set[String],
+    mut conformance_extension_template_cache Dict[String, ref GenericExtensionMethodTemplate],
+    mut conformance_extension_template_missing Set[String],
+    mut trait_tool_template_cache Dict[String, ref GenericExtensionMethodTemplate],
+    mut trait_tool_template_missing Set[String],
+    mut fuzzy_given_trait_decls_cache Dict[String, List[ref TypedDecl]],
+    mut fuzzy_given_trait_decls_missing Set[String],
+    mut concrete_method_lookup_cache Dict[String, Symbol],
+    mut concrete_method_lookup_missing Set[String],
+    mut trait_target_static_lookup_cache Dict[String, Symbol],
+    mut trait_target_static_lookup_missing Set[String],
+    mut declared_static_receiver_lookup_index Dict[String, List[DefId]],
+    mut materialized_function_def_ids Set[UInt],
+    mut declared_static_receiver_indexed_node_count UInt,
 
     // ── Output ───────────────────────────────────────────────────────────────
     mut generated_nodes List[ref TypedDecl],
@@ -337,6 +352,15 @@ protected type MonomorphizerStorage(
     mut remapped_function_def_ids Dict[UInt, List[Pair[DefId, Type]]],
     mut receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     mut vtable_requests List[VtableRequest],
+    mut conformance_trait_methods_scan_version Dict[Type, UInt],
+    mut resolved_function_body_ids Set[UInt],
+    mut resolved_given_member_body_ids Set[UInt],
+    mut expression_resolve_steps UInt,
+    expression_resolve_limit UInt,
+    mut expression_resolve_limited Bool,
+    mut expression_resolve_total_steps UInt,
+    expression_resolve_total_limit UInt,
+    mut expression_resolve_total_limited Bool,
 
     // ── Cross-module metadata ─────────────────────────────────────────────
     global_scope Scope,
@@ -357,6 +381,7 @@ protected type MonomorphizerStorage(
     mut instantiating_functions Set[String],
     mut current_recursion_depth Int,
     mut extension_body_resolution_depth Int,
+    mut current_self_type Option[Type],
 
     // ── Shared metadata context ─────────────────────────────────────────────
     context CompilerContext,
@@ -424,6 +449,127 @@ private let is_source_given_decl(decl ref TypedDecl) Bool = {
     }
 }
 
+private let mono_debug_phase_enabled() Bool =
+    when env("KORAL_DEBUG_PHASE") in {
+        .Some(value) then value == "1" or value == "true" or value == "TRUE",
+        .None() then false,
+    }
+
+private let mono_parse_uint(text String) Option[UInt] = {
+    if text.is_empty() then { return Option[UInt].None() }
+    let mut value UInt = 0(UInt)
+    let mut has_digit = false
+    for ch in text.to_runes() then {
+        let digit = when ch in {
+            '0' then Option[UInt].Some(0(UInt)),
+            '1' then Option[UInt].Some(1(UInt)),
+            '2' then Option[UInt].Some(2(UInt)),
+            '3' then Option[UInt].Some(3(UInt)),
+            '4' then Option[UInt].Some(4(UInt)),
+            '5' then Option[UInt].Some(5(UInt)),
+            '6' then Option[UInt].Some(6(UInt)),
+            '7' then Option[UInt].Some(7(UInt)),
+            '8' then Option[UInt].Some(8(UInt)),
+            '9' then Option[UInt].Some(9(UInt)),
+            _ then Option[UInt].None(),
+        }
+        when digit in {
+            .Some(d) then {
+                has_digit = true
+                value = value * 10(UInt) + d
+            },
+            .None() then {
+                return Option[UInt].None()
+            },
+        }
+    }
+    return if has_digit then Option[UInt].Some(value) else Option[UInt].None()
+}
+
+private let mono_env_uint(name String, fallback UInt) UInt = {
+    return when env(name) in {
+        .Some(raw) then when mono_parse_uint(raw) in {
+            .Some(parsed) then parsed,
+            .None() then fallback,
+        },
+        .None() then fallback,
+    }
+}
+
+private let instantiation_kind_profile_name(kind InstantiationKind) String = {
+    return when kind in {
+        .StructType(_, _) then "struct",
+        .EnumType(_, _) then "enum",
+        .Function(_, _) then "function",
+        .ExtensionMethod(_, _, _, _, _) then "extension-method",
+        .TraitMethod(_, _, _) then "trait-method",
+    }
+}
+
+private let mono_decl_kind_name(decl ref TypedDecl) String = {
+    return when decl in {
+        .LetDecl(_, _, _, _, _, _, _) then "let",
+        .FunctionDecl(_, _, _, _, _, _, _) then "function",
+        .GenericFunctionDecl(_, _, _) then "generic-function",
+        .IntrinsicFunctionDecl(_, _, _, _, _, _) then "intrinsic-function",
+        .ForeignFunctionDecl(_, _, _, _, _, _) then "foreign-function",
+        .ForeignLetDecl(_, _, _, _, _, _) then "foreign-let",
+        .TypeStructDecl(_, _, _, _, _) then "struct",
+        .TypeEnumDecl(_, _, _, _, _) then "enum",
+        .GenericTypeStructDecl(_, _, _) then "generic-struct",
+        .GenericTypeEnumDecl(_, _, _) then "generic-enum",
+        .TypeAliasDecl(_, _, _, _) then "type-alias",
+        .IntrinsicTypeDecl(_, _, _) then "intrinsic-type",
+        .TraitDecl(_, _, _, _) then "trait",
+        .GivenDecl(_, _, _) then "given",
+        .GivenTraitDecl(_, _, _, _, _) then "given-trait",
+        .IntrinsicGivenDecl(_, _, _) then "intrinsic-given",
+        .ForeignTypeDecl(_, _, _, _, _) then "foreign-type",
+        .UsingDecl(_, _, _) then "using",
+    }
+}
+
+private let mono_decl_dedup_key(decl ref TypedDecl) Option[String] = {
+    when decl_def_id(decl) in {
+        .Some(node_def_id) then {
+            return Option[String].Some("def:\(node_def_id.id)")
+        },
+        .None() then {},
+    }
+
+    return when decl in {
+        .GivenDecl(target_type, members, _) then {
+            let mut out = "given:\(layout_key(target_type))"
+            for m_ref in members then {
+                out.push_string("|")
+                out.push_string("\(m_ref.def_id.id)")
+            }
+            yield Option[String].Some(out)
+        },
+        .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
+            let mut out = "given-trait:\(layout_key(target_type)):\(trait_name)"
+            for trait_arg in trait_args then {
+                out.push_string("#")
+                out.push_string(layout_key(trait_arg))
+            }
+            for m_ref in members then {
+                out.push_string("|")
+                out.push_string("\(m_ref.def_id.id)")
+            }
+            yield Option[String].Some(out)
+        },
+        .IntrinsicGivenDecl(target_type, members, _) then {
+            let mut out = "intrinsic-given:\(layout_key(target_type))"
+            for m_ref in members then {
+                out.push_string("|")
+                out.push_string("\(m_ref.def_id.id)")
+            }
+            yield Option[String].Some(out)
+        },
+        _ then Option[String].None(),
+    }
+}
+
 /// Extract the DefId from a TypedDecl node's embedded identifier, if present.
 protected let decl_def_id(decl ref TypedDecl) Option[DefId] = {
     return when decl in {
@@ -444,12 +590,43 @@ private type MonoProgramInputs(
     source_given_decls List[ref TypedDecl],
 )
 
+private let strip_given_member_body(member_ref ref TypedGivenMember) ref TypedGivenMember = {
+    return box(TypedGivenMember(member_ref.def_id, member_ref.name, member_ref.params, member_ref.return_type, Option[ref TypedExpr].None()))
+}
+
+private let strip_given_decl_bodies_for_source_lookup(decl_ref ref TypedDecl) ref TypedDecl = {
+    return when decl_ref in {
+        .GivenDecl(target_type, members, span) then {
+            let mut stripped_members = List[ref TypedGivenMember].new()
+            for member_ref in members then {
+                stripped_members.push(strip_given_member_body(member_ref))
+            }
+            yield box(TypedDecl.GivenDecl(target_type, stripped_members, span))
+        },
+        .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
+            let mut stripped_members = List[ref TypedGivenMember].new()
+            for member_ref in members then {
+                stripped_members.push(strip_given_member_body(member_ref))
+            }
+            yield box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, stripped_members, span))
+        },
+        .IntrinsicGivenDecl(target_type, members, span) then {
+            let mut stripped_members = List[ref TypedGivenMember].new()
+            for member_ref in members then {
+                stripped_members.push(strip_given_member_body(member_ref))
+            }
+            yield box(TypedDecl.IntrinsicGivenDecl(target_type, stripped_members, span))
+        },
+        _ then decl_ref,
+    }
+}
+
 private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
     let mut initial_nodes = List[ref TypedDecl].new()
     let mut source_given_decls = List[ref TypedDecl].new()
     for decl_ref in program.declarations then {
         if is_source_given_decl(decl_ref) then {
-            source_given_decls.push(decl_ref)
+            source_given_decls.push(strip_given_decl_bodies_for_source_lookup(decl_ref))
         }
         if is_non_generic_decl(decl_ref) then {
             initial_nodes.push(decl_ref)
@@ -536,6 +713,21 @@ given Monomorphizer {
             Dict[Type, Type].new(),
             Set[Type].new(),
             Set[String].new(),
+            Dict[String, List[ref GenericExtensionMethodTemplate]].new(),
+            Set[String].new(),
+            Dict[String, ref GenericExtensionMethodTemplate].new(),
+            Set[String].new(),
+            Dict[String, ref GenericExtensionMethodTemplate].new(),
+            Set[String].new(),
+            Dict[String, List[ref TypedDecl]].new(),
+            Set[String].new(),
+            Dict[String, Symbol].new(),
+            Set[String].new(),
+            Dict[String, Symbol].new(),
+            Set[String].new(),
+            Dict[String, List[DefId]].new(),
+            Set[UInt].new(),
+            0(UInt),
             // output
             initial_nodes,
             initial_nodes.count(),
@@ -548,6 +740,15 @@ given Monomorphizer {
             Dict[UInt, List[Pair[DefId, Type]]].new(),
             input.generic_templates.receiver_method_dispatch,
             List[VtableRequest].new(),
+            Dict[Type, UInt].new(),
+            Set[UInt].new(),
+            Set[UInt].new(),
+            0(UInt),
+            mono_env_uint("KORAL_MONO_EXPR_LIMIT", 0(UInt)),
+            false,
+            0(UInt),
+            mono_env_uint("KORAL_MONO_EXPR_TOTAL_LIMIT", 50000(UInt)),
+            false,
             // cross-module metadata
             input.global_scope,
             input.import_graph,
@@ -565,6 +766,7 @@ given Monomorphizer {
             Set[String].new(),
             0,
             0,
+            Option[Type].None(),
             // shared metadata context
             input.context,
         ))
@@ -696,7 +898,6 @@ given Monomorphizer {
                     if ext_template.method.name <> "drop" and not is_drop_trait then {
                         continue
                     }
-
                     let req = InstantiationRequest(
                         InstantiationKind.ExtensionMethod(
                             template_name,
@@ -725,6 +926,9 @@ given Monomorphizer {
         base_type Type,
         type_args List[ref Type],
     ) Void = {
+        if has_generic_parameter(base_type) or is_placeholder_inferred_type(base_type) or args_have_generic_parameter(type_args) then {
+            return
+        }
         when self.storage.generic_templates.lookup_extension_methods(template_name) in {
             .Some(ext_templates) then {
                 for ext_template in ext_templates then {
@@ -770,22 +974,28 @@ given Monomorphizer {
     //   5. Assemble and return MonomorphizedProgram
     //
     public monomorphize(self ref Self) MonomorphizedProgram = {
+        eprintln("[mono-phase] start")
         // Seed forced Drop-method instantiation for already-materialized
         // concrete generic nominal types tracked only in CompilerContext.
+        eprintln("[mono-phase] seed-forced-drop begin")
         let mut seed_def_id UInt = 1
         while seed_def_id < self.storage.context.next_def_id() then {
             self.enqueue_forced_drop_request_for_type_def(DefId(seed_def_id))
             seed_def_id += 1
         }
+        eprintln("[mono-phase] seed-forced-drop done pending=\(self.storage.pending_requests.count())")
 
         // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
         // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
         // so that resolve_static_method_call_to_call can find them.
+        eprintln("[mono-phase] seed-given-method-defids begin")
         for node_ref in self.storage.generated_nodes then {
             self.seed_given_method_def_ids(node_ref)
         }
+        eprintln("[mono-phase] seed-given-method-defids done")
 
         let mut processed_iterations = 0
+        eprintln("[mono-phase] queue-loop begin pending=\(self.storage.pending_requests.count())")
 
         // ── Work-queue loop ───────────────────────────────────────────────────
         while not self.storage.pending_requests.is_empty() then {
@@ -794,6 +1004,9 @@ given Monomorphizer {
             }
 
             processed_iterations += 1
+            if processed_iterations % 100(UInt) == 0(UInt) then {
+                eprintln("[mono-progress] iter=\(processed_iterations) pending=\(self.storage.pending_requests.count()) processed=\(self.storage.processed_request_keys.count())")
+            }
             if processed_iterations > 200000 then {
                 panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
             }
@@ -808,6 +1021,9 @@ given Monomorphizer {
                 panic("Monomorphization pending queue unexpectedly empty")
             }
             let key = req.deduplication_key()
+            if processed_iterations <= 200(UInt) then {
+                eprintln("[mono-phase] queue-loop pop iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_after_pop=\(self.storage.pending_requests.count()) generated_nodes=\(self.storage.generated_nodes.count())")
+            }
 
             // Deduplication check
             if self.storage.processed_request_keys.contains(key) then {
@@ -817,6 +1033,9 @@ given Monomorphizer {
 
             // Increment recursion depth before dispatching
             self.storage.current_recursion_depth += 1
+            if processed_iterations <= 200(UInt) then {
+                eprintln("[mono-phase] queue-loop dispatch-begin iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) depth=\(self.storage.current_recursion_depth)")
+            }
 
             // Dispatch by kind
             when req.kind in {
@@ -840,6 +1059,10 @@ given Monomorphizer {
                 },
             }
 
+            if processed_iterations <= 200(UInt) then {
+                eprintln("[mono-phase] queue-loop dispatch-end iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_now=\(self.storage.pending_requests.count()) generated_nodes=\(self.storage.generated_nodes.count())")
+            }
+
             // Decrement recursion depth after dispatching
             self.storage.current_recursion_depth -= 1
         }
@@ -852,16 +1075,66 @@ given Monomorphizer {
             self.seed_given_method_def_ids(node_ref)
         }
 
+        let mut dedup_seen_keys = Set[String].new()
+        let mut deduped_nodes = List[ref TypedDecl].new()
+        let mut dedup_removed = 0(UInt)
+        for node_ref in self.storage.generated_nodes then {
+            when mono_decl_dedup_key(node_ref) in {
+                .Some(dedup_key) then {
+                    if dedup_seen_keys.contains(dedup_key) then {
+                        dedup_removed += 1(UInt)
+                    } else {
+                        dedup_seen_keys.insert(dedup_key)
+                        deduped_nodes.push(node_ref)
+                    }
+                },
+                .None() then {
+                    deduped_nodes.push(node_ref)
+                },
+            }
+        }
+        if dedup_removed > 0(UInt) then {
+            self.storage.generated_nodes = deduped_nodes
+            eprintln("[mono-phase] resolve-generated-nodes dedup removed=\(dedup_removed) remaining=\(self.storage.generated_nodes.count())")
+        }
+        eprintln("[mono-phase] resolve-generated-nodes dedup-removed=\(dedup_removed)")
+
+        let mut unique_def_ids = Set[UInt].new()
+        let mut duplicate_def_nodes = 0(UInt)
+        for node_ref in self.storage.generated_nodes then {
+            when decl_def_id(node_ref) in {
+                .Some(node_def_id) then {
+                    if unique_def_ids.contains(node_def_id.id) then {
+                        duplicate_def_nodes += 1(UInt)
+                    } else {
+                        unique_def_ids.insert(node_def_id.id)
+                    }
+                },
+                .None() then {},
+            }
+        }
+        self.storage.expression_resolve_total_steps = 0(UInt)
+        self.storage.expression_resolve_total_limited = false
+        eprintln("[mono-phase] resolve-generated-nodes begin count=\(self.storage.generated_nodes.count()) unique_def_ids=\(unique_def_ids.count()) duplicate_def_nodes=\(duplicate_def_nodes)")
+
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
         let mut resolved_nodes = List[ref TypedDecl].new()
         let mut ri = 0(UInt)
         while ri < self.storage.generated_nodes.count() then {
             let node = self.storage.generated_nodes[ri]
+            let node_kind = mono_decl_kind_name(node)
+            if ri < 200(UInt) then {
+                eprintln("[mono-phase] resolve-node begin index=\(ri) total=\(self.storage.generated_nodes.count()) kind=\(node_kind)")
+            }
             resolved_nodes.push(box(resolve_types_in_global_node(self, node)))
+            if ri < 200(UInt) then {
+                eprintln("[mono-phase] resolve-node end index=\(ri) resolved_count=\(resolved_nodes.count())")
+            }
             ri += 1(UInt)
         }
         self.storage.generated_nodes = resolved_nodes
+        eprintln("[mono-phase] resolve-generated-nodes done count=\(self.storage.generated_nodes.count())")
 
         // ── Final trait-placeholder resolution loop ───────────────────────────
         while not self.storage.pending_requests.is_empty() then {
@@ -870,6 +1143,9 @@ given Monomorphizer {
             }
 
             processed_iterations += 1
+            if processed_iterations % 100(UInt) == 0(UInt) then {
+                eprintln("[mono-progress] iter=\(processed_iterations) pending=\(self.storage.pending_requests.count()) processed=\(self.storage.processed_request_keys.count())")
+            }
             if processed_iterations > 200000 then {
                 panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
             }
@@ -878,6 +1154,9 @@ given Monomorphizer {
                 panic("Monomorphization pending queue unexpectedly empty")
             }
             let key = req.deduplication_key()
+            if processed_iterations <= 20(UInt) then {
+                eprintln("[mono-phase] final-loop pop iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_after_pop=\(self.storage.pending_requests.count())")
+            }
             if self.storage.processed_request_keys.contains(key) then {
                 continue
             }
@@ -899,6 +1178,9 @@ given Monomorphizer {
                 .TraitMethod(base_type, method_name, method_type_args) then {
                     self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
                 },
+            }
+            if processed_iterations <= 20(UInt) then {
+                eprintln("[mono-phase] final-loop dispatch-end iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_now=\(self.storage.pending_requests.count())")
             }
         }
 
@@ -952,6 +1234,21 @@ given Monomorphizer {
             Dict[Type, Type].new(),
             Set[Type].new(),
             Set[String].new(),
+            Dict[String, List[ref GenericExtensionMethodTemplate]].new(),
+            Set[String].new(),
+            Dict[String, ref GenericExtensionMethodTemplate].new(),
+            Set[String].new(),
+            Dict[String, ref GenericExtensionMethodTemplate].new(),
+            Set[String].new(),
+            Dict[String, List[ref TypedDecl]].new(),
+            Set[String].new(),
+            Dict[String, Symbol].new(),
+            Set[String].new(),
+            Dict[String, Symbol].new(),
+            Set[String].new(),
+            Dict[String, List[DefId]].new(),
+            Set[UInt].new(),
+            0(UInt),
             List[ref TypedDecl].new(),
             existing_node_count,
             Dict[String, TemplateInfo].new(),
@@ -962,6 +1259,15 @@ given Monomorphizer {
             program.remapped_function_def_ids,
             program.receiver_method_dispatch,
             List[VtableRequest].new(),
+            Dict[Type, UInt].new(),
+            Set[UInt].new(),
+            Set[UInt].new(),
+            0(UInt),
+            mono_env_uint("KORAL_MONO_EXPR_LIMIT", 0(UInt)),
+            false,
+            0(UInt),
+            mono_env_uint("KORAL_MONO_EXPR_TOTAL_LIMIT", 50000(UInt)),
+            false,
             program.global_scope,
             program.import_graph,
             program.method_table,
@@ -976,6 +1282,7 @@ given Monomorphizer {
             Set[String].new(),
             0,
             0,
+            Option[Type].None(),
             context.val,
         ))
         let mono = Monomorphizer(s)

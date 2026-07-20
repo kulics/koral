@@ -1093,6 +1093,48 @@ given TypeChecker {
         }
     }
 
+    private decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
+        let _ = self
+        return when decl in {
+            .LetDecl(_, _, _, _, _, _) then true,
+            .FunctionDecl(_, _, type_params, _, _, _, _) then type_params.is_empty(),
+            .GivenDecl(_, type_params, members, _) then {
+                if not type_params.is_empty() then {
+                    return false
+                }
+                for member in members then {
+                    if not member.type_params.is_empty() then {
+                        return false
+                    }
+                }
+                yield true
+            },
+            .GivenTraitDecl(_, type_params, _, members, _) then {
+                if not type_params.is_empty() then {
+                    return false
+                }
+                for member in members then {
+                    if not member.type_params.is_empty() then {
+                        return false
+                    }
+                }
+                yield true
+            },
+            .IntrinsicGivenDecl(_, type_params, members, _) then {
+                if not type_params.is_empty() then {
+                    return false
+                }
+                for member in members then {
+                    if not member.type_params.is_empty() then {
+                        return false
+                    }
+                }
+                yield true
+            },
+            _ then false,
+        }
+    }
+
     public check_program(self ref mut, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
         let mut typed_decls = List[ref TypedDecl].new()
@@ -1213,7 +1255,10 @@ given TypeChecker {
             if reset_constraint_solver_each_decl then {
                 self.storage.constraint_solver.clear_debug_state()
             }
-            if clear_variable_symbol_types_each_decl or not retain_checked_template_bodies then {
+            let can_clear_local_symbol_types = clear_variable_symbol_types_each_decl
+                or not retain_checked_template_bodies
+                or (retain_checked_template_bodies and self.decl_can_clear_local_symbol_types_in_build(pair.first.decl))
+            if can_clear_local_symbol_types then {
                 let decl_end_def_id = self.context().next_def_id()
                 let mut context = self.context()
                 context.clear_variable_symbol_types_in_range(decl_start_def_id, decl_end_def_id)
@@ -1555,7 +1600,7 @@ given TypeChecker {
                     }
                     let extension_type_key = self.extension_template_key_for_target_node(target_type, resolved_target)
                     let target_type_name = self.type_node_name(target_type)
-                    let trait_tool_target_name = if type_params.is_empty() and self.storage.trait_registry.get(target_type_name) is .Some(_) then Option[String].Some(target_type_name) else Option[String].None()
+                    let trait_tool_target_name = if self.storage.trait_registry.get(target_type_name) is .Some(_) then Option[String].Some(target_type_name) else Option[String].None()
                     self.collect_given_signatures(members, resolved_target, type_params, Option[String].None())
                     for member in members then {
                         let method_name = member.name
@@ -1577,6 +1622,8 @@ given TypeChecker {
                             self.register_extension_method_template(
                                 extension_type_key,
                                 type_params,
+                                Option[Type].None(),
+                                List[Type].new(),
                                 method_name,
                                 method_access,
                                 method_type_params,
@@ -1680,13 +1727,12 @@ given TypeChecker {
                             let checked_params = self.typed_params_to_checked_symbols(
                                 self.check_given_member_params_with_bindings(method_params, template_target_type, member_bindings)
                             )
-                            let checked_body = when context.get_concrete_given_member_body(member.def_id) in {
-                                .Some(body_ref) then Option[ref TypedExpr].Some(body_ref),
-                                .None() then Option[ref TypedExpr].None(),
-                            }
+                            let checked_body = Option[ref TypedExpr].None()
                             self.register_extension_method_template(
                                 extension_type_key,
                                 type_params,
+                                Option[Type].Some(resolved_target),
+                                resolved_trait_args,
                                 method_name,
                                 method_access,
                                 method_type_params,
@@ -1739,13 +1785,12 @@ given TypeChecker {
                         let checked_params = self.typed_params_to_checked_symbols(
                             self.check_given_member_params_with_bindings(method_params, template_target_type, member_bindings)
                         )
-                        let checked_body = when context.get_concrete_given_member_body(member.def_id) in {
-                            .Some(body_ref) then Option[ref TypedExpr].Some(body_ref),
-                            .None() then Option[ref TypedExpr].None(),
-                        }
+                        let checked_body = Option[ref TypedExpr].None()
                         self.register_extension_method_template(
                             extension_type_key,
                             type_params,
+                            Option[Type].None(),
+                            List[Type].new(),
                             method_name,
                             method_access,
                             method_type_params,

@@ -95,6 +95,17 @@ public let layout_key(t Type) String = {
     }
 }
 
+// Like layout_key but uses get_name for StructureType/EnumType to match
+// the key format used by instantiate_extension_method_from_entry.
+// This ensures extension method registration and lookup use the same key format.
+public let contextual_layout_key(mono ref Monomorphizer, t Type) String = {
+    return when t in {
+        .StructureType(def_id) then mono.storage.context.get_name(def_id) or else layout_key(t),
+        .EnumType(def_id) then mono.storage.context.get_name(def_id) or else layout_key(t),
+        _ then layout_key(t),
+    }
+}
+
 private let instantiation_layout_key(mono ref Monomorphizer, t Type) String = {
     return when t in {
         .ReferenceType(inner) then "ref_\(instantiation_layout_key(mono, inner.val))",
@@ -200,15 +211,6 @@ public let make_layout_name(mono ref Monomorphizer, template_name String, args L
         out.push_string(instantiation_layout_key(mono, a.val))
     }
     return out
-}
-
-private let enqueue_pending_request_if_needed(mono ref Monomorphizer, req InstantiationRequest) Void = {
-    let key = req.deduplication_key()
-    if mono.storage.processed_request_keys.contains(key) then { return }
-    if mono.storage.pending_request_keys.contains(key) then { return }
-
-    mono.storage.pending_request_keys.insert(key)
-    mono.storage.pending_requests.push(req)
 }
 
 private let is_std_drop_trait_conformance(mono ref Monomorphizer, conformance_trait_name Option[String]) Bool = {
@@ -464,18 +466,13 @@ public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemp
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
                 if ext_template.method.name == "drop" or is_std_drop_trait_conformance(mono, ext_template.conformance_trait_name) then {
-                    let ext_request = InstantiationRequest(
-                        InstantiationKind.ExtensionMethod(
-                            template_lookup_name,
-                            concrete_type,
-                            ext_template,
-                            args,
-                            List[ref Type].new(),
-                        ),
-                        0,
-                        "",
+                    let _ = mono.instantiate_extension_method_impl(
+                        concrete_type,
+                        template_lookup_name,
+                        ext_template,
+                        args,
+                        List[ref Type].new(),
                     )
-                    enqueue_pending_request_if_needed(mono, ext_request)
                 }
             }
         },
@@ -633,18 +630,13 @@ public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate
         .Some(ext_templates) then {
             for ext_template in ext_templates then {
                 if ext_template.method.name == "drop" or is_std_drop_trait_conformance(mono, ext_template.conformance_trait_name) then {
-                    let ext_request = InstantiationRequest(
-                        InstantiationKind.ExtensionMethod(
-                            template_lookup_name,
-                            concrete_type,
-                            ext_template,
-                            args,
-                            List[ref Type].new(),
-                        ),
-                        0,
-                        "",
+                    let _ = mono.instantiate_extension_method_impl(
+                        concrete_type,
+                        template_lookup_name,
+                        ext_template,
+                        args,
+                        List[ref Type].new(),
                     )
-                    enqueue_pending_request_if_needed(mono, ext_request)
                 }
             }
         },

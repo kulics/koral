@@ -75,6 +75,12 @@ public type CodeGen(
 
     // 预热后的 callable 名缓存，降低 MIR emit 热路径中的方法名拼接成本
     mut callable_c_name_cache Dict[UInt, String],
+
+    // 预热后的方法 owner 类型缓存，降低 callable_c_name/current-owner 热路径中的全局扫描成本
+    mut method_owner_type_cache Dict[UInt, Type],
+
+    // 跨 emitter 复用的 owner-sensitive callable 名缓存
+    mut current_owner_callable_c_name_cache Dict[String, String],
 )
 
 given CodeGen {
@@ -108,7 +114,12 @@ given CodeGen {
             Dict[String, String].new(),
             // callable_c_name_cache
             Dict[UInt, String].new(),
+            // method_owner_type_cache
+            Dict[UInt, Type].new(),
+            // current_owner_callable_c_name_cache
+            Dict[String, String].new(),
         )
+        cg.method_owner_type_cache = cg.build_method_owner_type_cache()
         return cg
     }
 
@@ -739,7 +750,9 @@ given CodeGen {
     method_owner_type(self, method_def_id DefId) Option[Type] = {
         return when self.concrete_callable_info(method_def_id) in {
             .Some(info) then info.owner_type,
-            .None() then {
+            .None() then when self.method_owner_type_cache.get(method_def_id.id) in {
+                .Some(owner_type) then Option[Type].Some(owner_type),
+                .None() then {
                 for global in self.program.globals then {
                     when global in {
                         .Given(target_type, _, _, methods) then {
@@ -762,6 +775,7 @@ given CodeGen {
                     .None() then {},
                 }
                 yield Option[Type].None()
+                },
             },
         }
     }
@@ -778,6 +792,10 @@ given CodeGen {
             _ then concrete_type,
         }
         return self.concrete_receiver_lookup_key(base_type)
+    }
+
+    current_owner_callable_c_name_cache_key(self, owner_type Type, symbol ref Symbol) String = {
+        return "\(self.concrete_receiver_lookup_key(owner_type))|\(symbol.def_id.id.to_string())"
     }
 
     private owner_types_match(self, lhs Type, rhs Type) Bool = {
@@ -849,6 +867,36 @@ given CodeGen {
             }
         }
         return Option[String].None()
+    }
+
+    private extract_template_prefixed_method_name(self, symbol_name String) Option[String] = {
+        let _ = self
+        if not symbol_name.contains("_") then {
+            return Option[String].None()
+        }
+        let mut found_lower = false
+        let mut out = String.new()
+        let mut saw_prefix = false
+        for segment in symbol_name.split("_") then {
+            if segment.is_empty() then {
+                continue
+            }
+            let first = segment.to_runes()[0(UInt)]
+            let is_lower = first >= 'a' and first <= 'z'
+            if not found_lower then {
+                if is_lower then {
+                    found_lower = true
+                } else {
+                    saw_prefix = true
+                    continue
+                }
+            }
+            if not out.is_empty() then {
+                out.push_byte('_')
+            }
+            out.push_string(segment)
+        }
+        return if saw_prefix and found_lower and not out.is_empty() then Option[String].Some(out) else Option[String].None()
     }
 
     private current_owner_method_symbol(self, symbol ref Symbol) Option[Symbol] = {
@@ -1070,6 +1118,41 @@ given CodeGen {
         }
     }
 
+    public build_method_owner_type_cache(self ref) Dict[UInt, Type] = {
+        let mut cache = Dict[UInt, Type].new()
+        for function_ref in self.program.functions then {
+            when function_ref.kind in {
+                .Given(target_type, _, _) then cache.insert(function_ref.identifier.def_id.id, target_type),
+                .Global() then when self.receiver_owner_type_from_typed_params(function_ref.params) in {
+                    .Some(owner_type) then cache.insert(function_ref.identifier.def_id.id, owner_type),
+                    .None() then {},
+                },
+            }
+        }
+
+        for global in self.program.globals then {
+            when global in {
+                .Given(target_type, _, _, methods) then {
+                    for method in methods then {
+                        cache.insert(method.def_id.id, target_type)
+                    }
+                },
+                .Function(identifier, params, _, _) then {
+                    when self.receiver_owner_type_from_typed_params(params) in {
+                        .Some(owner_type) then cache.insert(identifier.def_id.id, owner_type),
+                        .None() then when self.receiver_owner_type_from_function_type(identifier.symbol_type) in {
+                            .Some(owner_type) then cache.insert(identifier.def_id.id, owner_type),
+                            .None() then {},
+                        },
+                    }
+                },
+                _ then {},
+            }
+        }
+        return cache
+    }
+
+
     callable_c_name(self, symbol ref Symbol) String = {
         when self.current_function_owner_type in {
             .Some(owner_type) then {
@@ -1133,18 +1216,51 @@ given CodeGen {
             and resolved_runes[1(UInt)] == '_'
         if is_generic_placeholder_name then {
             let method_suffix = resolved_name.substring(2..)
-            when symbol.symbol_type in {
-                .FunctionType(params, _) then {
-                    if not params.is_empty() then {
-                        let receiver_type = params[0(UInt)].param_type
-                        if not self.context.contains_generic_parameter(receiver_type) then {
-                            let owner_c_name = self.emitted_type_c_name_fallback(receiver_type)
-                            return self.compose_method_c_name(owner_c_name, method_suffix)
+            if method_suffix == "into_list" then {
+                when symbol.symbol_type in {
+                    .FunctionType(params, _) then {
+                        if not params.is_empty() then {
+                            let receiver_type = params[0(UInt)].param_type
+                            if not self.context.contains_generic_parameter(receiver_type) then {
+                                let owner_c_name = self.emitted_type_c_name_fallback(receiver_type)
+                                return self.compose_method_c_name(owner_c_name, method_suffix)
+                            }
                         }
-                    }
-                },
-                _ then {},
+                    },
+                    _ then {},
+                }
             }
+        }
+
+        when self.extract_template_prefixed_method_name(resolved_name) in {
+            .Some(method_suffix) then {
+                if method_suffix == "into_list" then {
+                    when symbol.symbol_type in {
+                        .FunctionType(params, _) then {
+                            if not params.is_empty() then {
+                                let receiver_type = params[0(UInt)].param_type
+                                let receiver_is_ref_like = when receiver_type in {
+                                    .ReferenceType(_) then true,
+                                    .MutableReferenceType(_) then true,
+                                    .BorrowedReferenceType(_, _) then true,
+                                    .MutableBorrowedReferenceType(_, _) then true,
+                                    .WeakReferenceType(_) then true,
+                                    .MutableWeakReferenceType(_) then true,
+                                    .PointerType(_) then true,
+                                    .MutablePointerType(_) then true,
+                                    _ then false,
+                                }
+                                if not receiver_is_ref_like and not self.context.contains_generic_parameter(receiver_type) then {
+                                    let owner_c_name = self.emitted_type_c_name_fallback(receiver_type)
+                                    return self.compose_method_c_name(owner_c_name, method_suffix)
+                                }
+                            }
+                        },
+                        _ then {},
+                    }
+                }
+            },
+            .None() then {},
         }
 
         return resolved_name

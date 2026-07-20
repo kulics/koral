@@ -1,4 +1,13 @@
+using std::time { .. }
+
+private type ReusedGivenMemberSignature(
+    method_def_id DefId,
+    params List[TypedParam],
+    return_type Type,
+)
+
 given TypeChecker {
+
     private function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
         let mut specs = List[FunctionParamSpec].new()
         for param in params then {
@@ -118,6 +127,29 @@ given TypeChecker {
     private make_method_symbol(self, method_name String, return_type Type) Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
         return Symbol(def_id, Type.FunctionType(List[ref FunctionParamEntry].new(), box(return_type)), SymbolKind.Function())
+    }
+
+    private reused_given_member_signature(self, method_symbol Symbol) Option[ReusedGivenMemberSignature] = {
+        let param_specs = self.context().get_param_specs(method_symbol.def_id) or else List[FunctionParamSpec].new()
+        return when self.context().get_function_type(method_symbol.def_id) in {
+            .Some(function_type) then when function_type in {
+                .FunctionType(param_entries, return_type_ref) then {
+                    if param_entries.count() <> param_specs.count() then {
+                        return Option[ReusedGivenMemberSignature].None()
+                    }
+                    let mut params = List[TypedParam].new()
+                    let mut idx UInt = 0
+                    for entry in param_entries then {
+                        let spec = param_specs[idx]
+                        params.push(TypedParam(spec.name, spec.mutable, entry.param_type, spec.named))
+                        idx += 1(UInt)
+                    }
+                    yield Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, return_type_ref.val))
+                },
+                _ then Option[ReusedGivenMemberSignature].None(),
+            },
+            .None() then Option[ReusedGivenMemberSignature].None(),
+        }
     }
 
     // Recover static receiver types from member chains like Time.DateTime.
@@ -528,8 +560,24 @@ given TypeChecker {
             let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
             let prev_scope = self.storage.current_scope
             self.storage.current_scope = member_type_scope
-            let typed_params = self.check_params(m.params)
-            let ret = self.resolve_type(m.return_type)
+            let can_reuse_registered_signature = conformance_trait_name is .None()
+                and type_params.is_empty()
+                and m.type_params.is_empty()
+            let reused_signature = if can_reuse_registered_signature then {
+                let type_key = self.extension_template_key(target_type)
+                yield when self.lookup_method_signature(type_key, m.name) in {
+                    .Some(method_symbol) then self.reused_given_member_signature(method_symbol),
+                    .None() then Option[ReusedGivenMemberSignature].None(),
+                }
+            } else Option[ReusedGivenMemberSignature].None()
+            let typed_params = when reused_signature in {
+                .Some(signature) then signature.params,
+                .None() then self.check_params(m.params),
+            }
+            let ret = when reused_signature in {
+                .Some(signature) then signature.return_type,
+                .None() then self.resolve_type(m.return_type),
+            }
             let typed_body = when m.body in {
                 .Some(b) then {
                     if self.skip_given_body_debug_enabled() then {
@@ -598,22 +646,30 @@ given TypeChecker {
                 let mut context = self.context()
                 context.set_symbol_info(generic_method_def_id, SymbolInfo(make_function_type(self.to_type_ref_list(generic_param_types), ret), SymbolKind.Function(), MethodKind.Normal(), false))
                 context.set_param_specs(generic_method_def_id, self.function_param_specs_from_typed_params(typed_params))
-                when typed_body in {
-                    .Some(body_ref) then context.set_concrete_given_member_body(generic_method_def_id, body_ref),
+                when m.body in {
+                    .Some(raw_body) then context.set_concrete_given_member_source(
+                        generic_method_def_id,
+                        ConcreteExprSource(raw_body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
+                    ),
                     .None() then {},
                 }
                 self.register_extension_method_template(
                     self.extension_template_key(target_type),
                     type_params,
+                    when conformance_trait_name in {
+                        .Some(_) then Option[Type].Some(target_type),
+                        .None() then Option[Type].None(),
+                    },
+                    List[Type].new(),
                     method_name,
                     m.access,
                     m.type_params,
                     m.params,
                     m.return_type,
                     conformance_trait_name,
-                    template_body.ref,
+                    template_body,
                     Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
-                    ret,
+                    Option[Type].Some(ret),
                 )
                 out.push(box(TypedGivenMember(
                     generic_method_def_id,
@@ -625,22 +681,30 @@ given TypeChecker {
                 continue
             }
             let mut context = self.context()
-            let method_def_id = if conformance_trait_name is .None() and m.type_params.is_empty() then {
+            let method_def_id = when reused_signature in {
+                .Some(signature) then signature.method_def_id,
+                .None() then if conformance_trait_name is .None() and m.type_params.is_empty() then {
                 let type_key = self.extension_template_key(target_type)
                 yield when self.lookup_method_signature(type_key, method_name) in {
                     .Some(existing_symbol) then existing_symbol.def_id,
                     .None() then context.allocate(method_name, DefKind.Function()),
                 }
-            } else context.allocate(method_name, DefKind.Function())
-            // Register method signature so mono can look it up by DefId
-            let mut param_types = List[Type].new()
-            for p in typed_params then {
-                param_types.push(p.param_type)
+                } else context.allocate(method_name, DefKind.Function()),
             }
-            let stable_stored_ret = ret
-            let method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret)
-            context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false))
-            context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params))
+            // Register method signature so mono can look it up by DefId
+            when reused_signature in {
+                .Some(_) then {},
+                .None() then {
+                    let mut param_types = List[Type].new()
+                    for p in typed_params then {
+                        param_types.push(p.param_type)
+                    }
+                    let stable_stored_ret = ret
+                    let method_type = make_function_type(self.to_type_ref_list(param_types), stable_stored_ret)
+                    context.set_symbol_info(method_def_id, SymbolInfo(method_type, SymbolKind.Function(), MethodKind.Normal(), false))
+                    context.set_param_specs(method_def_id, self.function_param_specs_from_typed_params(typed_params))
+                },
+            }
             let skip_concrete_given_program_body_retention = self.skip_concrete_given_program_body_retention_debug_enabled()
             let should_store_concrete_given_body = retain_checked_template_bodies
                 and not should_retain_template_body
@@ -648,14 +712,13 @@ given TypeChecker {
             when typed_body in {
                 .Some(body_ref) then {
                     if should_store_concrete_given_body then {
+                        context.set_concrete_given_member_body(method_def_id, body_ref)
                         when m.body in {
-                            .Some(source_body) then {
-                                context.set_concrete_given_member_source(
-                                    method_def_id,
-                                    ConcreteExprSource(source_body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
-                                )
-                            },
-                            .None() then context.set_concrete_given_member_body(method_def_id, body_ref),
+                            .Some(raw_body) then context.set_concrete_given_member_source(
+                                method_def_id,
+                                ConcreteExprSource(raw_body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
+                            ),
+                            .None() then {},
                         }
                     }
                 },

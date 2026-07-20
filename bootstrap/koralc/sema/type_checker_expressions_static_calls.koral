@@ -892,10 +892,23 @@ given TypeChecker {
         if not self.validate_function_expression_argument_count(typed_callee_ref, call_args.ref) then {
             return make_typed_expr(TypedExprKind.Call(typed_callee_ref, List[ref TypedExpr].new()), Type.Unknown())
         }
-        let callee_param_specs = self.resolve_call_param_specs(callee, typed_callee_ref, scope)
-        // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型
-        let callee_param_types = self.resolve_call_param_types(typed_callee_ref)
-        let expected_constructor_param_types = self.resolve_expected_constructor_param_types(callee, expected, scope)
+        let call_has_named_args = if call_args.is_empty() then false else {
+            let mut has_named = false
+            for arg in call_args then {
+                when arg in {
+                    .NamedArgument(_, _, _) then {
+                        has_named = true
+                        break
+                    },
+                    _ then {},
+                }
+            }
+            yield has_named
+        }
+        let callee_param_specs = when callee in {
+            .Identifier(_, _) then self.resolve_call_param_specs(callee, typed_callee_ref, scope),
+            _ then List[FunctionParamSpec].new(),
+        }
         let generic_function_template_opt = self.generic_function_template_for_callee(typed_callee_ref)
         let mut generic_function_bindings = Dict[String, Type].new()
         let mut has_generic_function_bindings = false
@@ -912,6 +925,8 @@ given TypeChecker {
         // Cache for resolved method signature to avoid triple resolution
         let mut cached_method_sig = Option[Symbol].None()
         let mut cached_adapted_base_type = Type.Unknown()
+        let mut cached_adapted_base_expr = Option[TypedExpr].None()
+        let mut cached_materialized_receiver_binding = Option[ref Symbol].None()
         when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
                 let method_val = method.val
@@ -921,6 +936,8 @@ given TypeChecker {
                 let adapted = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
                 let receiver_type = adapted.expr_type
                 cached_adapted_base_type = receiver_type
+                cached_adapted_base_expr = Option[TypedExpr].Some(adapted)
+                cached_materialized_receiver_binding = prepared_base.second
                 let bound_bindings = self.resolve_signature_method_type_bindings(receiver_type, method_val, List[Type].new())
                 let bound_method = self.bind_method_symbol_type(method_val, bound_bindings)
                 cached_method_sig = Option[Symbol].Some(bound_method)
@@ -943,9 +960,14 @@ given TypeChecker {
                     let receiver_expr = parts.first
                     let expected_self_type = self.resolve_method_self_type(receiver_expr.expr_type, method_name)
                     let prepared_base = self.prepare_call_receiver(receiver_expr, expected_self_type)
-                    let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
+                    let adapted = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                    let receiver_type = adapted.expr_type
                     when self.resolve_source_method_signature(receiver_type, method_name) in {
                         .Some(method) then {
+                            cached_adapted_base_type = receiver_type
+                            cached_adapted_base_expr = Option[TypedExpr].Some(adapted)
+                            cached_materialized_receiver_binding = prepared_base.second
+                            cached_method_sig = Option[Symbol].Some(method)
                             method_param_types_for_inference = List[Type].new()
                             let param_types = when method.symbol_type in {
                                 .FunctionType(params, _) then param_entry_types(params),
@@ -973,9 +995,14 @@ given TypeChecker {
                     let typed_base = self.check_child_expr_ref(base_expr, .None(), scope)
                     let expected_self_type = self.resolve_method_self_type(typed_base.expr_type, method_name)
                     let prepared_base = self.prepare_call_receiver(typed_base, expected_self_type)
-                    let receiver_type = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name).expr_type
+                    let adapted = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                    let receiver_type = adapted.expr_type
                     when self.resolve_source_method_signature(receiver_type, method_name) in {
                         .Some(method) then {
+                            cached_adapted_base_type = receiver_type
+                            cached_adapted_base_expr = Option[TypedExpr].Some(adapted)
+                            cached_materialized_receiver_binding = prepared_base.second
+                            cached_method_sig = Option[Symbol].Some(method)
                             method_param_types_for_inference = List[Type].new()
                             let param_types = when method.symbol_type in {
                                 .FunctionType(params, _) then param_entry_types(params),
@@ -994,6 +1021,21 @@ given TypeChecker {
                 },
                 _ then {},
             }
+        }
+        // 从 callee 签名中提取参数类型，用于向调用参数传播期望类型。
+        // 当 generic / method bindings 已经决定参数期望时，避免再做一轮通用 metadata 解析。
+        let callee_param_types = if call_args.is_empty() or has_generic_function_bindings or has_method_call_bindings
+            then List[Type].new()
+            else self.resolve_call_param_types(typed_callee_ref)
+        let expected_constructor_param_types = if call_args.is_empty() or has_generic_function_bindings or has_method_call_bindings then List[Type].new() else when typed_callee.expr_kind in {
+            .Variable(sym) then when sym.kind in {
+                .TypeSymbol() then self.resolve_expected_constructor_param_types(callee, expected, scope),
+                _ then List[Type].new(),
+            },
+            .GenericInstantiation(_, _) then self.resolve_expected_constructor_param_types(callee, expected, scope),
+            .StaticMethodCall(_, _, _, _, _, _) then self.resolve_expected_constructor_param_types(callee, expected, scope),
+            .MemberPath(_, _) then self.resolve_expected_constructor_param_types(callee, expected, scope),
+            _ then List[Type].new(),
         }
         let mut typed_args = List[ref TypedExpr].new()
         let mut arg_idx UInt = 0
@@ -1042,36 +1084,37 @@ given TypeChecker {
                     yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
                 },
                 .Call(nested_callee, nested_args, _) then self.check_call_expr_ref(nested_callee, nested_args, param_expected, scope),
-                .RangeExpr(op, left, right, _) then {
-                    yield self.check_range_expr_ref(op, left, right, param_expected, scope)
-                },
+                .RangeExpr(op, left, right, _) then self.check_range_expr_ref(op, left, right, param_expected, scope),
+                .MemberPath(_, _, _) then self.check_expr_scoped_ref(a, param_expected, scope),
+                .StaticMethodCall(_, _, _, _, _) then self.check_expr_scoped_ref(a, param_expected, scope),
+                .IntegerLiteral(_, _) or .FloatLiteral(_, _) or .BoolLiteral(_, _) or .StringLiteral(_, _) or .RuneLiteral(_, _) then self.check_expr_scoped_ref(a, param_expected, scope),
                 _ then self.check_expr_scoped_ref(a, param_expected, scope),
             }
-            let expected_requires_ref_like = when param_expected in {
-                .Some(expected_t) then when expected_t in {
-                    .ReferenceType(_) then true,
-                    .MutableReferenceType(_) then true,
-                    .BorrowedReferenceType(_, _) then true,
-                    .MutableBorrowedReferenceType(_, _) then true,
-                    _ then false,
+            let adjusted_arg = when param_expected in {
+                .None() then typed_arg,
+                .Some(expected_t) then {
+                    let expected_requires_ref_like = when expected_t in {
+                        .ReferenceType(_) then true,
+                        .MutableReferenceType(_) then true,
+                        .BorrowedReferenceType(_, _) then true,
+                        .MutableBorrowedReferenceType(_, _) then true,
+                        _ then false,
+                    }
+                    let actual_is_ref_like = when typed_arg.expr_type in {
+                        .ReferenceType(_) then true,
+                        .MutableReferenceType(_) then true,
+                        .BorrowedReferenceType(_, _) then true,
+                        .MutableBorrowedReferenceType(_, _) then true,
+                        .WeakReferenceType(_) then true,
+                        .MutableWeakReferenceType(_) then true,
+                        .PointerType(_) then true,
+                        .MutablePointerType(_) then true,
+                        _ then false,
+                    }
+                    yield if self.same_expr_type(typed_arg.expr_type, expected_t) then typed_arg
+                    else if expected_requires_ref_like and not actual_is_ref_like then typed_arg
+                    else self.adapt_expr_to_expected_type_at(typed_arg, Option[Type].Some(expected_t), Option[SourceSpan].Some(expr_span(a)))
                 },
-                .None() then false,
-            }
-            let actual_is_ref_like = when typed_arg.expr_type in {
-                .ReferenceType(_) then true,
-                .MutableReferenceType(_) then true,
-                .BorrowedReferenceType(_, _) then true,
-                .MutableBorrowedReferenceType(_, _) then true,
-                .WeakReferenceType(_) then true,
-                .MutableWeakReferenceType(_) then true,
-                .PointerType(_) then true,
-                .MutablePointerType(_) then true,
-                _ then false,
-            }
-            let adjusted_arg = if expected_requires_ref_like and not actual_is_ref_like then {
-                yield typed_arg
-            } else {
-                yield self.adapt_expr_to_expected_type_at(typed_arg, param_expected, Option[SourceSpan].Some(expr_span(a)))
             }
             if param_expected is .Some(expected_t) then {
                 if not self.same_expr_type(adjusted_arg.expr_type, expected_t)
@@ -1165,16 +1208,25 @@ given TypeChecker {
                 .Some(parts) then {
                     let method_name = parts.second
                     let receiver_expr = parts.first
-                    let expected_self_type = self.resolve_method_self_type(receiver_expr.expr_type, method_name)
-                    let prepared_base = self.prepare_call_receiver(receiver_expr, expected_self_type)
-                    let typed_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
-                    yield when self.resolve_source_method_signature(typed_base.expr_type, method_name) in {
+                    yield when cached_method_sig in {
                         .Some(sig) then {
-                            let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, List[Type].new(), expected)
-                            let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
+                            let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(cached_adapted_base_type, sig, typed_args, List[Type].new(), expected)
+                            let inferred_return_type = self.resolve_method_return_type_for_call(cached_adapted_base_type, sig, typed_args, inferred_method_type_args)
                             yield Option[Pair[Type, List[Type]]].Some(Pair[Type, List[Type]](inferred_return_type, inferred_method_type_args))
                         },
-                        .None() then Option[Pair[Type, List[Type]]].None(),
+                        .None() then {
+                            let expected_self_type = self.resolve_method_self_type(receiver_expr.expr_type, method_name)
+                            let prepared_base = self.prepare_call_receiver(receiver_expr, expected_self_type)
+                            let typed_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                            yield when self.resolve_source_method_signature(typed_base.expr_type, method_name) in {
+                                .Some(sig) then {
+                                    let inferred_method_type_args = self.resolve_method_type_args_for_call_with_expected(typed_base.expr_type, sig, typed_args, List[Type].new(), expected)
+                                    let inferred_return_type = self.resolve_method_return_type_for_call(typed_base.expr_type, sig, typed_args, inferred_method_type_args)
+                                    yield Option[Pair[Type, List[Type]]].Some(Pair[Type, List[Type]](inferred_return_type, inferred_method_type_args))
+                                },
+                                .None() then Option[Pair[Type, List[Type]]].None(),
+                            }
+                        },
                     }
                 },
                 .None() then Option[Pair[Type, List[Type]]].None(),
@@ -1337,8 +1389,16 @@ given TypeChecker {
                     .Some(_) then Option[Type].None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let prepared_base = self.prepare_call_receiver(base, expected_self_type)
-                let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                let mut prepared_base_binding = cached_materialized_receiver_binding
+                let adapted_base = when cached_adapted_base_expr in {
+                    .Some(cached) then cached,
+                    .None() then {
+                        let prepared_base = self.prepare_call_receiver(base, expected_self_type)
+                        prepared_base_binding = prepared_base.second
+                        cached_materialized_receiver_binding = prepared_base.second
+                        yield self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                    },
+                }
                 let inferred_method_type_args = if not callee_method_type_args.is_empty()
                     then callee_method_type_args
                     else inferred_method_type_args_for_call
@@ -1439,7 +1499,7 @@ given TypeChecker {
                     }
                 }
                 yield when structured_call in {
-                    .Some(call_expr) then Option[TypedExpr].Some(self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)),
+                    .Some(call_expr) then Option[TypedExpr].Some(self.wrap_receiver_materialized_call(prepared_base_binding, base, call_expr)),
                     .None() then Option[TypedExpr].None(),
                 }
             },
@@ -1450,15 +1510,26 @@ given TypeChecker {
                 let base_type = base.expr_type
                 let normalized_base_type = base_type
                 let trait_constraint_opt = self.find_trait_constraint_for_method(base_type, method_name)
-                let direct_method_signature_opt = self.resolve_source_method_signature(base_type, method_name)
+                let direct_method_signature_opt = when cached_method_sig in {
+                    .Some(sig) then Option[Symbol].Some(sig),
+                    .None() then self.resolve_source_method_signature(base_type, method_name),
+                }
                 let trait_dispatch_requires_object = self.dispatches_via_trait_object_for_static_call(normalized_base_type)
                     or normalized_base_type is .GenericParameter(_)
                 let expected_self_type = when trait_constraint_opt in {
                     .Some(_) then Option[Type].None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let prepared_base = self.prepare_call_receiver(base, expected_self_type)
-                let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                let mut prepared_base_binding = cached_materialized_receiver_binding
+                let adapted_base = when cached_adapted_base_expr in {
+                    .Some(cached) then cached,
+                    .None() then {
+                        let prepared_base = self.prepare_call_receiver(base, expected_self_type)
+                        prepared_base_binding = prepared_base.second
+                        cached_materialized_receiver_binding = prepared_base.second
+                        yield self.adapt_receiver_to_expected_self_type_for_method(prepared_base.first, expected_self_type, method_name)
+                    },
+                }
                 let inferred_method_type_args = inferred_method_type_args_for_call
                 let method_ret_type = when ret_type in {
                     .Unknown() then when direct_method_signature_opt in {
@@ -1557,7 +1628,7 @@ given TypeChecker {
                     }
                 }
                 yield when structured_call in {
-                    .Some(call_expr) then Option[TypedExpr].Some(self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)),
+                    .Some(call_expr) then Option[TypedExpr].Some(self.wrap_receiver_materialized_call(prepared_base_binding, base, call_expr)),
                     .None() then Option[TypedExpr].None(),
                 }
                 },

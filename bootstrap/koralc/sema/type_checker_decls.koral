@@ -111,6 +111,7 @@ given TypeChecker {
                     let fn_sym = box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false))
                     let stable_body = if retain_checked_template_bodies then {
                         let mut context = self.context()
+                        context.set_concrete_function_body(fn_sym.def_id, box(typed_body))
                         context.set_concrete_function_source(
                             fn_sym.def_id,
                             ConcreteExprSource(body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
@@ -515,6 +516,14 @@ given TypeChecker {
                     }
                     if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
+                    }
+                    if not self.contains_generic_parameter(resolved_target) then {
+                        self.register_trait_tool_templates_for_concrete_type(
+                            resolved_target,
+                            type_params,
+                            trait_name,
+                            typed_members.ref,
+                        )
                     }
                     if not self.contains_generic_parameter(resolved_target) then {
                         self.register_conformance_method_signatures_for_concrete_type(resolved_target, typed_members.ref)

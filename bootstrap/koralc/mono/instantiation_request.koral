@@ -39,7 +39,7 @@ public type InstantiationKey {
     StructType(template_def_id DefId, args List[ref Type]),
     EnumType(template_def_id DefId, args List[ref Type]),
     Function(template_def_id DefId, args List[ref Type]),
-    ExtensionMethod(template_name String, method_name String, type_args List[ref Type], method_type_args List[ref Type]),
+    ExtensionMethod(template_name String, base_type Type, method_name String, type_args List[ref Type], method_type_args List[ref Type]),
     TraitMethod(base_type Type, method_name String, method_type_args List[ref Type]),
 }
 
@@ -71,8 +71,8 @@ given InstantiationKey {
                 "enum:\(template_def_id.id):\(type_parts_to_string(args))",
             .Function(template_def_id, args) then
                 "func:\(template_def_id.id):\(type_parts_to_string(args))",
-            .ExtensionMethod(template_name, method_name, type_args, method_type_args) then
-                "ext:\(template_name):\(method_name):\(type_parts_to_string(type_args)):\(type_parts_to_string(method_type_args))",
+            .ExtensionMethod(template_name, base_type, method_name, type_args, method_type_args) then
+                "ext:\(template_name):\(stable_type_key(base_type)):\(method_name):\(type_parts_to_string(type_args)):\(type_parts_to_string(method_type_args))",
             .TraitMethod(base_type, method_name, method_type_args) then
                 "trait:\(stable_type_key(base_type)):\(method_name):\(type_parts_to_string(method_type_args))",
         }
@@ -84,7 +84,7 @@ given InstantiationKey {
             .StructType(_, _) then 0,
             .EnumType(_, _) then 1,
             .Function(_, _) then 2,
-            .ExtensionMethod(_, _, _, _) then 3,
+            .ExtensionMethod(_, _, _, _, _) then 3,
             .TraitMethod(_, _, _) then 4,
         }
     }
@@ -105,9 +105,10 @@ given InstantiationKey as Eq {
             .Function(other_template_def_id, other_args) then template_def_id.id == other_template_def_id.id and args == other_args,
             _ then false,
         },
-        .ExtensionMethod(template_name, method_name, type_args, method_type_args) then when other in {
-            .ExtensionMethod(other_template_name, other_method_name, other_type_args, other_method_type_args) then
+        .ExtensionMethod(template_name, base_type, method_name, type_args, method_type_args) then when other in {
+            .ExtensionMethod(other_template_name, other_base_type, other_method_name, other_type_args, other_method_type_args) then
                 template_name == other_template_name
+                and base_type == other_base_type
                 and method_name == other_method_name
                 and type_args == other_type_args
                 and method_type_args == other_method_type_args,
@@ -147,8 +148,8 @@ given InstantiationKey as Hash {
             }
             yield hash
         },
-        .ExtensionMethod(template_name, method_name, type_args, method_type_args) then {
-            let mut hash = 4(UInt).combine_hash(template_name.hash()).combine_hash(method_name.hash())
+        .ExtensionMethod(template_name, base_type, method_name, type_args, method_type_args) then {
+            let mut hash = 4(UInt).combine_hash(template_name.hash()).combine_hash(base_type.hash()).combine_hash(method_name.hash())
             for arg in type_args then {
                 hash = hash.combine_hash(arg.val.hash())
             }
@@ -185,9 +186,9 @@ given InstantiationRequest {
                 yield InstantiationKey.Function(template.def_id, args)
             },
             .ExtensionMethod(template_name, base_type, template, type_args, method_type_args) then {
-                let _ = base_type
                 yield InstantiationKey.ExtensionMethod(
                     template_name,
+                    base_type,
                     template.val.method.name,
                     type_args,
                     method_type_args,
