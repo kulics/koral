@@ -115,7 +115,6 @@ extension Parser {
     var left = try parseOrElseExpression()
 
     while currentToken === .orKeyword {
-      if isLineContinuationBlocked() { break }
       if lexer.peekNextToken() === .returnKeyword {
         let startSpan = currentSpan
         try match(.orKeyword)
@@ -135,7 +134,6 @@ extension Parser {
     var left = try parseOrExpression()
 
     while currentToken === .orKeyword {
-      if isLineContinuationBlocked() { break }
       // Peek: if next token is `else`, this is `or else` syntax
       if lexer.peekNextToken() === .elseKeyword {
         let startSpan = currentSpan
@@ -154,7 +152,6 @@ extension Parser {
     var left = try parseAndThenExpression()
 
     while currentToken === .orKeyword {
-      if isLineContinuationBlocked() { break }
       // If next token is `else` / `return`, don't consume — handled by higher layers.
       if lexer.peekNextToken() === .elseKeyword || lexer.peekNextToken() === .returnKeyword {
         break
@@ -172,7 +169,6 @@ extension Parser {
     var left = try parseAndExpression()
 
     while currentToken === .andKeyword {
-      if isLineContinuationBlocked() { break }
       // Peek: if next token is `then`, this is `and then` syntax
       if lexer.peekNextToken() === .thenKeyword {
         let startSpan = currentSpan
@@ -191,7 +187,6 @@ extension Parser {
     var left = try parseLogicalNotExpression()
 
     while currentToken === .andKeyword {
-      if isLineContinuationBlocked() { break }
       // If next token is `then`, don't consume — let parseAndThenExpression handle it
       if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
@@ -242,7 +237,6 @@ extension Parser {
   private func parseBitwiseOrExpression() throws -> ExpressionNode {
     var left = try parseBitwiseXorExpression()
     while currentToken === .pipe {
-      if isLineContinuationBlocked() { break }
       try match(.pipe)
       let right = try parseBitwiseXorExpression()
       left = .bitwiseExpression(left: left, operator: .or, right: right)
@@ -253,7 +247,6 @@ extension Parser {
   private func parseBitwiseXorExpression() throws -> ExpressionNode {
     var left = try parseBitwiseAndExpression()
     while currentToken === .caret {
-      if isLineContinuationBlocked() { break }
       try match(.caret)
       let right = try parseBitwiseAndExpression()
       left = .bitwiseExpression(left: left, operator: .xor, right: right)
@@ -264,7 +257,6 @@ extension Parser {
   private func parseBitwiseAndExpression() throws -> ExpressionNode {
     var left = try parseRangeExpression()
     while currentToken === .ampersand {
-      if isLineContinuationBlocked() { break }
       try match(.ampersand)
       let right = try parseRangeExpression()
       left = .bitwiseExpression(left: left, operator: .and, right: right)
@@ -294,8 +286,6 @@ extension Parser {
     let left = try parseComparisonExpression()
     
     // Handle infix and postfix range operators
-    if isLineContinuationBlocked() { return left }
-    
     switch currentToken {
     case .range:  // ..
       try match(.range)
@@ -349,7 +339,6 @@ extension Parser {
     while currentToken === .equalEqual || currentToken === .notEqual || currentToken === .greater
       || currentToken === .less || currentToken === .greaterEqual || currentToken === .lessEqual
     {
-      if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
       let right = try parseShiftExpression()
@@ -365,7 +354,6 @@ extension Parser {
   private func parseShiftExpression() throws -> ExpressionNode {
     var left = try parseAdditiveExpression()
     while currentToken === .leftShift || currentToken === .rightShift {
-      if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
       let right = try parseAdditiveExpression()
@@ -382,7 +370,6 @@ extension Parser {
     var left = try parseMultiplicativeExpression()
 
     while currentToken === .plus || currentToken === .minus {
-      if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
       let right = try parseMultiplicativeExpression()
@@ -400,7 +387,6 @@ extension Parser {
     var left = try parsePrefixExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .remainder {
-      if isLineContinuationBlocked() { break }
       let op = currentToken
       try match(op)
       let right = try parsePrefixExpression()
@@ -457,10 +443,6 @@ extension Parser {
   private func parsePostfixExpression() throws -> ExpressionNode {
     var expr = try term()
     while true {
-      // If a newline was crossed and it included blank lines/comments, do not allow continuation.
-      if isLineContinuationBlocked() {
-        break
-      }
       // Check for automatic statement termination before parsing postfix operators
       // If there's a newline before the current token and it's not a continuation token,
       // we should stop parsing postfix expressions

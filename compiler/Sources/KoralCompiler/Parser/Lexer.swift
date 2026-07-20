@@ -430,7 +430,6 @@ public class Lexer {
   
   // Newline tracking for automatic statement termination
   private var _hasNewlineBeforeCurrentToken: Bool = false
-  private var _hasBlankLineOrCommentBeforeCurrentToken: Bool = false
   
   // Column tracking for unreadChar - stores the column before newline
   private var _previousLineColumn: Int = 1
@@ -442,7 +441,6 @@ public class Lexer {
     fileprivate let tokenStartLine: Int
     fileprivate let tokenStartColumn: Int
     fileprivate let hasNewlineBeforeCurrentToken: Bool
-    fileprivate let hasBlankLineOrCommentBeforeCurrentToken: Bool
     fileprivate let previousLineColumn: Int
   }
 
@@ -475,11 +473,6 @@ public class Lexer {
   public var newlineBeforeCurrent: Bool {
     self._hasNewlineBeforeCurrentToken
   }
-  
-  // Whether there was a blank line or comment before the current token
-  public var blankLineOrCommentBeforeCurrent: Bool {
-    self._hasBlankLineOrCommentBeforeCurrentToken
-  }
 
   public init(input: String) {
     self.input = input
@@ -494,7 +487,6 @@ public class Lexer {
       tokenStartLine: _tokenStartLine,
       tokenStartColumn: _tokenStartColumn,
       hasNewlineBeforeCurrentToken: _hasNewlineBeforeCurrentToken,
-      hasBlankLineOrCommentBeforeCurrentToken: _hasBlankLineOrCommentBeforeCurrentToken,
       previousLineColumn: _previousLineColumn
     )
   }
@@ -506,7 +498,6 @@ public class Lexer {
     _tokenStartLine = state.tokenStartLine
     _tokenStartColumn = state.tokenStartColumn
     _hasNewlineBeforeCurrentToken = state.hasNewlineBeforeCurrentToken
-    _hasBlankLineOrCommentBeforeCurrentToken = state.hasBlankLineOrCommentBeforeCurrentToken
     _previousLineColumn = state.previousLineColumn
   }
 
@@ -551,46 +542,15 @@ public class Lexer {
     return char
   }
 
-  // Skip whitespace characters and track newlines
-  // Returns (sawNewline, sawBlankLineOrComment)
-  private func skipWhitespaceOnly() -> (sawNewline: Bool, sawBlankLineOrComment: Bool) {
+  // Skip whitespace and comments, tracking whether any newline was crossed.
+  private func skipWhitespaceAndComments() throws -> Bool {
     var sawNewline = false
-    var sawBlankLineOrComment = false
-    var consecutiveNewlines = 0
-    
-    while let char = getNextChar() {
-      if char.isNewline {
-        sawNewline = true
-        consecutiveNewlines += 1
-        if consecutiveNewlines > 1 {
-          sawBlankLineOrComment = true  // Empty line detected
-        }
-      } else if char.isWhitespace {
-        // Regular whitespace, don't reset newline count
-        continue
-      } else {
-        unreadChar(char)
-        break
-      }
-    }
-    return (sawNewline, sawBlankLineOrComment)
-  }
-  
-  // Skip whitespace and comments, tracking newlines and blank lines/comments
-  private func skipWhitespaceAndComments() throws -> (sawNewline: Bool, sawBlankLineOrComment: Bool) {
-    var sawNewline = false
-    var sawBlankLineOrComment = false
-    var consecutiveNewlines = 0
     
     while true {
       // First skip any whitespace
       while let char = getNextChar() {
         if char.isNewline {
           sawNewline = true
-          consecutiveNewlines += 1
-          if consecutiveNewlines > 1 {
-            sawBlankLineOrComment = true
-          }
         } else if char.isWhitespace {
           continue
         } else {
@@ -607,14 +567,10 @@ public class Lexer {
           if nextChar == "/" {
             // Line comment
             skipLineComment()
-            sawBlankLineOrComment = true
-            consecutiveNewlines = 0
             continue
           } else if nextChar == "*" {
             // Block comment
             try skipBlockComment()
-            sawBlankLineOrComment = true
-            consecutiveNewlines = 0
             continue
           }
           unreadChar(nextChar)
@@ -627,7 +583,7 @@ public class Lexer {
       }
     }
     
-    return (sawNewline, sawBlankLineOrComment)
+    return sawNewline
   }
 
   // Skip line comments
@@ -1394,10 +1350,8 @@ public class Lexer {
 
   // Get next token
   public func getNextToken() throws -> Token {
-    // Track newlines and blank lines/comments before this token
-    let (sawNewline, sawBlankLineOrComment) = try skipWhitespaceAndComments()
-    _hasNewlineBeforeCurrentToken = sawNewline
-    _hasBlankLineOrCommentBeforeCurrentToken = sawBlankLineOrComment
+    // Track whether any newline was crossed before this token.
+    _hasNewlineBeforeCurrentToken = try skipWhitespaceAndComments()
     
     // Record token start position before reading the first character
     markTokenStart()
@@ -1430,16 +1384,14 @@ public class Lexer {
         if nextChar == "/" {
           skipLineComment()
           // Re-track newlines after comment
-          let (sawNewline, _) = try skipWhitespaceAndComments()
+          let sawNewline = try skipWhitespaceAndComments()
           _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || sawNewline
-          _hasBlankLineOrCommentBeforeCurrentToken = true
           return try getNextToken()
         } else if nextChar == "*" {
           try skipBlockComment()
           // Re-track newlines after comment
-          let (sawNewline, _) = try skipWhitespaceAndComments()
+          let sawNewline = try skipWhitespaceAndComments()
           _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || sawNewline
-          _hasBlankLineOrCommentBeforeCurrentToken = true
           return try getNextToken()
         } else if nextChar == "=" {
           return .divideEqual
@@ -1528,7 +1480,6 @@ public class Lexer {
             }
             unreadChar(nextNextChar)
           }
-          unreadChar(nextChar)
         }
         unreadChar(nextChar)
       }

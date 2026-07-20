@@ -72,7 +72,7 @@ Semicolon insertion follows these rules:
 - A statement may end with an explicit semicolon `;`.
 - A newline may terminate a statement when the parser is not in a continuation context.
 - Newlines inside `()`, `[]`, and `{}` do not terminate the surrounding statement.
-- Blank lines and comments break continuation.
+- Blank lines and comments do not break continuation on their own; only the next token decides whether parsing continues.
 
 ```koral
 let a = 0;

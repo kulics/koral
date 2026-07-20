@@ -34,7 +34,6 @@ public class Parser {
   /// Returns true if:
   /// 1. Current token is a semicolon
   /// 2. There was a newline before current token AND current token is not a continuation token
-  ///    (unless there was a blank line or comment, which blocks continuation)
   /// 3. Current token is EOF or right brace (end of block)
   func shouldTerminateStatement() -> Bool {
     // Explicit termination
@@ -47,11 +46,6 @@ public class Parser {
     }
     // Newline-based termination
     if lexer.newlineBeforeCurrent {
-      // If there was a blank line or comment, always terminate (no continuation allowed)
-      if lexer.blankLineOrCommentBeforeCurrent {
-        return true
-      }
-      // Otherwise, check if current token is a continuation token
       if !currentToken.isContinuationToken {
         return true
       }
@@ -65,12 +59,6 @@ public class Parser {
     if currentToken === .semicolon {
       try match(.semicolon)
     }
-  }
-
-  /// True if a newline before the current token is *blocked* from continuing
-  /// the previous expression/statement due to intervening blank lines or comments.
-  func isLineContinuationBlocked() -> Bool {
-    lexer.newlineBeforeCurrent && lexer.blankLineOrCommentBeforeCurrent
   }
 
   // Parse program
