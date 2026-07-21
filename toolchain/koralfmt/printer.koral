@@ -630,11 +630,6 @@ given Printer {
             self.print_expr(expr.val)
             if semi is .Some(s) then { self.write_token(s) }
         },
-        .Yield(kw, value) then {
-            self.write_token(kw)
-            self.write_space()
-            self.print_expr(value.val)
-        },
         .Defer(kw, value) then {
             self.write_token(kw)
             self.write_space()
@@ -647,7 +642,13 @@ given Printer {
                 self.print_expr(v.val)
             }
         },
-        .Break(kw) then self.write_token(kw),
+        .Break(kw, value) then {
+            self.write_token(kw)
+            if value is .Some(v) then {
+                self.write_space()
+                self.print_expr(v.val)
+            }
+        },
         .Continue(kw) then self.write_token(kw),
     }
 
@@ -759,9 +760,9 @@ given Printer {
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
-                yield if params.count() > 0 then {
+                break if params.count() > 0 then {
                     let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
-                    yield (self.indent * 4) + head_len > 90
+                    break (self.indent * 4) + head_len > 90
                 } else false
             } else false
 
@@ -831,9 +832,9 @@ given Printer {
     ) Void = {
         let wrap_params =
             if lp is .Some(_) then {
-                yield if params.count() > 0 then {
+                break if params.count() > 0 then {
                     let head_len = self.estimate_head_length(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret)
-                    yield (self.indent * 4) + head_len > 90
+                    break (self.indent * 4) + head_len > 90
                 } else false
             } else false
 
@@ -936,7 +937,7 @@ given Printer {
                 let wrap_fields =
                     if fields.count() > 0 then {
                         let decl_len = self.estimate_struct_decl_length(vis, mods, kw, gp, name, fields)
-                        yield (self.indent * 4) + decl_len > 90
+                        break (self.indent * 4) + decl_len > 90
                     } else false
 
                 self.write_token(lp)
@@ -1001,11 +1002,11 @@ given Printer {
                 .BlankLine() then {
                     let prev_is_comment =
                         if i > 0 then {
-                            yield when cases[i - 1] in { .Comment(_) then true, _ then false }
+                            break when cases[i - 1] in { .Comment(_) then true, _ then false }
                         } else false
                     let next_is_code =
                         if i + 1 < cases.count() then {
-                            yield when cases[i + 1] in { .Decl(_) or .Stmt(_) then true, _ then false }
+                            break when cases[i + 1] in { .Decl(_) or .Stmt(_) then true, _ then false }
                         } else false
                     if prev_is_comment and next_is_code then {
                         i += 1
@@ -1359,7 +1360,7 @@ given Printer {
             for comment in comments then {
                 sum += comment.to_string().count() + 1
             }
-            yield sum
+            break sum
         },
         .BinaryOp(left, op, right) then
             self.estimate_expr_length(left.val) + 1 + op.to_string().count() + 1 + self.estimate_expr_length(right.val),
@@ -1375,7 +1376,7 @@ given Printer {
                 if i > 0 then { len += 2 }
                 len += self.estimate_expr_length(args[i].value.val)
             }
-            yield len
+            break len
         },
         .GenericInst(base, _, type_args, _) then {
             let mut len = self.estimate_expr_length(base.val) + 2
@@ -1383,7 +1384,7 @@ given Printer {
                 if i > 0 then { len += 2 }
                 len += self.estimate_type_length(type_args[i].inner.val)
             }
-            yield len
+            break len
         },
         .EnumVariant(name, lp, fields, _) then {
             let mut len = name.to_string().count()
@@ -1394,7 +1395,7 @@ given Printer {
                     len += fields[i].name.to_string().count() + 1 + self.estimate_type_length(fields[i].field_type.val)
                 }
             }
-            yield len
+            break len
         },
         _ then 10,
     }
@@ -1409,7 +1410,7 @@ given Printer {
                 if i > 0 then { len += 2 }
                 len += self.estimate_type_length(args[i].inner.val)
             }
-            yield len
+            break len
         },
         .Ref(inner, _) then self.estimate_type_length(inner.val) + 4,
         .Ptr(inner, _) then self.estimate_type_length(inner.val) + 4,

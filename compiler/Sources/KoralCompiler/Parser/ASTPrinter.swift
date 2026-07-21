@@ -270,8 +270,13 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .break:
+    case .break(let value, _):
       print("\(indent)Break")
+      if let value {
+        withIndent {
+          printExpression(value)
+        }
+      }
 
     case .continue:
       print("\(indent)Continue")
@@ -280,12 +285,6 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)Finally:")
       withIndent {
         printExpression(expression)
-      }
-
-    case .yield(let value, _):
-      print("\(indent)Yield:")
-      withIndent {
-        printExpression(value)
       }
     }
   }

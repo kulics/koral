@@ -75,21 +75,21 @@ given TypeChecker {
             .IntegerLiteral(value, _) then {
                 let tv = self.fresh_literal_type_variable(LiteralDefaultKind.Int(), unknown_span())
                 self.storage.constraint_solver.add_constraint(Constraint.DefaultInt(tv, unknown_span()))
-                yield make_typed_expr(TypedExprKind.IntegerLiteral(value), Type.TypeVar(box(tv)))
+                break make_typed_expr(TypedExprKind.IntegerLiteral(value), Type.TypeVar(box(tv)))
             },
             .FloatLiteral(value, _) then {
                 let tv = self.fresh_literal_type_variable(LiteralDefaultKind.Float(), unknown_span())
                 self.storage.constraint_solver.add_constraint(Constraint.DefaultFloat(tv, unknown_span()))
-                yield make_typed_expr(TypedExprKind.FloatLiteral(value), Type.TypeVar(box(tv)))
+                break make_typed_expr(TypedExprKind.FloatLiteral(value), Type.TypeVar(box(tv)))
             },
             .BoolLiteral(value, _) then {
-                yield make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType())
+                break make_typed_expr(TypedExprKind.BoolLiteral(value), Type.BoolType())
             },
             .StringLiteral(value, _) then {
-                yield make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type())
+                break make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type())
             },
             .RuneLiteral(value, _) then {
-                yield self.lower_rune_literal(value, Option[Type].None())
+                break self.lower_rune_literal(value, Option[Type].None())
             },
             _ then self.check_expr_scoped_ref(expr, .None(), scope),
         }
@@ -141,7 +141,7 @@ given TypeChecker {
             .LambdaExpr(params, return_type, body, _) then {
                 let bidi_result = self.bidi_check_lambda(params, return_type, body, expected, scope)
                 let lambda_type = self.build_lambda_function_type(box(bidi_result))
-                yield make_typed_expr_ref(bidi_result.expr_kind, lambda_type)
+                break make_typed_expr_ref(bidi_result.expr_kind, lambda_type)
             },
             .Block(statements, _) then self.typed_block_expr(statements, expected, scope),
             .CollectionLiteral(elements, span) then self.typed_collection_literal(elements, expected, scope),
@@ -209,10 +209,10 @@ given TypeChecker {
         let prev_function_return_context = self.storage.function_return_context
         let prev_in_loop = self.storage.in_loop
         let prev_in_finally = self.storage.in_finally
-        let prev_yield_targets = self.storage.yield_targets
+        let prev_branch_break_targets = self.storage.branch_break_targets
         self.storage.in_loop = false
         self.storage.in_finally = false
-        self.storage.yield_targets = List[ref mut YieldTarget].new()
+        self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
         let infer_return_type_from_block_returns = return_type is .None() and resolved_ret is .Unknown() and fn_info is .None() and body is .Block(_, _)
         let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(ret_type) and body is .Block(_, _)
         if infer_return_type_from_block_returns then {
@@ -232,9 +232,9 @@ given TypeChecker {
             else if ret_type is .Unknown()
                 then Option[Type].None()
                 else Option[Type].Some(ret_type)
-        let typed_body = self.check_expr_in_yield_body_context(body, body_expected, lambda_scope)
+        let typed_body = self.check_expr_in_branch_break_body_context(body, body_expected, lambda_scope)
         let inferred_return_type = self.storage.function_return_context.inferred_return_type
-        self.storage.yield_targets = prev_yield_targets
+        self.storage.branch_break_targets = prev_branch_break_targets
         self.storage.function_return_context = prev_function_return_context
         self.storage.in_loop = prev_in_loop
         self.storage.in_finally = prev_in_finally
@@ -243,13 +243,13 @@ given TypeChecker {
             self.validate_lambda_return_type(ret_type, typed_body)
         }
         let actual_ret = if self.is_unresolved_expr_type(ret_type) then {
-            yield if infer_return_type_from_block_returns
+            break if infer_return_type_from_block_returns
                 then inferred_return_type or else Type.VoidType()
                 else typed_body.expr_type
         } else if self.contains_generic_parameter(ret_type) and body is .Block(_, _) then {
-            yield inferred_return_type or else typed_body.expr_type
+            break inferred_return_type or else typed_body.expr_type
         } else if self.contains_generic_parameter(ret_type) and not self.is_unresolved_expr_type(typed_body.expr_type) then {
-            yield typed_body.expr_type
+            break typed_body.expr_type
         } else ret_type
 
         return make_typed_expr(TypedExprKind.LambdaExpr(typed_params, actual_ret, box(typed_body)), Type.Unknown())
@@ -259,7 +259,7 @@ given TypeChecker {
     private build_lambda_function_type(self, expr ref TypedExpr) Type = {
         return when expr.expr_kind in {
             .LambdaExpr(params, ret, _) then {
-                yield self.build_function_type_from_params(params, ret)
+                break self.build_function_type_from_params(params, ret)
             },
             _ then expr.expr_type,
         }
@@ -301,12 +301,12 @@ given TypeChecker {
             .StructureType(def_id) then {
                 let template_name = self.context().get_template_name(def_id) or else ""
                 let type_args = self.context().get_type_arguments(def_id) or else List[Type].new()
-                yield if (template_name == "List" or template_name == "Set") and type_args.count() > 0(UInt)
+                break if (template_name == "List" or template_name == "Set") and type_args.count() > 0(UInt)
                     then Option[Type].Some(type_args[0(UInt)])
                     else Option[Type].None()
             },
             .GenericStruct(template, args) then {
-                yield if (template == "List" or template == "Set") and args.count() > 0(UInt)
+                break if (template == "List" or template == "Set") and args.count() > 0(UInt)
                     then Option[Type].Some(args[0(UInt)].val)
                     else Option[Type].None()
             },
@@ -321,12 +321,12 @@ given TypeChecker {
             .StructureType(def_id) then {
                 let template_name = self.context().get_template_name(def_id) or else ""
                 let type_args = self.context().get_type_arguments(def_id) or else List[Type].new()
-                yield if template_name == "Dict" and type_args.count() > 1(UInt)
+                break if template_name == "Dict" and type_args.count() > 1(UInt)
                     then Pair[Option[Type], Option[Type]](Option[Type].Some(type_args[0(UInt)]), Option[Type].Some(type_args[1(UInt)]))
                     else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None())
             },
             .GenericStruct(template, args) then {
-                yield if template == "Dict" and args.count() > 1(UInt)
+                break if template == "Dict" and args.count() > 1(UInt)
                     then Pair[Option[Type], Option[Type]](Option[Type].Some(args[0(UInt)].val), Option[Type].Some(args[1(UInt)].val))
                     else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None())
             },

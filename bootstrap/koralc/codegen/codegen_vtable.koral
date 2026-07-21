@@ -141,7 +141,7 @@ given CodeGen {
             "Self" then bindings.get("Self") or else Type.Unknown(),
             _ then when self.find_type_def_id_by_name(name) in {
                 .Some(def_id) then {
-                    yield when self.context.get_kind(def_id) in {
+                    break when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
                                 .Structure() then Type.StructureType(def_id),
@@ -172,26 +172,26 @@ given CodeGen {
             .Identifier(name) then self.resolve_vtable_named_type(name, bindings),
             .Reference(inner, mutable) then {
                 let resolved_inner = self.resolve_type_node_for_vtable(inner.val, bindings)
-                yield if mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
+                break if mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
             },
             .Pointer(inner, mutable) then {
                 let resolved_inner = self.resolve_type_node_for_vtable(inner.val, bindings)
-                yield if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+                break if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
             },
             .WeakReference(inner, mutable) then {
                 let resolved = self.resolve_type_node_for_vtable(inner.val, bindings)
-                yield if mutable then Type.MutableWeakReferenceType(box(resolved)) else Type.WeakReferenceType(box(resolved))
+                break if mutable then Type.MutableWeakReferenceType(box(resolved)) else Type.WeakReferenceType(box(resolved))
             },
             .BorrowedReference(inner, lifetime, mutable) then {
                 let resolved_inner = self.resolve_type_node_for_vtable(inner.val, bindings)
-                yield if mutable then Type.MutableBorrowedReferenceType(box(resolved_inner), lifetime) else Type.BorrowedReferenceType(box(resolved_inner), lifetime)
+                break if mutable then Type.MutableBorrowedReferenceType(box(resolved_inner), lifetime) else Type.BorrowedReferenceType(box(resolved_inner), lifetime)
             },
             .Generic(base, args) then {
                 let mut resolved_args = List[ref Type].new()
                 for arg_ref in args then {
                     resolved_args.push(box(self.resolve_type_node_for_vtable(arg_ref.val, bindings)))
                 }
-                yield when self.find_type_def_id_by_name(base) in {
+                break when self.find_type_def_id_by_name(base) in {
                     .Some(def_id) then when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
@@ -210,7 +210,7 @@ given CodeGen {
                 }
             },
             .InferredSelf() then {
-                yield when bindings.get("Self") in {
+                break when bindings.get("Self") in {
                     .Some(bound) then bound,
                     .None() then Type.Unknown(),
                 }
@@ -220,7 +220,7 @@ given CodeGen {
                 for param_ref in param_types then {
                     resolved_params.push(box(self.resolve_type_node_for_vtable(param_ref.val, bindings)))
                 }
-                yield make_function_type(resolved_params, self.resolve_type_node_for_vtable(return_type.val, bindings))
+                break make_function_type(resolved_params, self.resolve_type_node_for_vtable(return_type.val, bindings))
             },
         }
     }
@@ -264,7 +264,7 @@ given CodeGen {
     normalize_vtable_receiver_type(self, t Type) Type = {
         return when t in {
             .OpaqueType(def_id) then {
-                yield when self.context.lookup_type(def_id) in {
+                break when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.normalize_vtable_receiver_type(mapped_type),
                     .None() then t,
                 }
@@ -565,7 +565,7 @@ given CodeGen {
                             _ then "*(\(actual_c_type)*)\(extra).ptr",
                         }
                     }
-                    yield actual_arg
+                    break actual_arg
                 },
                 .None() then extra,
             }
@@ -662,14 +662,14 @@ given CodeGen {
                 .Some(def_id) then {
                     let actual_symbol = self.resolve_vtable_method_symbol(concrete_type, trait_name, member, def_id)
                     let actual_name = self.callable_c_name(box(actual_symbol))
-                    yield if self.vtable_method_needs_wrapper(concrete_type, member, def_id)
+                    break if self.vtable_method_needs_wrapper(concrete_type, member, def_id)
                         then self.vtable_wrapper_name(concrete_type_c_name, trait_name, member.name)
                         else actual_name
                 },
                 .None() then {
                     self.add_indent()
                     self.buffer.push_string("/* WARNING: missing actual method def id for vtable slot \(trait_name).\(member.name); slot omitted */\n")
-                    yield ""
+                    break ""
                 },
             }
 
@@ -749,7 +749,7 @@ given CodeGen {
                                     then Option[MIRTraitVTableParameter].Some(member.parameters[param_index])
                                     else Option[MIRTraitVTableParameter].None()
                                 let param_name = if not param_spec.name.is_empty() then {
-                                    yield param_spec.name
+                                    break param_spec.name
                                 } else when original_param in {
                                     .Some(original) then if not original.name.is_empty() then original.name else "arg\(param_index)",
                                     .None() then "arg\(param_index)",
@@ -1074,7 +1074,7 @@ given CodeGen {
                     .Some(actual_method_def_id) then Option[DefId].Some(actual_method_def_id),
                     .None() then {
                         let fallback_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
-                        yield if layout_key(fallback_concrete_type) == layout_key(concrete_type)
+                        break if layout_key(fallback_concrete_type) == layout_key(concrete_type)
                             then Option[DefId].None()
                             else self.resolve_method_def_id(fallback_concrete_type, trait_name, member.name)
                     },

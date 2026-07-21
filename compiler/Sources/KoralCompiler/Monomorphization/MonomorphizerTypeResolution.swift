@@ -1561,8 +1561,8 @@ extension Monomorphizer {
         case .finally(let expression):
             return .finally(expression: resolveTypesInExpression(expression))
 
-        case .yield(let target, let value):
-            return .yield(target: target, value: resolveTypesInExpression(value))
+        case .branchBreak(let target, let value):
+            return .branchBreak(target: target, value: resolveTypesInExpression(value))
         }
     }
 }

@@ -653,11 +653,11 @@ given Parser {
             let param_name = when self.current().kind in {
                 .Identifier(name) then {
                     self.advance()
-                    yield name
+                    break name
                 },
                 .LifetimeIdentifier(name) then {
                     self.advance()
-                    yield name
+                    break name
                 },
                 _ then {
                     return .Error(box(self.format_context_position_error("Expected identifier for ", "type parameter", self.current())))
@@ -1264,7 +1264,7 @@ given Parser {
                 let mut path = List[String].new()
                 path.push(member_name)
                 let callee = box(Expr.MemberPath(base, path, span))
-                yield Result[ref Expr].Ok(box(Expr.Call(callee, args, span)))
+                break Result[ref Expr].Ok(box(Expr.Call(callee, args, span)))
             },
             _ then Result[ref Expr].Error(box("Expected postfix continuation expression")),
         }
@@ -1278,11 +1278,11 @@ given Parser {
             current = when current in {
                 .LetStmt(name, mutable, type_name, value, span) then {
                     let updated = self.apply_statement_postfix_continuation(value, continuation) or return
-                    yield Statement.LetStmt(name, mutable, type_name, updated, span)
+                    break Statement.LetStmt(name, mutable, type_name, updated, span)
                 },
                 .ExprStmt(expr, span) then {
                     let updated = self.apply_statement_postfix_continuation(expr, continuation) or return
-                    yield Statement.ExprStmt(updated, span)
+                    break Statement.ExprStmt(updated, span)
                 },
                 _ then { return .Ok(current) },
             }
@@ -1310,8 +1310,13 @@ given Parser {
             },
             .KwBreak() then {
                 self.advance()
+                if self.should_terminate_statement() then {
+                    self.consume_semicolon()
+                    return .Ok(Statement.BreakStmt(Option[ref Expr].None(), self.span_from_start(start)))
+                }
+                let value = self.parse_expression_checked("break statement value") or return
                 self.consume_semicolon()
-                return .Ok(Statement.BreakStmt(self.span_from_start(start)))
+                return .Ok(Statement.BreakStmt(.Some(value), self.span_from_start(start)))
             },
             .KwContinue() then {
                 self.advance()
@@ -1323,12 +1328,6 @@ given Parser {
                 let value = self.parse_expression_checked("finally statement value") or return
                 self.consume_semicolon()
                 return .Ok(Statement.FinallyStmt(value, self.span_from_start(start)))
-            },
-            .KwYield() then {
-                self.advance()
-                let value = self.parse_expression_checked("yield statement value") or return
-                self.consume_semicolon()
-                return .Ok(Statement.YieldStmt(value, self.span_from_start(start)))
             },
             _ then {
                 let mut value = self.parse_expression_checked("statement expression") or return

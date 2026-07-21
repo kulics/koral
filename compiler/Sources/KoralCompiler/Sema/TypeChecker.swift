@@ -19,7 +19,7 @@ public struct GlobalNodeSourceInfo {
   }
 }
 
-public struct YieldTargetId: Hashable {
+public struct BranchBreakTargetId: Hashable {
   public let rawValue: Int
 
   public init(rawValue: Int) {
@@ -27,7 +27,7 @@ public struct YieldTargetId: Hashable {
   }
 }
 
-enum YieldTargetKind {
+enum BranchBreakTargetKind {
   case ifExpression
   case whenExpression
   case ifPatternExpression
@@ -36,16 +36,16 @@ enum YieldTargetKind {
 enum ExpressionUsage: Equatable {
   case value
   case statement
-  case branchBody(target: YieldTargetId)
+  case branchBody(target: BranchBreakTargetId)
 }
 
-struct YieldTarget {
-  let id: YieldTargetId
-  let kind: YieldTargetKind
+struct BranchBreakTarget {
+  let id: BranchBreakTargetId
+  let kind: BranchBreakTargetKind
   let span: SourceSpan
   let preferredType: Type?
   var resultType: Type?
-  var didExplicitYield: Bool
+  var didExplicitBranchBreak: Bool
 }
 
 struct ConformanceKey: Hashable {
@@ -209,8 +209,8 @@ public class TypeChecker {
   var loopDepth: Int = 0
   var insideFinally: Bool = false
   var currentBlockExpressionDepth: Int = 0
-  var yieldTargets: [YieldTarget] = []
-  var nextYieldTargetId: Int = 0
+  var branchBreakTargets: [BranchBreakTarget] = []
+  var nextBranchBreakTargetId: Int = 0
 
   var synthesizedTempIndex: Int = 0
   
@@ -1123,7 +1123,7 @@ public class TypeChecker {
   /// ```
   /// blockExpression([
   ///   variableDeclaration(__koral_temp_recv_1, "hello"),
-  ///   yield(call(
+  ///   break call(
   ///     callee: methodReference(
   ///       base: referenceExpression(variable(__koral_temp_recv_1)),
   ///       method: count_byte
@@ -1172,11 +1172,11 @@ public class TypeChecker {
     }
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType
-    let previousYieldTargets = yieldTargets
-    yieldTargets = []
+    let previousBranchBreakTargets = branchBreakTargets
+    branchBreakTargets = []
     defer {
       currentFunctionReturnType = previousReturnType
-      yieldTargets = previousYieldTargets
+      branchBreakTargets = previousBranchBreakTargets
     }
 
     return try withNewScope {

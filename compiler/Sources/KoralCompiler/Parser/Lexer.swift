@@ -108,7 +108,6 @@ public enum Token: CustomStringConvertible {
   case usingKeyword // 'using' keyword
   case weakrefKeyword // 'weakref' keyword
   case finallyKeyword // 'finally' keyword
-  case yieldKeyword // 'yield' keyword
   case itKeyword // 'it' keyword
 
   /// Whether this token is a continuation token (triggers line continuation when at start of line)
@@ -215,8 +214,6 @@ public enum Token: CustomStringConvertible {
     case (.weakrefKeyword, .weakrefKeyword):
       return true
     case (.finallyKeyword, .finallyKeyword):
-      return true
-    case (.yieldKeyword, .yieldKeyword):
       return true
     case (.itKeyword, .itKeyword):
       return true
@@ -402,8 +399,6 @@ public enum Token: CustomStringConvertible {
       return "weakref"
     case .finallyKeyword:
       return "finally"
-    case .yieldKeyword:
-      return "yield"
     case .itKeyword:
       return "it"
     }
@@ -1578,7 +1573,6 @@ public class Lexer {
       case "for": .forKeyword
       case "weakref": .weakrefKeyword
       case "finally": .finallyKeyword
-      case "yield": .yieldKeyword
       case "it": .itKeyword
       default: .identifier(id)
       }

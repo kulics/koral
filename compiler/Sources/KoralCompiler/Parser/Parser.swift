@@ -107,7 +107,11 @@ public class Parser {
       return .return(value: value, span: startSpan)
     case .breakKeyword:
       try match(.breakKeyword)
-      return .break(span: startSpan)
+      if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
+        return .break(value: nil, span: startSpan)
+      }
+      let value = try expression()
+      return .break(value: value, span: startSpan)
     case .continueKeyword:
       try match(.continueKeyword)
       return .continue(span: startSpan)
@@ -115,10 +119,6 @@ public class Parser {
       try match(.finallyKeyword)
       let expr = try expression()
       return .finally(expression: expr, span: startSpan)
-    case .yieldKeyword:
-      try match(.yieldKeyword)
-      let value = try expression()
-      return .yield(value: value, span: startSpan)
     default:
       let expr = try expression()
 

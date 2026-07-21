@@ -74,9 +74,9 @@ extension TypeChecker {
       defer { currentFunctionReturnType = savedFunctionReturnType }
       defer { inferredFunctionReturnType = savedInferredFunctionReturnType }
       defer { isInferringFunctionReturnType = savedIsInferringFunctionReturnType }
-      let savedYieldTargets = yieldTargets
-      defer { yieldTargets = savedYieldTargets }
-      yieldTargets = []
+      let savedBranchBreakTargets = branchBreakTargets
+      defer { branchBreakTargets = savedBranchBreakTargets }
+      branchBreakTargets = []
 
       // Lambda has its own scope, so reset insideFinally flag.
       // This allows return/break/continue/finally inside a lambda that
@@ -390,12 +390,14 @@ extension TypeChecker {
       if let value = value {
         try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
       }
-    case .break, .continue:
+    case .break(let value, _):
+      if let value {
+        try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
+      }
+    case .continue:
       break
     case .finally(let expression, _):
       try collectCapturedVariables(expr: expression, paramNames: paramNames, captures: &captures)
-    case .yield(let value, _):
-      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     }
   }
 }

@@ -73,7 +73,7 @@ given TypeChecker {
                     .Some(value) then self.expr_contains_or_return(value),
                     .None() then false,
                 }
-                yield left_has or right_has
+                break left_has or right_has
             },
             .Unary(_, inner, _) then self.expr_contains_or_return(inner),
             .CastExpr(_, inner, _) then self.expr_contains_or_return(inner),
@@ -88,13 +88,13 @@ given TypeChecker {
                 for arg in args then {
                     if self.expr_contains_or_return(arg) then { return true }
                 }
-                yield false
+                break false
             },
             .StaticMethodCall(_, _, _, args, _) then {
                 for arg in args then {
                     if self.expr_contains_or_return(arg) then { return true }
                 }
-                yield false
+                break false
             },
             .MemberPath(base, _, _) then self.expr_contains_or_return(base),
             .SubscriptExpr(base, args, _) then {
@@ -104,7 +104,7 @@ given TypeChecker {
                 for arg in args then {
                     if self.expr_contains_or_return(arg) then { return true }
                 }
-                yield false
+                break false
             },
             .Block(statements, _) then self.stmts_contain_or_return(statements),
             .IfExpr(condition, then_expr, else_expr, _) then {
@@ -112,7 +112,7 @@ given TypeChecker {
                     .Some(value) then self.expr_contains_or_return(value),
                     .None() then false,
                 }
-                yield self.expr_contains_or_return(condition) or self.expr_contains_or_return(then_expr) or else_has
+                break self.expr_contains_or_return(condition) or self.expr_contains_or_return(then_expr) or else_has
             },
             .WhileExpr(condition, body, _) then self.expr_contains_or_return(condition) or self.expr_contains_or_return(body),
             .ForExpr(_, iterable, body, _) then self.expr_contains_or_return(iterable) or self.expr_contains_or_return(body),
@@ -123,14 +123,14 @@ given TypeChecker {
                 for arm in arms then {
                     if self.expr_contains_or_return(arm.body) then { return true }
                 }
-                yield false
+                break false
             },
             .LambdaExpr(_, _, body, _) then self.expr_contains_or_return(body),
             .ImplicitMemberExpr(_, args, _) then {
                 for arg in args then {
                     if self.expr_contains_or_return(arg) then { return true }
                 }
-                yield false
+                break false
             },
             .NamedArgument(_, inner, _) then self.expr_contains_or_return(inner),
             _ then false,
@@ -148,8 +148,11 @@ given TypeChecker {
                     .Some(value) then if self.expr_contains_or_return(value) then { return true },
                     .None() then {},
                 },
+                .BreakStmt(value_opt, _) then when value_opt in {
+                    .Some(value) then if self.expr_contains_or_return(value) then { return true },
+                    .None() then {},
+                },
                 .FinallyStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
-                .YieldStmt(value, _) then if self.expr_contains_or_return(value) then { return true },
                 _ then {},
             }
         }
@@ -162,7 +165,7 @@ given TypeChecker {
             .Some(info) then {
                 if info.module_path.is_empty() then { return false }
                 let root = info.module_path[0(UInt)]
-                yield root == "Std" or root == "std"
+                break root == "Std" or root == "std"
             },
             .None() then false,
         }
@@ -205,13 +208,13 @@ given TypeChecker {
         let prev_function_return_context = self.storage.function_return_context
         let prev_in_loop = self.storage.in_loop
         let prev_in_finally = self.storage.in_finally
-        let prev_yield_targets = self.storage.yield_targets
+        let prev_branch_break_targets = self.storage.branch_break_targets
         self.storage.function_return_context.expected_return_type = Option[Type].None()
         self.storage.function_return_context.inferred_return_type = Option[Type].None()
         self.storage.function_return_context.is_inferring = false
         self.storage.in_loop = false
         self.storage.in_finally = false
-        self.storage.yield_targets = List[ref mut YieldTarget].new()
+        self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
         let mut scope = Scope.new_child(self.storage.global_scope)
         let typed = if self.expr_contains_or_return(expr) then {
             self.push_diagnostic_at_span("'or return' can only be used inside a function", expr_span(expr))
@@ -219,14 +222,14 @@ given TypeChecker {
                 .Some(expected_type) then expected_type,
                 .None() then Type.Unknown(),
             }
-            yield self.empty_typed_block(fallback_type)
+            break self.empty_typed_block(fallback_type)
         } else {
-            yield self.check_expr_scoped_ref(expr, expected, scope)
+            break self.check_expr_scoped_ref(expr, expected, scope)
         }
         self.storage.function_return_context = prev_function_return_context
         self.storage.in_loop = prev_in_loop
         self.storage.in_finally = prev_in_finally
-        self.storage.yield_targets = prev_yield_targets
+        self.storage.branch_break_targets = prev_branch_break_targets
         return typed
     }
 
@@ -264,7 +267,7 @@ given TypeChecker {
             let symbol_kind = if is_type_name then SymbolKind.TypeSymbol() else SymbolKind.Variable(VariableKind.Value())
             let def_kind = if is_type_name then DefKind.TypeDef(TypeDefKind.Structure()) else DefKind.Variable()
             let def_id = self.allocate_unindexed_def_id(name, def_kind)
-            yield Symbol(def_id, fallback_type, symbol_kind)
+            break Symbol(def_id, fallback_type, symbol_kind)
         }
         let mut normalized_sym = sym
         if sym.kind is .TypeSymbol() then {
@@ -328,73 +331,73 @@ given TypeChecker {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .ReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .MutableBorrowedReferenceType(inner_ref, _) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .BorrowedReferenceType(inner_ref, _) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .WeakReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .MutableWeakReferenceType(inner_ref) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .TraitObject(_, _) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on a trait object ref: concrete type is unknown at compile time")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .PointerType(inner_ref) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .OpaqueType(def_id) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on an opaque type ptr")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
                     },
                     .MutablePointerType(inner_ref) then {
-                        yield when inner_ref.val in {
+                        break when inner_ref.val in {
                             .OpaqueType(def_id) then {
                                 self.push_expr_diagnostic(expr, "Cannot use .val on an opaque type ptr")
-                                yield Type.Unknown()
+                                break Type.Unknown()
                             },
                             _ then inner_ref.val,
                         }
@@ -405,14 +408,14 @@ given TypeChecker {
                             _ then type_to_string(typed_inner.expr_type),
                         }
                         self.push_expr_diagnostic(expr, "Type mismatch: expected Pointer type, got \(actual)")
-                        yield Type.Unknown()
+                        break Type.Unknown()
                     },
                 }
                 let checked_inner_t = when inner_t in {
                     .Unknown() then inner_t,
                     _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
                 }
-                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t)
+                break make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t)
             },
             _ then self.check_expr_core_ref(expr, expected, scope),
         }
@@ -431,12 +434,12 @@ given TypeChecker {
                     extended.push(segment)
                 }
                 extended.push(member)
-                yield make_typed_expr(TypedExprKind.MemberPath(path_base, extended), member_type)
+                break make_typed_expr(TypedExprKind.MemberPath(path_base, extended), member_type)
             },
             _ then {
                 let mut path = List[String].new()
                 path.push(member)
-                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type)
+                break make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), member_type)
             },
         }
         if self.receiver_is_addressable_without_temp(typed_base) then {
@@ -450,7 +453,7 @@ given TypeChecker {
                 let mut block_statements = List[ref TypedStatement].new()
                 block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(typed_base), unknown_span())))
                 block_statements.push(box(TypedStatement.ExprStmt(box(temp_member_access), unknown_span())))
-                yield make_typed_expr(TypedExprKind.Block(block_statements), member_type)
+                break make_typed_expr(TypedExprKind.Block(block_statements), member_type)
             },
             _ then member_access,
         }
@@ -474,9 +477,9 @@ given TypeChecker {
                         receiver_path.push(copied_path[idx])
                         idx += 1
                     }
-                    yield box(Expr.MemberPath(base, receiver_path, expr_span(callee)))
+                    break box(Expr.MemberPath(base, receiver_path, expr_span(callee)))
                 }
-                yield Option[Pair[ref Expr, String]].Some(Pair[ref Expr, String](receiver_expr, method_name))
+                break Option[Pair[ref Expr, String]].Some(Pair[ref Expr, String](receiver_expr, method_name))
             },
             _ then Option[Pair[ref Expr, String]].None(),
         }
@@ -530,14 +533,14 @@ given TypeChecker {
                         },
                     }
                 }
-                yield resolved
+                break resolved
             },
             .MutablePointerType(inner) then {
                 let pointee = inner.val
                 let resolved = self.resolve_member_type(pointee, member)
                 let has_pointer_method = visible_method is .Some(_)
                 self.report_pointer_member_access_issue_if_needed(resolved, has_pointer_method, pointee, member)
-                yield resolved
+                break resolved
             },
             .MutableReferenceType(inner) then self.resolve_member_type(inner.val, member),
             .ReferenceType(inner) then self.resolve_member_type(inner.val, member),
@@ -584,7 +587,7 @@ given TypeChecker {
                             )
                         }
                     }
-                    yield found
+                    break found
                 },
                 .None() then Type.Unknown(),
             },
@@ -629,13 +632,13 @@ given TypeChecker {
                                     )
                                 }
                             }
-                            yield found
+                            break found
                         },
                         .None() then Type.Unknown(),
                     },
                     .None() then Type.Unknown(),
                 }
-                yield when self.storage.generic_templates.lookup_struct(template) in {
+                break when self.storage.generic_templates.lookup_struct(template) in {
                     .Some(struct_template) then {
                         let mut bindings = Dict[String, Type].new()
                         let mut i UInt = 0
@@ -647,7 +650,7 @@ given TypeChecker {
                             bindings.insert(tp.name, args[i].val)
                             i += 1
                         }
-                        yield self.apply_type_bindings(raw_field_type, bindings)
+                        break self.apply_type_bindings(raw_field_type, bindings)
                     },
                     .None() then raw_field_type,
                 }
@@ -665,7 +668,7 @@ given TypeChecker {
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .MemberPath(_, _, _) then {
-                yield when self.split_member_path_call_callee(callee) in {
+                break when self.split_member_path_call_callee(callee) in {
                     .Some(parts) then {
                         let raw_typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
                     let normalized_receiver_type = self.canonicalize_alias_type(self.concretize_default_literal_type(raw_typed_receiver.expr_type))
@@ -761,7 +764,7 @@ given TypeChecker {
                         when method_symbol in {
                             .Some(sym) then {
                                 let sym_type = sym.symbol_type
-                                yield when self.trait_object_dispatch_type(typed_receiver.expr_type) in {
+                                break when self.trait_object_dispatch_type(typed_receiver.expr_type) in {
                                     .Some(trait_type) then if self.trait_type_declares_dispatch_method(trait_type, parts.second)
                                         then make_typed_expr(TypedExprKind.TraitMethodPlaceholder(box(typed_receiver), trait_type, box(sym), List[Type].new(), .None()), sym_type)
                                         else make_typed_expr(TypedExprKind.MethodReference(box(typed_receiver), typed_receiver.expr_type, box(sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type),
@@ -896,7 +899,7 @@ given TypeChecker {
                         }
                     }
                 }
-                yield Option[String].None()
+                break Option[String].None()
             },
             _ then {
                 if direct_method_exists then {
@@ -928,7 +931,7 @@ given TypeChecker {
                         return Option[String].Some(trait_name)
                     }
                 }
-                yield Option[String].None()
+                break Option[String].None()
             },
         }
     }
@@ -953,7 +956,7 @@ given TypeChecker {
                             matched = true
                         }
                     }
-                    yield matched
+                    break matched
                 },
                 .None() then false,
             },
@@ -1606,7 +1609,7 @@ given TypeChecker {
                                 for c in constraints then {
                                     if c.trait_name == "Deref" then { found = true }
                                 }
-                                yield found
+                                break found
                             },
                             .None() then false,
                         },

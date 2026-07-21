@@ -158,10 +158,9 @@ public type CstStmt {
             var_type Option[ref CstType], eq Token, value ref CstExpr),
     Assignment(target ref CstExpr, op Token, value ref CstExpr),
     ExprStmt(expr ref CstExpr, semi Option[Token]),
-    Yield(kw Token, value ref CstExpr),
     Defer(kw Token, value ref CstExpr),
     Return(kw Token, value Option[ref CstExpr]),
-    Break(kw Token),
+    Break(kw Token, value Option[ref CstExpr]),
     Continue(kw Token),
 }
 
@@ -364,7 +363,7 @@ given CstParser {
             let runes = name.to_runes()
             if runes.count() == 0 then { return false }
             let first = runes[0].to_uint32()
-            yield first >= 65 and first <= 90
+            break first >= 65 and first <= 90
         },
         _ then false,
     }
@@ -1839,15 +1838,6 @@ given CstParser {
 
     private parse_stmt(self ref mut) Result[CstStmt] = {
         when self.peek() in {
-            .KwYield() then {
-                let kw = self.eat()
-                let value = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then { return .Error(e) },
-                }
-                if self.peek() is .Semi() then { self.eat() }
-                return .Ok(.Yield(kw, box(value)))
-            },
             .KwDefer() then {
                 let kw = self.eat()
                 let value = when self.parse_expr_node() in {
@@ -1880,8 +1870,22 @@ given CstParser {
             },
             .KwBreak() then {
                 let kw = self.eat()
+                if self.peek_raw() is .Newline() or self.peek_raw() is .EOF() then {
+                    return .Ok(.Break(kw, .None()))
+                }
+                if self.check(.RBrace()) then {
+                    return .Ok(.Break(kw, .None()))
+                }
                 if self.peek() is .Semi() then { self.eat() }
-                return .Ok(.Break(kw))
+                else {
+                    let value = when self.parse_expr_node() in {
+                        .Ok(e) then e,
+                        .Error(e) then { return .Error(e) },
+                    }
+                    if self.peek() is .Semi() then { self.eat() }
+                    return .Ok(.Break(kw, .Some(box(value))))
+                }
+                return .Ok(.Break(kw, .None()))
             },
             .KwContinue() then {
                 let kw = self.eat()

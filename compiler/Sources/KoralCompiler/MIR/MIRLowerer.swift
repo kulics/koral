@@ -360,8 +360,8 @@ private func ownershipUse(for expression: TypedExpressionNode) -> MIROwnershipUs
 }
 
 private final class MIRFunctionBuilder {
-  private struct MIRYieldTargetContext {
-    let id: YieldTargetId
+  private struct MIRBranchBreakTargetContext {
+    let id: BranchBreakTargetId
     let resultLocal: MIRLocalID?
     let joinBlock: MIRBlockID
     let baseScopeDepth: Int
@@ -389,7 +389,7 @@ private final class MIRFunctionBuilder {
   private var loopStack: [(continueBlock: MIRBlockID, breakBlock: MIRBlockID, scopeDepth: Int)] = []
   private var scopeStack: [MIRScopeID] = []
   private var finaliesByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
-  private var yieldTargetStack: [MIRYieldTargetContext] = []
+  private var branchBreakTargetStack: [MIRBranchBreakTargetContext] = []
 
   init(
     program: MonomorphizedProgram,
@@ -783,11 +783,11 @@ private final class MIRFunctionBuilder {
     append(.scopeEnter(scope))
     scopeStack.append(scope)
 
-    let ownedYieldTargets = statements.reduce(into: Set<YieldTargetId>()) { ids, statement in
-      ids.formUnion(statement.ownedYieldTargetIDs)
+    let ownedBranchBreakTargets = statements.reduce(into: Set<BranchBreakTargetId>()) { ids, statement in
+      ids.formUnion(statement.ownedBranchBreakTargetIDs)
     }
     let blockProducesValue = type != .void && type != .never
-    let usesYieldJoin = !ownedYieldTargets.isEmpty && type != .never
+    let usesBranchBreakJoin = !ownedBranchBreakTargets.isEmpty && type != .never
     let resultLocal: MIRLocal? = blockProducesValue
       ? makeTemporary(type: type, nameHint: "block_result")
       : nil
@@ -796,16 +796,16 @@ private final class MIRFunctionBuilder {
     }
 
     let blockBody = currentBlockID
-    let joinBlock = usesYieldJoin ? makeBlock() : nil
-    let yieldTargetDepth = joinBlock.map {
-      pushYieldTargets(
-        ownedYieldTargets,
+    let joinBlock = usesBranchBreakJoin ? makeBlock() : nil
+    let branchBreakTargetDepth = joinBlock.map {
+      pushBranchBreakTargets(
+        ownedBranchBreakTargets,
         resultLocal: resultLocal,
         joinBlock: $0,
         baseScopeDepth: parentScopeDepth
       )
-    } ?? yieldTargetStack.count
-    if usesYieldJoin {
+    } ?? branchBreakTargetStack.count
+    if usesBranchBreakJoin {
       setCurrentBlock(blockBody)
     }
 
@@ -838,7 +838,7 @@ private final class MIRFunctionBuilder {
     }
     _ = scopeStack.popLast()
     finaliesByScope.removeValue(forKey: scope)
-    restoreYieldTargets(toDepth: yieldTargetDepth)
+    restoreBranchBreakTargets(toDepth: branchBreakTargetDepth)
 
     if let joinBlock {
       if !currentBlockIsTerminated {
@@ -986,25 +986,25 @@ private final class MIRFunctionBuilder {
       } else {
         _ = lowerExpression(expression)
       }
-    case .yield(let target, let value):
-      lowerYield(target: target, value: value)
+    case .branchBreak(let target, let value):
+      lowerBranchBreak(target: target, value: value)
     }
   }
 
-  private func lowerYield(target: YieldTargetId, value: TypedExpressionNode) {
-    guard let yieldContext = yieldTargetStack.last(where: { $0.id == target }) else {
-      fatalError("Unsupported yield without MIR target reached MIR lowering")
+  private func lowerBranchBreak(target: BranchBreakTargetId, value: TypedExpressionNode) {
+    guard let branchBreakContext = branchBreakTargetStack.last(where: { $0.id == target }) else {
+      fatalError("Unsupported break-with-value without MIR branch-break target reached MIR lowering")
     }
 
     let loweredValue = lowerValue(value)
     guard !currentBlockIsTerminated else { return }
-    if let resultLocal = yieldContext.resultLocal {
+    if let resultLocal = branchBreakContext.resultLocal {
       append(.assign(.local(resultLocal), loweredValue))
     } else {
       append(.evaluate(loweredValue))
     }
-    emitScopeExits(fromDepth: yieldContext.baseScopeDepth)
-    terminate(.goto(yieldContext.joinBlock))
+    emitScopeExits(fromDepth: branchBreakContext.baseScopeDepth)
+    terminate(.goto(branchBreakContext.joinBlock))
   }
 
   private func emitScopeExits(fromDepth baseScopeDepth: Int) {
@@ -1024,21 +1024,21 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func pushYieldTargets(
-    _ targets: Set<YieldTargetId>,
+  private func pushBranchBreakTargets(
+    _ targets: Set<BranchBreakTargetId>,
     resultLocal: MIRLocal?,
     joinBlock: MIRBlockID,
     baseScopeDepth: Int? = nil
   ) -> Int {
-    let previousDepth = yieldTargetStack.count
+    let previousDepth = branchBreakTargetStack.count
     guard !targets.isEmpty else { return previousDepth }
     let targetBaseScopeDepth = baseScopeDepth ?? scopeStack.count
     for target in targets {
-      if yieldTargetStack.contains(where: { $0.id == target }) {
+      if branchBreakTargetStack.contains(where: { $0.id == target }) {
         continue
       }
-      yieldTargetStack.append(
-        MIRYieldTargetContext(
+      branchBreakTargetStack.append(
+        MIRBranchBreakTargetContext(
           id: target,
           resultLocal: resultLocal?.id,
           joinBlock: joinBlock,
@@ -1049,9 +1049,9 @@ private final class MIRFunctionBuilder {
     return previousDepth
   }
 
-  private func restoreYieldTargets(toDepth depth: Int) {
-    guard yieldTargetStack.count > depth else { return }
-    yieldTargetStack.removeSubrange(depth..<yieldTargetStack.count)
+  private func restoreBranchBreakTargets(toDepth depth: Int) {
+    guard branchBreakTargetStack.count > depth else { return }
+    branchBreakTargetStack.removeSubrange(depth..<branchBreakTargetStack.count)
   }
 
   private func lowerBranchBody(_ expression: TypedExpressionNode, resultLocal: MIRLocal?) {
@@ -1060,7 +1060,7 @@ private final class MIRFunctionBuilder {
       return
     }
 
-    if expression.containsYield {
+    if expression.containsBranchBreak {
       guard let result = lowerExpression(expression), !currentBlockIsTerminated else {
         return
       }
@@ -1214,12 +1214,12 @@ private final class MIRFunctionBuilder {
     let thenBlock = makeBlock()
     let elseBlock = makeBlock()
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      thenBranch.ownedYieldTargetIDs.union(elseBranch?.ownedYieldTargetIDs ?? []),
+    let branchBreakTargetDepth = pushBranchBreakTargets(
+      thenBranch.ownedBranchBreakTargetIDs.union(elseBranch?.ownedBranchBreakTargetIDs ?? []),
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
+    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
 
     setCurrentBlock(branchBlock)
     terminate(.branch(condition: conditionOperand, thenBlock: thenBlock, elseBlock: elseBlock))
@@ -2420,12 +2420,12 @@ private final class MIRFunctionBuilder {
     let thenBlock = makeBlock()
     let elseBlock = makeBlock()
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      thenBranch.ownedYieldTargetIDs.union(elseBranch?.ownedYieldTargetIDs ?? []),
+    let branchBreakTargetDepth = pushBranchBreakTargets(
+      thenBranch.ownedBranchBreakTargetIDs.union(elseBranch?.ownedBranchBreakTargetIDs ?? []),
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
+    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
 
     setCurrentBlock(branchBlock)
     terminate(.branch(condition: condition, thenBlock: thenBlock, elseBlock: elseBlock))
@@ -2589,14 +2589,14 @@ private final class MIRFunctionBuilder {
     let caseBlocks = cases.map { _ in makeBlock() }
     let nextBlocks = cases.map { _ in makeBlock() }
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
-        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
+    let branchBreakTargetDepth = pushBranchBreakTargets(
+      cases.reduce(into: Set<BranchBreakTargetId>()) { ids, matchCase in
+        ids.formUnion(matchCase.body.ownedBranchBreakTargetIDs)
       },
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
+    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
 
     setCurrentBlock(dispatchBlock)
 
@@ -2687,14 +2687,14 @@ private final class MIRFunctionBuilder {
 
     let dispatchBlock = currentBlockID
     let joinBlock = makeBlock()
-    let yieldTargetDepth = pushYieldTargets(
-      cases.reduce(into: Set<YieldTargetId>()) { ids, matchCase in
-        ids.formUnion(matchCase.body.ownedYieldTargetIDs)
+    let branchBreakTargetDepth = pushBranchBreakTargets(
+      cases.reduce(into: Set<BranchBreakTargetId>()) { ids, matchCase in
+        ids.formUnion(matchCase.body.ownedBranchBreakTargetIDs)
       },
       resultLocal: resultLocal,
       joinBlock: joinBlock
     )
-    defer { restoreYieldTargets(toDepth: yieldTargetDepth) }
+    defer { restoreBranchBreakTargets(toDepth: branchBreakTargetDepth) }
 
     // Build switch cases and default
     var switchCases: [MIRSwitchCase] = []

@@ -319,14 +319,14 @@ private let execute_command_with_timeout(
 
     let execution CommandExecution = when wait_result in {
         .Ok(status) then if timed_out.load() then {
-            yield .TimedOut(infer_exit_code(status))
+            break .TimedOut(infer_exit_code(status))
         } else {
-            yield .Finished(CommandOutput(status, stdout_content, stderr_content))
+            break .Finished(CommandOutput(status, stdout_content, stderr_content))
         },
         .Error(message) then if timed_out.load() then {
-            yield .TimedOut(-1)
+            break .TimedOut(-1)
         } else {
-            yield .InfrastructureError("failed to wait process: " + message.message())
+            break .InfrastructureError("failed to wait process: " + message.message())
         },
     }
     return execution
@@ -369,13 +369,13 @@ private let execute_built_executable_with_retry(
                 timeout_secs,
                 "failed to spawn built executable",
             )
-            yield when second in {
+            break when second in {
                 .InfrastructureError(_) then {
                     sleep(150ms)
                     let third_program = prepared_run_executable_path(info, output_dir, 2(UInt)) or else {
                         return .InfrastructureError("failed to prepare built executable: " + it.message())
                     }
-                    yield execute_command_with_timeout(
+                    break execute_command_with_timeout(
                         config,
                         third_program.to_string(),
                         run_command_args_for_case(),
@@ -647,7 +647,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 )
             },
             .InfrastructureError(message) then {
-                yield when execute_built_executable_with_retry(
+                break when execute_built_executable_with_retry(
                     config,
                     info,
                     active_output_dir,
@@ -762,7 +762,7 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         },
         .InfrastructureError(message) then {
-            yield when execute_built_executable_with_retry(
+            break when execute_built_executable_with_retry(
                 config,
                 info,
                 active_output_dir,

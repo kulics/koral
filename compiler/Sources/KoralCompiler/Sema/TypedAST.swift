@@ -194,7 +194,7 @@ public indirect enum TypedStatementNode {
   case `break`
   case `continue`
   case finally(expression: TypedExpressionNode)
-  case yield(target: YieldTargetId, value: TypedExpressionNode)
+  case branchBreak(target: BranchBreakTargetId, value: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
   case integerLiteral(value: String, type: Type)  // Store as string to support arbitrary precision

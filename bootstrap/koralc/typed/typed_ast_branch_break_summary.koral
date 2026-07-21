@@ -1,0 +1,149 @@
+private type TypedBranchBreakSummaryWalker()
+
+given TypedBranchBreakSummaryWalker {
+    private expr_list_contains_branch_break(self, exprs List[ref TypedExpr]) Bool = {
+        for expr in exprs then {
+            if self.expr_contains_branch_break(expr) then { return true }
+        }
+        return false
+    }
+
+    private when_arms_contain_branch_break(self, arms List[ref TypedWhenArm]) Bool = {
+        for arm in arms then {
+            if self.expr_contains_branch_break(arm.body) then { return true }
+        }
+        return false
+    }
+
+    private intrinsic_contains_branch_break(self, node TypedIntrinsic) Bool = {
+        return when node in {
+            .IsUniqueMutable(ref_expr) then self.expr_contains_branch_break(ref_expr),
+            .RefCount(ref_expr) then self.expr_contains_branch_break(ref_expr),
+            .MakeRef(pointer_expr, owner_expr, _) then self.expr_contains_branch_break(pointer_expr) or self.expr_contains_branch_break(owner_expr),
+            .MakeMutRef(pointer_expr, owner_expr, _) then self.expr_contains_branch_break(pointer_expr) or self.expr_contains_branch_break(owner_expr),
+            .DowngradeRef(ref_expr, _) then self.expr_contains_branch_break(ref_expr),
+            .DowngradeMutRef(ref_expr, _) then self.expr_contains_branch_break(ref_expr),
+            .UpgradeRef(weak_expr, _) then self.expr_contains_branch_break(weak_expr),
+            .UpgradeMutRef(weak_expr, _) then self.expr_contains_branch_break(weak_expr),
+            .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                break self.expr_contains_branch_break(out_handle)
+                    or self.expr_contains_branch_break(out_tid)
+                    or self.expr_contains_branch_break(closure)
+                    or self.expr_contains_branch_break(stack_size)
+            },
+            .AllocMemory(count, _) then self.expr_contains_branch_break(count),
+            .DeallocMemory(pointer_expr) then self.expr_contains_branch_break(pointer_expr),
+            .CopyMemory(dest, source, count) then self.expr_contains_branch_break(dest) or self.expr_contains_branch_break(source) or self.expr_contains_branch_break(count),
+            .MoveMemory(dest, source, count) then self.expr_contains_branch_break(dest) or self.expr_contains_branch_break(source) or self.expr_contains_branch_break(count),
+            .InitMemory(pointer_expr, value_expr) then self.expr_contains_branch_break(pointer_expr) or self.expr_contains_branch_break(value_expr),
+            .DeinitMemory(pointer_expr) then self.expr_contains_branch_break(pointer_expr),
+            .TakeMemory(pointer_expr, _) then self.expr_contains_branch_break(pointer_expr),
+            .NullPtr(_) then false,
+        }
+    }
+
+    expr_contains_branch_break(self, expr ref TypedExpr) Bool = {
+        return when expr.expr_kind in {
+            .Variable(_) then false,
+            .IntegerLiteral(_) then false,
+            .FloatLiteral(_) then false,
+            .StringLiteral(_) then false,
+            .BoolLiteral(_) then false,
+            .CastExpr(_, inner) then self.expr_contains_branch_break(inner),
+            .Unary(_, inner) then self.expr_contains_branch_break(inner),
+            .RefExpr(inner) then self.expr_contains_branch_break(inner),
+            .PtrExpr(inner) then self.expr_contains_branch_break(inner),
+            .DerefExpr(inner) then self.expr_contains_branch_break(inner),
+            .ArithmeticExpr(left, _, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .WrappingArithmeticExpr(left, _, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .WrappingShiftExpr(left, _, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .ComparisonExpr(left, _, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .BitwiseExpr(left, _, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .AndExpr(left, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .OrExpr(left, right) then self.expr_contains_branch_break(left) or self.expr_contains_branch_break(right),
+            .IsExpr(subject, _, _) then self.expr_contains_branch_break(subject),
+            .Call(callee, args) then self.expr_contains_branch_break(callee) or self.expr_list_contains_branch_break(args),
+            .GenericCall(_, _, args) then self.expr_list_contains_branch_break(args),
+            .IntrinsicCall(node) then self.intrinsic_contains_branch_break(node),
+            .MemberPath(base, _) then self.expr_contains_branch_break(base),
+            .MethodReference(base, _, _, _, _, _) then self.expr_contains_branch_break(base),
+            .Block(statements) then self.statements_contain_branch_break(statements),
+            .IfExpr(condition, then_branch, else_branch) then {
+                let else_has = when else_branch in {
+                    .Some(inner) then self.expr_contains_branch_break(inner),
+                    .None() then false,
+                }
+                break self.expr_contains_branch_break(condition) or self.expr_contains_branch_break(then_branch) or else_has
+            },
+            .WhenExpr(subject, arms) then self.expr_contains_branch_break(subject) or self.when_arms_contain_branch_break(arms),
+            .LambdaExpr(_, _, body) then self.expr_contains_branch_break(body),
+            .StaticMethodCall(_, _, _, _, _, args) then self.expr_list_contains_branch_break(args),
+            .TypeConstruction(_, _, args) then self.expr_list_contains_branch_break(args),
+            .EnumConstruction(_, _, args) then self.expr_list_contains_branch_break(args),
+            .TraitMethodPlaceholder(base, _, _, _, _) then self.expr_contains_branch_break(base),
+            .TraitObjectConversion(inner, _, _) then self.expr_contains_branch_break(inner),
+            .TraitMethodCall(receiver, _, _, _, args) then self.expr_contains_branch_break(receiver) or self.expr_list_contains_branch_break(args),
+            .GenericInstantiation(_, _) then false,
+        }
+    }
+
+    statement_contains_branch_break(self, statement ref TypedStatement) Bool = {
+        return when statement in {
+            .LetStmt(_, value, _) then self.expr_contains_branch_break(value),
+            .PairLetStmt(_, _, _, value, _) then self.expr_contains_branch_break(value),
+            .AssignmentStmt(target, value, _) then self.expr_contains_branch_break(target) or self.expr_contains_branch_break(value),
+            .ExprStmt(expr, _) then self.expr_contains_branch_break(expr),
+            .IfStmt(condition, then_branch, else_branch, _) then {
+                let else_has = when else_branch in {
+                    .Some(expr) then self.expr_contains_branch_break(expr),
+                    .None() then false,
+                }
+                break self.expr_contains_branch_break(condition) or self.expr_contains_branch_break(then_branch) or else_has
+            },
+            .WhileStmt(condition, body, _) then self.expr_contains_branch_break(condition) or self.expr_contains_branch_break(body),
+            .WhenStmt(subject, arms, _) then self.expr_contains_branch_break(subject) or self.when_arms_contain_branch_break(arms),
+            .ReturnStmt(value, _) then when value in {
+                .Some(expr) then self.expr_contains_branch_break(expr),
+                .None() then false,
+            },
+            .BreakStmt(_) then false,
+            .ContinueStmt(_) then false,
+            .FinallyStmt(expr, _) then self.expr_contains_branch_break(expr),
+            .BranchBreakStmt(_, _) then true,
+        }
+    }
+
+    statements_contain_branch_break(self, statements List[ref TypedStatement]) Bool = {
+        for statement in statements then {
+            if self.statement_contains_branch_break(statement) then { return true }
+        }
+        return false
+    }
+}
+
+public type TypedBranchBreakSummary(
+    contains_branch_break Bool,
+)
+
+public let typed_branch_break_summary_empty() TypedBranchBreakSummary = TypedBranchBreakSummary(false)
+
+public let typed_branch_break_summary_union(left TypedBranchBreakSummary, right TypedBranchBreakSummary) TypedBranchBreakSummary =
+    TypedBranchBreakSummary(left.contains_branch_break or right.contains_branch_break)
+
+public let typed_statement_branch_break_summary(statement TypedStatement) TypedBranchBreakSummary =
+    TypedBranchBreakSummary(TypedBranchBreakSummaryWalker().statement_contains_branch_break(box(statement)))
+
+public let typed_statement_contains_branch_break(statement TypedStatement) Bool =
+    typed_statement_branch_break_summary(statement).contains_branch_break
+
+public let typed_intrinsic_branch_break_summary(node TypedIntrinsic) TypedBranchBreakSummary =
+    TypedBranchBreakSummary(TypedBranchBreakSummaryWalker().intrinsic_contains_branch_break(node))
+
+public let typed_intrinsic_contains_branch_break(node TypedIntrinsic) Bool =
+    typed_intrinsic_branch_break_summary(node).contains_branch_break
+
+public let typed_expr_branch_break_summary(expr ref TypedExpr) TypedBranchBreakSummary =
+    TypedBranchBreakSummary(TypedBranchBreakSummaryWalker().expr_contains_branch_break(expr))
+
+public let typed_expr_contains_branch_break(expr ref TypedExpr) Bool =
+    typed_expr_branch_break_summary(expr).contains_branch_break

@@ -220,17 +220,17 @@ public let instantiate_function(mono ref Monomorphizer, template ref GenericFunc
         .Some(body) then Option[ref TypedExpr].Some(body),
         .None() then {
             // Look up the latest version from the registry.
-            yield when mono.storage.generic_templates.lookup_function_by_def_id(template.def_id) in {
+            break when mono.storage.generic_templates.lookup_function_by_def_id(template.def_id) in {
                 .Some(latest_template_ref) then {
-                    yield when latest_template_ref.checked_body in {
+                    break when latest_template_ref.checked_body in {
                         .Some(latest_body) then Option[ref TypedExpr].Some(latest_body),
                         .None() then Option[ref TypedExpr].None(),
                     }
                 },
                 .None() then {
-                    yield when mono.storage.generic_templates.lookup_function(template.name) in {
+                    break when mono.storage.generic_templates.lookup_function(template.name) in {
                         .Some(latest_template_ref) then {
-                            yield when latest_template_ref.checked_body in {
+                            break when latest_template_ref.checked_body in {
                                 .Some(latest_body) then Option[ref TypedExpr].Some(latest_body),
                                 .None() then Option[ref TypedExpr].None(),
                             }
@@ -456,7 +456,7 @@ private let concrete_extension_def_id_is_materialized(mono ref Monomorphizer, de
 
 // Resolve a StructureType/EnumType def_id to a (template_name, type_args) pair.
 // Tries in order: context.get_template_name + get_type_arguments, layout_to_template_info, context.lookup_type.
-// Returns None if none of the sources yield a template name.
+// Returns None if none of the sources produce a template name.
 private let resolve_template_name_and_args(mono ref Monomorphizer, def_id DefId) Option[Pair[String, List[Type]]] = {
     when mono.storage.context.get_template_name(def_id) in {
         .Some(template_name) then {
@@ -1141,13 +1141,13 @@ public let instantiate_extension_method(
     let structure_name = when resolved_base_type in {
         .StructureType(def_id) then {
             let name = mono.storage.context.get_name(def_id) or else ""
-            yield mono.storage.context.get_template_name(def_id) or else name
+            break mono.storage.context.get_template_name(def_id) or else name
         },
         .GenericStruct(tmpl, _) then tmpl,
         .GenericEnum(tmpl, _) then tmpl,
         .EnumType(def_id) then {
             let name = mono.storage.context.get_name(def_id) or else ""
-            yield mono.storage.context.get_template_name(def_id) or else name
+            break mono.storage.context.get_template_name(def_id) or else name
         },
         .PointerType(_) then "Ptr",
         .MutablePointerType(_) then "MutPtr",
@@ -1223,9 +1223,9 @@ public let instantiate_extension_method(
     // 4. Resolve the latest template from the registry if checked_body is missing.
     //    InstantiationRequests may carry an earlier snapshot without a checked_body.
     let resolved_template = if template.checked_body is .Some(_) then template else {
-            yield when mono.storage.generic_templates.lookup_extension_methods(template_name) in {
+            break when mono.storage.generic_templates.lookup_extension_methods(template_name) in {
                 .Some(ext_list) then {
-                    yield when select_extension_template(
+                    break when select_extension_template(
                         ext_list,
                         template.method.name,
                         Option[UInt].Some(template.method.type_params.count()),
@@ -1504,11 +1504,11 @@ public let instantiate_extension_method_from_entry(
     let concrete_return_type = when resolved_template.checked_return_type in {
         .Some(checked_return_type) then {
             let substituted_return_type = mono.substitute_type_impl(checked_return_type, substitution)
-            yield resolve_parameterized_type(mono, substituted_return_type)
+            break resolve_parameterized_type(mono, substituted_return_type)
         },
         .None() then {
             let resolved_node_type = mono.resolve_type_node_impl(resolved_template.method.return_type, substitution)
-            yield resolve_parameterized_type(mono, resolved_node_type)
+            break resolve_parameterized_type(mono, resolved_node_type)
         },
     }
     let mut method_param_entries = List[ref FunctionParamEntry].new()
@@ -1709,10 +1709,10 @@ private let normalize_trait_conformance_actual_type(mono ref Monomorphizer, actu
                 .Some(pair) then {
                     let mut args = List[ref Type].new()
                     for arg in pair.second then { args.push(box(arg)) }
-                    yield Type.GenericStruct(pair.first, args)
+                    break Type.GenericStruct(pair.first, args)
                 },
                 .None() then {
-                    yield when mono.storage.context.lookup_type(def_id) in {
+                    break when mono.storage.context.lookup_type(def_id) in {
                         .Some(mapped_type) then mapped_type,
                         .None() then actual,
                     }
@@ -1724,10 +1724,10 @@ private let normalize_trait_conformance_actual_type(mono ref Monomorphizer, actu
                 .Some(pair) then {
                     let mut args = List[ref Type].new()
                     for arg in pair.second then { args.push(box(arg)) }
-                    yield Type.GenericEnum(pair.first, args)
+                    break Type.GenericEnum(pair.first, args)
                 },
                 .None() then {
-                    yield when mono.storage.context.lookup_type(def_id) in {
+                    break when mono.storage.context.lookup_type(def_id) in {
                         .Some(mapped_type) then mapped_type,
                         .None() then actual,
                     }
@@ -2694,17 +2694,17 @@ public let instantiate_trait_placeholder_method(
     }
     let parameterized_resolved_base_type = resolve_parameterized_type(mono, resolved_base_type)
     let conformance_binding_type_args = if not type_args.is_empty() then {
-            yield type_args
+            break type_args
         } else when parameterized_resolved_base_type in {
             .GenericStruct(_, base_args) then {
                 let mut inferred_args = List[ref Type].new()
                 for arg in base_args then { inferred_args.push(box(arg.val)) }
-                yield inferred_args
+                break inferred_args
             },
             .GenericEnum(_, base_args) then {
                 let mut inferred_args = List[ref Type].new()
                 for arg in base_args then { inferred_args.push(box(arg.val)) }
-                yield inferred_args
+                break inferred_args
             },
             .StructureType(def_id) then {
                 let mut inferred_args = List[ref Type].new()
@@ -2716,7 +2716,7 @@ public let instantiate_trait_placeholder_method(
                     },
                     .None() then {},
                 }
-                yield inferred_args
+                break inferred_args
             },
             .EnumType(def_id) then {
                 let mut inferred_args = List[ref Type].new()
@@ -2728,7 +2728,7 @@ public let instantiate_trait_placeholder_method(
                     },
                     .None() then {},
                 }
-                yield inferred_args
+                break inferred_args
             },
             _ then List[ref Type].new(),
         }
@@ -2814,9 +2814,9 @@ public let instantiate_trait_placeholder_method(
                                     ext_ref,
                                 )
                                 let inferred_trait_args = if not inferred_trait_args_from_conformance.is_empty() then {
-                                    yield inferred_trait_args_from_conformance
+                                    break inferred_trait_args_from_conformance
                                 } else {
-                                    yield infer_trait_args_from_extension_template_binding(
+                                    break infer_trait_args_from_extension_template_binding(
                                         mono,
                                         ext_ref,
                                         conformance_binding_type_args,
@@ -2874,7 +2874,7 @@ public let instantiate_trait_placeholder_method(
                         trait_name,
                     )
                     let effective_trait_args = if not resolved_from_conformance.is_empty() then {
-                            yield resolved_from_conformance
+                            break resolved_from_conformance
                         } else inferred_from_binding
                     let trait_arg_count_filter = if effective_trait_args.is_empty() then
                             Option[UInt].None()
@@ -2927,7 +2927,7 @@ public let instantiate_trait_placeholder_method(
                                         .None() then {},
                                     }
                                 }
-                                yield found
+                                break found
                             },
                             .None() then Option[ref GenericExtensionMethodTemplate].None(),
                         }
@@ -2949,11 +2949,11 @@ public let instantiate_trait_placeholder_method(
                             .None() then List[ref Type].new(),
                         }
                         let effective_trait_args = if not resolved_trait_args.is_empty() then {
-                                yield resolved_trait_args
+                                break resolved_trait_args
                             } else if not resolved_from_conformance.is_empty() then {
-                                yield resolved_from_conformance
+                                break resolved_from_conformance
                             } else if not inferred_from_binding.is_empty() then {
-                                yield inferred_from_binding
+                                break inferred_from_binding
                             } else inferred_trait_args
                         when select_trait_tool_template_cached(
                             mono,
@@ -3001,9 +3001,9 @@ public let instantiate_trait_placeholder_method(
                     trait_name,
                 )
                 let effective_trait_args = if not resolved_from_conformance.is_empty() then {
-                        yield resolved_from_conformance
+                        break resolved_from_conformance
                     } else if not inferred_from_binding.is_empty() then {
-                        yield inferred_from_binding
+                        break inferred_from_binding
                     } else List[ref Type].new()
                 when select_trait_tool_template_cached(
                     mono,
@@ -3053,11 +3053,11 @@ public let instantiate_trait_placeholder_method(
                         trait_name,
                     )
                     let effective_trait_args = if not resolved_trait_args.is_empty() then {
-                            yield resolved_trait_args
+                            break resolved_trait_args
                         } else if not resolved_from_conformance.is_empty() then {
-                            yield resolved_from_conformance
+                            break resolved_from_conformance
                         } else if not inferred_from_binding.is_empty() then {
-                            yield inferred_from_binding
+                            break inferred_from_binding
                         } else inferred_trait_args
                     when select_trait_tool_template_cached(
                         mono,

@@ -863,7 +863,7 @@ given MIRFunctionCodeEmitter {
                     let temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(return_type))
                     self.codegen.append_copy_or_move_assignment(return_type, emission.expression, temp, true)
                     self.emit_root_cleanup(Option[MIRLocalID].None())
-                    yield temp
+                    break temp
                 } else {
                     // Treat returning a local as moving ownership to the caller.
                     // Otherwise root cleanup can still drop the same local before
@@ -885,7 +885,7 @@ given MIRFunctionCodeEmitter {
                         self.codegen.buffer.push_string(emission.expression)
                         self.codegen.buffer.push_string(").control); }\n")
                     }
-                    yield emission.expression
+                    break emission.expression
                 }
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("return ")
@@ -957,7 +957,7 @@ given MIRFunctionCodeEmitter {
         return when value in {
             .PlaceRead(place, ownership) then {
                 let result = self.emit_place_read(place, ownership, true)
-                yield result
+                break result
             },
             _ then self.emit_value(value),
         }
@@ -1009,7 +1009,7 @@ given MIRFunctionCodeEmitter {
         let expression = when operation.operator_kind in {
             .Arithmetic(op, checked) then {
                 let expr = if checked and self.codegen.is_integer_type(result_type) then self.codegen.next_temp_with_call_2(c_type, self.codegen.checked_arithmetic_func_name(op, result_type), left, right) else self.codegen.next_temp_with_infix_init(c_type, left, self.codegen.arithmetic_op_to_c(op), right)
-                yield expr
+                break expr
             },
             .WrappingArithmetic(op) then self.codegen.next_temp_with_call_2(c_type, self.wrapping_arithmetic_func_name(op, result_type), left, right),
             .Comparison(op) then self.codegen.next_temp_with_infix_init(c_type, left, self.codegen.comparison_op_to_c(op), right),
@@ -1017,7 +1017,7 @@ given MIRFunctionCodeEmitter {
             .LogicalOr() then self.codegen.next_temp_with_infix_init("_Bool", left, "||", right),
             .Bitwise(op, checked_shift) then {
                 let expr = if checked_shift and self.codegen.is_integer_type(result_type) and (op is .LeftShift() or op is .RightShift()) then self.codegen.next_temp_with_call_2(c_type, self.codegen.checked_shift_func_name(op, result_type), left, right) else self.codegen.next_temp_with_infix_init(c_type, left, self.codegen.bitwise_op_to_c(op), right)
-                yield expr
+                break expr
             },
             .WrappingShift(op) then self.codegen.next_temp_with_call_2(c_type, self.wrapping_shift_func_name(op, result_type), left, right),
         }
@@ -1061,7 +1061,7 @@ given MIRFunctionCodeEmitter {
                     }
                     i += 1
                 }
-                yield true
+                break true
             },
             _ then false,
         }
@@ -1147,7 +1147,7 @@ given MIRFunctionCodeEmitter {
                     },
                     _ then {},
                 }
-                yield pts
+                break pts
             },
             _ then List[Type].new(),
         }
@@ -1180,7 +1180,7 @@ given MIRFunctionCodeEmitter {
         let expression = when call.callee in {
             .Function(symbol) then {
                 let callee_name = self.callable_name_for_symbol(symbol)
-                yield self.emit_direct_call(callee_name, arg_values, call.result_type)
+                break self.emit_direct_call(callee_name, arg_values, call.result_type)
             },
             _ then self.emit_closure_call(self.emit_operand_expression(call.callee), self.type_of_operand(call.callee), arg_values, call.result_type),
         }
@@ -1206,24 +1206,24 @@ given MIRFunctionCodeEmitter {
             .Copy() then {
                 let emission = self.emit_value(value)
                 if not self.codegen.needs_drop(value_type) then {
-                    yield emission
+                    break emission
                 }
-                yield when value in {
+                break when value in {
                     .PlaceRead(_, place_ownership) then {
                         if place_ownership is .Copy() then {
-                            yield emission
+                            break emission
                         } else {
                             let temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(value_type))
                             self.codegen.append_copy_or_move_assignment(value_type, emission.expression, temp, true)
                             self.emit_cleanup(emission.cleanup)
-                            yield MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, value_type))
+                            break MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, value_type))
                         }
                     },
                     _ then {
                         let temp = self.codegen.next_temp_with_decl(self.codegen.c_type_name(value_type))
                         self.codegen.append_copy_or_move_assignment(value_type, emission.expression, temp, true)
                         self.emit_cleanup(emission.cleanup)
-                        yield MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, value_type))
+                        break MIRValueEmission(temp, self.cleanup_for_temporary_result(temp, value_type))
                     },
                 }
             },
@@ -1909,7 +1909,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string("    __koral_panic_float_cast_overflow();\n")
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("}\n")
-                yield self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(float_value)")
+                break self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(float_value)")
             },
             .None() then self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(source.expression)"),
         } else self.codegen.next_temp_with_init(target_c_type, "(\(target_c_type))\(source.expression)")
@@ -1931,7 +1931,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(self.codegen.c_type_name(element_type))
                 self.codegen.buffer.push_string("));\n")
                 self.emit_cleanup(count_emission.cleanup)
-                yield MIRValueEmission(expression, Option[ref MIRValueCleanup].None())
+                break MIRValueEmission(expression, Option[ref MIRValueCleanup].None())
             },
             .DeallocMemory(pointer) then {
                 let p = self.emit_value_source(pointer.val)
@@ -1940,7 +1940,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(p.expression)
                 self.codegen.buffer.push_string(");\n")
                 self.emit_cleanup(p.cleanup)
-                yield MIRValueEmission("", Option[ref MIRValueCleanup].None())
+                break MIRValueEmission("", Option[ref MIRValueCleanup].None())
             },
             .CopyMemory(dest, source, count) then self.emit_memory_transfer("memcpy", dest.val, source.val, count.val),
             .MoveMemory(dest, source, count) then self.emit_memory_transfer("memmove", dest.val, source.val, count.val),
@@ -1960,7 +1960,7 @@ given MIRFunctionCodeEmitter {
                 self.consume_moved_source(value.val)
                 self.emit_cleanup(p.cleanup)
                 self.emit_residual_cleanups(v, true)
-                yield MIRValueEmission("", Option[ref MIRValueCleanup].None())
+                break MIRValueEmission("", Option[ref MIRValueCleanup].None())
             },
             .DeinitMemory(pointer) then {
                 let p = self.emit_value_source(pointer.val)
@@ -1968,17 +1968,17 @@ given MIRFunctionCodeEmitter {
                 self.codegen.add_indent()
                 self.codegen.append_drop_statement(element_type, "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)")
                 self.emit_cleanup(p.cleanup)
-                yield MIRValueEmission("", Option[ref MIRValueCleanup].None())
+                break MIRValueEmission("", Option[ref MIRValueCleanup].None())
             },
             .TakeMemory(pointer, result_type) then {
                 let p = self.emit_value_source(pointer.val)
                 let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "*(\(self.codegen.c_type_name(result_type))*)\(p.expression)")
                 self.emit_cleanup(p.cleanup)
-                yield MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type))
+                break MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type))
             },
             .NullPtr(result_type) then {
                 let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(result_type), "NULL")
-                yield MIRValueEmission(expression, Option[ref MIRValueCleanup].None())
+                break MIRValueEmission(expression, Option[ref MIRValueCleanup].None())
             },
             .SpawnThread(out_handle, out_tid, closure, stack_size) then self.emit_spawn_thread(out_handle.val, out_tid.val, closure.val, stack_size.val),
         }
@@ -1997,17 +1997,17 @@ given MIRFunctionCodeEmitter {
                     then self.emit_heap_reference(source, capture.symbol_type)
                     else {
                         let access = self.emit_place_access(source)
-                        yield MIRValueEmission(access.path, access.cleanup)
+                        break MIRValueEmission(access.path, access.cleanup)
                     },
                 .MutableReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref.val
                     then self.emit_borrowed_reference(source, capture.symbol_type)
                     else {
                         let access = self.emit_place_access(source)
-                        yield MIRValueEmission(access.path, access.cleanup)
+                        break MIRValueEmission(access.path, access.cleanup)
                     },
                 _ then {
                     let access = self.emit_place_access(source)
-                    yield MIRValueEmission(access.path, access.cleanup)
+                    break MIRValueEmission(access.path, access.cleanup)
                 },
             }
             capture_source_overrides.insert(capture.def_id.id, capture_emission.expression)
@@ -2280,14 +2280,14 @@ given MIRFunctionCodeEmitter {
         return when place in {
             .Local(local) then {
                 let name = self.local_name(local)
-                yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[ref MIRValueCleanup].None())
+                break MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[ref MIRValueCleanup].None())
             },
             .Global(def_id) then {
                 let name = when self.codegen.context.get_symbol(def_id) in {
                     .Some(symbol) then self.codegen.c_identifier_for_symbol_value(symbol),
                     .None() then self.codegen.c_identifier_opt(def_id) or else self.codegen.sanitize_codegen_identifier(self.context_name(def_id)),
                 }
-                yield MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[ref MIRValueCleanup].None())
+                break MIRPlaceAccess(name, self.control_expression(self.type_of_place(place), name), Option[ref MIRValueCleanup].None())
             },
             .Field(base, field) then {
                 let base_access = self.emit_place_access(base.val)
@@ -2301,17 +2301,17 @@ given MIRFunctionCodeEmitter {
                         path.push_string(base_access.path)
                         path.push_string(".ptr).")
                         path.push_string(field_name)
-                        yield path
+                        break path
                     },
                     _ then {
                         let mut path = String.new()
                         path.push_string(base_access.path)
                         path.push_string(".")
                         path.push_string(field_name)
-                        yield path
+                        break path
                     },
                 }
-                yield MIRPlaceAccess(path, base_access.control, base_access.cleanup)
+                break MIRPlaceAccess(path, base_access.control, base_access.cleanup)
             },
             .EnumPayload(base, case_name, field_name, _, _) then {
                 let base_access = self.emit_place_access(base.val)
@@ -2323,7 +2323,7 @@ given MIRFunctionCodeEmitter {
                         payload_base.push_string("*)")
                         payload_base.push_string(base_access.path)
                         payload_base.push_string(".ptr)")
-                        yield payload_base
+                        break payload_base
                     },
                     _ then base_access.path,
                 }
@@ -2333,12 +2333,12 @@ given MIRFunctionCodeEmitter {
                 path.push_string(self.codegen.sanitize_codegen_identifier(case_name))
                 path.push_string(".")
                 path.push_string(self.codegen.sanitize_codegen_identifier(field_name))
-                yield MIRPlaceAccess(path, base_access.control, base_access.cleanup)
+                break MIRPlaceAccess(path, base_access.control, base_access.cleanup)
             },
             .Deref(base, pointee) then {
                 let base_emission = self.emit_value_source(base.val)
                 let base_type = self.type_of_value(base.val)
-                yield when base_type in {
+                break when base_type in {
                     .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_, _) or .MutableBorrowedReferenceType(_, _) then {
                         let mut path = String.new()
                         path.push_string("(*(")
@@ -2349,7 +2349,7 @@ given MIRFunctionCodeEmitter {
                         let mut control = String.new()
                         control.push_string(base_emission.expression)
                         control.push_string(".control")
-                        yield MIRPlaceAccess(path, control, base_emission.cleanup)
+                        break MIRPlaceAccess(path, control, base_emission.cleanup)
                     },
                     _ then {
                         let mut path = String.new()
@@ -2358,7 +2358,7 @@ given MIRFunctionCodeEmitter {
                         path.push_string("*)")
                         path.push_string(base_emission.expression)
                         path.push_string(")")
-                        yield MIRPlaceAccess(path, "NULL", base_emission.cleanup)
+                        break MIRPlaceAccess(path, "NULL", base_emission.cleanup)
                     },
                 }
             },
@@ -2370,7 +2370,7 @@ given MIRFunctionCodeEmitter {
                 path.push_string("*)")
                 path.push_string(base_emission.expression)
                 path.push_string(")")
-                yield MIRPlaceAccess(path, "NULL", base_emission.cleanup)
+                break MIRPlaceAccess(path, "NULL", base_emission.cleanup)
             },
         }
     }
@@ -2572,7 +2572,7 @@ given MIRFunctionCodeEmitter {
                 let mut control = String.new()
                 control.push_string(value)
                 control.push_string(".control")
-                yield control
+                break control
             },
             _ then "NULL",
         }
@@ -2732,7 +2732,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression)
                 self.codegen.buffer.push_string(".vtable;\n")
                 self.emit_cleanup(emission.cleanup)
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+                break MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
             .MutableReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
@@ -2755,7 +2755,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression)
                 self.codegen.buffer.push_string(".vtable;\n")
                 self.emit_cleanup(emission.cleanup)
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+                break MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
             .BorrowedReferenceType(inner, _) then if inner.val is .TraitObject(_, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
@@ -2778,7 +2778,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression)
                 self.codegen.buffer.push_string(".vtable;\n")
                 self.emit_cleanup(emission.cleanup)
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+                break MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
             .MutableBorrowedReferenceType(inner, _) then if inner.val is .TraitObject(_, _) then {
                 let result = self.codegen.next_temp_with_decl("struct __koral_TraitWeakRef")
@@ -2801,7 +2801,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(emission.expression)
                 self.codegen.buffer.push_string(".vtable;\n")
                 self.emit_cleanup(emission.cleanup)
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+                break MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
             _ then self.emit_runtime_unary_ref_from_emission("__koral_downgrade_ref", emission, result_type),
         }
@@ -2859,7 +2859,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("}\n")
                 self.emit_cleanup(emission.cleanup)
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+                break MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_plain_upgrade_ref(emission, success, result_type),
             .MutableWeakReferenceType(inner) then if inner.val is .TraitObject(_, _) then {
                 let upgraded = self.codegen.next_temp_with_init("struct __koral_Ref", "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))")
@@ -2898,7 +2898,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.add_indent()
                 self.codegen.buffer.push_string("}\n")
                 self.emit_cleanup(emission.cleanup)
-                yield MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
+                break MIRValueEmission(result, self.cleanup_for_temporary_result(result, result_type))
             } else self.emit_plain_upgrade_ref(emission, success, result_type),
             _ then self.emit_plain_upgrade_ref(emission, success, result_type),
         }

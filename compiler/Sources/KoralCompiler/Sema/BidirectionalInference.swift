@@ -330,14 +330,14 @@ public class BidirectionalInference {
             processStatement(stmt, span: span)
         }
         
-        // Check if last statement is yield
+        // Check if last statement is a break carrying the enclosing branch value.
         if let lastStmt = statements.last {
-            if case .yield(let value, _) = lastStmt {
+            if case .break(let value, _) = lastStmt, let value {
                 return synthesize(value, span: span)
             }
             // Check for control transfer
             switch lastStmt {
-            case .return, .break, .continue:
+            case .return, .break(nil, _), .continue:
                 return .never
             default:
                 break
@@ -459,8 +459,10 @@ public class BidirectionalInference {
         case .expression(let expr, _):
             let _ = synthesize(expr, span: span)
             
-        case .yield(let value, _):
-            let _ = synthesize(value, span: span)
+        case .break(let value, _):
+            if let value {
+                let _ = synthesize(value, span: span)
+            }
             
         default:
             break

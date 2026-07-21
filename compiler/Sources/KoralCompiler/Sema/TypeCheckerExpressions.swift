@@ -700,58 +700,58 @@ extension TypeChecker {
   }
 
   private func makeBreakBlock(span: SourceSpan) -> ExpressionNode {
-    .blockExpression(statements: [.break(span: span)])
+    .blockExpression(statements: [.break(value: nil, span: span)])
   }
 
-  func createYieldTarget(
-    kind: YieldTargetKind,
+  func createBranchBreakTarget(
+    kind: BranchBreakTargetKind,
     span: SourceSpan,
     preferredType: Type?
-  ) -> YieldTargetId {
-    let id = YieldTargetId(rawValue: nextYieldTargetId)
-    nextYieldTargetId += 1
-    yieldTargets.append(YieldTarget(
+  ) -> BranchBreakTargetId {
+    let id = BranchBreakTargetId(rawValue: nextBranchBreakTargetId)
+    nextBranchBreakTargetId += 1
+    branchBreakTargets.append(BranchBreakTarget(
       id: id,
       kind: kind,
       span: span,
       preferredType: preferredType,
       resultType: nil,
-      didExplicitYield: false
+      didExplicitBranchBreak: false
     ))
     return id
   }
 
-  func activeYieldTargetIndex(_ id: YieldTargetId? = nil) -> Int? {
+  func activeBranchBreakTargetIndex(_ id: BranchBreakTargetId? = nil) -> Int? {
     if let id {
-      return yieldTargets.lastIndex(where: { $0.id == id })
+      return branchBreakTargets.lastIndex(where: { $0.id == id })
     }
-    guard !yieldTargets.isEmpty else { return nil }
-    return yieldTargets.count - 1
+    guard !branchBreakTargets.isEmpty else { return nil }
+    return branchBreakTargets.count - 1
   }
 
-  func activeYieldTarget(_ id: YieldTargetId? = nil) -> YieldTarget? {
-    guard let index = activeYieldTargetIndex(id) else { return nil }
-    return yieldTargets[index]
+  func activeBranchBreakTarget(_ id: BranchBreakTargetId? = nil) -> BranchBreakTarget? {
+    guard let index = activeBranchBreakTargetIndex(id) else { return nil }
+    return branchBreakTargets[index]
   }
 
-  func expectedTypeForYieldTarget(_ id: YieldTargetId?, fallback: Type?) -> Type? {
-    guard let target = activeYieldTarget(id) else { return fallback }
+  func expectedTypeForBranchBreakTarget(_ id: BranchBreakTargetId?, fallback: Type?) -> Type? {
+    guard let target = activeBranchBreakTarget(id) else { return fallback }
     return target.resultType ?? target.preferredType ?? fallback
   }
 
-  func markExplicitYield(on id: YieldTargetId) {
-    guard let index = activeYieldTargetIndex(id) else {
-      fatalError("markExplicitYield called for inactive yield target")
+  func markExplicitBranchBreak(on id: BranchBreakTargetId) {
+    guard let index = activeBranchBreakTargetIndex(id) else {
+      fatalError("markExplicitBranchBreak called for inactive branch-break target")
     }
-    yieldTargets[index].didExplicitYield = true
+    branchBreakTargets[index].didExplicitBranchBreak = true
   }
 
-  func popYieldTarget(_ id: YieldTargetId) -> YieldTarget {
-    guard let popped = yieldTargets.popLast() else {
-      fatalError("yield target stack underflow")
+  func popBranchBreakTarget(_ id: BranchBreakTargetId) -> BranchBreakTarget {
+    guard let popped = branchBreakTargets.popLast() else {
+      fatalError("branch-break target stack underflow")
     }
     guard popped.id == id else {
-      fatalError("yield target stack mismatch")
+      fatalError("branch-break target stack mismatch")
     }
     return popped
   }
@@ -773,31 +773,31 @@ extension TypeChecker {
     throw SemanticError.typeMismatch(expected: current.description, got: incoming.description)
   }
 
-  func mergeYieldTargetResult(type: Type, span: SourceSpan) throws {
-    guard !yieldTargets.isEmpty else {
-      fatalError("mergeYieldTargetResult called without an active yield target")
+  func mergeBranchBreakTargetResult(type: Type, span: SourceSpan) throws {
+    guard !branchBreakTargets.isEmpty else {
+      fatalError("mergeBranchBreakTargetResult called without an active branch-break target")
     }
-    let index = yieldTargets.count - 1
-    let current = yieldTargets[index]
+    let index = branchBreakTargets.count - 1
+    let current = branchBreakTargets[index]
     let preferredBaseType: Type? = {
       guard let preferredType = current.preferredType else { return nil }
       return context.containsGenericParameter(preferredType) ? nil : preferredType
     }()
     let baseType = current.resultType ?? preferredBaseType
     let merged = try mergeBranchResultTypes(baseType, type, span: span)
-    yieldTargets[index].resultType = merged
+    branchBreakTargets[index].resultType = merged
   }
 
   func mergeBranchContribution(_ expr: TypedExpressionNode, span: SourceSpan) throws {
-    guard !yieldTargets.isEmpty else { return }
+    guard !branchBreakTargets.isEmpty else { return }
     switch expr {
     case .blockExpression:
       if expr.type == .void {
-        try mergeYieldTargetResult(type: .void, span: span)
+        try mergeBranchBreakTargetResult(type: .void, span: span)
       }
     default:
       if expr.type != .never {
-        try mergeYieldTargetResult(type: expr.type, span: span)
+        try mergeBranchBreakTargetResult(type: expr.type, span: span)
       }
     }
   }
@@ -855,12 +855,12 @@ extension TypeChecker {
     throw SemanticError.typeMismatch(expected: expectedType.description, got: normalized.type.description)
   }
 
-  func materializeExplicitYieldBlockValue(
+  func materializeExplicitBranchBreakBlockValue(
     _ expr: TypedExpressionNode,
     resultType: Type,
-    didExplicitYield: Bool
+    didExplicitBranchBreak: Bool
   ) -> TypedExpressionNode {
-    guard didExplicitYield,
+    guard didExplicitBranchBreak,
           resultType != .void,
           resultType != .never,
           case .blockExpression(let statements, _) = expr else {
@@ -868,7 +868,7 @@ extension TypeChecker {
     }
     // Internal lowering helper: preserve source-level "blocks do not produce
     // values" while still letting desugarings such as `or else` / `and then`
-    // carry the explicit-yield result as an ordinary typed expression.
+    // Carry the explicit break-with-value result as an ordinary typed expression.
     return .blockExpression(statements: statements, type: resultType)
   }
 
@@ -897,8 +897,8 @@ extension TypeChecker {
   ) throws -> (TypedExpressionNode, TypedExpressionNode?, Type) {
     guard var typedElse = elseBranch else {
       // Single-branch if must have Void or Never type in the then branch.
-      // This prevents misuse of yield in a single-branch if, where the user
-      // might expect yield to produce a value but the expression always has
+      // This prevents misuse of break-with-value in a single-branch if, where the user
+      // might expect it to produce a value but the expression always has
       // type Void (since there is no else branch to merge with).
       if thenBranch.type != .void && thenBranch.type != .never {
         throw SemanticError(.generic(
@@ -1096,8 +1096,8 @@ extension TypeChecker {
     }
 
     let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
-    let targetId: YieldTargetId? = (usage != .statement && elseBranch != nil)
-      ? createYieldTarget(kind: .ifPatternExpression, span: subject.span, preferredType: expectedType)
+    let targetId: BranchBreakTargetId? = (usage != .statement && elseBranch != nil)
+      ? createBranchBreakTarget(kind: .ifPatternExpression, span: subject.span, preferredType: expectedType)
       : nil
 
     let branchUsage: ExpressionUsage = targetId.map { .branchBody(target: $0) } ?? .statement
@@ -1109,13 +1109,13 @@ extension TypeChecker {
       }
       return try normalizeBranchExpression(
         try thenBuilder(branchUsage),
-        expectedType: expectedTypeForYieldTarget(targetId, fallback: expectedType)
+        expectedType: expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
       )
     }
 
     let typedElse: TypedExpressionNode?
     if let elseBranch {
-      var elseExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      var elseExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
       if elseExpectedType == nil,
          typedThen.type != .never,
          isImplicitMemberContextType(typedThen.type),
@@ -1133,11 +1133,11 @@ extension TypeChecker {
 
     let resultType: Type
     if let targetId {
-      guard let targetState = activeYieldTarget(targetId) else {
-        fatalError("if-pattern yield target disappeared before completion")
+      guard let targetState = activeBranchBreakTarget(targetId) else {
+        fatalError("if-pattern branch-break target disappeared before completion")
       }
-      if !targetState.didExplicitYield {
-        _ = popYieldTarget(targetId)
+      if !targetState.didExplicitBranchBreak {
+        _ = popBranchBreakTarget(targetId)
         let (mergedThen, mergedElse, mergedType) = try mergeConditionalBranches(
           thenBranch: typedThen,
           elseBranch: typedElse,
@@ -1159,7 +1159,7 @@ extension TypeChecker {
         try mergeBranchContribution(typedElse, span: elseBranch?.span ?? subject.span)
       }
 
-      let target = popYieldTarget(targetId)
+      let target = popBranchBreakTarget(targetId)
       resultType = target.resultType ?? ((typedThen.type == .never && typedElse?.type == .never) ? .never : .void)
     } else {
       let (mergedThen, mergedElse, mergedType) = try mergeConditionalBranches(
@@ -1588,9 +1588,9 @@ extension TypeChecker {
         break
       }
 
-      let targetId: YieldTargetId? = usage == .statement
+      let targetId: BranchBreakTargetId? = usage == .statement
         ? nil
-        : createYieldTarget(kind: .whenExpression, span: span, preferredType: expectedType)
+        : createBranchBreakTarget(kind: .whenExpression, span: span, preferredType: expectedType)
 
       var typedCases: [TypedMatchCase] = []
       var sawFallthrough = false
@@ -1606,7 +1606,7 @@ extension TypeChecker {
             }
           }
           // Use the current target's evolving type, if any, for subsequent arms.
-          var branchExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+          var branchExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
           if branchExpectedType == nil,
              branchNeedsExpectedTypeForImplicitMember(c.body) {
             branchExpectedType = runningExpectedType
@@ -1635,7 +1635,7 @@ extension TypeChecker {
         }
         if typedCase.body.type != .never,
            isImplicitMemberContextType(typedCase.body.type),
-           activeYieldTarget(targetId)?.didExplicitYield != true {
+           activeBranchBreakTarget(targetId)?.didExplicitBranchBreak != true {
           runningExpectedType = try mergeBranchResultTypes(runningExpectedType, typedCase.body.type, span: c.body.span)
         }
         typedCases.append(typedCase)
@@ -1655,11 +1655,11 @@ extension TypeChecker {
       
       let resultType: Type
       if let targetId {
-        if activeYieldTarget(targetId)?.didExplicitYield == true {
+        if activeBranchBreakTarget(targetId)?.didExplicitBranchBreak == true {
           for (typedCase, sourceCase) in zip(typedCases, cases) {
             try mergeBranchContribution(typedCase.body, span: sourceCase.body.span)
           }
-          let target = popYieldTarget(targetId)
+          let target = popBranchBreakTarget(targetId)
           if let mergedType = target.resultType {
             resultType = mergedType
           } else if allNever {
@@ -1676,7 +1676,7 @@ extension TypeChecker {
             expectedType: expectedType
           )
           typedCases = mergedCases
-          _ = popYieldTarget(targetId)
+          _ = popBranchBreakTarget(targetId)
           resultType = mergedType
         }
       } else {
@@ -1775,8 +1775,8 @@ extension TypeChecker {
         }
 
         // Ordinary blocks always evaluate to Void or Never. Branch-expression
-        // yields contribute to the enclosing target directly; a block that can
-        // still fall through must remain Void even if some inner path yields.
+        // Branch breaks contribute to the enclosing target directly; a block that can
+        // still fall through must remain Void even if some inner path breaks with a value.
         if controlFlowTerminator != nil {
           blockType = .never
         }
@@ -1923,14 +1923,14 @@ extension TypeChecker {
         )
       }
 
-      let targetId = createYieldTarget(kind: .ifExpression, span: expr.span, preferredType: expectedType)
-      let branchExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      let targetId = createBranchBreakTarget(kind: .ifExpression, span: expr.span, preferredType: expectedType)
+      let branchExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
       let typedThen = try normalizeBranchExpression(
         try inferTypedExpression(thenBranch, expectedType: branchExpectedType, usage: .branchBody(target: targetId)),
         expectedType: branchExpectedType
       )
 
-      var nextExpectedType = expectedTypeForYieldTarget(targetId, fallback: expectedType)
+      var nextExpectedType = expectedTypeForBranchBreakTarget(targetId, fallback: expectedType)
       if nextExpectedType == nil,
          typedThen.type != .never,
          isImplicitMemberContextType(typedThen.type),
@@ -1941,11 +1941,11 @@ extension TypeChecker {
         try inferTypedExpression(elseBranch, expectedType: nextExpectedType, usage: .branchBody(target: targetId)),
         expectedType: nextExpectedType
       )
-      guard let targetState = activeYieldTarget(targetId) else {
-        fatalError("if-expression yield target disappeared before completion")
+      guard let targetState = activeBranchBreakTarget(targetId) else {
+        fatalError("if-expression branch-break target disappeared before completion")
       }
-      if !targetState.didExplicitYield {
-        _ = popYieldTarget(targetId)
+      if !targetState.didExplicitBranchBreak {
+        _ = popBranchBreakTarget(targetId)
         return try buildTypedIfExpression(
           condition: typedCondition,
           thenBranch: typedThen,
@@ -1957,7 +1957,7 @@ extension TypeChecker {
       try mergeBranchContribution(typedThen, span: thenBranch.span)
       try mergeBranchContribution(typedElse, span: elseBranch.span)
 
-      let target = popYieldTarget(targetId)
+      let target = popBranchBreakTarget(targetId)
       let resultType = target.resultType ?? ((typedThen.type == .never && typedElse.type == .never) ? .never : .void)
       return .ifExpression(
         condition: typedCondition,
@@ -7907,7 +7907,7 @@ extension TypeChecker {
     span: SourceSpan
   ) throws -> TypedExpressionNode {
     let innerType = kind.innerType
-    let targetId = createYieldTarget(kind: .whenExpression, span: span, preferredType: innerType)
+    let targetId = createBranchBreakTarget(kind: .whenExpression, span: span, preferredType: innerType)
 
     // Type-check defaultExpr, injecting `it` for Result's error value.
     let typedDefault: TypedExpressionNode
@@ -7932,17 +7932,17 @@ extension TypeChecker {
       )
     }
 
-    try mergeYieldTargetResult(type: innerType, span: span)
+    try mergeBranchBreakTargetResult(type: innerType, span: span)
     try mergeBranchContribution(typedDefault, span: span)
 
     // Build the lowered whenExpression.
-    let targetState = activeYieldTarget(targetId)
-    let didExplicitYield = targetState?.didExplicitYield == true
-    let resultType = popYieldTarget(targetId).resultType ?? innerType
-    let materializedDefault = materializeExplicitYieldBlockValue(
+    let targetState = activeBranchBreakTarget(targetId)
+    let didExplicitBranchBreak = targetState?.didExplicitBranchBreak == true
+    let resultType = popBranchBreakTarget(targetId).resultType ?? innerType
+    let materializedDefault = materializeExplicitBranchBreakBlockValue(
       typedDefault,
       resultType: resultType,
-      didExplicitYield: didExplicitYield
+      didExplicitBranchBreak: didExplicitBranchBreak
     )
     switch kind {
     case .option:
@@ -8079,7 +8079,7 @@ extension TypeChecker {
     // e.g. if expectedType is [U]Option, the transform should produce U or [U]Option.
     let transformExpectedType: Type? = nil
 
-    let targetId = createYieldTarget(kind: .whenExpression, span: span, preferredType: transformExpectedType)
+    let targetId = createBranchBreakTarget(kind: .whenExpression, span: span, preferredType: transformExpectedType)
 
     // Create it symbol, type-check transformExpr in child scope with it injected.
     let underscoreSymbol = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
@@ -8091,13 +8091,13 @@ extension TypeChecker {
       )
     }
     try mergeBranchContribution(typedTransform, span: span)
-    let targetState = activeYieldTarget(targetId)
-    let didExplicitYield = targetState?.didExplicitYield == true
-    let transformType = popYieldTarget(targetId).resultType ?? typedTransform.type
-    let materializedTransform = materializeExplicitYieldBlockValue(
+    let targetState = activeBranchBreakTarget(targetId)
+    let didExplicitBranchBreak = targetState?.didExplicitBranchBreak == true
+    let transformType = popBranchBreakTarget(targetId).resultType ?? typedTransform.type
+    let materializedTransform = materializeExplicitBranchBreakBlockValue(
       typedTransform,
       resultType: transformType,
-      didExplicitYield: didExplicitYield
+      didExplicitBranchBreak: didExplicitBranchBreak
     )
 
     let (finalType, flattened) = computeAndThenResultType(

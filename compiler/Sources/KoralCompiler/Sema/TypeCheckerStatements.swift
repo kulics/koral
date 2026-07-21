@@ -7,7 +7,7 @@ extension TypeChecker {
 
   func statementCanFallThrough(_ stmt: TypedStatementNode) -> Bool {
     switch stmt {
-    case .return, .break, .continue, .yield:
+    case .return, .break, .continue, .branchBreak:
       return false
     case .expression(let expr):
       return expr.type != .never
@@ -34,8 +34,8 @@ extension TypeChecker {
       return "break"
     case .continue:
       return "continue"
-    case .yield:
-      return "yield"
+    case .branchBreak:
+      return "break"
     case .expression(let expr):
       return expr.type == .never ? "control flow terminator" : nil
     case .ifStatement, .ifPatternStatement, .whenStatement:
@@ -689,11 +689,39 @@ extension TypeChecker {
       }
       return .return(value: nil)
 
-    case .break(let span):
+    case .break(let value, let span):
       self.currentSpan = span
       if insideFinally {
         throw SemanticError(.generic(
           "control flow statement 'break' is not allowed in finally expression"))
+      }
+      if let value {
+        if let currentTarget = branchBreakTargets.last {
+          let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
+          var typedValueOpt: TypedExpressionNode?
+          for expectedType in candidateExpectedTypes {
+            do {
+              typedValueOpt = try normalizeBranchExpression(
+                try inferTypedExpression(value, expectedType: expectedType),
+                expectedType: expectedType
+              )
+              break
+            } catch {
+              continue
+            }
+          }
+          let typedValue: TypedExpressionNode
+          if let inferredValue = typedValueOpt {
+            typedValue = inferredValue
+          } else {
+            typedValue = try inferTypedExpression(value)
+          }
+          markExplicitBranchBreak(on: currentTarget.id)
+          try mergeBranchBreakTargetResult(type: typedValue.type, span: span)
+          return .branchBreak(target: currentTarget.id, value: typedValue)
+        }
+
+        throw SemanticError(.generic("break with value outside of branch expression body"), span: span)
       }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")
@@ -723,38 +751,6 @@ extension TypeChecker {
       let typedExpr = try inferTypedExpression(expression, usage: .statement)
       return .finally(expression: typedExpr)
 
-    case .yield(let value, let span):
-      self.currentSpan = span
-      if insideFinally {
-        throw SemanticError(.generic(
-          "control flow statement 'yield' is not allowed in finally expression"))
-      }
-      if let currentTarget = yieldTargets.last {
-        let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
-        var typedValueOpt: TypedExpressionNode?
-        for expectedType in candidateExpectedTypes {
-          do {
-            typedValueOpt = try normalizeBranchExpression(
-              try inferTypedExpression(value, expectedType: expectedType),
-              expectedType: expectedType
-            )
-            break
-          } catch {
-            continue
-          }
-        }
-        let typedValue: TypedExpressionNode
-        if let inferredValue = typedValueOpt {
-          typedValue = inferredValue
-        } else {
-          typedValue = try inferTypedExpression(value)
-        }
-        markExplicitYield(on: currentTarget.id)
-        try mergeYieldTargetResult(type: typedValue.type, span: span)
-        return .yield(target: currentTarget.id, value: typedValue)
-      }
-
-      throw SemanticError(.generic("yield outside of branch expression body"), span: span)
     }
   }
 }

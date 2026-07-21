@@ -244,7 +244,7 @@ Block rules:
 - A block contains zero or more statements.
 - A plain block's default type is `Void`.
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
-- `yield` is not a block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch.
+- `break <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
 
 ```koral
@@ -797,18 +797,18 @@ When we don't need to handle the `else` branch, we can omit it, in which case it
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-When an `if` branch body is a block, that block still defaults to `Void`. Use `yield` to produce the value of the enclosing `if` expression and to exit that branch body early:
+When an `if` branch body is a block, that block still defaults to `Void`. Use `break <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early:
 
 ```koral
 let label = if score >= 90 then {
-    if score == 100 then yield "perfect"
-    yield "A"
+    if score == 100 then break "perfect"
+    break "A"
 } else {
-    yield "other"
+    break "other"
 }
 ```
 
-`yield` inside a statement-form nested `if` / `when` still targets the enclosing branch expression. A nested `if` / `when` expression creates its own yield target.
+`break <expression>` inside a statement-form nested `if` / `when` still targets the enclosing branch expression. A nested `if` / `when` expression creates its own branch-result target.
 
 ### if is Pattern Matching
 
@@ -956,7 +956,7 @@ finally {
 
 #### Restrictions
 
-- `return`, `break`, `continue`, and `yield` are not allowed inside a `finally` expression.
+- `return`, `break`, and `continue` are not allowed inside a `finally` expression. This includes `break <expression>` used for branch values.
 - Nested `finally` is not allowed inside a `finally` expression.
 - `finally` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
 - These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
@@ -978,19 +978,19 @@ let result = when x in {
 }
 ```
 
-Like `if`, a block branch in `when` still defaults to `Void`. Use `yield` to produce the enclosing `when` expression's value and to support early exit inside the branch body:
+Like `if`, a block branch in `when` still defaults to `Void`. Use `break <expression>` to produce the enclosing `when` expression's value and to support early exit inside the branch body:
 
 ```koral
 let label = when score in {
     100 then {
         println("bonus")
-        yield "perfect"
+        break "perfect"
     },
     >= 90 then {
-        if has_curve(score) then yield "A+"
-        yield "A"
+        if has_curve(score) then break "A+"
+        break "A"
     },
-    _ then { yield "other" },
+    _ then { break "other" },
 }
 ```
 

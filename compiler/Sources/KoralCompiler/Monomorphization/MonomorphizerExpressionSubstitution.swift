@@ -1004,8 +1004,8 @@ extension Monomorphizer {
         case .finally(let expression):
             return .finally(expression: substituteTypesInExpression(expression, substitution: substitution))
 
-        case .yield(let target, let value):
-            return .yield(target: target, value: substituteTypesInExpression(value, substitution: substitution))
+        case .branchBreak(let target, let value):
+            return .branchBreak(target: target, value: substituteTypesInExpression(value, substitution: substitution))
         }
     }
     

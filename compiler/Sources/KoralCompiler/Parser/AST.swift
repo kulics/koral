@@ -336,10 +336,9 @@ public indirect enum StatementNode {
     target: ExpressionNode, operator: CompoundAssignmentOperator?, value: ExpressionNode, span: SourceSpan)
   case expression(ExpressionNode, span: SourceSpan)
   case `return`(value: ExpressionNode?, span: SourceSpan)
-  case `break`(span: SourceSpan)
+  case `break`(value: ExpressionNode?, span: SourceSpan)
   case `continue`(span: SourceSpan)
   case finally(expression: ExpressionNode, span: SourceSpan)
-  case yield(value: ExpressionNode, span: SourceSpan)
 }
 
 extension StatementNode {
@@ -351,10 +350,9 @@ extension StatementNode {
     case .assignment(_, _, _, let span): return span
     case .expression(_, let span): return span
     case .return(_, let span): return span
-    case .break(let span): return span
+    case .break(_, let span): return span
     case .continue(let span): return span
     case .finally(_, let span): return span
-    case .yield(_, let span): return span
     }
   }
 }

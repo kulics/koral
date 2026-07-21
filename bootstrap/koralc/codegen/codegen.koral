@@ -272,19 +272,19 @@ given CodeGen {
             .GenericStruct(template, args) then {
                 let mut bound_args = List[ref Type].new()
                 for arg_ref in args then { bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings))) }
-                yield Type.GenericStruct(template, bound_args)
+                break Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
                 let mut bound_args = List[ref Type].new()
                 for arg_ref in args then { bound_args.push(box(self.apply_codegen_type_bindings(arg_ref.val, bindings))) }
-                yield Type.GenericEnum(template, bound_args)
+                break Type.GenericEnum(template, bound_args)
             },
             .FunctionType(fn_params, return_type_ref) then {
                 let mut bound_param_types = List[ref Type].new()
                 for entry in fn_params then {
                     bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, bindings)))
                 }
-                yield make_function_type(bound_param_types, self.apply_codegen_type_bindings(return_type_ref.val, bindings))
+                break make_function_type(bound_param_types, self.apply_codegen_type_bindings(return_type_ref.val, bindings))
             },
             _ then t,
         }
@@ -313,7 +313,7 @@ given CodeGen {
                         .Some(type_args) then {
                             let mut type_arg_refs = List[ref Type].new()
                             for type_arg in type_args then { type_arg_refs.push(box(type_arg)) }
-                            yield Type.GenericStruct(template_name, type_arg_refs)
+                            break Type.GenericStruct(template_name, type_arg_refs)
                         },
                         .None() then concrete_base_type,
                     },
@@ -327,7 +327,7 @@ given CodeGen {
                         .Some(type_args) then {
                             let mut type_arg_refs = List[ref Type].new()
                             for type_arg in type_args then { type_arg_refs.push(box(type_arg)) }
-                            yield Type.GenericEnum(template_name, type_arg_refs)
+                            break Type.GenericEnum(template_name, type_arg_refs)
                         },
                         .None() then concrete_base_type,
                     },
@@ -365,7 +365,7 @@ given CodeGen {
                     bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, receiver_bindings)))
                 }
                 let bound_return_type = self.apply_codegen_type_bindings(return_type_ref.val, receiver_bindings)
-                yield make_function_type(bound_param_types, bound_return_type)
+                break make_function_type(bound_param_types, bound_return_type)
             },
             _ then fn_type,
         }
@@ -473,7 +473,7 @@ given CodeGen {
                     found = self.lookup_trait_method_def_id(concrete_receiver_type, parent_trait_name.name, method_name)
                     if found is .Some(_) then { break }
                 }
-                yield found
+                break found
             },
             .None() then Option[DefId].None(),
         }
@@ -586,7 +586,7 @@ given CodeGen {
                     .MutableWeakReferenceType(inner_ref) then inner_ref.val,
                     _ then concrete_param_type,
                 }
-                yield self.concrete_receiver_lookup_key(param_base_type) == receiver_base_key
+                break self.concrete_receiver_lookup_key(param_base_type) == receiver_base_key
             },
             .None() then false,
         }
@@ -634,7 +634,7 @@ given CodeGen {
             .ReferenceType(inner_ref) then self.lookup_receiver_method(inner_ref.val, method_name),
             .MutableReferenceType(inner_ref) then {
                 let shared_ref_type = Type.ReferenceType(box(inner_ref.val))
-                yield when self.lookup_receiver_method_via_metadata(shared_ref_type, method_name, Type.Unknown()) in {
+                break when self.lookup_receiver_method_via_metadata(shared_ref_type, method_name, Type.Unknown()) in {
                     .Some(symbol) then Option[Symbol].Some(symbol),
                     .None() then self.lookup_receiver_method(inner_ref.val, method_name),
                 }
@@ -774,7 +774,7 @@ given CodeGen {
                     },
                     .None() then {},
                 }
-                yield Option[Type].None()
+                break Option[Type].None()
                 },
             },
         }
@@ -965,7 +965,7 @@ given CodeGen {
                     }
                 }
 
-                yield Option[Symbol].None()
+                break Option[Symbol].None()
             },
             .None() then Option[Symbol].None(),
         }
@@ -1040,7 +1040,7 @@ given CodeGen {
                     },
                 }
                 let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                yield Option[String].Some(self.compose_method_c_name(owner_c_name, selected_method_name))
+                break Option[String].Some(self.compose_method_c_name(owner_c_name, selected_method_name))
             },
             .None() then Option[String].None(),
         }
@@ -1063,16 +1063,16 @@ given CodeGen {
                             let sanitized_logical = self.sanitize_codegen_identifier(info.logical_name)
                             if sanitized_name == sanitized_logical then {
                                 let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                                yield self.compose_method_c_name(owner_c_name, info.logical_name)
+                                break self.compose_method_c_name(owner_c_name, info.logical_name)
                             }
-                            yield sanitized_name
+                            break sanitized_name
                         },
                         .None() then self.sanitize_codegen_identifier(name),
                     },
                     .None() then when info.owner_type in {
                         .Some(owner_type) then {
                             let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                            yield self.compose_method_c_name(owner_c_name, info.logical_name)
+                            break self.compose_method_c_name(owner_c_name, info.logical_name)
                         },
                         .None() then info.logical_name,
                     },
@@ -1084,7 +1084,7 @@ given CodeGen {
                     .Some(owner_type) then {
                         let raw_method_name = self.context.symbol_name(symbol.val)
                         let owner_c_name = self.emitted_type_c_name_fallback(owner_type)
-                        yield self.compose_method_c_name(owner_c_name, raw_method_name)
+                        break self.compose_method_c_name(owner_c_name, raw_method_name)
                     },
                     .None() then {
                         when self.current_owner_method_symbol(symbol) in {
@@ -1095,7 +1095,7 @@ given CodeGen {
                             .Some(name) then { return name },
                             .None() then {},
                         }
-                        yield self.qualified_name(symbol)
+                        break self.qualified_name(symbol)
                     },
                 },
             },
@@ -1194,7 +1194,7 @@ given CodeGen {
         }
 
         let resolved_name = if self.should_use_current_owner_resolution(symbol) then {
-            yield when self.current_owner_method_symbol(symbol) in {
+            break when self.current_owner_method_symbol(symbol) in {
                 .Some(resolved_symbol) then self.callable_c_name(box(resolved_symbol)),
                 .None() then when self.fallback_current_owner_method_c_name(symbol) in {
                     .Some(name) then name,
@@ -1274,7 +1274,7 @@ given CodeGen {
                     return Option[Type].None()
                 }
                 let receiver_type = params[0(UInt)].param_type
-                yield Option[Type].Some(when receiver_type in {
+                break Option[Type].Some(when receiver_type in {
                     .ReferenceType(inner) then inner.val,
                     .MutableReferenceType(inner) then inner.val,
                     .BorrowedReferenceType(inner, _) then inner.val,
@@ -1306,7 +1306,7 @@ given CodeGen {
 
         return when t in {
             .StructureType(def_id) then {
-                yield when self.c_identifier_opt(def_id) in {
+                break when self.c_identifier_opt(def_id) in {
                     .Some(name) then Option[String].Some(name),
                     .None() then when self.context.get_name(def_id) in {
                         .Some(name) then Option[String].Some(self.sanitize_codegen_identifier(name)),
@@ -1315,7 +1315,7 @@ given CodeGen {
                 }
             },
             .EnumType(def_id) then {
-                yield when self.c_identifier_opt(def_id) in {
+                break when self.c_identifier_opt(def_id) in {
                     .Some(name) then Option[String].Some(name),
                     .None() then when self.context.get_name(def_id) in {
                         .Some(name) then Option[String].Some(self.sanitize_codegen_identifier(name)),
@@ -1325,14 +1325,14 @@ given CodeGen {
             },
             .GenericStruct(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(self.concretize_codegen_type(t))
-                yield Option[String].Some(self.sanitize_codegen_identifier(layout_key))
+                break Option[String].Some(self.sanitize_codegen_identifier(layout_key))
             },
             .GenericEnum(_, _) then {
                 let layout_key = self.concrete_layout_key_for_type(self.concretize_codegen_type(t))
-                yield Option[String].Some(self.sanitize_codegen_identifier(layout_key))
+                break Option[String].Some(self.sanitize_codegen_identifier(layout_key))
             },
             .OpaqueType(def_id) then {
-                yield when self.context.lookup_type(def_id) in {
+                break when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.concrete_type_c_name_fallback(mapped_type),
                     .None() then when self.c_identifier_opt(def_id) in {
                         .Some(name) then Option[String].Some(name),
@@ -1386,13 +1386,13 @@ given CodeGen {
             .WeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .MutableWeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(inner_ref.val),
             .StructureType(def_id) then {
-                yield when self.context.get_name(def_id) in {
+                break when self.context.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "T_\(def_id.id)",
                 }
             },
             .EnumType(def_id) then {
-                yield when self.context.get_name(def_id) in {
+                break when self.context.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "U_\(def_id.id)",
                 }
@@ -1413,7 +1413,7 @@ given CodeGen {
             .Float64Type() then "Float64",
             .BoolType() then "Bool",
             .OpaqueType(def_id) then {
-                yield when self.context.lookup_type(def_id) in {
+                break when self.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.receiver_type_lookup_name_fallback(mapped_type),
                     .None() then when self.context.get_name(def_id) in {
                         .Some(name) then name,
@@ -1496,7 +1496,7 @@ given CodeGen {
                 }
                 out.push_string("_")
                 out.push_string(self.concrete_layout_key_for_type(return_type.val))
-                yield out
+                break out
             },
             .GenericStruct(template, args) then {
                 let mut out = template
@@ -1504,7 +1504,7 @@ given CodeGen {
                     out.push_string("_")
                     out.push_string(self.concrete_layout_key_for_type(arg.val))
                 }
-                yield out
+                break out
             },
             .GenericEnum(template, args) then {
                 let mut out = template
@@ -1512,7 +1512,7 @@ given CodeGen {
                     out.push_string("_")
                     out.push_string(self.concrete_layout_key_for_type(arg.val))
                 }
-                yield out
+                break out
             },
             .StructureType(def_id) then self.concrete_layout_key_for_def_id(def_id) or else layout_key(t),
             .EnumType(def_id) then self.concrete_layout_key_for_def_id(def_id) or else layout_key(t),
@@ -1592,7 +1592,7 @@ given CodeGen {
         let enum_cases_opt = when self.context.get_enum_cases(def_id) in {
             .Some(enum_cases) then Option[List[EnumCaseInfo]].Some(enum_cases),
             .None() then {
-                yield when self.concrete_enum_cases_from_program(def_id) in {
+                break when self.concrete_enum_cases_from_program(def_id) in {
                     .Some(typed_cases) then {
                         let mut enum_cases = List[EnumCaseInfo].new()
                         for typed_case in typed_cases then {
@@ -1602,7 +1602,7 @@ given CodeGen {
                             }
                             enum_cases.push(EnumCaseInfo(typed_case.name, params))
                         }
-                        yield Option[List[EnumCaseInfo]].Some(enum_cases)
+                        break Option[List[EnumCaseInfo]].Some(enum_cases)
                     },
                     .None() then Option[List[EnumCaseInfo]].None(),
                 }
@@ -1627,7 +1627,7 @@ given CodeGen {
                     true then Option[Pair[UInt, List[EnumCaseParam]]].Some(Pair[UInt, List[EnumCaseParam]](found_index, found_params)),
                     false then Option[Pair[UInt, List[EnumCaseParam]]].None(),
                 }
-                yield resolved
+                break resolved
             },
             .None() then Option[Pair[UInt, List[EnumCaseParam]]].None(),
         }
@@ -1657,7 +1657,7 @@ given CodeGen {
                 let source_file = self.context.get_source_file(symbol.def_id) or else ""
                 let access = self.context.get_access(symbol.def_id) or else AccessModifier.Protected()
                 let is_private = access is .Private()
-                yield not module_path.is_empty() or not source_file.is_empty() or is_private
+                break not module_path.is_empty() or not source_file.is_empty() or is_private
             },
         }
 
@@ -1676,7 +1676,7 @@ given CodeGen {
                 .Some(c_id) then c_id,
                 .None() then {
                     let symbol_name = self.context.symbol_name(symbol)
-                    yield if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
+                    break if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
                 },
             }
         }
@@ -1726,7 +1726,7 @@ given CodeGen {
             .None() then {
                 let symbol_name = self.context.symbol_name(symbol)
                 let c_name = if symbol_name.starts_with("_k__") then symbol_name else self.sanitize_codegen_identifier(symbol_name)
-                yield c_name
+                break c_name
             },
         }
     }
@@ -1760,7 +1760,7 @@ given CodeGen {
                 .Some(mapped_type) then self.type_looks_traitlike_for_storage(mapped_type),
                 .None() then {
                     let trait_name = self.context.get_name(def_id) or else ""
-                    yield when self.context.get_kind(def_id) in {
+                    break when self.context.get_kind(def_id) in {
                         .Some(kind) then when kind in {
                             .TypeDef(type_kind) then when type_kind in {
                                 .Trait() then true,
@@ -1812,19 +1812,19 @@ given CodeGen {
                         .None() then "T_\(def_id.id)",
                     },
                 }
-                yield Option[String].Some("struct \(c_name)")
+                break Option[String].Some("struct \(c_name)")
             },
             .EnumType(def_id) then {
                 let c_name = when self.c_identifier_opt(def_id) in {
                     .Some(name) then name,
                     .None() then {
-                        yield when self.context.get_name(def_id) in {
+                        break when self.context.get_name(def_id) in {
                             .Some(name) then self.sanitize_codegen_identifier(name),
                             .None() then "U_\(def_id.id)",
                         }
                     },
                 }
-                yield Option[String].Some("struct \(c_name)")
+                break Option[String].Some("struct \(c_name)")
             },
             _ then Option[String].None(),
         }
@@ -1833,40 +1833,40 @@ given CodeGen {
     private opaque_mapped_c_type_name(self, mapped_type Type) Option[String] = {
         return when mapped_type in {
             .TraitObject(_, _) then {
-                yield Option[String].Some("struct __koral_TraitRef")
+                break Option[String].Some("struct __koral_TraitRef")
             },
             .ReferenceType(inner_ref) then {
-                yield when inner_ref.val in {
+                break when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .MutableReferenceType(inner_ref) then {
-                yield when inner_ref.val in {
+                break when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .BorrowedReferenceType(inner_ref, _) then {
-                yield when inner_ref.val in {
+                break when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .MutableBorrowedReferenceType(inner_ref, _) then {
-                yield when inner_ref.val in {
+                break when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitRef"),
                     _ then Option[String].None(),
                 }
             },
             .WeakReferenceType(inner_ref) then {
-                yield when inner_ref.val in {
+                break when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitWeakRef"),
                     _ then Option[String].None(),
                 }
             },
             .MutableWeakReferenceType(inner_ref) then {
-                yield when inner_ref.val in {
+                break when inner_ref.val in {
                     .TraitObject(_, _) then Option[String].Some("struct __koral_TraitWeakRef"),
                     _ then Option[String].None(),
                 }
@@ -1879,7 +1879,7 @@ given CodeGen {
         return when self.c_identifier_opt(def_id) in {
             .Some(name) then name,
             .None() then {
-                yield when self.context.get_name(def_id) in {
+                break when self.context.get_name(def_id) in {
                     .Some(name) then self.sanitize_codegen_identifier(name),
                     .None() then "opaque_\(def_id.id)",
                 }
@@ -1894,7 +1894,7 @@ given CodeGen {
                     .Some(mapped_type) then self.opaque_mapped_c_type_name(mapped_type),
                     .None() then Option[String].None(),
                 }
-                yield when mapped_c_type_opt in {
+                break when mapped_c_type_opt in {
                     .Some(mapped_c_type) then Option[String].Some(mapped_c_type),
                     .None() then Option[String].Some(self.opaque_fallback_c_type_name(def_id)),
                 }
@@ -1907,9 +1907,9 @@ given CodeGen {
         return when t in {
             .GenericStruct(template, _) then {
                 let layout_key = self.concrete_layout_key_for_type(t)
-                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                break when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
-                        yield when self.c_identifier_opt(def_id) in {
+                        break when self.c_identifier_opt(def_id) in {
                             .Some(name) then Option[String].Some("struct \(name)"),
                             .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(layout_key))"),
                         }
@@ -1919,9 +1919,9 @@ given CodeGen {
             },
             .GenericEnum(template, _) then {
                 let layout_key = self.concrete_layout_key_for_type(t)
-                yield when self.find_type_def_id_by_layout_or_template(t, template) in {
+                break when self.find_type_def_id_by_layout_or_template(t, template) in {
                     .Some(def_id) then {
-                        yield when self.c_identifier_opt(def_id) in {
+                        break when self.c_identifier_opt(def_id) in {
                             .Some(name) then Option[String].Some("struct \(name)"),
                             .None() then Option[String].Some("struct \(self.sanitize_codegen_identifier(layout_key))"),
                         }
@@ -2121,7 +2121,7 @@ given CodeGen {
             "int" then Type.BoolType(),
             "void" then Type.VoidType(),
             _ then {
-                yield self.nominal_type_from_c_type_name(c_type) or else Type.Unknown()
+                break self.nominal_type_from_c_type_name(c_type) or else Type.Unknown()
             },
         }
     }
