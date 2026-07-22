@@ -10,7 +10,9 @@ At repository root:
 - `std/` — standard library sources and runtime C files
 - `docs/` — language docs and this guide
 - `bootstrap/` — self-hosting compiler implementation
-- `toolchain/fmt/` — formatter sources
+- `toolchain/koralfmt/` — formatter sources
+- `toolchain/doc/` — std API doc generator
+- `toolchain/koral/` — Koral build tool implementation
 
 ### Build the Compiler
 
@@ -65,6 +67,7 @@ Common options:
 - `--compiler-bin <path>`: explicit compiler executable path when `--compiler custom`
 - `--bootstrap-koralc <path>`: explicit bootstrap compiler executable path
 - `--swift-koralc <path>`: explicit Swift compiler executable path
+- `--report-file <path>`: write stable summary log (default: `tests/compiler-cases_output/_reports/latest-summary.log`)
 - `--verbose`: print per-case command lines
 - `-h`, `--help`: print usage
 
@@ -613,7 +616,7 @@ resolveModule(entryFile:)
 | enum case | `public` |
 | trait method | `public` |
 | given method | `protected` |
-| using declaration | `private` |
+| using declaration | file-local (imported bindings are not re-exported) |
 
 ## Code Generation Development
 

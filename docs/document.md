@@ -244,7 +244,8 @@ Block rules:
 - A block contains zero or more statements.
 - A plain block's default type is `Void`.
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
-- `break <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch.
+- `break <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch, where it produces the value of that branch and exits the branch body early.
+- Plain `break` (without expression) exits the nearest enclosing `while` or `for` loop.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
 
 ```koral
@@ -443,7 +444,7 @@ s.ends_with("!")             // true
 s.to_ascii_lowercase()       // "hello, world!"
 s.to_ascii_uppercase()       // "HELLO, WORLD!"
 s.trim_ascii()               // Trim leading/trailing whitespace
-s.slice(0..<5)               // "Hello" - slicing
+s.substring(0..<5)           // "Hello" - slicing
 s.find("World")              // Some(7)
 s.replace_all("World", "Koral") // "Hello, Koral!"
 s.split(",")                 // Split by separator
@@ -1071,7 +1072,7 @@ The `is` operator checks whether a value matches a pattern, and the result is al
 
 `is not` is the negated form and returns the inverse match result.
 
-When used in conditional expressions such as `if` or `while`, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings.
+When used in the condition of an `if` or `while` statement, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings. The `when ... in` construct uses its own pattern matching on the matched value and does not use `is` for binding.
 
 ```koral
 let opt = Option[Int].Some(42)
@@ -1938,7 +1939,7 @@ using app::models { User }
 using app::services { authenticate }
 using std { .. }
 
-public let main() = {
+public let main() Void = {
     let user = User.new("Alice")
     if authenticate(user) then {
         println("Welcome!")

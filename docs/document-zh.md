@@ -258,7 +258,8 @@ a = 2  // 合法
 - 块中可以包含零条或多条语句。
 - 普通块表达式的默认类型是 `Void`。
 - `return`、`break`、`continue` 可以让块提前结束，因此对应块类型会变成 `Never`。
-- `break <expression>` 不是通用的块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内。
+- `break <expression>` 不是通用的块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内，用于产出该分支的值并提前退出分支体。
+- 不带表达式的 `break` 退出最近的 `while` 或 `for` 循环。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
 
 通过块表达式可以组合一系列语句。
@@ -467,7 +468,7 @@ s.ends_with("!")             // true
 s.to_ascii_lowercase()       // "hello, world!"
 s.to_ascii_uppercase()       // "HELLO, WORLD!"
 s.trim_ascii()               // 去除首尾空白
-s.slice(0..<5)               // "Hello" - 切片
+s.substring(0..<5)           // "Hello" - 切片
 s.find("World")              // Some(7)
 s.replace_all("World", "Koral") // "Hello, Koral!"
 s.split(",")                 // 按分隔符分割
@@ -1109,7 +1110,7 @@ when b in {
 
 `is not` 是对应的否定形式，结果等价于对匹配结果取反。
 
-当在 `if` 或 `while` 等条件表达式中使用时，`is` 在匹配成功后还可以将模式中的变量绑定到当前作用域；但在其他位置，`is` 只能做纯布尔测试，不能绑定变量。
+当在 `if` 或 `while` 语句的条件中使用时，`is` 在匹配成功后还可以将模式中的变量绑定到当前作用域；但在其他位置，`is` 只能做纯布尔测试，不能绑定变量。`when ... in` 使用自身的模式匹配机制，不通过 `is` 进行绑定。
 
 ```koral
 let opt = Option[Int].Some(42)
@@ -1975,7 +1976,7 @@ using app::models { User }
 using app::services { authenticate }
 using std { .. }
 
-public let main() = {
+public let main() Void = {
     let user = User.new("Alice")
     if authenticate(user) then {
         println("Welcome!")

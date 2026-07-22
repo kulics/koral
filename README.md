@@ -208,7 +208,7 @@ let result = list.iterator()
 - Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
 - Trait objects for runtime polymorphism: `ref Greet`, `ref mut Greet`
-- Operator overloading through algebraic traits (`Add`, `Sub`, `Mul`, `Div`, `Index`, etc.)
+- Operator overloading through algebraic traits (`Add`, `Sub`, `Neg`, `Mul`, `Div`, `Rem`, `Eq`, `Ord`)
 
 ### Functions and Lambdas
 
@@ -332,9 +332,9 @@ For full module-by-module API documentation, see `docs/std/`.
 - `bootstrap/` — self-hosting compiler implementation and bootstrap tests
 - `std/` — standard library modules and runtime C files
 - `docs/` — language and developer documentation
-- `toolchain/fmt/` — formatter implementation and tests
+- `toolchain/` — developer tooling (`koralfmt/` formatter, `doc/` API doc generator, `koral/` build tool)
 - `samples/` — example projects
-- `test/` — ad-hoc language playground and cases
+- `tests/` — integration test runner and test cases
 
 ## Prerequisites
 
