@@ -192,7 +192,7 @@ let result = list.iterator()
 - `while` statements (with pattern matching via `is`)
 - `for` statements over any `Iterable`
 - `when` expressions for exhaustive pattern matching
-- `finally` for deterministic cleanup
+- `defer` for deterministic cleanup
 - `break`, `continue`, `return`
 - `break <expression>` inside `if` / `when` branch bodies for branch values and early branch exit
 
@@ -233,7 +233,7 @@ let result = list.iterator()
 - Automatic reference counting with copy-on-write semantics
 - Escape analysis for stack vs. heap allocation decisions
 - Weak references (`weakref` / `weakref mut`) for breaking reference cycles
-- `finally` for deterministic resource cleanup
+- `defer` for deterministic resource cleanup
 
 Reference creation rules:
 - Koral distinguishes managed references (`ref T`, `ref mut T`) from borrowed references (`ref '_ T`, `ref '_ mut T`). Both share the same runtime layout; the difference is frontend static semantics only — borrowed references cannot escape.

@@ -78,12 +78,12 @@ extension TypeChecker {
       defer { branchBreakTargets = savedBranchBreakTargets }
       branchBreakTargets = []
 
-      // Lambda has its own scope, so reset insideFinally flag.
-      // This allows return/break/continue/finally inside a lambda that
-      // appears within a finally expression.
-      let savedInsideFinally = insideFinally
-      insideFinally = false
-      defer { insideFinally = savedInsideFinally }
+      // Lambda has its own scope, so reset insideDefer.
+      // This allows return/break/continue/defer inside a lambda that
+      // appears within a defer expression.
+      let savedInsideDefer = insideDefer
+      insideDefer = false
+      defer { insideDefer = savedInsideDefer }
 
       let resolvedExplicitReturnType = try returnType.map { try resolveTypeNode($0) }
       let inferReturnTypeFromBlockReturns =
@@ -396,7 +396,7 @@ extension TypeChecker {
       }
     case .continue:
       break
-    case .finally(let expression, _):
+    case .deferStatement(let expression, _):
       try collectCapturedVariables(expr: expression, paramNames: paramNames, captures: &captures)
     }
   }

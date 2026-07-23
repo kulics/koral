@@ -220,8 +220,8 @@ public func printTypedAST(_ node: TypedProgram) {
     case .continue:
       print("\(indent)Continue")
 
-    case .finally(let expression):
-      print("\(indent)Finally")
+    case .deferStatement(let expression):
+      print("\(indent)Defer")
       withIndent {
         printTypedExpression(expression)
       }

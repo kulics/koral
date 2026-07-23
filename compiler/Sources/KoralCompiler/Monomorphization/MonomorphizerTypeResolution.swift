@@ -1558,8 +1558,8 @@ extension Monomorphizer {
         case .continue:
             return .continue
 
-        case .finally(let expression):
-            return .finally(expression: resolveTypesInExpression(expression))
+        case .deferStatement(let expression):
+            return .deferStatement(expression: resolveTypesInExpression(expression))
 
         case .branchBreak(let target, let value):
             return .branchBreak(target: target, value: resolveTypesInExpression(value))

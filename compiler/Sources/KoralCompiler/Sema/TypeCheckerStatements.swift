@@ -21,7 +21,7 @@ extension TypeChecker {
       return cases.contains { $0.body.type != .never }
     case .whileStatement, .whilePatternStatement:
       return true
-    case .variableDeclaration, .pairVariableDeclaration, .assignment, .finally:
+    case .variableDeclaration, .pairVariableDeclaration, .assignment, .deferStatement:
       return true
     }
   }
@@ -638,9 +638,9 @@ extension TypeChecker {
 
     case .return(let value, let span):
       self.currentSpan = span
-      if insideFinally {
+      if insideDefer {
         throw SemanticError(.generic(
-          "control flow statement 'return' is not allowed in finally expression"))
+          "control flow statement 'return' is not allowed in defer expression"))
       }
       guard let returnType = currentFunctionReturnType else {
         if isInferringFunctionReturnType {
@@ -691,9 +691,9 @@ extension TypeChecker {
 
     case .break(let value, let span):
       self.currentSpan = span
-      if insideFinally {
+      if insideDefer {
         throw SemanticError(.generic(
-          "control flow statement 'break' is not allowed in finally expression"))
+          "control flow statement 'break' is not allowed in defer expression"))
       }
       if let value {
         if let currentTarget = branchBreakTargets.last {
@@ -730,26 +730,26 @@ extension TypeChecker {
 
     case .continue(let span):
       self.currentSpan = span
-      if insideFinally {
+      if insideDefer {
         throw SemanticError(.generic(
-          "control flow statement 'continue' is not allowed in finally expression"))
+          "control flow statement 'continue' is not allowed in defer expression"))
       }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "continue outside of while", type1: "", type2: "")
       }
       return .continue
 
-    case .finally(let expression, let span):
+    case .deferStatement(let expression, let span):
       self.currentSpan = span
-      if insideFinally {
+      if insideDefer {
         throw SemanticError(.generic(
-          "finally statement is not allowed inside finally expression"))
+          "defer statement is not allowed inside defer expression"))
       }
-      let previousInsideFinally = insideFinally
-      insideFinally = true
-      defer { insideFinally = previousInsideFinally }
+      let previousInsideDefer = insideDefer
+      insideDefer = true
+      defer { insideDefer = previousInsideDefer }
       let typedExpr = try inferTypedExpression(expression, usage: .statement)
-      return .finally(expression: typedExpr)
+      return .deferStatement(expression: typedExpr)
 
     }
   }

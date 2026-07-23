@@ -1001,8 +1001,8 @@ extension Monomorphizer {
         case .continue:
             return .continue
 
-        case .finally(let expression):
-            return .finally(expression: substituteTypesInExpression(expression, substitution: substitution))
+        case .deferStatement(let expression):
+            return .deferStatement(expression: substituteTypesInExpression(expression, substitution: substitution))
 
         case .branchBreak(let target, let value):
             return .branchBreak(target: target, value: substituteTypesInExpression(value, substitution: substitution))

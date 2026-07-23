@@ -388,7 +388,7 @@ private final class MIRFunctionBuilder {
   private var patternPlaceByDefId: [UInt64: MIRPlace] = [:]
   private var loopStack: [(continueBlock: MIRBlockID, breakBlock: MIRBlockID, scopeDepth: Int)] = []
   private var scopeStack: [MIRScopeID] = []
-  private var finaliesByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
+  private var deferredExpressionsByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
   private var branchBreakTargetStack: [MIRBranchBreakTargetContext] = []
 
   init(
@@ -831,13 +831,13 @@ private final class MIRFunctionBuilder {
     }
 
     if !currentBlockIsTerminated {
-      emitFinalies(for: scope)
+      emitDeferredExpressions(for: scope)
     }
     if !currentBlockIsTerminated {
       append(.scopeExit(scope))
     }
     _ = scopeStack.popLast()
-    finaliesByScope.removeValue(forKey: scope)
+    deferredExpressionsByScope.removeValue(forKey: scope)
     restoreBranchBreakTargets(toDepth: branchBreakTargetDepth)
 
     if let joinBlock {
@@ -980,9 +980,9 @@ private final class MIRFunctionBuilder {
       } else {
         terminate(.unreachable)
       }
-    case .finally(let expression):
+    case .deferStatement(let expression):
       if let scope = scopeStack.last {
-        finaliesByScope[scope, default: []].append(expression)
+        deferredExpressionsByScope[scope, default: []].append(expression)
       } else {
         _ = lowerExpression(expression)
       }
@@ -1010,15 +1010,15 @@ private final class MIRFunctionBuilder {
   private func emitScopeExits(fromDepth baseScopeDepth: Int) {
     guard scopeStack.count > baseScopeDepth else { return }
     for scope in scopeStack[baseScopeDepth...].reversed() {
-      emitFinalies(for: scope)
+      emitDeferredExpressions(for: scope)
       guard !currentBlockIsTerminated else { return }
       append(.scopeExit(scope))
     }
   }
 
-  private func emitFinalies(for scope: MIRScopeID) {
-    guard let finalies = finaliesByScope[scope], !finalies.isEmpty else { return }
-    for expression in finalies.reversed() {
+  private func emitDeferredExpressions(for scope: MIRScopeID) {
+    guard let deferredExpressions = deferredExpressionsByScope[scope], !deferredExpressions.isEmpty else { return }
+    for expression in deferredExpressions.reversed() {
       lowerStatement(.expression(expression))
       guard !currentBlockIsTerminated else { return }
     }

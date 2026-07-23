@@ -812,8 +812,8 @@ given TypeChecker {
                 if not self.in_function_context() then {
                     self.push_diagnostic_at_span("'return' used outside of function", span)
                 }
-                if self.storage.in_finally then {
-                    self.push_diagnostic_at_span("control flow statement 'return' is not allowed in finally expression", span)
+                if self.storage.in_defer then {
+                    self.push_diagnostic_at_span("control flow statement 'return' is not allowed in defer expression", span)
                 }
                 let expected_return = self.storage.function_return_context.expected_return_type
                 let typed_val = when value in {
@@ -870,8 +870,8 @@ given TypeChecker {
             .BreakStmt(value_opt, span) then {
                 when value_opt in {
                     .Some(expr) then {
-                        if self.storage.in_finally then {
-                            self.push_diagnostic_at_span("control flow statement 'break' is not allowed in finally expression", span)
+                        if self.storage.in_defer then {
+                            self.push_diagnostic_at_span("control flow statement 'break' is not allowed in defer expression", span)
                         } else if self.storage.branch_break_targets.is_empty() then {
                             self.push_diagnostic_at_span("break with value outside of branch expression body", span)
                         } else when self.current_branch_break_target() in {
@@ -884,8 +884,8 @@ given TypeChecker {
                         if not self.storage.in_loop then {
                             self.push_diagnostic_at_span("'break' used outside of loop", span)
                         }
-                        if self.storage.in_finally then {
-                            self.push_diagnostic_at_span("'break' is not allowed inside 'finally'", span)
+                        if self.storage.in_defer then {
+                            self.push_diagnostic_at_span("'break' is not allowed inside 'defer'", span)
                         }
                         return TypedStatement.BreakStmt(span)
                     },
@@ -895,20 +895,20 @@ given TypeChecker {
                 if not self.storage.in_loop then {
                     self.push_diagnostic_at_span("'continue' used outside of loop", span)
                 }
-                if self.storage.in_finally then {
-                    self.push_diagnostic_at_span("'continue' is not allowed inside 'finally'", span)
+                if self.storage.in_defer then {
+                    self.push_diagnostic_at_span("'continue' is not allowed inside 'defer'", span)
                 }
                 return TypedStatement.ContinueStmt(span)
             },
-            .FinallyStmt(expr, span) then {
-                if self.storage.in_finally then {
-                    self.push_diagnostic_at_span("'finally' is not allowed inside 'finally'", span)
+            .DeferStmt(expr, span) then {
+                if self.storage.in_defer then {
+                    self.push_diagnostic_at_span("'defer' is not allowed inside 'defer'", span)
                 }
-                let prev_in_finally = self.storage.in_finally
-                self.storage.in_finally = true
+                let prev_in_defer = self.storage.in_defer
+                self.storage.in_defer = true
                 let typed_expr = self.check_expr_scoped_ref(expr, .None(), scope)
-                self.storage.in_finally = prev_in_finally
-                return TypedStatement.FinallyStmt(box(typed_expr), span)
+                self.storage.in_defer = prev_in_defer
+                return TypedStatement.DeferStmt(box(typed_expr), span)
             },
         }
     }

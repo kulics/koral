@@ -67,25 +67,25 @@ given TypeChecker {
                 break TypedDecl.LetDecl(access, name, mutable, resolved, stable_initializer, span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
-                // Enter function context — cleanup via finally (Swift: withNewScope pattern)
+                // Enter function context — cleanup via defer (Swift: withNewScope pattern)
                 let prev_function_return_context = self.storage.function_return_context
                 let prev_in_loop = self.storage.in_loop
-                let prev_in_finally = self.storage.in_finally
+                let prev_in_defer = self.storage.in_defer
                 let prev_branch_break_targets = self.storage.branch_break_targets
                 self.storage.in_loop = false
-                self.storage.in_finally = false
+                self.storage.in_defer = false
                 self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
                 self.storage.function_return_context.inferred_return_type = Option[Type].None()
                 self.storage.function_return_context.is_inferring = false
-                finally {
+                defer {
                     self.storage.function_return_context = prev_function_return_context
                     self.storage.in_loop = prev_in_loop
-                    self.storage.in_finally = prev_in_finally
+                    self.storage.in_defer = prev_in_defer
                     self.storage.branch_break_targets = prev_branch_break_targets
                 }
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                 self.register_generic_constraints(type_params)
-                finally { self.restore_generic_constraints(generic_constraint_snapshot) }
+                defer { self.restore_generic_constraints(generic_constraint_snapshot) }
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type)
                     if self.contains_borrowed_reference_type(resolved_ret) then {
@@ -185,7 +185,7 @@ given TypeChecker {
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                 self.register_generic_constraints(type_params)
-                finally { self.restore_generic_constraints(generic_constraint_snapshot) }
+                defer { self.restore_generic_constraints(generic_constraint_snapshot) }
                 // Resolve signature in a generic scope if type params exist (Swift: withNewScope)
                 let prev = self.storage.current_scope
                 if not type_params.is_empty() then {

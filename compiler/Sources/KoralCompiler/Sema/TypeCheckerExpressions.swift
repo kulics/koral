@@ -8002,9 +8002,9 @@ extension TypeChecker {
     guard currentFunctionReturnType != nil else {
       throw SemanticError(.generic("'or return' can only be used inside a function"), span: span)
     }
-    if insideFinally {
+    if insideDefer {
       throw SemanticError(
-        .generic("control flow statement 'return' is not allowed in finally expression"),
+        .generic("control flow statement 'return' is not allowed in defer expression"),
         span: span
       )
     }

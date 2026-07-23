@@ -141,8 +141,8 @@ extension TypedStatementNode {
     case .assignment(let target, _, let value):
       let allTargets = target.branchBreakSummary.allTargets.union(value.branchBreakSummary.allTargets)
       return TypedBranchBreakSummary(allTargets: allTargets, ownedTargets: [])
-    case .expression(let expression),
-         .finally(let expression):
+        case .expression(let expression),
+          .deferStatement(let expression):
       return TypedBranchBreakSummary(allTargets: expression.branchBreakSummary.allTargets, ownedTargets: [])
     case .ifStatement(let condition, let thenBranch, let elseBranch):
       let branchSummary = thenBranch.branchBreakSummary.union(elseBranch?.branchBreakSummary ?? .empty)

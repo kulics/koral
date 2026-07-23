@@ -34,7 +34,7 @@ private type SendChannelStorage[T Any](channel ref mut ChannelStorage[T])
 given[T Any] SendChannelStorage[T] as Drop {
     drop(source ptr mut Self) Void = {
         source.channel.mutex.lock()
-        finally source.channel.mutex.unlock()
+        defer source.channel.mutex.unlock()
         source.channel.sender_closed = true
         source.channel.not_empty.notify_all()
     }
@@ -45,7 +45,7 @@ private type RecvChannelStorage[T Any](channel ref mut ChannelStorage[T])
 given[T Any] RecvChannelStorage[T] as Drop {
     drop(source ptr mut Self) Void = {
         source.channel.mutex.lock()
-        finally source.channel.mutex.unlock()
+        defer source.channel.mutex.unlock()
         source.channel.receiver_closed = true
         source.channel.not_full.notify_all()
     }
@@ -61,7 +61,7 @@ given[T Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
     public send(self ref, value T) Result[Void] = {
         self.storage.channel.mutex.lock()
-        finally self.storage.channel.mutex.unlock()
+        defer self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.count() >= self.storage.channel.capacity
               and not self.storage.channel.receiver_closed then {
             self.storage.channel.not_full.wait()
@@ -77,7 +77,7 @@ given[T Any] SendChannel[T] {
     /// 非阻塞发送
     public try_send(self ref, value T) Result[Bool] = {
         self.storage.channel.mutex.lock()
-        finally self.storage.channel.mutex.unlock()
+        defer self.storage.channel.mutex.unlock()
         if self.storage.channel.receiver_closed then {
             return Result[Bool].Error(box("channel closed"))
         }
@@ -100,7 +100,7 @@ given[T Any] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）
     public recv(self ref) Result[T] = {
         self.storage.channel.mutex.lock()
-        finally self.storage.channel.mutex.unlock()
+        defer self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.is_empty() and not self.storage.channel.sender_closed then {
             self.storage.channel.not_empty.wait()
         }
@@ -115,7 +115,7 @@ given[T Any] RecvChannel[T] {
     /// 非阻塞接收
     public try_recv(self ref) Result[Option[T]] = {
         self.storage.channel.mutex.lock()
-        finally self.storage.channel.mutex.unlock()
+        defer self.storage.channel.mutex.unlock()
         if not self.storage.channel.queue.is_empty() then {
             let value = self.storage.channel.queue.take_at(0)
             self.storage.channel.not_full.notify()

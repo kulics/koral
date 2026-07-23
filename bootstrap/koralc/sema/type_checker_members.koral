@@ -440,7 +440,7 @@ given TypeChecker {
     private check_trait_members(self, members List[TraitMember], type_params List[TypeParameter]) List[TypedTraitMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params)
         self.register_generic_constraints(type_params)
-        finally { self.restore_generic_constraints(owner_constraint_snapshot) }
+        defer { self.restore_generic_constraints(owner_constraint_snapshot) }
         let mut trait_scope = Scope.new_child(self.storage.current_scope)
         for tp in type_params then {
             trait_scope.define_generic_param(tp.name)
@@ -449,19 +449,19 @@ given TypeChecker {
         // Set current_scope to trait_scope so Self is visible (Swift: withNewScope)
         let prev_scope = self.storage.current_scope
         self.storage.current_scope = trait_scope
-        finally { self.storage.current_scope = prev_scope }
+        defer { self.storage.current_scope = prev_scope }
         let mut out = List[TypedTraitMember].new()
         for m in members then {
             let method_constraint_snapshot = self.snapshot_generic_constraints(m.type_params)
             self.register_generic_constraints(m.type_params)
-            finally { self.restore_generic_constraints(method_constraint_snapshot) }
+            defer { self.restore_generic_constraints(method_constraint_snapshot) }
             let mut member_scope = Scope.new_child(self.storage.current_scope)
             for tp in m.type_params then {
                 member_scope.define_generic_param(tp.name)
             }
             let prev_member_scope = self.storage.current_scope
             self.storage.current_scope = member_scope
-            finally { self.storage.current_scope = prev_member_scope }
+            defer { self.storage.current_scope = prev_member_scope }
             let mut typed_params = List[TypedParam].new()
             for p in m.params then {
                 typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name), p.named))
@@ -512,7 +512,7 @@ given TypeChecker {
     ) List[ref TypedGivenMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params)
         self.register_generic_constraints(type_params)
-        finally { self.restore_generic_constraints(owner_constraint_snapshot) }
+        defer { self.restore_generic_constraints(owner_constraint_snapshot) }
         let mut out = List[ref TypedGivenMember].with_capacity(members.count())
         let is_generic_given_target = when target_type in {
             .TraitObject(_, _) then true,
@@ -537,7 +537,7 @@ given TypeChecker {
             },
             _ then Option[List[GenericConstraintBound]].None(),
         }
-        finally {
+        defer {
             when self_constraint_snapshot in {
                 .Some(previous) then self.storage.generic_param_constraints.insert("Self", previous),
                 .None() then when target_type in {
@@ -549,7 +549,7 @@ given TypeChecker {
         for m in members then {
             let method_constraint_snapshot = self.snapshot_generic_constraints(m.type_params)
             self.register_generic_constraints(m.type_params)
-            finally { self.restore_generic_constraints(method_constraint_snapshot) }
+            defer { self.restore_generic_constraints(method_constraint_snapshot) }
             if self.sema_progress_debug_enabled() then {
                 println("[sema-given-member] file=\(self.storage.file_path) member=\(m.name)")
             }
@@ -586,18 +586,18 @@ given TypeChecker {
                     // Enter function context for body checking (Swift: withNewScope)
                     let prev_function_return_context = self.storage.function_return_context
                     let prev_in_loop = self.storage.in_loop
-                    let prev_in_finally = self.storage.in_finally
+                    let prev_in_defer = self.storage.in_defer
                     let prev_branch_break_targets = self.storage.branch_break_targets
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(ret)
                     self.storage.function_return_context.inferred_return_type = Option[Type].None()
                     self.storage.function_return_context.is_inferring = false
                     self.storage.in_loop = false
-                    self.storage.in_finally = false
+                    self.storage.in_defer = false
                     self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
-                    finally {
+                    defer {
                         self.storage.function_return_context = prev_function_return_context
                         self.storage.in_loop = prev_in_loop
-                        self.storage.in_finally = prev_in_finally
+                        self.storage.in_defer = prev_in_defer
                         self.storage.branch_break_targets = prev_branch_break_targets
                     }
                     let mut method_scope = self.make_method_scope(typed_params, target_type, type_params)
@@ -607,7 +607,7 @@ given TypeChecker {
                     }
                     // Set current_scope during body checking so resolve_type sees generic params
                     self.storage.current_scope = method_scope
-                    finally { self.storage.current_scope = prev_scope }
+                    defer { self.storage.current_scope = prev_scope }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
                     break if should_store_checked_body then Option[ref TypedExpr].Some(box(result)) else Option[ref TypedExpr].None()
                 },
@@ -766,14 +766,14 @@ given TypeChecker {
         self.storage.conformance_index = conformance_index
         let prev_function_return_context = self.storage.function_return_context
         let prev_in_loop = self.storage.in_loop
-        let prev_in_finally = self.storage.in_finally
+        let prev_in_defer = self.storage.in_defer
         let prev_branch_break_targets = self.storage.branch_break_targets
         let prev_scope = self.storage.current_scope
         self.storage.function_return_context.expected_return_type = Option[Type].Some(return_type)
         self.storage.function_return_context.inferred_return_type = Option[Type].None()
         self.storage.function_return_context.is_inferring = false
         self.storage.in_loop = false
-        self.storage.in_finally = false
+        self.storage.in_defer = false
         self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
         let mut method_scope = self.make_method_scope(params, target_type, List[TypeParameter].new())
         self.storage.current_scope = method_scope
@@ -792,7 +792,7 @@ given TypeChecker {
         self.storage.current_scope = prev_scope
         self.storage.function_return_context = prev_function_return_context
         self.storage.in_loop = prev_in_loop
-        self.storage.in_finally = prev_in_finally
+        self.storage.in_defer = prev_in_defer
         self.storage.branch_break_targets = prev_branch_break_targets
         return finalized
     }
@@ -818,14 +818,14 @@ given TypeChecker {
         self.storage.conformance_index = conformance_index
         let prev_function_return_context = self.storage.function_return_context
         let prev_in_loop = self.storage.in_loop
-        let prev_in_finally = self.storage.in_finally
+        let prev_in_defer = self.storage.in_defer
         let prev_branch_break_targets = self.storage.branch_break_targets
         let prev_scope = self.storage.current_scope
         self.storage.function_return_context.expected_return_type = Option[Type].Some(return_type)
         self.storage.function_return_context.inferred_return_type = Option[Type].None()
         self.storage.function_return_context.is_inferring = false
         self.storage.in_loop = false
-        self.storage.in_finally = false
+        self.storage.in_defer = false
         self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
         let mut fn_scope = self.make_fn_scope(params)
         self.storage.current_scope = fn_scope
@@ -844,7 +844,7 @@ given TypeChecker {
         self.storage.current_scope = prev_scope
         self.storage.function_return_context = prev_function_return_context
         self.storage.in_loop = prev_in_loop
-        self.storage.in_finally = prev_in_finally
+        self.storage.in_defer = prev_in_defer
         self.storage.branch_break_targets = prev_branch_break_targets
         return finalized
     }

@@ -207,7 +207,7 @@ public class TypeChecker {
   var inferredFunctionReturnType: Type?
   var isInferringFunctionReturnType: Bool = false
   var loopDepth: Int = 0
-  var insideFinally: Bool = false
+  var insideDefer: Bool = false
   var currentBlockExpressionDepth: Int = 0
   var branchBreakTargets: [BranchBreakTarget] = []
   var nextBranchBreakTargetId: Int = 0

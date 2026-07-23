@@ -17,7 +17,7 @@ protected type TypeCheckerStorage(
     mut package_id String,
     mut function_return_context FunctionReturnContext,
     mut in_loop Bool,
-    mut in_finally Bool,
+    mut in_defer Bool,
     mut branch_break_targets List[ref mut BranchBreakTarget],
     mut constraint_solver ConstraintSolver,
     mut trait_registry TraitRegistry,
@@ -540,7 +540,7 @@ given TypeChecker {
                 .ReturnStmt(_, span) then span,
                 .BreakStmt(span) then span,
                 .ContinueStmt(span) then span,
-                .FinallyStmt(_, span) then span,
+                .DeferStmt(_, span) then span,
                 .BranchBreakStmt(_, span) then span,
             },
             .IfExpr(condition, _, _) then self.typed_expr_span(condition),
@@ -593,7 +593,7 @@ given TypeChecker {
             .ReturnStmt(_, span) then span,
             .BreakStmt(_, span) then span,
             .ContinueStmt(span) then span,
-            .FinallyStmt(_, span) then span,
+            .DeferStmt(_, span) then span,
         }
     }
 
@@ -1706,7 +1706,7 @@ given TypeChecker {
                             println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=inject-trait-type-args trait=\(trait_name)")
                         }
                         let prev_scope = self.storage.current_scope
-                        finally { self.storage.current_scope = prev_scope }
+                        defer { self.storage.current_scope = prev_scope }
                         self.inject_trait_type_args_with_bindings(trait_type, trait_name, bindings)
                         for member in members then {
                             let should_register_template = if not type_params.is_empty() then true else if not member.type_params.is_empty() then true else when resolved_target in {
@@ -1843,7 +1843,7 @@ given TypeChecker {
         // Build a scope with owner type params so resolve_type sees them
         // Always set current_scope (like Swift's withNewScope) so generic params are visible
         let prev_scope = self.storage.current_scope
-        finally { self.storage.current_scope = prev_scope }
+        defer { self.storage.current_scope = prev_scope }
         let mut sig_scope = Scope.new_child(self.storage.current_scope)
         for tp in owner_type_params then {
             sig_scope.define_generic_param(tp.name)
@@ -2157,7 +2157,7 @@ given TypeChecker {
 
         // Use child scope instead of mutating global_scope (Swift: withNewScope)
         let prev_scope = self.storage.current_scope
-        finally { self.storage.current_scope = prev_scope }
+        defer { self.storage.current_scope = prev_scope }
         let child = Scope.new_child(self.storage.current_scope)
         for tp in type_params then {
             child.define_generic_param(tp.name)

@@ -193,7 +193,7 @@ public indirect enum TypedStatementNode {
   case `return`(value: TypedExpressionNode?)
   case `break`
   case `continue`
-  case finally(expression: TypedExpressionNode)
+  case deferStatement(expression: TypedExpressionNode)
   case branchBreak(target: BranchBreakTargetId, value: TypedExpressionNode)
 }
 public indirect enum TypedExpressionNode {
