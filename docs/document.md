@@ -581,6 +581,17 @@ println( a < b )      // < Less than
 println( a <= b )     // <= Less than or equal to
 ```
 
+Koral also supports same-direction chained ordering comparisons as syntax sugar for interval-style predicates:
+
+```koral
+println(1 < x < 3)
+println(10 >= y > 0)
+println(a <= b <= c)
+```
+
+Chains are restricted to `<`, `<=`, `>`, and `>=`, and every operator in the chain must point in the same direction. Mixed forms such as `a < b > c`, `a < b == c`, or `a == b < c` are rejected; write them explicitly with `and` instead.
+Each operand in a valid chain is evaluated at most once, and the chain short-circuits from left to right.
+
 ### Logical Operators
 
 Logical operators perform logical operations (AND, OR, NOT) on two Bool type operands.
@@ -629,6 +640,8 @@ Range operators generate a range (Range), commonly used in loops or pattern matc
 ..       // Full range
 ```
 
+These range operators construct `Range` values. They are distinct from chained comparison predicates such as `1 < x < 5`, which produce `Bool`.
+
 ### Compound Assignment
 
 ```koral
@@ -661,6 +674,8 @@ The built-in operator mappings are:
 - `%` -> `Rem[R]` via `rem(self, other R) Self`
 - `==` / `<>` -> `Eq` via `equals(self, other Self) Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord` via `compare(self, other Self) Int`
+
+Same-direction chained ordering comparisons such as `a < b < c` are syntax sugar over these existing comparison operators. The compiler lowers them into adjacent pairwise comparisons with single-evaluation and short-circuit semantics; they do not introduce a separate trait or dispatch mechanism.
 
 Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are currently built-in and are not customized through public operator traits.
 

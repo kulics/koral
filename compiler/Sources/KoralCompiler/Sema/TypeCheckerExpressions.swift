@@ -1802,93 +1802,12 @@ extension TypeChecker {
       return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight)
 
     case .comparisonExpression(let left, let op, let right):
-      var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
-      var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
+      let typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
+      let typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
+      return try buildTypedComparisonExpression(lhs: typedLeft, op: op, rhs: typedRight)
 
-      // Allow numeric literals to coerce to the other operand type.
-      if typedLeft.type != typedRight.type {
-        if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
-          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
-        }
-        if typedLeft.type != typedRight.type,
-          isIntegerType(typedRight.type) || isFloatType(typedRight.type)
-        {
-          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
-        }
-      }
-
-      // Allow rune literals to coerce to UInt8 in comparisons when needed.
-      if typedLeft.type != typedRight.type {
-        if typedLeft.type == .uint8 {
-          typedRight = try coerceLiteral(typedRight, to: .uint8)
-        }
-        if typedRight.type == .uint8 {
-          typedLeft = try coerceLiteral(typedLeft, to: .uint8)
-        }
-      }
-      
-      // Allow rune literals to coerce to Rune in comparisons.
-      if typedLeft.type != typedRight.type {
-        if isRuneType(typedLeft.type) {
-          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
-        }
-        if typedLeft.type != typedRight.type, isRuneType(typedRight.type) {
-          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
-        }
-      }
-
-      // Allow null_ptr() to infer pointer element type from the other operand.
-      if typedLeft.type != typedRight.type {
-        let leftIsPointerLike: Bool = {
-          switch typedLeft.type {
-          case .pointer, .mutablePointer:
-            return true
-          default:
-            return false
-          }
-        }()
-        let rightIsPointerLike: Bool = {
-          switch typedRight.type {
-          case .pointer, .mutablePointer:
-            return true
-          default:
-            return false
-          }
-        }()
-        if leftIsPointerLike, case .intrinsicCall(.nullPtr) = typedRight {
-          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
-        } else if rightIsPointerLike, case .intrinsicCall(.nullPtr) = typedLeft {
-          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
-        }
-      }
-
-      // Operator sugar for Eq: lower `==`/`<>` to `equals(self, other)`
-      // for non-builtin scalar types (struct/enum/String/generic parameters).
-      if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
-        !isBuiltinEqualityComparable(typedLeft.type)
-      {
-        let eq = try buildEqualsCall(lhs: typedLeft, rhs: typedRight)
-        if op == .notEqual {
-          return .notExpression(expression: eq, type: .bool)
-        }
-        return eq
-      }
-
-      // Operator sugar for Ord: lower `<`/`<=`/`>`/`>=` to
-      // `compare(self, other) Int` for non-builtin scalar types
-      // (struct/enum/String/generic parameters).
-      if (op == .greater || op == .less || op == .greaterEqual || op == .lessEqual),
-        typedLeft.type == typedRight.type,
-        !isBuiltinOrderingComparable(typedLeft.type)
-      {
-        let cmp = try buildCompareCall(lhs: typedLeft, rhs: typedRight)
-        let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
-        return .comparisonExpression(left: cmp, op: op, right: zero, type: .bool)
-      }
-
-      let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
-      return .comparisonExpression(
-        left: typedLeft, op: op, right: typedRight, type: resultType)
+    case .comparisonChainExpression(let operands, let operators, let span):
+      return try inferComparisonChainExpression(operands: operands, operators: operators, span: span)
 
     case .ifExpression(let condition, let thenBranch, let elseBranch):
       if usage == .statement {
@@ -2301,6 +2220,177 @@ extension TypeChecker {
 
       return .isNotExpression(subject: typedSubject, pattern: typedPattern, type: .bool)
     }
+  }
+
+  private func freshComparisonChainTempName() -> String {
+    synthesizedTempIndex += 1
+    return "__KORAL_cmp_chain_\(synthesizedTempIndex)"
+  }
+
+  private func normalizeComparisonOperands(
+    lhs initialLeft: TypedExpressionNode,
+    rhs initialRight: TypedExpressionNode
+  ) throws -> (TypedExpressionNode, TypedExpressionNode) {
+    var typedLeft = initialLeft
+    var typedRight = initialRight
+
+    // Allow numeric literals to coerce to the other operand type.
+    if typedLeft.type != typedRight.type {
+      if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+      }
+      if typedLeft.type != typedRight.type,
+        isIntegerType(typedRight.type) || isFloatType(typedRight.type)
+      {
+        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+      }
+    }
+
+    // Allow rune literals to coerce to UInt8 in comparisons when needed.
+    if typedLeft.type != typedRight.type {
+      if typedLeft.type == .uint8 {
+        typedRight = try coerceLiteral(typedRight, to: .uint8)
+      }
+      if typedRight.type == .uint8 {
+        typedLeft = try coerceLiteral(typedLeft, to: .uint8)
+      }
+    }
+
+    // Allow rune literals to coerce to Rune in comparisons.
+    if typedLeft.type != typedRight.type {
+      if isRuneType(typedLeft.type) {
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+      }
+      if typedLeft.type != typedRight.type, isRuneType(typedRight.type) {
+        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+      }
+    }
+
+    // Allow null_ptr() to infer pointer element type from the other operand.
+    if typedLeft.type != typedRight.type {
+      let leftIsPointerLike: Bool = {
+        switch typedLeft.type {
+        case .pointer, .mutablePointer:
+          return true
+        default:
+          return false
+        }
+      }()
+      let rightIsPointerLike: Bool = {
+        switch typedRight.type {
+        case .pointer, .mutablePointer:
+          return true
+        default:
+          return false
+        }
+      }()
+      if leftIsPointerLike, case .intrinsicCall(.nullPtr) = typedRight {
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+      } else if rightIsPointerLike, case .intrinsicCall(.nullPtr) = typedLeft {
+        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+      }
+    }
+
+    return (typedLeft, typedRight)
+  }
+
+  private func buildTypedComparisonExpression(
+    lhs initialLeft: TypedExpressionNode,
+    op: ComparisonOperator,
+    rhs initialRight: TypedExpressionNode
+  ) throws -> TypedExpressionNode {
+    let (typedLeft, typedRight) = try normalizeComparisonOperands(lhs: initialLeft, rhs: initialRight)
+
+    // Operator sugar for Eq: lower `==`/`<>` to `equals(self, other)`
+    // for non-builtin scalar types (struct/enum/String/generic parameters).
+    if (op == .equal || op == .notEqual), typedLeft.type == typedRight.type,
+      !isBuiltinEqualityComparable(typedLeft.type)
+    {
+      let eq = try buildEqualsCall(lhs: typedLeft, rhs: typedRight)
+      if op == .notEqual {
+        return .notExpression(expression: eq, type: .bool)
+      }
+      return eq
+    }
+
+    // Operator sugar for Ord: lower `<`/`<=`/`>`/`>=` to
+    // `compare(self, other) Int` for non-builtin scalar types
+    // (struct/enum/String/generic parameters).
+    if (op == .greater || op == .less || op == .greaterEqual || op == .lessEqual),
+      typedLeft.type == typedRight.type,
+      !isBuiltinOrderingComparable(typedLeft.type)
+    {
+      let cmp = try buildCompareCall(lhs: typedLeft, rhs: typedRight)
+      let zero: TypedExpressionNode = .integerLiteral(value: "0", type: .int)
+      return .comparisonExpression(left: cmp, op: op, right: zero, type: .bool)
+    }
+
+    let resultType = try checkComparisonOp(op, typedLeft.type, typedRight.type)
+    return .comparisonExpression(left: typedLeft, op: op, right: typedRight, type: resultType)
+  }
+
+  private func inferComparisonChainExpression(
+    operands: [ExpressionNode],
+    operators: [ComparisonOperator],
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    guard operands.count == operators.count + 1, operators.count >= 2 else {
+      throw SemanticError(.generic("Invalid comparison chain"), span: span)
+    }
+
+    func buildChain(
+      from index: Int,
+      leftExpr: TypedExpressionNode,
+      in typeChecker: TypeChecker
+    ) throws -> TypedExpressionNode {
+      let rawRight = typeChecker.autoDereferenceValueContext(
+        try typeChecker.inferTypedExpression(operands[index + 1])
+      )
+
+      if index == operators.count - 1 {
+        return try typeChecker.buildTypedComparisonExpression(
+          lhs: leftExpr,
+          op: operators[index],
+          rhs: rawRight
+        )
+      }
+
+      let (normalizedLeft, normalizedRight) = try typeChecker.normalizeComparisonOperands(
+        lhs: leftExpr,
+        rhs: rawRight
+      )
+      let tempSymbol = typeChecker.makeLocalSymbol(
+        name: typeChecker.freshComparisonChainTempName(),
+        type: normalizedRight.type,
+        kind: .variable(.Value)
+      )
+      let tempRef: TypedExpressionNode = .variable(identifier: tempSymbol)
+      let condition = try typeChecker.buildTypedComparisonExpression(
+        lhs: normalizedLeft,
+        op: operators[index],
+        rhs: tempRef
+      )
+      let next = try buildChain(from: index + 1, leftExpr: tempRef, in: typeChecker)
+      let elseExpr: TypedExpressionNode = .booleanLiteral(value: false, type: .bool)
+
+      return .blockExpression(
+        statements: [
+          .variableDeclaration(identifier: tempSymbol, value: normalizedRight, mutable: false),
+          .expression(
+            .ifExpression(
+              condition: condition,
+              thenBranch: next,
+              elseBranch: elseExpr,
+              type: .bool
+            )
+          ),
+        ],
+        type: .bool
+      )
+    }
+
+    let firstLeft = autoDereferenceValueContext(try inferTypedExpression(operands[0]))
+    return try buildChain(from: 0, leftExpr: firstLeft, in: self)
   }
 
   private enum CollectionTargetKind {

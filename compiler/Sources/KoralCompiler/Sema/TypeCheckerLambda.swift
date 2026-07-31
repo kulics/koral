@@ -247,6 +247,11 @@ extension TypeChecker {
          .orExpression(let left, let right):
       try collectCapturedVariables(expr: left, paramNames: paramNames, captures: &captures)
       try collectCapturedVariables(expr: right, paramNames: paramNames, captures: &captures)
+
+    case .comparisonChainExpression(let operands, _, _):
+      for operand in operands {
+        try collectCapturedVariables(expr: operand, paramNames: paramNames, captures: &captures)
+      }
       
     case .notExpression(let inner),
        .bitwiseNotExpression(let inner),

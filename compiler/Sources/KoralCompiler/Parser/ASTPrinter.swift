@@ -370,6 +370,19 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)Operator: \(op)")
         printExpression(right)
       }
+    case .comparisonChainExpression(let operands, let operators, _):
+      print("\(indent)ComparisonChainExpression:")
+      withIndent {
+        for (index, operand) in operands.enumerated() {
+          print("\(indent)Operand \(index):")
+          withIndent {
+            printExpression(operand)
+          }
+          if index < operators.count {
+            print("\(indent)Operator \(index): \(operators[index])")
+          }
+        }
+      }
     case .ifExpression(let condition, let thenBranch, let elseBranch):
       print("\(indent)IfExpression:")
       print("\(indent)  Condition:")

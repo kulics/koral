@@ -4,6 +4,11 @@
 /// Extension containing all expression parsing methods
 extension Parser {
 
+  private enum ComparisonChainDirection {
+    case ascending
+    case descending
+  }
+
   private func parseBracketedTypeArguments() throws -> [TypeNode] {
     try match(.leftBracket)
     var typeArgs: [TypeNode] = []
@@ -331,24 +336,97 @@ extension Parser {
 
   
   // MARK: - Comparison Expressions
+
+  private func isEqualityComparisonToken(_ token: Token) -> Bool {
+    token === .equalEqual || token === .notEqual
+  }
+
+  private func isOrderingComparisonToken(_ token: Token) -> Bool {
+    token === .greater || token === .less || token === .greaterEqual || token === .lessEqual
+  }
+
+  private func isComparisonToken(_ token: Token) -> Bool {
+    isEqualityComparisonToken(token) || isOrderingComparisonToken(token)
+  }
+
+  private func comparisonChainDirection(for token: Token) -> ComparisonChainDirection? {
+    switch token {
+    case .less, .lessEqual:
+      return .ascending
+    case .greater, .greaterEqual:
+      return .descending
+    default:
+      return nil
+    }
+  }
+
+  private func comparisonChainError(at span: SourceSpan) -> ParserError {
+    ParserError.invalidComparisonChain(
+      span: span,
+      message: "Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."
+    )
+  }
   
   /// Fourth level: Comparisons
   private func parseComparisonExpression() throws -> ExpressionNode {
-    var left = try parseShiftExpression()
+    let startSpan = currentSpan
+    let left = try parseShiftExpression()
 
-    while currentToken === .equalEqual || currentToken === .notEqual || currentToken === .greater
-      || currentToken === .less || currentToken === .greaterEqual || currentToken === .lessEqual
-    {
+    guard isComparisonToken(currentToken) else {
+      return left
+    }
+
+    if isEqualityComparisonToken(currentToken) {
       let op = currentToken
       try match(op)
       let right = try parseShiftExpression()
-      left = .comparisonExpression(
+      if isComparisonToken(currentToken) {
+        throw comparisonChainError(at: currentSpan)
+      }
+      return .comparisonExpression(
         left: left,
         operator: tokenToComparisonOperator(op),
         right: right
       )
     }
-    return left
+
+    let firstToken = currentToken
+    let firstDirection = comparisonChainDirection(for: firstToken)
+    try match(firstToken)
+    let firstRight = try parseShiftExpression()
+
+    guard let direction = firstDirection else {
+      return .comparisonExpression(
+        left: left,
+        operator: tokenToComparisonOperator(firstToken),
+        right: firstRight
+      )
+    }
+
+    var operands: [ExpressionNode] = [left, firstRight]
+    var operators: [ComparisonOperator] = [tokenToComparisonOperator(firstToken)]
+
+    while isComparisonToken(currentToken) {
+      guard isOrderingComparisonToken(currentToken), comparisonChainDirection(for: currentToken) == direction else {
+        throw comparisonChainError(at: currentSpan)
+      }
+
+      let op = currentToken
+      try match(op)
+      let right = try parseShiftExpression()
+      operands.append(right)
+      operators.append(tokenToComparisonOperator(op))
+    }
+
+    if operators.count == 1 {
+      return .comparisonExpression(
+        left: left,
+        operator: operators[0],
+        right: firstRight
+      )
+    }
+
+    return .comparisonChainExpression(operands: operands, operators: operators, span: startSpan)
   }
 
   private func parseShiftExpression() throws -> ExpressionNode {

@@ -70,6 +70,7 @@ public enum ParserError: Error {
   case foreignFunctionNoGenerics(span: SourceSpan)
   case emptyInterpolationExpression(span: SourceSpan)
   case invalidAccessModifierOrder(span: SourceSpan, message: String)
+  case invalidComparisonChain(span: SourceSpan, message: String)
   
   /// The source span where the error occurred
   public var span: SourceSpan {
@@ -93,6 +94,7 @@ public enum ParserError: Error {
     case .foreignFunctionNoGenerics(let span): return span
     case .emptyInterpolationExpression(let span): return span
     case .invalidAccessModifierOrder(let span, _): return span
+    case .invalidComparisonChain(let span, _): return span
     }
   }
   
@@ -147,6 +149,8 @@ public enum ParserError: Error {
     case .emptyInterpolationExpression:
       return "empty interpolation expression"
     case .invalidAccessModifierOrder(_, let message):
+      return message
+    case .invalidComparisonChain(_, let message):
       return message
     }
   }

@@ -655,10 +655,25 @@ given TypeChecker {
         }
     }
 
-    protected check_comparison_expr_ref(self, left ref Expr, op ComparisonOperator, right ref Expr, scope Scope) TypedExpr = {
+    protected normalize_comparison_operands(
+        self,
+        initial_left TypedExpr,
+        left_source Option[ref Expr],
+        initial_right TypedExpr,
+        right_source Option[ref Expr],
+        scope Scope,
+    ) Pair[TypedExpr, TypedExpr] = {
+        let mut typed_left = initial_left
+        let mut typed_right = initial_right
 
-        let mut typed_left = self.check_expr_core_ref(left, .None(), scope)
-        let mut typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
+        let left_span = when left_source in {
+            .Some(expr_ref) then expr_span(expr_ref),
+            .None() then self.typed_expr_span(box(typed_left)),
+        }
+        let right_span = when right_source in {
+            .Some(expr_ref) then expr_span(expr_ref),
+            .None() then self.typed_expr_span(box(typed_right)),
+        }
 
         let left_value_type = when typed_left.expr_type in {
             .ReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
@@ -686,7 +701,7 @@ given TypeChecker {
                     or typed_right.expr_type is .BoolType()
                     or self.is_numeric_literal_expr(typed_right)
                 if right_is_scalar_like then {
-                    typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(left_inner), .Some(expr_span(left)))
+                    typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(left_inner), .Some(left_span))
                 }
             },
             .None() then {},
@@ -699,33 +714,44 @@ given TypeChecker {
                     or typed_left.expr_type is .BoolType()
                     or self.is_numeric_literal_expr(typed_left)
                 if left_is_scalar_like then {
-                    typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(right_inner), .Some(expr_span(right)))
+                    typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(right_inner), .Some(right_span))
                 }
             },
             .None() then {},
         }
 
         if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-            if self.is_null_ptr_call_expr(left) and (typed_right.expr_type is .PointerType(_) or typed_right.expr_type is .MutablePointerType(_)) then {
-                typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
+            when left_source in {
+                .Some(left_expr) then {
+                    if self.is_null_ptr_call_expr(left_expr) and (typed_right.expr_type is .PointerType(_) or typed_right.expr_type is .MutablePointerType(_)) then {
+                        typed_left = self.check_expr_scoped_ref(left_expr, .Some(typed_right.expr_type), scope)
+                    }
+                    if left_expr is .RuneLiteral(_, _) and (self.is_integer_type(typed_right.expr_type) or self.is_rune_type(typed_right.expr_type)) then {
+                        typed_left = self.check_expr_scoped_ref(left_expr, .Some(typed_right.expr_type), scope)
+                    }
+                },
+                .None() then {},
             }
-            if self.is_null_ptr_call_expr(right) and (typed_left.expr_type is .PointerType(_) or typed_left.expr_type is .MutablePointerType(_)) then {
-                typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
-            }
-            if when left in {
-                .RuneLiteral(_, _) then true,
-                _ then false,
-            } and (self.is_integer_type(typed_right.expr_type) or self.is_rune_type(typed_right.expr_type)) then {
-                typed_left = self.check_expr_scoped_ref(left, .Some(typed_right.expr_type), scope)
+            when right_source in {
+                .Some(right_expr) then {
+                    if self.is_null_ptr_call_expr(right_expr) and (typed_left.expr_type is .PointerType(_) or typed_left.expr_type is .MutablePointerType(_)) then {
+                        typed_right = self.check_expr_scoped_ref(right_expr, .Some(typed_left.expr_type), scope)
+                    }
+                },
+                .None() then {},
             }
             if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-                typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(typed_left.expr_type), Option[SourceSpan].Some(expr_span(right)))
+                typed_right = self.adapt_expr_to_expected_type_at(typed_right, .Some(typed_left.expr_type), Option[SourceSpan].Some(right_span))
             }
             if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
-                typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(typed_right.expr_type), Option[SourceSpan].Some(expr_span(left)))
+                typed_left = self.adapt_expr_to_expected_type_at(typed_left, .Some(typed_right.expr_type), Option[SourceSpan].Some(left_span))
             }
         }
 
+        return Pair[TypedExpr, TypedExpr](typed_left, typed_right)
+    }
+
+    protected build_typed_comparison_expr(self, typed_left TypedExpr, op ComparisonOperator, typed_right TypedExpr) TypedExpr = {
         let same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type)
         let is_eq_op = when op in {
             .Equal() then true,
@@ -762,8 +788,64 @@ given TypeChecker {
             return result
         }
 
-        let result = make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
-        return result
+        return make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
+    }
+
+    protected lower_comparison_chain_step(
+        self,
+        operands List[ref Expr],
+        operators List[ComparisonOperator],
+        index UInt,
+        left_expr TypedExpr,
+        left_source Option[ref Expr],
+        scope Scope,
+    ) TypedExpr = {
+        let mut right_source = operands[index + 1(UInt)].val
+        let right_source_ref = box(right_source)
+        let raw_right = self.check_expr_scoped_ref(right_source_ref, .Some(left_expr.expr_type), scope)
+        let normalized = self.normalize_comparison_operands(left_expr, left_source, raw_right, Option[ref Expr].Some(right_source_ref), scope)
+
+        if index + 1(UInt) == operators.count() then {
+            return self.build_typed_comparison_expr(normalized.first, operators[index], normalized.second)
+        }
+
+        let temp_symbol = self.make_expr_temp_symbol("__cmp_chain", normalized.second.expr_type, VariableKind.Value())
+        let temp_ref = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
+        let condition = self.build_typed_comparison_expr(normalized.first, operators[index], temp_ref)
+        let next = self.lower_comparison_chain_step(operands, operators, index + 1(UInt), temp_ref, Option[ref Expr].None(), scope)
+        let mut block_statements = List[ref TypedStatement].new()
+        block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(normalized.second), unknown_span())))
+        let else_false = make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
+        let if_expr = make_typed_expr(
+            TypedExprKind.IfExpr(box(condition), box(next), Option[ref TypedExpr].Some(box(else_false))),
+            Type.BoolType(),
+        )
+        block_statements.push(box(TypedStatement.ExprStmt(box(if_expr), unknown_span())))
+        return make_typed_expr(TypedExprKind.Block(block_statements), Type.BoolType())
+    }
+
+    protected check_comparison_chain_expr_ref(self, operands List[ref Expr], operators List[ComparisonOperator], scope Scope) TypedExpr = {
+        if operands.is_empty() or operands.count() <> operators.count() + 1(UInt) or operators.count() < 2(UInt) then {
+            self.push_diagnostic_at_span("Invalid comparison chain", unknown_span())
+            return self.empty_typed_block(Type.Unknown())
+        }
+        let mut first_operand = operands[0(UInt)].val
+        let first_operand_ref = box(first_operand)
+        let typed_left = self.check_expr_core_ref(first_operand_ref, .None(), scope)
+        return self.lower_comparison_chain_step(operands, operators, 0(UInt), typed_left, Option[ref Expr].Some(first_operand_ref), scope)
+    }
+
+    protected check_comparison_expr_ref(self, left ref Expr, op ComparisonOperator, right ref Expr, scope Scope) TypedExpr = {
+        let typed_left = self.check_expr_core_ref(left, .None(), scope)
+        let typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
+        let normalized = self.normalize_comparison_operands(
+            typed_left,
+            Option[ref Expr].Some(left),
+            typed_right,
+            Option[ref Expr].Some(right),
+            scope,
+        )
+        return self.build_typed_comparison_expr(normalized.first, op, normalized.second)
     }
 
     protected is_builtin_equality_comparable(self, t Type) Bool = {

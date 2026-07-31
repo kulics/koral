@@ -455,6 +455,8 @@ public indirect enum ExpressionNode {
     left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode)
   case comparisonExpression(
     left: ExpressionNode, operator: ComparisonOperator, right: ExpressionNode)
+  case comparisonChainExpression(
+    operands: [ExpressionNode], operators: [ComparisonOperator], span: SourceSpan)
   case bitwiseExpression(
     left: ExpressionNode, operator: BitwiseOperator, right: ExpressionNode)
   case andExpression(left: ExpressionNode, right: ExpressionNode)
@@ -687,6 +689,8 @@ extension ExpressionNode {
     case .isExpression(_, _, let span):
       return span
     case .isNotExpression(_, _, let span):
+      return span
+    case .comparisonChainExpression(_, _, let span):
       return span
     case .collectionLiteral(_, let span):
       return span

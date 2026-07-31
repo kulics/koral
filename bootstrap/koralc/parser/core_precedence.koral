@@ -15,6 +15,68 @@ private let access_modifier_text(access AccessModifier) String = {
 
 given Parser {
 
+    protected comparison_kind_is_equality(self, kind TokenKind) Bool = {
+        let _ = self
+        return when kind in {
+            .EqualEqual() then true,
+            .NotEqual() then true,
+            _ then false,
+        }
+    }
+
+    protected comparison_kind_is_ordering(self, kind TokenKind) Bool = {
+        let _ = self
+        return when kind in {
+            .Greater() then true,
+            .GreaterEqual() then true,
+            .Less() then true,
+            .LessEqual() then true,
+            _ then false,
+        }
+    }
+
+    protected comparison_kind_is_ascending(self, kind TokenKind) Bool = {
+        let _ = self
+        return when kind in {
+            .Less() then true,
+            .LessEqual() then true,
+            .Greater() then false,
+            .GreaterEqual() then false,
+            _ then false,
+        }
+    }
+
+    protected comparison_operator_from_kind(self, kind TokenKind) ComparisonOperator = {
+        let _ = self
+        return when kind in {
+            .EqualEqual() then ComparisonOperator.Equal(),
+            .NotEqual() then ComparisonOperator.NotEqual(),
+            .Greater() then ComparisonOperator.Greater(),
+            .GreaterEqual() then ComparisonOperator.GreaterEqual(),
+            .Less() then ComparisonOperator.Less(),
+            .LessEqual() then ComparisonOperator.LessEqual(),
+            _ then ComparisonOperator.Equal(),
+        }
+    }
+
+    protected expr_is_ordering_comparison(self, expr ref Expr) Bool = {
+        return when expr in {
+            .ComparisonExpr(_, op, _, _) then when op in {
+                .Greater() then true,
+                .GreaterEqual() then true,
+                .Less() then true,
+                .LessEqual() then true,
+                _ then false,
+            },
+            .ComparisonChainExpr(_, _, _) then true,
+            _ then false,
+        }
+    }
+
+    protected invalid_comparison_chain_error(self) Result[ref Expr] = {
+        return .Error(box("Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."))
+    }
+
     protected parse_factor(self ref mut) Result[ref Expr] = {
         let mut expr = self.parse_unary() or return
 
@@ -163,57 +225,66 @@ given Parser {
     }
 
     protected parse_comparison(self ref mut) Result[ref Expr] = {
-        let mut expr = self.parse_shift() or return
+        let start = self.current()
+        let expr = self.parse_shift() or return
 
-        while true then {
-            when self.current().kind in {
-                .Greater() then {
-                    self.advance()
-                    let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(box(expr.val), ComparisonOperator.Greater(), box(rhs.val), self.span_from_expr_start(expr)))
-                },
-                .GreaterEqual() then {
-                    self.advance()
-                    let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(box(expr.val), ComparisonOperator.GreaterEqual(), box(rhs.val), self.span_from_expr_start(expr)))
-                },
-                .Less() then {
-                    self.advance()
-                    let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(box(expr.val), ComparisonOperator.Less(), box(rhs.val), self.span_from_expr_start(expr)))
-                },
-                .LessEqual() then {
-                    self.advance()
-                    let rhs = self.parse_shift() or return
-                    expr = box(Expr.ComparisonExpr(box(expr.val), ComparisonOperator.LessEqual(), box(rhs.val), self.span_from_expr_start(expr)))
-                },
-                _ then { break },
-            }
+        let first_kind = self.current().kind
+        if not self.comparison_kind_is_ordering(first_kind) then {
+            return .Ok(expr)
         }
 
-        return .Ok(expr)
+        let direction_is_ascending = self.comparison_kind_is_ascending(first_kind)
+        let first_op = self.comparison_operator_from_kind(first_kind)
+        self.advance()
+        let first_right = self.parse_shift() or return
+
+        if not self.comparison_kind_is_ordering(self.current().kind) then {
+            return .Ok(box(Expr.ComparisonExpr(expr, first_op, first_right, self.span_from_expr_start(expr))))
+        }
+
+        let mut operands = List[ref Expr].new()
+        operands.push(expr)
+        operands.push(first_right)
+        let mut operators = List[ComparisonOperator].new()
+        operators.push(first_op)
+
+        while self.comparison_kind_is_ordering(self.current().kind) then {
+            let next_kind = self.current().kind
+            if self.comparison_kind_is_ascending(next_kind) <> direction_is_ascending then {
+                return self.invalid_comparison_chain_error()
+            }
+            let next_op = self.comparison_operator_from_kind(next_kind)
+            self.advance()
+            let rhs = self.parse_shift() or return
+            operands.push(rhs)
+            operators.push(next_op)
+        }
+
+        return .Ok(box(Expr.ComparisonChainExpr(operands, operators, self.span_from_start(start))))
     }
 
     protected parse_equality(self ref mut) Result[ref Expr] = {
-        let mut expr = self.parse_bitwise_or() or return
+        let expr = self.parse_bitwise_or() or return
 
-        while true then {
-            when self.current().kind in {
-                .EqualEqual() then {
-                    self.advance()
-                    let rhs = self.parse_bitwise_or() or return
-                    expr = box(Expr.ComparisonExpr(box(expr.val), ComparisonOperator.Equal(), box(rhs.val), self.span_from_expr_start(expr)))
-                },
-                .NotEqual() then {
-                    self.advance()
-                    let rhs = self.parse_bitwise_or() or return
-                    expr = box(Expr.ComparisonExpr(box(expr.val), ComparisonOperator.NotEqual(), box(rhs.val), self.span_from_expr_start(expr)))
-                },
-                _ then { break },
-            }
+        if not self.comparison_kind_is_equality(self.current().kind) then {
+            return .Ok(expr)
+        }
+        if self.expr_is_ordering_comparison(expr) then {
+            return self.invalid_comparison_chain_error()
         }
 
-        return .Ok(expr)
+        let op = self.comparison_operator_from_kind(self.current().kind)
+        self.advance()
+        let rhs = self.parse_bitwise_or() or return
+        if self.expr_is_ordering_comparison(rhs) then {
+            return self.invalid_comparison_chain_error()
+        }
+        let result = box(Expr.ComparisonExpr(expr, op, rhs, self.span_from_expr_start(expr)))
+        if self.comparison_kind_is_equality(self.current().kind) or self.comparison_kind_is_ordering(self.current().kind) then {
+            return self.invalid_comparison_chain_error()
+        }
+
+        return .Ok(result)
     }
 
     protected parse_is(self ref mut) Result[ref Expr] = {
