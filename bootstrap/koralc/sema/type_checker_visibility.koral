@@ -1,5 +1,5 @@
 given TypeChecker {
-    private spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
+    protected spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
         let _ = self
         return left.start.line == right.start.line and
                left.start.column == right.start.column and
@@ -7,7 +7,7 @@ given TypeChecker {
                left.end.column == right.end.column
     }
 
-    private has_matching_last_diagnostic(self, message String, span SourceSpan) Bool = {
+    protected has_matching_last_diagnostic(self, message String, span SourceSpan) Bool = {
         return when self.storage.diagnostics.last() in {
             .Some(last_diag) then {
                 if last_diag.file_path <> self.storage.file_path or last_diag.message <> message then {
@@ -22,7 +22,7 @@ given TypeChecker {
         }
     }
 
-    private trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
+    protected trait_missing_constraint_message(self, bound_type Type, constraint_param String, constraint String) String = {
         let mut msg = "Type "
         msg.push_string(self.context().type_display_name(bound_type))
         msg.push_string(" does not explicitly implement trait ")
@@ -37,7 +37,7 @@ given TypeChecker {
         return msg
     }
 
-    private trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args List[Type]) String = {
+    protected trait_missing_conformance_message(self, target_type Type, trait_name String, trait_args List[Type]) String = {
         let mut msg = "Type "
         msg.push_string(self.context().type_display_name(target_type))
         msg.push_string(" does not explicitly implement trait ")
@@ -57,7 +57,7 @@ given TypeChecker {
         return msg
     }
 
-    private trait_requirement_missing_constraint_message(self, target_type Type, trait_name String, bound_type Type, constraint String) String = {
+    protected trait_requirement_missing_constraint_message(self, target_type Type, trait_name String, bound_type Type, constraint String) String = {
         let mut msg = "Type '"
         msg.push_string(self.context().type_display_name(target_type))
         msg.push_string("' does not satisfy trait '")
@@ -70,7 +70,7 @@ given TypeChecker {
         return msg
     }
 
-    private trait_requirement_missing_blanket_given_message(self, target_type Type, trait_name String, modifier_name String) String = {
+    protected trait_requirement_missing_blanket_given_message(self, target_type Type, trait_name String, modifier_name String) String = {
         let mut msg = "Type '"
         msg.push_string(self.context().type_display_name(target_type))
         msg.push_string("' does not satisfy trait '")
@@ -83,7 +83,7 @@ given TypeChecker {
         return msg
     }
 
-    private is_upper_first_char(self, s String) Bool = {
+    protected is_upper_first_char(self, s String) Bool = {
         if s.is_empty() then { return false }
         when s.get(0) in {
             .Some(c) then { return c >= 'A' and c <= 'Z' },
@@ -91,7 +91,7 @@ given TypeChecker {
         }
     }
 
-    private make_visibility_checker(self) Option[VisibilityChecker] = {
+    protected make_visibility_checker(self) Option[VisibilityChecker] = {
         return when self.storage.import_graph in {
             .Some(graph) then Option[VisibilityChecker].Some(VisibilityChecker.new(box(graph), self.storage.module_path, self.storage.file_path)),
             .None() then Option[VisibilityChecker].None(),
@@ -124,6 +124,176 @@ given TypeChecker {
                 },
             }
         }
+    }
+
+    protected signature_visibility_level(self, access AccessModifier) Int = {
+        let _ = self
+        return when access in {
+            .Private() then 0,
+            .Protected() then 1,
+            .ProtectedPublic() then 2,
+            .Public() then 3,
+        }
+    }
+
+    protected first_signature_visibility_violation(self, t Type, required_access AccessModifier) Option[Pair[String, AccessModifier]] = {
+        return when t in {
+            .StructureType(def_id) then {
+                break when self.context().get_access(def_id) in {
+                    .Some(type_access) then {
+                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(required_access) then {
+                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(t)
+                            break Option[Pair[String, AccessModifier]].Some(Pair[String, AccessModifier](type_name, type_access))
+                        }
+                        break Option[Pair[String, AccessModifier]].None()
+                    },
+                    .None() then Option[Pair[String, AccessModifier]].None(),
+                }
+            },
+            .EnumType(def_id) then {
+                break when self.context().get_access(def_id) in {
+                    .Some(type_access) then {
+                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(required_access) then {
+                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(t)
+                            break Option[Pair[String, AccessModifier]].Some(Pair[String, AccessModifier](type_name, type_access))
+                        }
+                        break Option[Pair[String, AccessModifier]].None()
+                    },
+                    .None() then Option[Pair[String, AccessModifier]].None(),
+                }
+            },
+            .OpaqueType(def_id) then {
+                break when self.context().get_access(def_id) in {
+                    .Some(type_access) then {
+                        if self.signature_visibility_level(type_access) < self.signature_visibility_level(required_access) then {
+                            let type_name = self.context().get_name(def_id) or else self.context().type_display_name(t)
+                            break Option[Pair[String, AccessModifier]].Some(Pair[String, AccessModifier](type_name, type_access))
+                        }
+                        break Option[Pair[String, AccessModifier]].None()
+                    },
+                    .None() then Option[Pair[String, AccessModifier]].None(),
+                }
+            },
+            .ReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .MutableReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .BorrowedReferenceType(inner, _) then self.first_signature_visibility_violation(inner.val, required_access),
+            .MutableBorrowedReferenceType(inner, _) then self.first_signature_visibility_violation(inner.val, required_access),
+            .PointerType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .MutablePointerType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .WeakReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .FunctionType(params, return_type) then {
+                for param in params then {
+                    when self.first_signature_visibility_violation(param.param_type, required_access) in {
+                        .Some(violation) then { return .Some(violation) },
+                        .None() then {},
+                    }
+                }
+                break self.first_signature_visibility_violation(return_type.val, required_access)
+            },
+            .GenericStruct(_, args) then {
+                for arg in args then {
+                    when self.first_signature_visibility_violation(arg.val, required_access) in {
+                        .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation) },
+                        .None() then {},
+                    }
+                }
+                break Option[Pair[String, AccessModifier]].None()
+            },
+            .GenericEnum(_, args) then {
+                for arg in args then {
+                    when self.first_signature_visibility_violation(arg.val, required_access) in {
+                        .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation) },
+                        .None() then {},
+                    }
+                }
+                break Option[Pair[String, AccessModifier]].None()
+            },
+            .TraitObject(_, type_args) then {
+                for arg in type_args then {
+                    when self.first_signature_visibility_violation(arg.val, required_access) in {
+                        .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation) },
+                        .None() then {},
+                    }
+                }
+                break Option[Pair[String, AccessModifier]].None()
+            },
+            _ then Option[Pair[String, AccessModifier]].None(),
+        }
+    }
+
+    protected validate_signature_type_visibility(self, symbol_name String, symbol_access AccessModifier, signature_types List[Type], span SourceSpan) Void = {
+        if symbol_access is .Private() then {
+            return
+        }
+        for t in signature_types then {
+            when self.first_signature_visibility_violation(t, symbol_access) in {
+                .Some(violation) then {
+                    let symbol_text = when symbol_access in {
+                        .Private() then "private",
+                        .Protected() then "protected",
+                        .ProtectedPublic() then "protected public",
+                        .Public() then "public",
+                    }
+                    let type_text = when violation.second in {
+                        .Private() then "private",
+                        .Protected() then "protected",
+                        .ProtectedPublic() then "protected public",
+                        .Public() then "public",
+                    }
+                    let message = "\(symbol_text) symbol '\(symbol_name)' uses \(type_text) type '\(violation.first)' in its signature"
+                    if not self.has_matching_last_diagnostic(message, span) then {
+                        self.push_diagnostic_at_span(message, span)
+                    }
+                    return
+                },
+                .None() then {},
+            }
+        }
+    }
+
+    protected ensure_generic_template_visible(self, template_name String, template_def_id DefId, span SourceSpan) Bool = {
+        let access = self.context().get_access(template_def_id) or else AccessModifier.Protected()
+        let module_path = self.context().get_module_path(template_def_id) or else List[String].new()
+
+        let access_allowed = when access in {
+            .Public() then true,
+            .Private() then {
+                let def_source_file = self.context().get_source_file(template_def_id) or else ""
+                break def_source_file == self.storage.file_path
+            },
+            .Protected() then string_list_eq(module_path, self.storage.module_path),
+            .ProtectedPublic() then {
+                let def_package_id = self.context().get_package_id(template_def_id) or else ""
+                break not self.storage.package_id.is_empty() and def_package_id == self.storage.package_id
+            },
+        }
+
+        if not access_allowed then {
+            let message = "Undefined type: \(template_name)"
+            if not self.has_matching_last_diagnostic(message, span) then {
+                self.push_diagnostic_at_span(message, span)
+            }
+            return false
+        }
+
+        if module_path.is_empty() or string_list_eq(module_path, self.storage.module_path) then {
+            return true
+        }
+
+        if self.make_visibility_checker() is .Some(checker) then {
+            return when checker.check_symbol(module_path, template_name, false) in {
+                .Ok(_) then true,
+                .Error(message) then {
+                    if not self.has_matching_last_diagnostic(message.message(), span) then {
+                        self.push_diagnostic_at_span(message.message(), span)
+                    }
+                    break false
+                },
+            }
+        }
+
+        return true
     }
 
     protected is_field_accessible_from_current_context(self, field_access AccessModifier, def_id DefId) Bool = {
@@ -371,12 +541,12 @@ given TypeChecker {
         }
     }
 
-    private trait_conformance_key(self, target_type Type, trait_name String, trait_arg_types List[Type]) ExplicitTraitConformanceKey = {
+    protected trait_conformance_key(self, target_type Type, trait_name String, trait_arg_types List[Type]) ExplicitTraitConformanceKey = {
         let _ = self
         return ExplicitTraitConformanceKey(self.canonicalize_alias_type(target_type), trait_name, trait_arg_types)
     }
 
-    private trait_args_match(self, expected List[Type], actual List[Type]) Bool = {
+    protected trait_args_match(self, expected List[Type], actual List[Type]) Bool = {
         let _ = self
         if not (expected.count() == actual.count()) then {
             return false
@@ -391,7 +561,7 @@ given TypeChecker {
         return true
     }
 
-    private generic_param_has_trait_bound(self, name String, trait_name String, trait_arg_types List[Type]) Bool = {
+    protected generic_param_has_trait_bound(self, name String, trait_name String, trait_arg_types List[Type]) Bool = {
         return when self.storage.generic_param_constraints.get(name) in {
             .Some(constraints) then {
                 for constraint in constraints then {
@@ -408,12 +578,12 @@ given TypeChecker {
         }
     }
 
-    private record_explicit_trait_conformance(self, target_type Type, trait_name String, trait_arg_types List[Type]) Void = {
+    protected record_explicit_trait_conformance(self, target_type Type, trait_name String, trait_arg_types List[Type]) Void = {
         self.invalidate_trait_requirement_caches()
         self.storage.explicit_trait_conformances.insert(self.trait_conformance_key(target_type, trait_name, trait_arg_types))
     }
 
-    private primitive_scalar_satisfies_std_trait(self, target_type Type, trait_name String) Bool = {
+    protected primitive_scalar_satisfies_std_trait(self, target_type Type, trait_name String) Bool = {
         let is_eq_or_ord = trait_name == "Eq" or trait_name == "Ord"
         let is_to_string = trait_name == "ToString"
         let is_hash = trait_name == "Hash"
@@ -435,7 +605,7 @@ given TypeChecker {
         }
     }
 
-    private is_implicitly_satisfied_trait_requirement(self, target_type Type, trait_name String) Bool = {
+    protected is_implicitly_satisfied_trait_requirement(self, target_type Type, trait_name String) Bool = {
         if trait_name == "Any" then {
             return true
         }
@@ -471,11 +641,11 @@ given TypeChecker {
         return false
     }
 
-    private satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
+    protected satisfies_trait_requirement(self, target_type Type, trait_name String) Bool = {
         return self.satisfies_trait_requirement_with_args(target_type, trait_name, List[Type].new())
     }
 
-    private satisfies_trait_requirement_with_args(self, target_type Type, trait_name String, trait_args List[Type]) Bool = {
+    protected satisfies_trait_requirement_with_args(self, target_type Type, trait_name String, trait_args List[Type]) Bool = {
         let key = self.trait_conformance_key(target_type, trait_name, trait_args)
         if self.storage.trait_requirement_in_progress.contains(key) then {
             return false
@@ -496,7 +666,7 @@ given TypeChecker {
         return result
     }
 
-    private has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
+    protected has_explicit_trait_conformance(self, target_type Type, trait_name String) Bool = {
         return self.has_explicit_trait_conformance_with_args(target_type, trait_name, List[Type].new())
     }
 
@@ -504,7 +674,7 @@ given TypeChecker {
         return self.storage.explicit_trait_conformances.contains(self.trait_conformance_key(target_type, trait_name, trait_arg_types))
     }
 
-    private has_explicit_trait_conformance_with_args(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
+    protected has_explicit_trait_conformance_with_args(self, target_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
         when target_type in {
             .GenericParameter(name) then {
                 return self.generic_param_has_trait_bound(name, trait_name, trait_arg_types)
@@ -562,7 +732,7 @@ given TypeChecker {
         return false
     }
 
-    private trait_type_args(self, trait_type TypeNode) List[Type] = {
+    protected trait_type_args(self, trait_type TypeNode) List[Type] = {
         return self.trait_type_args_with_bindings(trait_type, Dict[String, Type].new())
     }
 
@@ -579,7 +749,7 @@ given TypeChecker {
         }
     }
 
-    private record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_name String, trait_args List[Type]) Void = {
+    protected record_generic_trait_conformance_template(self, target_type Type, owner_type_params List[TypeParameter], trait_name String, trait_args List[Type]) Void = {
         self.invalidate_trait_requirement_caches()
         let template = GenericTraitConformanceTemplate(
             target_type,
@@ -605,7 +775,7 @@ given TypeChecker {
 
     // Returns the canonical key for conformance template indexing.
     // Mirrors extension_template_key from type_checker_templates.koral.
-    private conformance_template_key(self, target_type Type) String = {
+    protected conformance_template_key(self, target_type Type) String = {
         return when target_type in {
             .ReferenceType(_) then "Ref",
             .MutableReferenceType(_) then "MutRef",
@@ -631,7 +801,7 @@ given TypeChecker {
         }
     }
 
-    private type_modifier_inner_type(self, target_type Type) Option[Type] = {
+    protected type_modifier_inner_type(self, target_type Type) Option[Type] = {
         let _ = self
         return when target_type in {
             .ReferenceType(inner) then Option[Type].Some(inner.val),
@@ -646,7 +816,7 @@ given TypeChecker {
         }
     }
 
-    private modifier_blanket_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) Option[GenericTraitConformanceStatus] = {
+    protected modifier_blanket_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) Option[GenericTraitConformanceStatus] = {
         if trait_name == "Deref" then {
             return Option[GenericTraitConformanceStatus].None()
         }
@@ -716,7 +886,7 @@ given TypeChecker {
         return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name))
     }
 
-    private conformance_type_key_matches(self, pattern Type, actual Type, bindings ref mut Dict[String, Type]) Bool = {
+    protected conformance_type_key_matches(self, pattern Type, actual Type, bindings ref mut Dict[String, Type]) Bool = {
         return when pattern in {
             .GenericParameter(name) then {
                 return when bindings.get(name) in {
@@ -843,7 +1013,7 @@ given TypeChecker {
         }
     }
 
-    private generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
+    protected generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
         let key = self.trait_conformance_key(target_type, trait_name, trait_args)
         if self.storage.generic_trait_status_in_progress.contains(key) then {
             return GenericTraitConformanceStatus.MissingConformance()
@@ -859,7 +1029,7 @@ given TypeChecker {
         return result
     }
 
-    private compute_generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
+    protected compute_generic_trait_conformance_status(self, target_type Type, trait_name String, trait_args List[Type]) GenericTraitConformanceStatus = {
         when self.modifier_blanket_trait_conformance_status(target_type, trait_name, trait_args) in {
             .Some(status) then { return status },
             .None() then {},
@@ -917,11 +1087,11 @@ given TypeChecker {
         return final_result
     }
 
-    private conformance_type_key_bindings(self, pattern Type, actual Type) Option[Dict[String, Type]] = {
+    protected conformance_type_key_bindings(self, pattern Type, actual Type) Option[Dict[String, Type]] = {
         return self.conformance_type_key_bindings_with(pattern, actual, Dict[String, Type].new())
     }
 
-    private conformance_type_key_bindings_with(self, pattern Type, actual Type, bindings Dict[String, Type]) Option[Dict[String, Type]] = {
+    protected conformance_type_key_bindings_with(self, pattern Type, actual Type, bindings Dict[String, Type]) Option[Dict[String, Type]] = {
         return when pattern in {
             .GenericParameter(name) then {
                 break when bindings.get(name) in {
@@ -1165,7 +1335,7 @@ given TypeChecker {
         }
     }
 
-    private maybe_record_iterator_conformance(self, target_type Type, trait_type TypeNode) Void = {
+    protected maybe_record_iterator_conformance(self, target_type Type, trait_type TypeNode) Void = {
         if not (self.type_node_name(trait_type) == "Iterator") then {
             return
         }
@@ -1184,7 +1354,7 @@ given TypeChecker {
     }
 
     // Variant that accepts bindings for generic contexts (like Swift's withNewScope approach)
-    private maybe_record_iterator_conformance_with_bindings(self, target_type Type, trait_type TypeNode, bindings Dict[String, Type]) Void = {
+    protected maybe_record_iterator_conformance_with_bindings(self, target_type Type, trait_type TypeNode, bindings Dict[String, Type]) Void = {
         if not (self.type_node_name(trait_type) == "Iterator") then {
             return
         }

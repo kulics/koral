@@ -308,10 +308,6 @@ extension TypeChecker {
 
   private func isObjectSafeReceiverType(_ node: TypeNode) -> Bool {
     switch node {
-    case .reference(.inferredSelf, _):
-      return true
-    case .reference(.identifier(let name), _):
-      return name == "Self"
     case .borrowedReference(.inferredSelf, _, _):
       return true
     case .borrowedReference(.identifier(let name), _, _):

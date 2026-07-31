@@ -1,5 +1,5 @@
 given TypeChecker {
-    private copy_template_type_params(self, type_params List[TypeParameterDecl]) List[TypeParameterDecl] = {
+    protected copy_template_type_params(self, type_params List[TypeParameterDecl]) List[TypeParameterDecl] = {
         let mut copied = List[TypeParameterDecl].new()
         for type_param in type_params then {
             let mut constraints = List[TypeNode].with_capacity(type_param.constraints.count())
@@ -11,7 +11,7 @@ given TypeChecker {
         return copied
     }
 
-    private copy_template_params(self, params List[TemplateParam]) List[TemplateParam] = {
+    protected copy_template_params(self, params List[TemplateParam]) List[TemplateParam] = {
         let mut copied = List[TemplateParam].new()
         for param in params then {
             let copied_type = self.copy_type_node(param.param_type)
@@ -20,7 +20,7 @@ given TypeChecker {
         return copied
     }
 
-    private copy_string_list(self, values List[String]) List[String] = {
+    protected copy_string_list(self, values List[String]) List[String] = {
         let mut copied = List[String].with_capacity(values.count())
         for value in values then {
             copied.push(value)
@@ -28,7 +28,7 @@ given TypeChecker {
         return copied
     }
 
-    private copy_method_declaration(self, method MethodDeclaration) MethodDeclaration = {
+    protected copy_method_declaration(self, method MethodDeclaration) MethodDeclaration = {
         return MethodDeclaration(
             method.name,
             method.access,
@@ -39,14 +39,14 @@ given TypeChecker {
         )
     }
 
-    private copy_optional_checked_body(self, checked_body Option[ref TypedExpr]) Option[ref TypedExpr] = {
+    protected copy_optional_checked_body(self, checked_body Option[ref TypedExpr]) Option[ref TypedExpr] = {
         return when checked_body in {
             .Some(body) then Option[ref TypedExpr].Some(body),
             .None() then Option[ref TypedExpr].None(),
         }
     }
 
-    private copy_optional_symbols(self, symbols Option[List[Symbol]]) Option[List[Symbol]] = {
+    protected copy_optional_symbols(self, symbols Option[List[Symbol]]) Option[List[Symbol]] = {
         return when symbols in {
             .Some(items) then {
                 let mut copied = List[Symbol].with_capacity(items.count())
@@ -59,14 +59,14 @@ given TypeChecker {
         }
     }
 
-    private copy_optional_type(self, value Option[Type]) Option[Type] = {
+    protected copy_optional_type(self, value Option[Type]) Option[Type] = {
         return when value in {
             .Some(t) then Option[Type].Some(t),
             .None() then Option[Type].None(),
         }
     }
 
-    private typed_params_to_checked_symbols(self, params List[TypedParam]) List[Symbol] = {
+    protected typed_params_to_checked_symbols(self, params List[TypedParam]) List[Symbol] = {
         let mut symbols = List[Symbol].with_capacity(params.count())
         for param in params then {
             let variable_kind = if param.mutable then VariableKind.MutableValue() else VariableKind.Value()
@@ -79,7 +79,7 @@ given TypeChecker {
         return symbols
     }
 
-    private copied_extension_method_template(
+    protected copied_extension_method_template(
         self,
         type_params List[TypeParameterDecl],
         method MethodDeclaration,
@@ -110,7 +110,7 @@ given TypeChecker {
         )
     }
 
-    private boxed_extension_method_template(
+    protected boxed_extension_method_template(
         self,
         type_params List[TypeParameterDecl],
         method MethodDeclaration,
@@ -142,7 +142,7 @@ given TypeChecker {
         )
     }
 
-    private copy_type_list(self, values List[Type]) List[Type] = {
+    protected copy_type_list(self, values List[Type]) List[Type] = {
         let mut copied = List[Type].with_capacity(values.count())
         for value in values then {
             copied.push(value)
@@ -150,23 +150,23 @@ given TypeChecker {
         return copied
     }
 
-    private contains_generic_parameter(self, t Type) Bool = {
+    protected contains_generic_parameter(self, t Type) Bool = {
         let mut context = self.context()
         return context.contains_generic_parameter(t)
     }
 
-    private mentions_unresolved_generic_placeholder(self, t Type) Bool = {
+    protected mentions_unresolved_generic_placeholder(self, t Type) Bool = {
         return type_mentions_unresolved_generic_placeholder(t)
     }
 
-    private contains_generic_parameter_in_list(self, types List[Type]) Bool = {
+    protected contains_generic_parameter_in_list(self, types List[Type]) Bool = {
         for t in types then {
             if self.contains_generic_parameter(t) then { return true }
         }
         return false
     }
 
-    private should_register_extension_template_for_member(
+    protected should_register_extension_template_for_member(
         self,
         target_type Type,
         owner_type_params List[TypeParameter],
@@ -185,7 +185,7 @@ given TypeChecker {
         return self.mentions_unresolved_generic_placeholder(target_type)
     }
 
-    private resolve_template_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
+    protected resolve_template_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -206,7 +206,7 @@ given TypeChecker {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
                         break Option[Type].Some(if mutable
-                            then Type.MutableReferenceType(box(trait_ref_inner))
+                            then self.resolve_mutable_reference_type(trait_ref_inner)
                             else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
@@ -217,7 +217,7 @@ given TypeChecker {
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                             break Option[Type].Some(if mutable
-                                then Type.MutableReferenceType(box(trait_ref_inner))
+                                then self.resolve_mutable_reference_type(trait_ref_inner)
                                 else self.resolve_reference_type(trait_ref_inner))
                         } else Option[Type].None()
                     },
@@ -229,7 +229,7 @@ given TypeChecker {
                 }
                 let resolved_inner = self.resolve_template_type_node_with_bindings(inner.val, bindings)
                 break if mutable
-                    then Type.MutableReferenceType(box(resolved_inner))
+                    then self.resolve_mutable_reference_type(resolved_inner)
                     else self.resolve_reference_type(resolved_inner)
             },
             .BorrowedReference(inner, lifetime, mutable) then {
@@ -248,8 +248,8 @@ given TypeChecker {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
                         break Option[Type].Some(if mutable
-                            then Type.MutableWeakReferenceType(box(trait_ref_inner))
-                            else Type.WeakReferenceType(box(trait_ref_inner)))
+                            then self.resolve_mutable_weak_reference_type(trait_ref_inner)
+                            else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
                         break if self.storage.trait_registry.get(base) is .Some(_) then {
@@ -259,8 +259,8 @@ given TypeChecker {
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                             break Option[Type].Some(if mutable
-                                then Type.MutableWeakReferenceType(box(trait_ref_inner))
-                                else Type.WeakReferenceType(box(trait_ref_inner)))
+                                then self.resolve_mutable_weak_reference_type(trait_ref_inner)
+                                else self.resolve_weak_reference_type(trait_ref_inner))
                         } else Option[Type].None()
                     },
                     _ then Option[Type].None(),
@@ -270,7 +270,7 @@ given TypeChecker {
                     .None() then {},
                 }
                 let resolved_inner = self.resolve_template_type_node_with_bindings(inner.val, bindings)
-                break if mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner))
+                break if mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
             },
             .Generic(base, args) then {
                 let mut resolved_args = List[ref Type].new()
@@ -290,7 +290,7 @@ given TypeChecker {
         }
     }
 
-    private same_extension_template_slot(self, current ref GenericExtensionMethodTemplate, candidate ref GenericExtensionMethodTemplate) Bool = {
+    protected same_extension_template_slot(self, current ref GenericExtensionMethodTemplate, candidate ref GenericExtensionMethodTemplate) Bool = {
         return current.method.name == candidate.method.name
             and current.type_params.count() == candidate.type_params.count()
             and current.method.type_params.count() == candidate.method.type_params.count()
@@ -299,7 +299,7 @@ given TypeChecker {
             and current.conformance_trait_args == candidate.conformance_trait_args
     }
 
-    private upsert_extension_template(self ref mut, key String, template ref GenericExtensionMethodTemplate) Void = {
+    protected upsert_extension_template(self ref mut, key String, template ref GenericExtensionMethodTemplate) Void = {
         when self.storage.generic_templates.extension_methods.get(key) in {
             .Some(existing) then {
                 let mut updated = existing
@@ -335,7 +335,7 @@ given TypeChecker {
     //   "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef"
     // For generic types, returns the template name (e.g. "List", "Option").
     // For concrete types, returns the type name.
-    private extension_template_key(self, target_type Type) String = {
+    protected extension_template_key(self, target_type Type) String = {
         return when target_type in {
             .TraitObject(trait_name, _) then trait_name,
             .ReferenceType(_) then "Ref",
@@ -358,7 +358,7 @@ given TypeChecker {
         }
     }
 
-    private extension_template_key_for_target_node(self, target_type TypeNode, resolved_target Type) String = {
+    protected extension_template_key_for_target_node(self, target_type TypeNode, resolved_target Type) String = {
         return when target_type in {
             .Reference(_, mutable) then if mutable then "MutRef" else "Ref",
             .Pointer(_, mutable) then if mutable then "MutPtr" else "Ptr",
@@ -368,7 +368,7 @@ given TypeChecker {
         }
     }
 
-    private register_extension_method_template(
+    protected register_extension_method_template(
         self ref mut,
         type_key String,
         owner_type_params List[TypeParameter],
@@ -416,7 +416,7 @@ given TypeChecker {
         self.upsert_extension_template(type_key, primary_template)
     }
 
-    private update_extension_method_checked_template(
+    protected update_extension_method_checked_template(
         self ref mut,
         target_type Type,
         owner_type_param_count UInt,
@@ -454,7 +454,7 @@ given TypeChecker {
         }
     }
 
-    private register_trait_tool_templates_for_concrete_type(self ref mut, target_type Type, owner_type_params List[TypeParameter], trait_name String, existing_members ref List[ref TypedGivenMember]) Void = {
+    protected register_trait_tool_templates_for_concrete_type(self ref mut, target_type Type, owner_type_params List[TypeParameter], trait_name String, existing_members ref List[ref TypedGivenMember]) Void = {
         if self.skip_trait_tool_template_backfill_debug_enabled() then {
             return
         }
@@ -554,7 +554,7 @@ given TypeChecker {
         }
     }
 
-    private register_conformance_method_signatures_for_concrete_type(self, target_type Type, members ref List[ref TypedGivenMember]) Void = {
+    protected register_conformance_method_signatures_for_concrete_type(self, target_type Type, members ref List[ref TypedGivenMember]) Void = {
         let type_key = self.extension_template_key(target_type)
         for member_ref in members.val then {
             let member = member_ref.val
@@ -590,7 +590,7 @@ given TypeChecker {
         }
     }
 
-    private backfill_trait_tool_method_to_existing_conformances(
+    protected backfill_trait_tool_method_to_existing_conformances(
         self ref mut,
         trait_name String,
         method_name String,
@@ -685,7 +685,7 @@ given TypeChecker {
         }
     }
 
-    private backfill_checked_trait_tool_method_to_existing_conformances(
+    protected backfill_checked_trait_tool_method_to_existing_conformances(
         self ref mut,
         trait_name String,
         method_name String,
@@ -780,7 +780,7 @@ given TypeChecker {
         }
     }
 
-    private register_generic_function_template(
+    protected register_generic_function_template(
         self,
         name String,
         type_params List[TypeParameter],
@@ -957,7 +957,7 @@ given TypeChecker {
         return Option[Symbol].None()
     }
 
-    private maybe_record_extension_method_instantiation(self, base_type Type, method_name String, method_type_args List[Type]) Void = {
+    protected maybe_record_extension_method_instantiation(self, base_type Type, method_name String, method_type_args List[Type]) Void = {
         let normalized_base = base_type
         if self.contains_generic_parameter(normalized_base) then { return }
         if self.contains_generic_parameter_in_list(method_type_args) then { return }
@@ -1178,7 +1178,7 @@ given TypeChecker {
         }
     }
 
-    private maybe_record_trait_method_instantiation(self, base_type Type, method_name String, method_type_args List[Type]) Void = {
+    protected maybe_record_trait_method_instantiation(self, base_type Type, method_name String, method_type_args List[Type]) Void = {
         let normalized_base = when base_type in {
             .MutableReferenceType(inner) then inner.val,
             .ReferenceType(inner) then inner.val,

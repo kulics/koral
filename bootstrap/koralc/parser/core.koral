@@ -5,6 +5,7 @@ private type ParseDeclFlags(
     has_explicit_access Bool,
     is_foreign Bool,
     is_intrinsic Bool,
+    invalid_access_message Option[String],
 )
 
 public type Parser(
@@ -13,13 +14,13 @@ public type Parser(
 )
 
 given Parser {
-    private parse_debug(self, message String) Void = {
+    protected parse_debug(self, message String) Void = {
         if env("KORAL_DEBUG_PARSE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             eprintln("[parse] \(message)")
         }
     }
 
-    private token_position_text(self, token Token) String = {
+    protected token_position_text(self, token Token) String = {
         let _ = self
         let mut text = token.line.to_string()
         text.push_byte(':')
@@ -27,7 +28,7 @@ given Parser {
         return text
     }
 
-    private format_context_position_error(self, prefix String, context String, token Token) String = {
+    protected format_context_position_error(self, prefix String, context String, token Token) String = {
         let mut text = prefix
         text.push_string(context)
         text.push_string(" at ")
@@ -35,7 +36,7 @@ given Parser {
         return text
     }
 
-    private format_progress_error(self, prefix String, context String, token Token) String = {
+    protected format_progress_error(self, prefix String, context String, token Token) String = {
         let mut text = self.format_context_position_error(prefix, context, token)
         text.push_string(" (token: ")
         text.push_string(token_text(token))
@@ -43,14 +44,14 @@ given Parser {
         return text
     }
 
-    private previous_token(self) Option[Token] = {
+    protected previous_token(self) Option[Token] = {
         if self.index == 0 then {
             return .None()
         }
         return .Some(self.tokens[self.index - 1])
     }
 
-    private span_from_start(self, start Token) SourceSpan = {
+    protected span_from_start(self, start Token) SourceSpan = {
         let start_loc = SourceLocation(start.line, start.column)
         let end_tok = self.previous_token() or else {
             return SourceSpan(start_loc, start_loc)
@@ -59,12 +60,12 @@ given Parser {
         return SourceSpan(start_loc, end_loc)
     }
 
-    private token_span(self, token Token) SourceSpan = {
+    protected token_span(self, token Token) SourceSpan = {
         let loc = SourceLocation(token.line, token.column)
         return SourceSpan(loc, loc)
     }
 
-    private span_from_expr_start(self, expr ref Expr) SourceSpan = {
+    protected span_from_expr_start(self, expr ref Expr) SourceSpan = {
         let expr_base_span = expr_span(expr)
         let end_tok = self.previous_token() or else {
             return expr_base_span
@@ -77,7 +78,7 @@ given Parser {
         return SourceSpan(expr_base_span.start, end_loc)
     }
 
-    private is_decimal_digits(self, text String) Bool = {
+    protected is_decimal_digits(self, text String) Bool = {
         let runes = text.to_runes()
         if runes.is_empty() then {
             return false
@@ -91,7 +92,7 @@ given Parser {
     }
 
     // 按顶层 | 分割 pattern 文本（忽略括号内的 |）
-    private split_or_pattern(self, text String) List[String] = {
+    protected split_or_pattern(self, text String) List[String] = {
         let mut result = List[String].new()
         let mut current = String.new()
         let mut depth UInt = 0
@@ -114,7 +115,7 @@ given Parser {
         return result
     }
 
-    private pattern_from_text(self, text String, span SourceSpan) PatternNode = {
+    protected pattern_from_text(self, text String, span SourceSpan) PatternNode = {
         // 先检查顶层 | 分割（or 模式）
         let or_parts = self.split_or_pattern(text)
         if or_parts.count() > 1 then {
@@ -187,7 +188,7 @@ given Parser {
     }
 
     // 按顶层逗号分割 pattern 参数列表（忽略括号内的逗号）
-    private split_pattern_args(self, text String) List[String] = {
+    protected split_pattern_args(self, text String) List[String] = {
         let mut result = List[String].new()
         let mut current = String.new()
         let mut depth UInt = 0
@@ -216,27 +217,27 @@ given Parser {
         return Parser(tokens, 0)
     }
 
-    private current(self) Token = {
+    protected current(self) Token = {
         if self.index < self.tokens.count() then {
             return self.tokens[self.index]
         }
         return Token(TokenKind.Eof(), 0, 0, false)
     }
 
-    private save_state(self) UInt = self.index
+    protected save_state(self) UInt = self.index
 
-    private restore_state(self ref mut, saved UInt) Void = {
+    protected restore_state(self ref mut, saved UInt) Void = {
         self.index = saved
     }
 
-    private peek_kind(self) Option[TokenKind] = {
+    protected peek_kind(self) Option[TokenKind] = {
         if self.index + 1 < self.tokens.count() then {
             return .Some(self.tokens[self.index + 1].kind)
         }
         return .None()
     }
 
-    private is_eof(self) Bool = {
+    protected is_eof(self) Bool = {
         when self.current().kind in {
             .Eof() then { return true },
             _ then { return false },
@@ -244,7 +245,7 @@ given Parser {
     }
 
     // 检查 token 是否是表达式开始（用于区分类型转换和括号表达式）
-    private is_expr_start_token(self, kind TokenKind) Bool = {
+    protected is_expr_start_token(self, kind TokenKind) Bool = {
         return when kind in {
             .Identifier(_) then true,
             .IntegerLiteral(_) then true,
@@ -273,7 +274,7 @@ given Parser {
 
     // 检查当前位置是否是泛型类型表达式 [T, U]TypeName
     // 判断字符串首字母是否大写（用于区分类型名和变量名）
-    private is_upper_first(self, s String) Bool = {
+    protected is_upper_first(self, s String) Bool = {
         if s.is_empty() then { return false }
         let runes = s.to_runes()
         if runes.is_empty() then { return false }
@@ -281,7 +282,7 @@ given Parser {
     }
 
     // 通过 lookahead 检查 [...] 后面是否跟着标识符
-    private is_generic_type_expr(self) Bool = {
+    protected is_generic_type_expr(self) Bool = {
         when self.current().kind in {
             .LBracket() then {},
             _ then { return false },
@@ -316,7 +317,7 @@ given Parser {
         return false
     }
 
-    private advance(self ref mut) Token = {
+    protected advance(self ref mut) Token = {
         let t = self.current()
         if not self.is_eof() then {
             self.index += 1
@@ -324,14 +325,14 @@ given Parser {
         return t
     }
 
-    private consume_semicolon(self ref mut) Void = {
+    protected consume_semicolon(self ref mut) Void = {
         if self.current().kind is .Semicolon() then {
             self.advance()
         }
     }
 
     // 判断当前 token 是否是续行 token（出现在行首时不触发自动分号）
-    private is_continuation_token(self) Bool = {
+    protected is_continuation_token(self) Bool = {
         return when self.current().kind in {
             // 算术中缀运算符
             .Plus() then true,
@@ -369,7 +370,7 @@ given Parser {
     }
 
     // 判断是否应该终止当前语句（自动分号插入规则）
-    private should_terminate_statement(self) Bool = {
+    protected should_terminate_statement(self) Bool = {
         // 显式分号
         if self.current().kind is .Semicolon() then {
             return true
@@ -391,16 +392,16 @@ given Parser {
     }
 
     // 消耗可选的语句终止符（分号或换行）
-    private consume_statement_terminator(self ref mut) Void = {
+    protected consume_statement_terminator(self ref mut) Void = {
         if self.current().kind is .Semicolon() then {
             self.advance()
         }
         // 换行自动终止不需要消耗 token
     }
 
-    private can_continue_dot_postfix(self) Bool = self.current().kind is .Dot()
+    protected can_continue_dot_postfix(self) Bool = self.current().kind is .Dot()
 
-    private should_continue_postfix_after_expression(self) Bool = {
+    protected should_continue_postfix_after_expression(self) Bool = {
         return when self.current().kind in {
             .LParen() then not self.current().has_newline_before,
             .LBracket() then not self.current().has_newline_before,
@@ -409,7 +410,7 @@ given Parser {
         }
     }
 
-    private expect_identifier(self ref mut, label String) Result[String] = {
+    protected expect_identifier(self ref mut, label String) Result[String] = {
         let t = self.current()
         if t.kind is .Identifier(name) then {
             self.advance()
@@ -418,20 +419,49 @@ given Parser {
         return .Error(box(self.format_context_position_error("Expected identifier for ", label, t)))
     }
 
-    private parse_decl_flags(self ref mut) ParseDeclFlags = {
+    protected parse_decl_flags(self ref mut) ParseDeclFlags = {
         let mut access = AccessModifier.Protected()
         let mut has_explicit_access = false
         let mut is_foreign = false
         let mut is_intrinsic = false
+        let mut invalid_access_message = Option[String].None()
 
         while true then {
             when self.current().kind in {
                 .KwPublic() then {
+                    if has_explicit_access then {
+                        let previous = when access in {
+                            .Public() then "public",
+                            .Protected() then "protected",
+                            .Private() then "private",
+                            .ProtectedPublic() then "protected public",
+                        }
+                        if invalid_access_message is .None() then {
+                            invalid_access_message = .Some(
+                                "Invalid access modifier order: '\(previous) public'. Use 'protected public' only in that exact order"
+                            )
+                        }
+                        break
+                    }
                     has_explicit_access = true
                     access = AccessModifier.Public()
                     self.advance()
                 },
                 .KwProtected() then {
+                    if has_explicit_access then {
+                        let previous = when access in {
+                            .Public() then "public",
+                            .Protected() then "protected",
+                            .Private() then "private",
+                            .ProtectedPublic() then "protected public",
+                        }
+                        if invalid_access_message is .None() then {
+                            invalid_access_message = .Some(
+                                "Invalid access modifier order: '\(previous) protected'. Use 'protected public' only in that exact order"
+                            )
+                        }
+                        break
+                    }
                     has_explicit_access = true
                     self.advance()
                     if self.current().kind is .KwPublic() then {
@@ -442,6 +472,20 @@ given Parser {
                     }
                 },
                 .KwPrivate() then {
+                    if has_explicit_access then {
+                        let previous = when access in {
+                            .Public() then "public",
+                            .Protected() then "protected",
+                            .Private() then "private",
+                            .ProtectedPublic() then "protected public",
+                        }
+                        if invalid_access_message is .None() then {
+                            invalid_access_message = .Some(
+                                "Invalid access modifier order: '\(previous) private'. Use 'protected public' only in that exact order"
+                            )
+                        }
+                        break
+                    }
                     has_explicit_access = true
                     access = AccessModifier.Private()
                     self.advance()
@@ -460,10 +504,10 @@ given Parser {
             }
         }
 
-        return ParseDeclFlags(access, has_explicit_access, is_foreign, is_intrinsic)
+        return ParseDeclFlags(access, has_explicit_access, is_foreign, is_intrinsic, invalid_access_message)
     }
 
-    private wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) Result[Decl] = {
+    protected wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) Result[Decl] = {
         if is_foreign and is_intrinsic then {
             return .Error(box("foreign and intrinsic cannot be used together"))
         }
@@ -493,7 +537,7 @@ given Parser {
         return .Ok(base)
     }
 
-    private is_type_start(self) Bool = {
+    protected is_type_start(self) Bool = {
         return when self.current().kind in {
             .KwRef() then true,
             .KwPtr() then true,
@@ -504,7 +548,7 @@ given Parser {
         }
     }
 
-    private parse_type_arg_list(self ref mut) Result[List[ref TypeNode]] = {
+    protected parse_type_arg_list(self ref mut) Result[List[ref TypeNode]] = {
         when self.current().kind in {
             .LBracket() then { self.advance() },
             _ then { return .Error(box("Expected '[' to start type argument list")) },
@@ -535,7 +579,7 @@ given Parser {
         return .Ok(args)
     }
 
-    private parse_type(self ref mut) Result[TypeNode] = {
+    protected parse_type(self ref mut) Result[TypeNode] = {
         when self.current().kind in {
             .KwRef() then {
                 self.advance()
@@ -634,7 +678,7 @@ given Parser {
         }
     }
 
-    private parse_type_parameters(self ref mut) Result[List[TypeParameter]] = {
+    protected parse_type_parameters(self ref mut) Result[List[TypeParameter]] = {
         let mut params = List[TypeParameter].new()
 
         if self.current().kind is .LBracket() then {
@@ -707,7 +751,7 @@ given Parser {
         return .Ok(params)
     }
 
-    private parse_param_list(self ref mut) Result[List[Param]] = {
+    protected parse_param_list(self ref mut) Result[List[Param]] = {
         let mut params = List[Param].new()
 
         while true then {
@@ -792,7 +836,7 @@ given Parser {
         return .Ok(params)
     }
 
-    private parse_let_decl(self ref mut, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_let_decl(self ref mut, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
@@ -912,7 +956,7 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    private parse_type_decl(self ref mut, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_type_decl(self ref mut, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
@@ -1082,7 +1126,7 @@ given Parser {
         }
     }
 
-    private parse_let_statement(self ref mut) Result[Statement] = {
+    protected parse_let_statement(self ref mut) Result[Statement] = {
         let start = self.current()
         self.advance()
 
@@ -1120,7 +1164,7 @@ given Parser {
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
 
-    private parse_pair_let_statement(self ref mut, start Token) Result[Statement] = {
+    protected parse_pair_let_statement(self ref mut, start Token) Result[Statement] = {
         self.advance()
 
         let first = self.parse_pair_binding_element() or return
@@ -1147,7 +1191,7 @@ given Parser {
         return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)))
     }
 
-    private parse_pair_binding_element(self ref mut) Result[PairBindingElement] = {
+    protected parse_pair_binding_element(self ref mut) Result[PairBindingElement] = {
         let start = self.current()
 
         if start.kind is .Identifier(name) and name == "_" then {
@@ -1178,7 +1222,7 @@ given Parser {
         return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)))
     }
 
-    private is_assignment_operator(self) Bool = {
+    protected is_assignment_operator(self) Bool = {
         return when self.current().kind in {
             .Assign() then true,
             .PlusAssign() then true,
@@ -1195,7 +1239,7 @@ given Parser {
         }
     }
 
-    private parse_assignment_operator(self) Result[Option[CompoundAssignmentOperator]] = {
+    protected parse_assignment_operator(self) Result[Option[CompoundAssignmentOperator]] = {
         return when self.current().kind in {
             .Assign() then .Ok(Option[CompoundAssignmentOperator].None()),
             .PlusAssign() then .Ok(.Some(CompoundAssignmentOperator.AddAssign())),
@@ -1212,7 +1256,7 @@ given Parser {
         }
     }
 
-    private parse_expression_checked(self ref mut, context String) Result[ref Expr] = {
+    protected parse_expression_checked(self ref mut, context String) Result[ref Expr] = {
         let t = self.current()
         self.parse_debug("expr begin")
         let before = self.index
@@ -1228,7 +1272,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    private parse_statement_list_until_rbrace(self ref mut, context String) Result[List[Statement]] = {
+    protected parse_statement_list_until_rbrace(self ref mut, context String) Result[List[Statement]] = {
         let mut statements = List[Statement].new()
         self.parse_debug("stmt-list begin")
         while true then {
@@ -1257,7 +1301,7 @@ given Parser {
         return .Ok(statements)
     }
 
-    private apply_statement_postfix_continuation(self, base ref Expr, continuation ref Expr) Result[ref Expr] = {
+    protected apply_statement_postfix_continuation(self, base ref Expr, continuation ref Expr) Result[ref Expr] = {
         return when continuation in {
             .ImplicitMemberExpr(member_name, args, _) then {
                 let span = expr_span(continuation)
@@ -1270,7 +1314,7 @@ given Parser {
         }
     }
 
-    private parse_statement_postfix_continuations(self ref mut, statement Statement) Result[Statement] = {
+    protected parse_statement_postfix_continuations(self ref mut, statement Statement) Result[Statement] = {
         let mut current = statement
         while self.can_continue_dot_postfix() then {
             self.parse_debug("statement postfix continuation")
@@ -1290,7 +1334,7 @@ given Parser {
         return .Ok(current)
     }
 
-    private parse_statement(self ref mut) Result[Statement] = {
+    protected parse_statement(self ref mut) Result[Statement] = {
         let start = self.current()
         self.parse_debug("statement dispatch")
         when self.current().kind in {

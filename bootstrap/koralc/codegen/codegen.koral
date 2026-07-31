@@ -254,7 +254,7 @@ given CodeGen {
         }
     }
 
-    private apply_codegen_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+    protected apply_codegen_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
         if bindings.is_empty() then { return t }
         return when t in {
             .GenericParameter(name) then when bindings.get(name) in {
@@ -290,7 +290,7 @@ given CodeGen {
         }
     }
 
-    private append_generic_parameter_bindings(self, mut bindings Dict[String, Type], target_args List[ref Type], base_args List[ref Type]) Void = {
+    protected append_generic_parameter_bindings(self, mut bindings Dict[String, Type], target_args List[ref Type], base_args List[ref Type]) Void = {
         let mut i UInt = 0
         let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
         while i < n then {
@@ -350,14 +350,14 @@ given CodeGen {
         return bindings
     }
 
-    private method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) Dict[String, Type] = {
+    protected method_receiver_bindings(self, method_def_id DefId, concrete_receiver_type Type) Dict[String, Type] = {
         return when self.method_owner_type(method_def_id) in {
             .Some(target_type) then self.build_receiver_bindings(target_type, concrete_receiver_type),
             .None() then Dict[String, Type].new(),
         }
     }
 
-    private bind_function_type(self, fn_type Type, receiver_bindings Dict[String, Type]) Type = {
+    protected bind_function_type(self, fn_type Type, receiver_bindings Dict[String, Type]) Type = {
         return when fn_type in {
             .FunctionType(fn_params, return_type_ref) then {
                 let mut bound_param_types = List[ref Type].new()
@@ -422,7 +422,7 @@ given CodeGen {
         return left == right
     }
 
-    private concrete_callable_symbol(self, def_id DefId, requested_result_type Type) Option[Symbol] = {
+    protected concrete_callable_symbol(self, def_id DefId, requested_result_type Type) Option[Symbol] = {
         if def_id.id == 0 then {
             return Option[Symbol].None()
         }
@@ -479,7 +479,7 @@ given CodeGen {
         }
     }
 
-    private lookup_receiver_method_def_id(self, receiver_type Type, method_name String) Option[DefId] = {
+    protected lookup_receiver_method_def_id(self, receiver_type Type, method_name String) Option[DefId] = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         let concrete_key = self.concrete_receiver_lookup_key(concrete_receiver_type)
         let concrete_lookup_key = "\(concrete_key).\(method_name)"
@@ -543,7 +543,7 @@ given CodeGen {
         return Option[DefId].None()
     }
 
-    private receiver_method_matches_lookup(self, def_id DefId, receiver_type Type) Bool = {
+    protected receiver_method_matches_lookup(self, def_id DefId, receiver_type Type) Bool = {
         if self.program.receiver_method_dispatch.get(def_id) is .Some(_) then { return true }
 
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
@@ -592,7 +592,7 @@ given CodeGen {
         }
     }
 
-    private lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String, requested_result_type Type) Option[Symbol] = {
+    protected lookup_receiver_method_via_metadata(self, receiver_type Type, method_name String, requested_result_type Type) Option[Symbol] = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type)
         when self.lookup_receiver_method_def_id(concrete_receiver_type, method_name) in {
             .Some(def_id) then {
@@ -689,7 +689,7 @@ given CodeGen {
         return out
     }
 
-    private foreign_type_symbol_matches_def_id(self, symbol ref Symbol, def_id DefId) Bool = {
+    protected foreign_type_symbol_matches_def_id(self, symbol ref Symbol, def_id DefId) Bool = {
         let _ = self
         if symbol.def_id == def_id then { return true }
         return when symbol.symbol_type in {
@@ -743,7 +743,7 @@ given CodeGen {
         return if name.starts_with("_k__k__") then name.substring(3..) else name
     }
 
-    private concrete_callable_info(self, def_id DefId) Option[ConcreteCallableInfo] = {
+    protected concrete_callable_info(self, def_id DefId) Option[ConcreteCallableInfo] = {
         return self.program.concrete_callables_by_def_id.get(def_id)
     }
 
@@ -780,7 +780,7 @@ given CodeGen {
         }
     }
 
-    private owner_base_lookup_key(self, t Type) String = {
+    protected owner_base_lookup_key(self, t Type) String = {
         let concrete_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
         let base_type = when concrete_type in {
             .ReferenceType(inner_ref) then inner_ref.val,
@@ -798,7 +798,7 @@ given CodeGen {
         return "\(self.concrete_receiver_lookup_key(owner_type))|\(symbol.def_id.id.to_string())"
     }
 
-    private owner_types_match(self, lhs Type, rhs Type) Bool = {
+    protected owner_types_match(self, lhs Type, rhs Type) Bool = {
         let left_concrete = self.concretize_codegen_type(lhs)
         let right_concrete = self.concretize_codegen_type(rhs)
         let left_exact = self.concrete_receiver_lookup_key(left_concrete)
@@ -809,7 +809,7 @@ given CodeGen {
         return self.owner_base_lookup_key(left_concrete) == self.owner_base_lookup_key(right_concrete)
     }
 
-    private callable_logical_name(self, def_id DefId) String = {
+    protected callable_logical_name(self, def_id DefId) String = {
         return when self.program.receiver_method_dispatch.get(def_id) in {
             .Some(info) then info.method_name,
             .None() then when self.program.concrete_callables_by_def_id.get(def_id) in {
@@ -819,14 +819,14 @@ given CodeGen {
         }
     }
 
-    private symbol_is_function_like(self, symbol ref Symbol) Bool = {
+    protected symbol_is_function_like(self, symbol ref Symbol) Bool = {
         if symbol.kind is .Function() then {
             return true
         }
         return symbol.symbol_type is .FunctionType(_, _)
     }
 
-    private should_use_current_owner_resolution(self, symbol ref Symbol) Bool = {
+    protected should_use_current_owner_resolution(self, symbol ref Symbol) Bool = {
         if not self.symbol_is_function_like(symbol) then {
             return false
         }
@@ -839,7 +839,7 @@ given CodeGen {
         }
     }
 
-    private extract_helper_method_name_from_symbol(self, symbol_name String) Option[String] = {
+    protected extract_helper_method_name_from_symbol(self, symbol_name String) Option[String] = {
         let _ = self
         let body = if symbol_name.starts_with("ref_") then symbol_name.substring(4..)
             else if symbol_name.starts_with("mutref_") then symbol_name.substring(7..)
@@ -869,7 +869,7 @@ given CodeGen {
         return Option[String].None()
     }
 
-    private extract_template_prefixed_method_name(self, symbol_name String) Option[String] = {
+    protected extract_template_prefixed_method_name(self, symbol_name String) Option[String] = {
         let _ = self
         if not symbol_name.contains("_") then {
             return Option[String].None()
@@ -899,7 +899,7 @@ given CodeGen {
         return if saw_prefix and found_lower and not out.is_empty() then Option[String].Some(out) else Option[String].None()
     }
 
-    private current_owner_method_symbol(self, symbol ref Symbol) Option[Symbol] = {
+    protected current_owner_method_symbol(self, symbol ref Symbol) Option[Symbol] = {
         if not self.symbol_is_function_like(symbol) then {
             return Option[Symbol].None()
         }
@@ -971,7 +971,7 @@ given CodeGen {
         }
     }
 
-    private fallback_current_owner_method_c_name(self, symbol ref Symbol) Option[String] = {
+    protected fallback_current_owner_method_c_name(self, symbol ref Symbol) Option[String] = {
         if not self.symbol_is_function_like(symbol) then {
             return Option[String].None()
         }
@@ -1046,7 +1046,7 @@ given CodeGen {
         }
     }
 
-    private compute_callable_c_name_uncached(self, symbol ref Symbol) String = {
+    protected compute_callable_c_name_uncached(self, symbol ref Symbol) String = {
         let is_top_level_main = symbol.kind is .Function()
             and self.context.symbol_name(symbol.val) == "main"
             and self.method_owner_type(symbol.def_id) is .None()
@@ -1266,7 +1266,7 @@ given CodeGen {
         return resolved_name
     }
 
-    private receiver_owner_type_from_function_type(self, function_type Type) Option[Type] = {
+    protected receiver_owner_type_from_function_type(self, function_type Type) Option[Type] = {
         let _ = self
         return when function_type in {
             .FunctionType(params, _) then {
@@ -1288,7 +1288,7 @@ given CodeGen {
         }
     }
 
-    private codegen_layout_info(self, t Type) Option[TypeLayoutInfo] = {
+    protected codegen_layout_info(self, t Type) Option[TypeLayoutInfo] = {
         let _ = self
         let _ = t
         return Option[TypeLayoutInfo].None()
@@ -1561,7 +1561,7 @@ given CodeGen {
         return Option[DefId].None()
     }
 
-    private concrete_struct_fields_from_program(self, def_id DefId) Option[List[TypedField]] = {
+    protected concrete_struct_fields_from_program(self, def_id DefId) Option[List[TypedField]] = {
         for global in self.program.globals then {
             when global in {
                 .StructDeclaration(identifier, fields) then {
@@ -1576,7 +1576,7 @@ given CodeGen {
         return Option[List[TypedField]].None()
     }
 
-    private concrete_enum_cases_from_program(self, def_id DefId) Option[List[TypedEnumCase]] = {
+    protected concrete_enum_cases_from_program(self, def_id DefId) Option[List[TypedEnumCase]] = {
         for global in self.program.globals then {
             when global in {
                 .EnumDeclaration(identifier, cases) then {
@@ -1588,7 +1588,7 @@ given CodeGen {
         return Option[List[TypedEnumCase]].None()
     }
 
-    private lookup_enum_case_index_and_params(self, def_id DefId, case_name String) Option[Pair[UInt, List[EnumCaseParam]]] = {
+    protected lookup_enum_case_index_and_params(self, def_id DefId, case_name String) Option[Pair[UInt, List[EnumCaseParam]]] = {
         let enum_cases_opt = when self.context.get_enum_cases(def_id) in {
             .Some(enum_cases) then Option[List[EnumCaseInfo]].Some(enum_cases),
             .None() then {
@@ -1741,13 +1741,13 @@ given CodeGen {
 
     // ── 类型名称映射 ──────────────────────────────────────────────────────────
 
-    private ref_wrapper_c_type_name(self, inner_type Type, weak Bool) String = {
+    protected ref_wrapper_c_type_name(self, inner_type Type, weak Bool) String = {
         return if self.type_looks_traitlike_for_storage(inner_type)
             then if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef"
             else if weak then "struct __koral_WeakRef" else "struct __koral_Ref"
     }
 
-    private type_looks_traitlike_for_storage(self, t Type) Bool = {
+    protected type_looks_traitlike_for_storage(self, t Type) Bool = {
         return when t in {
             .TraitObject(_, _) then true,
             .ReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(inner_ref.val),
@@ -1776,7 +1776,7 @@ given CodeGen {
         }
     }
 
-    private storage_ref_wrapper_c_type_name(self, inner_type Type, weak Bool) Option[String] = {
+    protected storage_ref_wrapper_c_type_name(self, inner_type Type, weak Bool) Option[String] = {
         return if self.type_looks_traitlike_for_storage(inner_type)
             then Option[String].Some(if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef")
             else Option[String].None()
@@ -1802,7 +1802,7 @@ given CodeGen {
         }
     }
 
-    private nominal_named_c_type_name(self, t Type) Option[String] = {
+    protected nominal_named_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .StructureType(def_id) then {
                 let c_name = when self.c_identifier_opt(def_id) in {
@@ -1830,7 +1830,7 @@ given CodeGen {
         }
     }
 
-    private opaque_mapped_c_type_name(self, mapped_type Type) Option[String] = {
+    protected opaque_mapped_c_type_name(self, mapped_type Type) Option[String] = {
         return when mapped_type in {
             .TraitObject(_, _) then {
                 break Option[String].Some("struct __koral_TraitRef")
@@ -1875,7 +1875,7 @@ given CodeGen {
         }
     }
 
-    private opaque_fallback_c_type_name(self, def_id DefId) String = {
+    protected opaque_fallback_c_type_name(self, def_id DefId) String = {
         return when self.c_identifier_opt(def_id) in {
             .Some(name) then name,
             .None() then {
@@ -1887,7 +1887,7 @@ given CodeGen {
         }
     }
 
-    private opaque_c_type_name(self, t Type) Option[String] = {
+    protected opaque_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .OpaqueType(def_id) then {
                 let mapped_c_type_opt = when self.context.lookup_type(def_id) in {
@@ -1903,7 +1903,7 @@ given CodeGen {
         }
     }
 
-    private generic_nominal_c_type_name(self, t Type) Option[String] = {
+    protected generic_nominal_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .GenericStruct(template, _) then {
                 let layout_key = self.concrete_layout_key_for_type(t)
@@ -1933,7 +1933,7 @@ given CodeGen {
         }
     }
 
-    private nominal_c_type_name(self, t Type) Option[String] = {
+    protected nominal_c_type_name(self, t Type) Option[String] = {
         when self.nominal_named_c_type_name(t) in {
             .Some(name) then { return Option[String].Some(name) },
             .None() then {},
@@ -1945,7 +1945,7 @@ given CodeGen {
         return self.generic_nominal_c_type_name(t)
     }
 
-    private reference_like_c_type_name(self, t Type) Option[String] = {
+    protected reference_like_c_type_name(self, t Type) Option[String] = {
         return when t in {
             .ReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
             .MutableReferenceType(inner_ref) then Option[String].Some(self.ref_wrapper_c_type_name(inner_ref.val, false)),
@@ -1961,7 +1961,7 @@ given CodeGen {
         }
     }
 
-    private compute_c_type_name_uncached(self, t Type) String = {
+    protected compute_c_type_name_uncached(self, t Type) String = {
         let kind = type_handler_kind_from(t)
         when kind in {
             .Primitive() then { return primitive_c_type_name(t) },
@@ -1979,7 +1979,7 @@ given CodeGen {
         panic("Unresolved type \(display) during codegen")
     }
 
-    private cache_c_type_name(self ref mut Self, t Type) Void = {
+    protected cache_c_type_name(self ref mut Self, t Type) Void = {
         if self.type_contains_generic(t) then { return }
         if t is .Unknown() then { return }
         let key = stable_type_key(t)
@@ -2065,7 +2065,7 @@ given CodeGen {
         }
     }
 
-    private nominal_type_from_c_type_name(self, c_type String) Option[Type] = {
+    protected nominal_type_from_c_type_name(self, c_type String) Option[Type] = {
         let raw_name = if c_type.starts_with("struct ")
             then c_type.substring(7..<c_type.count())
             else if c_type.starts_with("enum ")
@@ -2104,7 +2104,7 @@ given CodeGen {
     }
 
     // 将 C 类型字符串反向映射为内部 Type（用于临时变量类型跟踪）。
-    private type_from_c_type_name(self ref mut Self, c_type String) Type = {
+    protected type_from_c_type_name(self ref mut Self, c_type String) Type = {
         return when c_type in {
             "int8_t" then Type.Int8Type(),
             "int16_t" then Type.Int16Type(),

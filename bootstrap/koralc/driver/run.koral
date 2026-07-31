@@ -283,6 +283,14 @@ private let sanitize_module_artifact_name(module_name String) String = {
     return module_name.replace_all("::", with: "__")
 }
 
+private let package_id_for_resolved_kind(kind ResolvedPackageKind) String = {
+    return when kind in {
+        .Root() then "root:user",
+        .Std() then "std:std",
+        .Dependency(key) then "dep:" + key,
+    }
+}
+
 private let contains_string(values List[String], target String) Bool = {
     for value in values then {
         if value == target then {
@@ -339,14 +347,16 @@ private let make_prepared_compilation(
 ) PreparedCompilation = {
     let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
     for pair in std_pairs then {
+        let package_id = if pair.first.package_id.is_empty() then "std:std" else pair.first.package_id
         all_pairs.push(Pair[LoadedNode, List[String]](
-            LoadedNode(pair.first.decl, pair.first.source_file, "std:std"),
+            LoadedNode(pair.first.decl, pair.first.source_file, package_id),
             pair.second
         ))
     }
     for pair in user_pairs then {
+        let package_id = if pair.first.package_id.is_empty() then "root:user" else pair.first.package_id
         all_pairs.push(Pair[LoadedNode, List[String]](
-            LoadedNode(pair.first.decl, pair.first.source_file, "root:user"),
+            LoadedNode(pair.first.decl, pair.first.source_file, package_id),
             pair.second
         ))
     }
@@ -387,6 +397,7 @@ private let load_manifest_modules_into_prepared(
     let mut root_module_path = ""
     let mut display_name = manifest.manifest_path
     let mut artifact_base_name = "main"
+    let package_id = package_id_for_resolved_kind(package_kind)
 
     let mut iter = manifest.modules.iterator()
     while iter.next() is .Some(entry) then {
@@ -401,9 +412,19 @@ private let load_manifest_modules_into_prepared(
             _ then false,
         }
         if is_std then {
-            for pair in pairs then { std_pairs.push(pair) }
+            for pair in pairs then {
+                std_pairs.push(Pair[LoadedNode, List[String]](
+                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
+                    pair.second,
+                ))
+            }
         } else {
-            for pair in pairs then { user_pairs.push(pair) }
+            for pair in pairs then {
+                user_pairs.push(Pair[LoadedNode, List[String]](
+                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
+                    pair.second,
+                ))
+            }
         }
         merged_graph.merge(unit.import_graph())
         for pair in pairs then {
@@ -501,10 +522,21 @@ private let prepare_package_compilation(options InvocationOptions) Result[Prepar
             .Std() then true,
             _ then false,
         }
+        let package_id = package_id_for_resolved_kind(spec.package_kind)
         if is_std then {
-            for pair in pairs then { std_pairs.push(pair) }
+            for pair in pairs then {
+                std_pairs.push(Pair[LoadedNode, List[String]](
+                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
+                    pair.second,
+                ))
+            }
         } else {
-            for pair in pairs then { user_pairs.push(pair) }
+            for pair in pairs then {
+                user_pairs.push(Pair[LoadedNode, List[String]](
+                    LoadedNode(pair.first.decl, pair.first.source_file, package_id),
+                    pair.second,
+                ))
+            }
         }
         merged_graph.merge(unit.import_graph())
         for pair in pairs then {

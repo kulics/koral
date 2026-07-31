@@ -19,7 +19,7 @@ public type InferenceMode {
 
 given TypeChecker {
     // 数值类型判断辅助方法
-    private is_numeric_type(self, t Type) Bool = {
+    protected is_numeric_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -37,7 +37,7 @@ given TypeChecker {
         }
     }
 
-    private is_integer_type(self, t Type) Bool = {
+    protected is_integer_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -53,7 +53,7 @@ given TypeChecker {
         }
     }
 
-    private is_float_type(self, t Type) Bool = {
+    protected is_float_type(self, t Type) Bool = {
         return when t in {
             .Float32Type() then true,
             .Float64Type() then true,
@@ -70,7 +70,7 @@ given TypeChecker {
     }
 
     // 合成模式：从表达式推断类型（Γ ⊢ e ⇒ τ）
-    private bidi_synthesize_mode(self, expr ref Expr, scope Scope) TypedExpr = {
+    protected bidi_synthesize_mode(self, expr ref Expr, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then {
                 let tv = self.fresh_literal_type_variable(LiteralDefaultKind.Int(), unknown_span())
@@ -96,27 +96,27 @@ given TypeChecker {
     }
 
     // 检查模式：验证表达式匹配期望类型（Γ ⊢ e ⇐ τ）
-    private typed_empty_literal(self, expected Type) TypedExpr = self.lower_empty_literal_expr(Option[Type].Some(expected))
+    protected typed_empty_literal(self, expected Type) TypedExpr = self.lower_empty_literal_expr(Option[Type].Some(expected))
 
-    private typed_dict_literal(self, entries List[ExprPair], expected Type, scope Scope) TypedExpr = {
+    protected typed_dict_literal(self, entries List[ExprPair], expected Type, scope Scope) TypedExpr = {
         return self.lower_dict_literal_expr(entries, Option[Type].Some(expected), scope)
     }
 
-    private typed_collection_literal(self, elements List[ref Expr], expected Type, scope Scope) TypedExpr = {
+    protected typed_collection_literal(self, elements List[ref Expr], expected Type, scope Scope) TypedExpr = {
         return self.lower_collection_literal_expr(elements, Option[Type].Some(expected), scope)
     }
 
-    private typed_block_expr(self, statements List[Statement], expected Type, scope Scope) TypedExpr = {
+    protected typed_block_expr(self, statements List[Statement], expected Type, scope Scope) TypedExpr = {
         return self.check_block(statements, .Some(expected), scope)
     }
 
-    private typed_cast_expr(self, type_node ref TypeNode, inner ref Expr, scope Scope) TypedExpr = {
+    protected typed_cast_expr(self, type_node ref TypeNode, inner ref Expr, scope Scope) TypedExpr = {
         let target = self.resolve_type_in_scope(type_node.val, scope)
         let typed_inner = self.bidirectional_check(inner, .Some(target), scope)
         return make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
     }
 
-    private typed_float_literal(self, expr ref Expr, value String, expected Type, scope Scope) TypedExpr = {
+    protected typed_float_literal(self, expr ref Expr, value String, expected Type, scope Scope) TypedExpr = {
         if self.is_float_type(expected) then {
             return make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
         }
@@ -126,14 +126,14 @@ given TypeChecker {
         return self.bidi_synthesize_mode(expr, scope)
     }
 
-    private typed_integer_literal(self, expr ref Expr, value String, expected Type, scope Scope) TypedExpr = {
+    protected typed_integer_literal(self, expr ref Expr, value String, expected Type, scope Scope) TypedExpr = {
         if self.is_numeric_type(expected) then {
             return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected)
         }
         return self.bidi_synthesize_mode(expr, scope)
     }
 
-    private bidi_check_mode(self, expr ref Expr, expected Type, scope Scope) TypedExpr = {
+    protected bidi_check_mode(self, expr ref Expr, expected Type, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then self.typed_integer_literal(expr, value, expected, scope),
             .FloatLiteral(value, _) then self.typed_float_literal(expr, value, expected, scope),
@@ -151,7 +151,7 @@ given TypeChecker {
         }
     }
 
-    private bidi_check_mode_fallback(self, expr ref Expr, expected Type, scope Scope) TypedExpr = {
+    protected bidi_check_mode_fallback(self, expr ref Expr, expected Type, scope Scope) TypedExpr = {
         let checked = self.check_expr_scoped_ref(expr, .Some(expected), scope)
         let synth_type = checked.expr_type
         if not self.same_expr_type(synth_type, expected) then {
@@ -165,7 +165,7 @@ given TypeChecker {
     }
 
     // Lambda 表达式的双向检查
-    private bidi_check_lambda(
+    protected bidi_check_lambda(
         self,
         params List[LambdaParam],
         return_type Option[TypeNode],
@@ -256,7 +256,7 @@ given TypeChecker {
     }
 
     // 从 LambdaExpr 的 TypedExprKind 中提取参数类型和返回类型，构造 FunctionType。
-    private build_lambda_function_type(self, expr ref TypedExpr) Type = {
+    protected build_lambda_function_type(self, expr ref TypedExpr) Type = {
         return when expr.expr_kind in {
             .LambdaExpr(params, ret, _) then {
                 break self.build_function_type_from_params(params, ret)
@@ -266,7 +266,7 @@ given TypeChecker {
     }
 
     // 从 TypedParam 列表和返回类型构造 FunctionType。
-    private build_function_type_from_params(self, params List[TypedParam], ret Type) Type = {
+    protected build_function_type_from_params(self, params List[TypedParam], ret Type) Type = {
         // 如果任何参数类型或返回类型是 Unknown，则返回 Unknown（无法构造完整的函数类型）
         let mut has_unknown = false
         when ret in {
@@ -285,7 +285,7 @@ given TypeChecker {
         return make_function_type(param_type_refs, ret)
     }
 
-    private collection_literal_target_error(self, t Type) String = {
+    protected collection_literal_target_error(self, t Type) String = {
         return when t in {
             .GenericStruct(template, _) then if template == "Dict"
                 then "Collection literal without ':' cannot be inferred as Dict"
@@ -296,7 +296,7 @@ given TypeChecker {
 
     // 从集合类型中提取元素类型。
     // 例如 [T]List -> Some(T), [T]Set -> Some(T)
-    private extract_collection_element_type(self, t Type) Option[Type] = {
+    protected extract_collection_element_type(self, t Type) Option[Type] = {
         return when t in {
             .StructureType(def_id) then {
                 let template_name = self.context().get_template_name(def_id) or else ""
@@ -316,7 +316,7 @@ given TypeChecker {
 
     // 从 Dict 类型中提取 key/value 类型。
     // 例如 [K, V]Dict -> (Some(K), Some(V))
-    private extract_dict_kv_types(self, t Type) Pair[Option[Type], Option[Type]] = {
+    protected extract_dict_kv_types(self, t Type) Pair[Option[Type], Option[Type]] = {
         return when t in {
             .StructureType(def_id) then {
                 let template_name = self.context().get_template_name(def_id) or else ""

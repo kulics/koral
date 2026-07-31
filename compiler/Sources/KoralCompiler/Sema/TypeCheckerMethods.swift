@@ -564,25 +564,16 @@ extension TypeChecker {
     modulePath: [String],
     packageID: String
   ) -> Symbol {
-    if method.access == .private {
-      return context.createSymbol(
-        name: method.name,
-        modulePath: modulePath,
-        sourceFile: sourceFile,
-        type: functionType,
-        kind: .function,
-        access: .private,
-        span: currentSpan,
-        packageID: packageID,
-        isMutable: false
-      )
-    }
-
-    return makeGlobalSymbol(
+    return context.createSymbol(
       name: method.name,
+      modulePath: modulePath,
+      sourceFile: sourceFile,
       type: functionType,
       kind: .function,
-      access: .protected
+      access: method.access,
+      span: currentSpan,
+      packageID: packageID,
+      isMutable: false
     )
   }
   
@@ -703,7 +694,7 @@ extension TypeChecker {
       name: method.name,
       type: functionType,
       kind: .function,
-      access: .protected
+      access: method.access
     )
     registerReceiverStyleMethod(
       methodSymbol,
@@ -984,7 +975,7 @@ extension TypeChecker {
           name: methodName,
           type: functionType,
           kind: .function,
-          access: .protected
+          access: sig.access
         )
         recordTraitPlaceholderInstantiation(
           baseType: baseType,

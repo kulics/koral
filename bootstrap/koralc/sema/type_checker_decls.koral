@@ -1,5 +1,5 @@
 given TypeChecker {
-    private validate_drop_member_signature(self, target_type Type, members List[ref TypedGivenMember]) Void = {
+    protected validate_drop_member_signature(self, target_type Type, members List[ref TypedGivenMember]) Void = {
         let expected_param_type = Type.MutablePointerType(box(target_type))
         for member_ref in members then {
             let member = member_ref.val
@@ -39,10 +39,11 @@ given TypeChecker {
         }
     }
 
-    private check_decl(self ref mut, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
+    protected check_decl(self ref mut, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
+                self.validate_signature_type_visibility(name, access, [resolved], span)
                 if resolved is .TraitObject(_, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
                 }
@@ -99,6 +100,12 @@ given TypeChecker {
                     }
                     self.storage.function_return_context.expected_return_type = Option[Type].Some(resolved_ret)
                     let typed_params = self.check_params(params)
+                    let mut signature_types = List[Type].new()
+                    for param in typed_params then {
+                        signature_types.push(param.param_type)
+                    }
+                    signature_types.push(resolved_ret)
+                    self.validate_signature_type_visibility(name, access, signature_types, span)
                     let mut fn_scope = self.make_fn_scope(typed_params)
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     let stable_params = typed_params
@@ -137,6 +144,12 @@ given TypeChecker {
                     self.storage.current_scope = generic_type_scope
                     let typed_params = self.check_params(params)
                     let resolved_ret = self.resolve_type(return_type)
+                    let mut signature_types = List[Type].new()
+                    for param in typed_params then {
+                        signature_types.push(param.param_type)
+                    }
+                    signature_types.push(resolved_ret)
+                    self.validate_signature_type_visibility(name, access, signature_types, span)
                     if self.contains_borrowed_reference_type(resolved_ret) then {
                         self.storage.diagnostics.push(
                             make_diagnostic(
@@ -197,6 +210,12 @@ given TypeChecker {
                 }
                 let resolved_ret = self.resolve_type(return_type)
                 let typed_params = self.check_params(params)
+                let mut signature_types = List[Type].new()
+                for param in typed_params then {
+                    signature_types.push(param.param_type)
+                }
+                signature_types.push(resolved_ret)
+                self.validate_signature_type_visibility(name, access, signature_types, span)
                 self.storage.current_scope = prev
                 let mut param_refs = List[ref Type].new()
                 for param in typed_params then {
@@ -208,6 +227,12 @@ given TypeChecker {
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
                 let typed_params = self.check_params(params)
+                let mut signature_types = List[Type].new()
+                for param in typed_params then {
+                    signature_types.push(param.param_type)
+                }
+                signature_types.push(resolved_ret)
+                self.validate_signature_type_visibility(name, access, signature_types, span)
                 if not self.is_ffi_compatible_type(resolved_ret) then {
                     self.storage.diagnostics.push(
                         make_diagnostic(
@@ -237,6 +262,7 @@ given TypeChecker {
             },
             .ForeignLetDecl(access, name, mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
+                self.validate_signature_type_visibility(name, access, [resolved], span)
                 if not self.is_ffi_compatible_type(resolved) then {
                     self.storage.diagnostics.push(
                         make_diagnostic(
@@ -559,7 +585,7 @@ given TypeChecker {
         }
     }
 
-    private type_node_name(self, node TypeNode) String = {
+    protected type_node_name(self, node TypeNode) String = {
         return when node in {
             .Identifier(name) then name,
             .Generic(base, _) then base,
@@ -567,11 +593,11 @@ given TypeChecker {
         }
     }
 
-    private concrete_type_modifier_given_message(self) String = {
+    protected concrete_type_modifier_given_message(self) String = {
         return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
     }
 
-    private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
+    protected is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
         if not type_params.is_empty() then {
             return false
         }
@@ -583,7 +609,7 @@ given TypeChecker {
         }
     }
 
-    private reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
+    protected reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
         if self.is_concrete_type_modifier_given_target(target_type, type_params) then {
             self.storage.diagnostics.push(
                 make_diagnostic(
@@ -597,7 +623,7 @@ given TypeChecker {
         return false
     }
 
-    private validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
+    protected validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
         if actual_count == 0(UInt) then {
             return
         }
@@ -618,12 +644,12 @@ given TypeChecker {
         }
     }
 
-    private validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
+    protected validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
         let scope = Scope.new_child(self.storage.global_scope)
         self.validate_trait_parent_type_arguments_in_scope(parents, scope)
     }
 
-    private validate_trait_parent_type_arguments_in_scope(self, parents List[TypeNode], scope Scope) Void = {
+    protected validate_trait_parent_type_arguments_in_scope(self, parents List[TypeNode], scope Scope) Void = {
         for parent in parents then {
             when parent in {
                 .Identifier(name) then {

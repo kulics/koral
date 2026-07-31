@@ -514,19 +514,33 @@ extension Parser {
     return try parseExplicitAccessModifier() ?? defaultAccess
   }
 
+  private func ensureNoTrailingAccessModifier(after accessText: String) throws {
+    if currentToken === .publicKeyword || currentToken === .protectedKeyword || currentToken === .privateKeyword {
+      let next = currentToken.description
+      throw ParserError.invalidAccessModifierOrder(
+        span: currentSpan,
+        message: "Invalid access modifier order: '\(accessText) \(next)'. Use 'protected public' only in that exact order"
+      )
+    }
+  }
+
   func parseExplicitAccessModifier() throws -> AccessModifier? {
     if currentToken === .privateKeyword {
       try match(.privateKeyword)
+      try ensureNoTrailingAccessModifier(after: "private")
       return .private
     } else if currentToken === .protectedKeyword {
       try match(.protectedKeyword)
       if currentToken === .publicKeyword {
         try match(.publicKeyword)
+        try ensureNoTrailingAccessModifier(after: "protected public")
         return .protectedPublic
       }
+      try ensureNoTrailingAccessModifier(after: "protected")
       return .protected
     } else if currentToken === .publicKeyword {
       try match(.publicKeyword)
+      try ensureNoTrailingAccessModifier(after: "public")
       return .public
     }
     return nil

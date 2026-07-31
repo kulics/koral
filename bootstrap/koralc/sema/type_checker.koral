@@ -163,7 +163,7 @@ given TypeChecker {
         }
     }
 
-    private duplicate_definition_message(self, name String) String = {
+    protected duplicate_definition_message(self, name String) String = {
         let _ = self
         let mut message = "Duplicate definition: "
         message.push_string(name)
@@ -181,7 +181,7 @@ given TypeChecker {
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
     }
 
-    private sema_progress_debug_enabled(self) Bool = {
+    protected sema_progress_debug_enabled(self) Bool = {
         let _ = self
         if env("KORAL_DEBUG_SEMA_PROGRESS") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true
@@ -317,7 +317,7 @@ given TypeChecker {
         return false
     }
 
-    private log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
+    protected log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
         let pending_constraints = self.storage.constraint_solver.constraints.count()
         let pending_default_constraints = self.storage.constraint_solver.default_constraints.count()
         let next_def_id = self.context().next_def_id()
@@ -346,7 +346,7 @@ given TypeChecker {
         println("[sema-progress] checked=\(checked_decl_count)/\(total_nodes) file=\(self.storage.file_path) constraints=\(pending_constraints) bindings=\(binding_count) diagnostics=\(self.storage.diagnostics.count()) next_def_id=\(next_def_id) extension_keys=\(extension_key_count) extension_templates=\(extension_template_count) method_type_keys=\(method_type_key_count) instantiation_requests=\(instantiation_request_count) global_scope_entries=\(global_scope_entry_count) global_scope_types=\(global_scope_type_count) def_names=\(def_id_name_count) def_symbol_types=\(def_id_symbol_type_count) def_symbol_kinds=\(def_id_symbol_kind_count) def_param_specs=\(def_id_param_spec_count) def_module_paths=\(def_id_module_path_count)")
     }
 
-    private decl_debug_label(self, decl Decl) String = {
+    protected decl_debug_label(self, decl Decl) String = {
         let _ = self
         return when decl in {
             .LetDecl(_, name, _, _, _, _) then "let \(name)",
@@ -616,19 +616,19 @@ given TypeChecker {
     }
 
     // Treat both Unknown and TypeVar as unresolved so they do not leak into codegen.
-    private is_unresolved_expr_type(self, t Type) Bool = when t in {
+    protected is_unresolved_expr_type(self, t Type) Bool = when t in {
         .Unknown() then true,
         .TypeVar(_) then true,
         _ then false,
     }
 
-    private is_value_expr_type(self, t Type) Bool = when t in {
+    protected is_value_expr_type(self, t Type) Bool = when t in {
         .VoidType() then false,
         .NeverType() then false,
         _ then not self.is_unresolved_expr_type(t),
     }
 
-    private is_ffi_compatible_type(self, t Type) Bool = {
+    protected is_ffi_compatible_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -652,7 +652,7 @@ given TypeChecker {
         }
     }
 
-    private contains_borrowed_reference_type(self, t Type) Bool = {
+    protected contains_borrowed_reference_type(self, t Type) Bool = {
         return when t in {
             .BorrowedReferenceType(_, _) then true,
             .MutableBorrowedReferenceType(_, _) then true,
@@ -698,7 +698,7 @@ given TypeChecker {
         }
     }
 
-    private ffi_type_error(self, t Type) String = {
+    protected ffi_type_error(self, t Type) String = {
         return when t in {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
@@ -711,13 +711,13 @@ given TypeChecker {
         }
     }
 
-    private same_expr_type(self, left Type, right Type) Bool = {
+    protected same_expr_type(self, left Type, right Type) Bool = {
         let normalized_left = self.canonicalize_alias_type(self.concretize_default_literal_type(left))
         let normalized_right = self.canonicalize_alias_type(self.concretize_default_literal_type(right))
         return normalized_left == normalized_right
     }
 
-    private canonicalize_alias_type(self, t Type) Type = {
+    protected canonicalize_alias_type(self, t Type) Type = {
         return when t in {
             .StructureType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
@@ -765,7 +765,7 @@ given TypeChecker {
         }
     }
 
-    private concretize_default_literal_type(self, t Type) Type = {
+    protected concretize_default_literal_type(self, t Type) Type = {
         let resolved = self.storage.constraint_solver.resolve(t)
         return when resolved in {
             .TypeVar(tv) then when tv.literal_default_kind in {
@@ -908,7 +908,7 @@ given TypeChecker {
         }
     }
 
-    private choose_conditional_result_type(self, expected Option[Type], then_type Type, else_type Option[Type]) Type = {
+    protected choose_conditional_result_type(self, expected Option[Type], then_type Type, else_type Option[Type]) Type = {
         when expected in {
             .Some(et) then {
                 if not self.contains_generic_parameter(et) then {
@@ -1020,26 +1020,26 @@ given TypeChecker {
         return then_type
     }
 
-    private is_enum_decl_type(self, t Type) Bool = when t in {
+    protected is_enum_decl_type(self, t Type) Bool = when t in {
         .EnumType(_) then true,
         _ then false,
     }
 
-    private is_enum_base_name(self, base String) Bool = {
+    protected is_enum_base_name(self, base String) Bool = {
         if self.storage.global_scope.lookup_type(base) is .Some(t) then {
             return self.is_enum_decl_type(t)
         }
         return false
     }
 
-    private is_enum_base_name_in_scope(self, base String, scope Scope) Bool = {
+    protected is_enum_base_name_in_scope(self, base String, scope Scope) Bool = {
         if self.try_resolve_named_type_in_scope_without_diag(base, scope) is .Some(t) then {
             return self.is_enum_decl_type(t)
         }
         return false
     }
 
-    private retained_given_member_skeleton(self, member ref TypedGivenMember) ref TypedGivenMember = {
+    protected retained_given_member_skeleton(self, member ref TypedGivenMember) ref TypedGivenMember = {
         let _ = self
         return box(TypedGivenMember(
             member.def_id,
@@ -1050,7 +1050,7 @@ given TypeChecker {
         ))
     }
 
-    private retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
+    protected retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
         return when typed_decl in {
             .FunctionDecl(access, name, _, _, body, span, id) then {
                 break TypedDecl.FunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), body, span, id)
@@ -1092,7 +1092,7 @@ given TypeChecker {
         }
     }
 
-    private decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
+    protected decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
         let _ = self
         return when decl in {
             .LetDecl(_, _, _, _, _, _) then true,
@@ -1275,7 +1275,7 @@ given TypeChecker {
         return TypedProgram(typed_decls, self.context().get_names())
     }
 
-    private finalize_checked_decl_constraints(self ref mut, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
+    protected finalize_checked_decl_constraints(self ref mut, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
         let subst_result = self.storage.constraint_solver.solve()
         let skip_checked_decl_substitution = self.skip_checked_decl_substitution_debug_enabled()
         return when subst_result in {
@@ -1315,7 +1315,7 @@ given TypeChecker {
         }
     }
 
-    private refresh_concrete_stored_exprs(self ref mut, subst TypeSubstitution, typed_decl TypedDecl) Void = {
+    protected refresh_concrete_stored_exprs(self ref mut, subst TypeSubstitution, typed_decl TypedDecl) Void = {
         when typed_decl in {
             .LetDecl(_, _, _, _, _, _, id) then {
                 let mut context = self.context()
@@ -1348,7 +1348,7 @@ given TypeChecker {
         }
     }
 
-    private refresh_concrete_given_member_body_list(self ref mut, subst TypeSubstitution, members List[ref TypedGivenMember]) Void = {
+    protected refresh_concrete_given_member_body_list(self ref mut, subst TypeSubstitution, members List[ref TypedGivenMember]) Void = {
         let mut context = self.context()
         for member_ref in members then {
             when context.get_concrete_given_member_body(member_ref.def_id) in {
@@ -1360,7 +1360,7 @@ given TypeChecker {
         }
     }
 
-    private collect_signatures(self ref mut, program Program) Void = {
+    protected collect_signatures(self ref mut, program Program) Void = {
         for decl in program.declarations then {
             when decl in {
                 .TraitDecl(_, _, _, _, _, _) then self.collect_decl_signature(decl),
@@ -1375,7 +1375,7 @@ given TypeChecker {
         }
     }
 
-    private collect_decl_signature(self ref mut, decl Decl) Void = {
+    protected collect_decl_signature(self ref mut, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let resolved_type = self.lookup_current_file_type_symbol(name)
@@ -1839,7 +1839,7 @@ given TypeChecker {
         }
     }
 
-    private collect_given_signatures(self, members List[GivenMember], target_type Type, owner_type_params List[TypeParameter], conformance_trait_name Option[String]) Void = {
+    protected collect_given_signatures(self, members List[GivenMember], target_type Type, owner_type_params List[TypeParameter], conformance_trait_name Option[String]) Void = {
         // Build a scope with owner type params so resolve_type sees them
         // Always set current_scope (like Swift's withNewScope) so generic params are visible
         let prev_scope = self.storage.current_scope
@@ -1925,7 +1925,7 @@ given TypeChecker {
         }
     }
 
-    private string_list_contains(self, values List[String], target String) Bool = {
+    protected string_list_contains(self, values List[String], target String) Bool = {
         let mut index = 0(UInt)
         while index < values.count() then {
             if values[index] == target then {
@@ -1936,7 +1936,7 @@ given TypeChecker {
         return false
     }
 
-    private to_template_type_params(self, type_params List[TypeParameter]) List[TypeParameterDecl] = {
+    protected to_template_type_params(self, type_params List[TypeParameter]) List[TypeParameterDecl] = {
         let mut out = List[TypeParameterDecl].new()
         for tp in type_params then {
             let mut constraints = List[TypeNode].new()
@@ -1948,7 +1948,7 @@ given TypeChecker {
         return out
     }
 
-    private generic_type_param_bindings(self, type_params List[TypeParameter]) Dict[String, Type] = {
+    protected generic_type_param_bindings(self, type_params List[TypeParameter]) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         for tp in type_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name))
@@ -1956,7 +1956,7 @@ given TypeChecker {
         return bindings
     }
 
-    private merged_type_param_bindings(self, owner_params List[TypeParameter], method_params List[TypeParameter]) Dict[String, Type] = {
+    protected merged_type_param_bindings(self, owner_params List[TypeParameter], method_params List[TypeParameter]) Dict[String, Type] = {
         let mut bindings = Dict[String, Type].new()
         for tp in owner_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name))
@@ -1967,7 +1967,7 @@ given TypeChecker {
         return bindings
     }
 
-    private to_template_params(self, params List[Param]) List[TemplateParam] = {
+    protected to_template_params(self, params List[Param]) List[TemplateParam] = {
         let mut out = List[TemplateParam].new()
         for p in params then {
             out.push(TemplateParam(p.name, p.mutable, self.copy_type_node(p.type_name), p.named))
@@ -1975,11 +1975,11 @@ given TypeChecker {
         return out
     }
 
-    private copy_type_node_ref(self, type_node ref TypeNode) ref TypeNode = {
+    protected copy_type_node_ref(self, type_node ref TypeNode) ref TypeNode = {
         return box(self.copy_type_node(type_node.val))
     }
 
-    private copy_type_node_ref_list(self, type_nodes List[ref TypeNode]) List[ref TypeNode] = {
+    protected copy_type_node_ref_list(self, type_nodes List[ref TypeNode]) List[ref TypeNode] = {
         let mut copied = List[ref TypeNode].with_capacity(type_nodes.count())
         for type_node in type_nodes then {
             copied.push(self.copy_type_node_ref(type_node))
@@ -1987,7 +1987,7 @@ given TypeChecker {
         return copied
     }
 
-    private copy_type_node(self, type_node TypeNode) TypeNode = {
+    protected copy_type_node(self, type_node TypeNode) TypeNode = {
         return when type_node in {
             .Identifier(name) then TypeNode.Identifier(name),
             .Reference(inner, mutable) then TypeNode.Reference(self.copy_type_node_ref(inner), mutable),
@@ -2000,7 +2000,7 @@ given TypeChecker {
         }
     }
 
-    private to_type_ref_list(self, types List[Type]) List[ref Type] = {
+    protected to_type_ref_list(self, types List[Type]) List[ref Type] = {
         let mut out = List[ref Type].new()
         for t in types then {
             out.push(box(t))
@@ -2008,7 +2008,7 @@ given TypeChecker {
         return out
     }
 
-    private from_template_type_params(self, type_params List[TypeParameterDecl]) List[TypeParameter] = {
+    protected from_template_type_params(self, type_params List[TypeParameterDecl]) List[TypeParameter] = {
         let mut out = List[TypeParameter].new()
         for tp in type_params then {
             let mut constraints = List[ref TypeNode].new()
@@ -2021,7 +2021,7 @@ given TypeChecker {
     }
 
 
-    private constraint_bounds_for_type_param(self, tp TypeParameter) List[GenericConstraintBound] = {
+    protected constraint_bounds_for_type_param(self, tp TypeParameter) List[GenericConstraintBound] = {
         let mut constraints = List[GenericConstraintBound].new()
         for c in tp.constraints then {
             constraints.push(self.resolve_constraint_bound(c.val))
@@ -2032,7 +2032,7 @@ given TypeChecker {
     /// Resolve a constraint TypeNode into a GenericConstraintBound, preserving type arguments.
     /// Unlike resolve_type, this does NOT emit diagnostics for unresolved names —
     /// forward-referenced generic params (e.g. T in [R Iterator[T], T]) fall back to GenericParameter.
-    private resolve_constraint_bound(self, node TypeNode) GenericConstraintBound = {
+    protected resolve_constraint_bound(self, node TypeNode) GenericConstraintBound = {
         return when node in {
             .Identifier(name) then GenericConstraintBound(name, List[Type].new()),
             .Generic(base, args) then {
@@ -2047,7 +2047,7 @@ given TypeChecker {
     }
 
     /// Lightweight type arg resolution for constraint bounds — no diagnostics on miss.
-    private resolve_constraint_type_arg(self, node TypeNode) Type = {
+    protected resolve_constraint_type_arg(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name) then self.resolve_constraint_identifier(name),
             .Generic(base, args) then self.resolve_constraint_generic_type(base, args),
@@ -2056,14 +2056,14 @@ given TypeChecker {
         }
     }
 
-    private resolve_constraint_identifier(self, name String) Type = {
+    protected resolve_constraint_identifier(self, name String) Type = {
         return when self.storage.global_scope.lookup_type(name) in {
             .Some(t) then t,
             .None() then Type.GenericParameter(name),
         }
     }
 
-    private resolve_constraint_generic_type(self, base String, args List[ref TypeNode]) Type = {
+    protected resolve_constraint_generic_type(self, base String, args List[ref TypeNode]) Type = {
         let mut resolved_args = List[Type].new()
         for arg in args then {
             resolved_args.push(self.resolve_constraint_type_arg(arg.val))
@@ -2071,7 +2071,7 @@ given TypeChecker {
         return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
     }
 
-    private resolve_constraint_ref_type(self, inner TypeNode, mutable Bool) Type = {
+    protected resolve_constraint_ref_type(self, inner TypeNode, mutable Bool) Type = {
         let resolved_inner = self.resolve_constraint_type_arg(inner)
         if mutable then {
             return Type.MutableReferenceType(box(resolved_inner))
@@ -2079,7 +2079,7 @@ given TypeChecker {
         return Type.ReferenceType(box(resolved_inner))
     }
 
-    private snapshot_generic_constraints(self, type_params List[TypeParameter]) GenericConstraintSnapshot = {
+    protected snapshot_generic_constraints(self, type_params List[TypeParameter]) GenericConstraintSnapshot = {
         let mut previous_constraints = Dict[String, Option[List[GenericConstraintBound]]].new()
         for tp in type_params then {
             let previous = when self.storage.generic_param_constraints.get(tp.name) in {
@@ -2097,14 +2097,14 @@ given TypeChecker {
         return GenericConstraintSnapshot(previous_constraints)
     }
 
-    private register_generic_constraints(self, type_params List[TypeParameter]) Void = {
+    protected register_generic_constraints(self, type_params List[TypeParameter]) Void = {
         self.invalidate_trait_requirement_caches()
         for tp in type_params then {
             self.storage.generic_param_constraints.insert(tp.name, self.constraint_bounds_for_type_param(tp))
         }
     }
 
-    private restore_generic_constraints(self, snapshot GenericConstraintSnapshot) Void = {
+    protected restore_generic_constraints(self, snapshot GenericConstraintSnapshot) Void = {
         self.invalidate_trait_requirement_caches()
         for entry in snapshot.previous_constraints then {
             let name = entry.first
@@ -2115,7 +2115,7 @@ given TypeChecker {
         }
     }
 
-    private nominal_def_id_for_type(self, t Type) Option[DefId] = {
+    protected nominal_def_id_for_type(self, t Type) Option[DefId] = {
         return when t in {
             .StructureType(def_id) then .Some(def_id),
             .EnumType(def_id) then .Some(def_id),
@@ -2132,7 +2132,7 @@ given TypeChecker {
         }
     }
 
-    private check_not_deref_constraint(self, inner_type Type, expr ref Expr) Bool = {
+    protected check_not_deref_constraint(self, inner_type Type, expr ref Expr) Bool = {
         return when self.nominal_def_id_for_type(inner_type) in {
             .Some(def_id) then {
                 if self.context().is_not_deref(def_id) then {
@@ -2149,7 +2149,7 @@ given TypeChecker {
         }
     }
 
-    private mark_not_deref_type(self ref mut, type_params List[TypeParameter], type_node TypeNode, trait_name String) Void = {
+    protected mark_not_deref_type(self ref mut, type_params List[TypeParameter], type_node TypeNode, trait_name String) Void = {
         if trait_name <> "Deref" then {
             self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Only 'not Deref' is currently supported"))
             return
@@ -2175,7 +2175,7 @@ given TypeChecker {
         }
     }
 
-    private check_given_not_trait_decl(self ref mut, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {
+    protected check_given_not_trait_decl(self ref mut, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {
         let _ = span
         self.mark_not_deref_type(type_params, target_type, trait_name)
     }

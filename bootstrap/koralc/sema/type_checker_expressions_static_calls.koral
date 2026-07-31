@@ -1,7 +1,7 @@
 using std::os { env }
 
 given TypeChecker {
-    private semantic_method_name_for_symbol(self, method Symbol) String = {
+    protected semantic_method_name_for_symbol(self, method Symbol) String = {
         if method.def_id.id > 0 then {
             when self.storage.generic_templates.receiver_method_dispatch.get(method.def_id) in {
                 .Some(info) then { return info.method_name },
@@ -11,7 +11,7 @@ given TypeChecker {
         return self.context().symbol_name(method)
     }
 
-    private type_construction_arg_types(self, constructed_type Type) List[Type] = {
+    protected type_construction_arg_types(self, constructed_type Type) List[Type] = {
         return when constructed_type in {
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
@@ -49,7 +49,7 @@ given TypeChecker {
         }
     }
 
-    private recheck_type_construction_args(self, args List[ref Expr], constructed_type Type, scope Scope) List[ref TypedExpr] = {
+    protected recheck_type_construction_args(self, args List[ref Expr], constructed_type Type, scope Scope) List[ref TypedExpr] = {
         let expected_types = self.type_construction_arg_types(constructed_type)
         let mut typed_args = List[ref TypedExpr].new()
         let mut index UInt = 0
@@ -61,7 +61,7 @@ given TypeChecker {
         return typed_args
     }
 
-    private should_suppress_missing_member_call_diagnostic(self, typed_callee TypedExpr) Bool = {
+    protected should_suppress_missing_member_call_diagnostic(self, typed_callee TypedExpr) Bool = {
         let _ = self
         return when typed_callee.expr_kind in {
             .Block(statements) then statements.is_empty() and typed_callee.expr_type is .Unknown(),
@@ -69,7 +69,7 @@ given TypeChecker {
         }
     }
 
-    private dispatches_via_trait_object_for_static_call(self, receiver_type Type) Bool = {
+    protected dispatches_via_trait_object_for_static_call(self, receiver_type Type) Bool = {
         return when receiver_type in {
             .TraitObject(_, _) then true,
             .ReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(inner.val),
@@ -78,7 +78,7 @@ given TypeChecker {
         }
     }
 
-    private trait_object_type_for_static_call(self, receiver_type Type) Option[Type] = {
+    protected trait_object_type_for_static_call(self, receiver_type Type) Option[Type] = {
         return when receiver_type in {
             .TraitObject(_, _) then Option[Type].Some(receiver_type),
             .ReferenceType(inner) then self.trait_object_type_for_static_call(inner.val),
@@ -87,7 +87,7 @@ given TypeChecker {
         }
     }
 
-    private trait_type_declares_static_call_method(self, trait_type Type, method_name String) Bool = {
+    protected trait_type_declares_static_call_method(self, trait_type Type, method_name String) Bool = {
         let trait_name = self.trait_name_from_type(trait_type)
         return when self.storage.trait_registry.flatten_methods(trait_name) in {
             .Ok(methods) then methods.get(method_name) is .Some(_),
@@ -95,7 +95,7 @@ given TypeChecker {
         }
     }
 
-    private check_static_call_arg_ref(self, arg ref Expr, callee_def_id DefId, arg_index UInt, scope Scope) TypedExpr = {
+    protected check_static_call_arg_ref(self, arg ref Expr, callee_def_id DefId, arg_index UInt, scope Scope) TypedExpr = {
         let param_type = self.context().signature_param_type_or_unknown(callee_def_id, arg_index)
         return when param_type in {
             .Unknown() then self.check_expr_scoped_ref(arg, Option[Type].None(), scope),
@@ -103,14 +103,14 @@ given TypeChecker {
         }
     }
 
-    private first_type_arg_or_unknown(self, type_args List[Type]) Type = {
+    protected first_type_arg_or_unknown(self, type_args List[Type]) Type = {
         if type_args.count() > 0 then {
             return type_args[0(UInt)]
         }
         return Type.Unknown()
     }
 
-    private split_typed_member_path_call_callee(self, typed_callee TypedExpr) Option[Pair[TypedExpr, String]] = {
+    protected split_typed_member_path_call_callee(self, typed_callee TypedExpr) Option[Pair[TypedExpr, String]] = {
         return when typed_callee.expr_kind in {
             .MemberPath(base_ref, path) then {
                 if path.is_empty() then {
@@ -134,7 +134,7 @@ given TypeChecker {
         }
     }
 
-    private missing_member_call_expr(self, typed_callee TypedExpr, typed_args List[ref TypedExpr], base_expr ref Expr, member String, scope Scope) TypedExpr = {
+    protected missing_member_call_expr(self, typed_callee TypedExpr, typed_args List[ref TypedExpr], base_expr ref Expr, member String, scope Scope) TypedExpr = {
         if self.should_suppress_missing_member_call_diagnostic(typed_callee) then {
             return make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), Type.Unknown())
         }
@@ -158,7 +158,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(box(typed_callee), typed_args), Type.Unknown())
     }
 
-    private check_alloc_memory_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_alloc_memory_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 1 then { return Option[TypedExpr].None() }
         let elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
         when elem_type in {
@@ -171,7 +171,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.AllocMemory(box(count), result_type)), result_type))
     }
 
-    private check_null_ptr_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], expected Option[Type]) Option[TypedExpr] = {
+    protected check_null_ptr_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], expected Option[Type]) Option[TypedExpr] = {
         if args.count() <> 0 then { return Option[TypedExpr].None() }
         let mut elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
         if self.is_unresolved_expr_type(elem_type) or self.contains_generic_parameter(elem_type) then {
@@ -192,7 +192,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)), result_type))
     }
 
-    private check_ref_family_intrinsic(self, intrinsic_name String, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_ref_family_intrinsic(self, intrinsic_name String, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 1 then { return Option[TypedExpr].None() }
         let arg_expr = args[0(UInt)].val
         let typed_arg = self.check_expr_scoped_ref(box(arg_expr), Option[Type].None(), scope)
@@ -206,7 +206,7 @@ given TypeChecker {
         return Option[TypedExpr].None()
     }
 
-    private check_make_ref_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_make_ref_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 2 then { return Option[TypedExpr].None() }
         let pointer_arg = args[0(UInt)]
         let owner_arg = args[1(UInt)]
@@ -228,7 +228,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
     }
 
-    private check_make_mut_ref_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_make_mut_ref_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 2 then { return Option[TypedExpr].None() }
         let pointer_arg = args[0(UInt)]
         let owner_arg = args[1(UInt)]
@@ -244,7 +244,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.MakeMutRef(box(pointer_expr), box(owner_expr), result_type)), result_type))
     }
 
-    private check_spawn_thread_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_spawn_thread_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 4 then { return Option[TypedExpr].None() }
         let out_handle_arg = args[0(UInt)]
         let out_tid_arg = args[1(UInt)]
@@ -288,7 +288,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.SpawnThread(box(out_handle), box(out_tid), box(closure), box(stack_size))), Type.Int32Type()))
     }
 
-    private check_take_memory_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_take_memory_intrinsic(self, intrinsic_type_args List[Type], args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 1 then { return Option[TypedExpr].None() }
         let pointer_arg = args[0(UInt)]
         let pointer_expr = self.check_expr_scoped_ref(pointer_arg, .None(), scope)
@@ -330,7 +330,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.TakeMemory(box(pointer_expr), checked_result_type)), checked_result_type))
     }
 
-    private check_init_memory_value_expr(self, value_expr ref Expr, pointer_type Type, scope Scope) TypedExpr = {
+    protected check_init_memory_value_expr(self, value_expr ref Expr, pointer_type Type, scope Scope) TypedExpr = {
         return when pointer_type in {
             .PointerType(inner) then self.check_expr_scoped_ref(value_expr, Option[Type].Some(inner.val), scope),
             .MutablePointerType(inner) then self.check_expr_scoped_ref(value_expr, Option[Type].Some(inner.val), scope),
@@ -338,7 +338,7 @@ given TypeChecker {
         }
     }
 
-    private check_init_memory_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_init_memory_intrinsic(self, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 2 then { return Option[TypedExpr].None() }
         let pointer_arg = args[0(UInt)]
         let value_arg = args[1(UInt)]
@@ -347,7 +347,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.InitMemory(box(pointer_expr), box(value))), Type.VoidType()))
     }
 
-    private check_copy_or_move_memory_intrinsic(self, intrinsic_name String, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
+    protected check_copy_or_move_memory_intrinsic(self, intrinsic_name String, args ref List[ref Expr], scope Scope) Option[TypedExpr] = {
         if args.count() <> 3 then { return Option[TypedExpr].None() }
         let dest_arg = args[0(UInt)]
         let source_arg = args[1(UInt)]
@@ -361,7 +361,7 @@ given TypeChecker {
         return Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(intrinsic_node), Type.VoidType()))
     }
 
-    private constrained_trait_object_type_for_static_call(self, receiver_type Type, trait_name String) Type = {
+    protected constrained_trait_object_type_for_static_call(self, receiver_type Type, trait_name String) Type = {
         let normalized = receiver_type
         return when normalized in {
             .TraitObject(existing_trait_name, existing_args) then {
@@ -373,7 +373,7 @@ given TypeChecker {
         }
     }
 
-    private check_static_method_call_ref(self, type_name String, type_args List[ref TypeNode], method_name String, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
+    protected check_static_method_call_ref(self, type_name String, type_args List[ref TypeNode], method_name String, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
         let effective_type_name = type_name
         if type_name.contains(".") then {
             self.storage.diagnostics.push(
@@ -653,7 +653,7 @@ given TypeChecker {
         }
     }
 
-    private check_intrinsic_call_ref(self, callee ref Expr, args ref List[ref Expr], expected Option[Type], scope Scope) Option[TypedExpr] = {
+    protected check_intrinsic_call_ref(self, callee ref Expr, args ref List[ref Expr], expected Option[Type], scope Scope) Option[TypedExpr] = {
         let mut intrinsic_name = ""
         let mut intrinsic_type_args = List[Type].new()
 
@@ -725,7 +725,7 @@ given TypeChecker {
         return Option[TypedExpr].None()
     }
 
-    private method_requires_mut_ref(self, self_type Type, method_name String) Bool = {
+    protected method_requires_mut_ref(self, self_type Type, method_name String) Bool = {
         let method_opt = self.resolve_method_signature(self_type, method_name)
         return when method_opt in {
             .Some(method) then when method.symbol_type in {
@@ -746,7 +746,7 @@ given TypeChecker {
         }
     }
 
-    private check_call_expr_ref(self, callee ref Expr, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
+    protected check_call_expr_ref(self, callee ref Expr, args List[ref Expr], expected Option[Type], scope Scope) TypedExpr = {
         let mut call_args = List[ref Expr].new()
         for arg in args then {
             call_args.push(arg)
@@ -1674,7 +1674,7 @@ given TypeChecker {
         return result
     }
 
-    private infer_generic_struct_constructor_return_type(self, callee ref Expr, typed_args List[ref TypedExpr]) Option[Type] = {
+    protected infer_generic_struct_constructor_return_type(self, callee ref Expr, typed_args List[ref TypedExpr]) Option[Type] = {
         return when callee in {
             .Identifier(name, _) then when self.storage.generic_templates.lookup_struct(name) in {
                 .Some(template) then {

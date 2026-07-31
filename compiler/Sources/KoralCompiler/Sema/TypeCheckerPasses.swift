@@ -41,6 +41,79 @@ extension TypeChecker {
     }
   }
 
+  private func signatureVisibilityLevel(_ access: AccessModifier) -> Int {
+    switch access {
+    case .private:
+      return 0
+    case .protected:
+      return 1
+    case .protectedPublic:
+      return 2
+    case .public:
+      return 3
+    }
+  }
+
+  private func firstSignatureVisibilityViolation(
+    in type: Type,
+    requiredAccess: AccessModifier
+  ) -> (name: String, access: AccessModifier)? {
+    switch type {
+    case .structure(let defId), .enum(let defId), .opaque(let defId):
+      guard let typeAccess = context.getAccess(defId),
+            signatureVisibilityLevel(typeAccess) < signatureVisibilityLevel(requiredAccess)
+      else {
+        return nil
+      }
+      return (context.getName(defId) ?? type.description, typeAccess)
+    case .reference(let inner),
+         .mutableReference(let inner),
+         .borrowedReference(let inner, _),
+         .mutableBorrowedReference(let inner, _),
+         .pointer(let inner),
+         .mutablePointer(let inner),
+         .weakReference(let inner),
+         .mutableWeakReference(let inner):
+      return firstSignatureVisibilityViolation(in: inner, requiredAccess: requiredAccess)
+    case .function(let parameters, let returns):
+      for parameter in parameters {
+        if let violation = firstSignatureVisibilityViolation(in: parameter.type, requiredAccess: requiredAccess) {
+          return violation
+        }
+      }
+      return firstSignatureVisibilityViolation(in: returns, requiredAccess: requiredAccess)
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+      for arg in args {
+        if let violation = firstSignatureVisibilityViolation(in: arg, requiredAccess: requiredAccess) {
+          return violation
+        }
+      }
+      return nil
+    default:
+      return nil
+    }
+  }
+
+  private func validateSignatureTypeVisibility(
+    symbolName: String,
+    symbolAccess: AccessModifier,
+    signatureTypes: [Type],
+    span: SourceSpan
+  ) throws {
+    guard symbolAccess != .private else {
+      return
+    }
+
+    for type in signatureTypes {
+      if let violation = firstSignatureVisibilityViolation(in: type, requiredAccess: symbolAccess) {
+        throw SemanticError(
+          .generic("\(symbolAccess) symbol '\(symbolName)' uses \(violation.access) type '\(violation.name)' in its signature"),
+          span: span
+        )
+      }
+    }
+  }
+
   private func declaredDefIdForCurrentGlobal(name: String, access: AccessModifier) -> DefId? {
     let lookupSourceFile = access == .private ? currentSourceFile : nil
     return defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: lookupSourceFile)
@@ -1286,7 +1359,7 @@ extension TypeChecker {
             name: method.name,
             type: methodType,
             kind: .function,
-            access: .protected
+            access: method.access
           )
           registerReceiverStyleMethod(
             methodSymbol,
@@ -1557,7 +1630,7 @@ extension TypeChecker {
             name: method.name,
             type: methodType,
             kind: .function,
-            access: .protected
+            access: method.access
           )
           registerReceiverStyleMethod(
             methodSymbol,
@@ -1786,6 +1859,12 @@ extension TypeChecker {
         let passKind = passKindForParameterType(paramType)
         return Parameter(type: paramType, kind: passKind)
       }
+      try validateSignatureTypeVisibility(
+        symbolName: name,
+        symbolAccess: access,
+        signatureTypes: params.map(\.type) + [returnType],
+        span: span
+      )
       let functionType = Type.function(parameters: params, returns: returnType)
       if isPrivate {
         currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
@@ -1931,6 +2010,7 @@ extension TypeChecker {
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueType(type, span: span)
       try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
+      try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
       
       // For Lambda expressions, pass the expected type for type inference
       var typedValue: TypedExpressionNode
@@ -2001,6 +2081,7 @@ extension TypeChecker {
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueType(type, span: span)
       try assertNoBorrowedReferenceType(type, context: "foreign global type", span: span)
+      try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
 
       let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
@@ -2099,6 +2180,12 @@ extension TypeChecker {
               name: param.name, type: paramType,
               kind: .variable(param.mutable ? .MutableValue : .Value))
           }
+          try validateSignatureTypeVisibility(
+            symbolName: name,
+            symbolAccess: access,
+            signatureTypes: params.map(\.type) + [returnType],
+            span: span
+          )
 
           // Perform declaration-site checking
           let (typedBody, _) = try checkFunctionBody(params, returnType, body)
@@ -2128,6 +2215,12 @@ extension TypeChecker {
           name: param.name, type: paramType,
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
+      try validateSignatureTypeVisibility(
+        symbolName: name,
+        symbolAccess: access,
+        signatureTypes: params.map(\.type) + [returnType],
+        span: span
+      )
 
       let functionType = Type.function(
         parameters: params.map {
@@ -2446,7 +2539,7 @@ extension TypeChecker {
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
-          access: .protected
+          access: method.access
         )
         registerReceiverStyleMethod(
           methodSymbol,
@@ -3238,7 +3331,7 @@ extension TypeChecker {
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           kind: .function,
-          access: .protected
+          access: method.access
         )
         registerReceiverStyleMethod(
           methodSymbol,
