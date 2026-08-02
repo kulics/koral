@@ -41,7 +41,7 @@ let shared_point = heap_point
 ## Language Highlights
 
 - **No GC, No Manual `free`**: Automatic memory management based on reference counting and escape analysis.
-- **Expression-Oriented Control Flow**: `if`, `when`, and blocks produce values; `while` and `for` keep the same surface style but remain statement-only.
+- **Expression-Oriented Control Flow**: `if` and `when` can be expressions or statements; blocks can produce values in expression contexts; `while` and `for` keep the same surface style but remain statement-only.
 - **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
 - **Algebraic Data Types**: Structs and enums with exhaustive pattern matching.
 - **C Interop**: Foreign function interface (FFI) and a C backend for broad platform compatibility.
@@ -60,7 +60,7 @@ let label = when status in {
 }
 ```
 
-Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. When a branch body uses a block, that block still defaults to `Void`; use `break <expression>` to produce the enclosing `if` or `when` expression's value from inside the block.
+Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. In expression-form `if`/`when`, a block branch still defaults to `Void`; use `break <expression>` to produce the enclosing expression's value from inside the block.
 
 ```koral
 let label = if score >= 90 then {
@@ -113,7 +113,7 @@ when temperature in {
 ```koral
 let port = config.get("port") or else 8080
 
-let name = user and then it.profile and then it.display_name or else "anonymous"
+let name = (user and then it.profile and then it.display_name) or else "anonymous"
 
 let read_config(path String) Result[Config] = {
     let text = read_text_file(path) or return
@@ -191,10 +191,10 @@ let result = list.iterator()
 - `if / then / else` expressions (with pattern matching via `is`)
 - `while` statements (with pattern matching via `is`)
 - `for` statements over any `Iterable`
-- `when` expressions for exhaustive pattern matching
+- `when` expressions/statements for exhaustive pattern matching
 - `defer` for deterministic cleanup
 - `break`, `continue`, `return`
-- `break <expression>` inside `if` / `when` branch bodies for branch values and early branch exit
+- `break <expression>` inside `if` / `when` expression branch bodies for branch values and early branch exit
 
 ### Pattern Matching
 
@@ -245,6 +245,7 @@ Reference creation rules:
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** `self ref` methods accept values via auto-ref; `self` methods accept `ref T` via auto-deref (following Go's pointer receiver behavior).
 - Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
 - Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `ref mut Trait` can call both `self ref mut` and `self ref` requirements.
+- Method receiver forms: `self` (managed value), `self ref` / `self ref mut` (borrowed receivers, auto-ref allowed), and explicit managed forms `self ref Self` / `self ref mut Self` (no auto-ref/auto-deref). Auto-ref and auto-deref apply only to `self` and `self ref` forms.
 - `ref T` is read-only: `.val` read only. `ref mut T` supports `.val` read and `.val = expr` assignment.
 - `ptr T` is read-only: `.val` read only. `ptr mut T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
 - Use `box(expr)` for owned escaping references from literals/temporaries — returns `ref mut T`.

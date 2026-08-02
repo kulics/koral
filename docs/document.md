@@ -12,7 +12,7 @@ Specification note:
 
 ## Key Features
 
-- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if`, `when`, and blocks produce values, while `while` and `for` remain statement-only.
+- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if` and `when` can be expressions or statements; blocks can produce values in expression contexts, while `while` and `for` remain statement-only.
 - Automatic memory management based on reference counting, ownership analysis, and escape analysis.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
@@ -581,7 +581,7 @@ println( a < b )      // < Less than
 println( a <= b )     // <= Less than or equal to
 ```
 
-Koral also supports same-direction chained ordering comparisons as syntax sugar for interval-style predicates:
+Koral also supports chained ordering comparisons as syntax sugar for interval-style predicates:
 
 ```koral
 println(1 < x < 3)
@@ -589,7 +589,7 @@ println(10 >= y > 0)
 println(a <= b <= c)
 ```
 
-Chains are restricted to `<`, `<=`, `>`, and `>=`, and every operator in the chain must point in the same direction. Mixed forms such as `a < b > c`, `a < b == c`, or `a == b < c` are rejected; write them explicitly with `and` instead.
+Chains are restricted to `<`, `<=`, `>`, and `>=`, and every operator in the chain must stay in the same direction family (ascending `<`/`<=` or descending `>`/`>=`). Mixed chains such as `a < b > c`, `a < b == c`, or `a == b < c` are rejected; write them explicitly with `and` instead.
 Each operand in a valid chain is evaluated at most once, and the chain short-circuits from left to right.
 
 ### Logical Operators
@@ -675,7 +675,7 @@ The built-in operator mappings are:
 - `==` / `<>` -> `Eq` via `equals(self, other Self) Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord` via `compare(self, other Self) Int`
 
-Same-direction chained ordering comparisons such as `a < b < c` are syntax sugar over these existing comparison operators. The compiler lowers them into adjacent pairwise comparisons with single-evaluation and short-circuit semantics; they do not introduce a separate trait or dispatch mechanism.
+Same-direction chained ordering comparisons such as `a < b < c` are syntax sugar over these existing comparison operators. The compiler lowers them into pairwise comparisons with single-evaluation and short-circuit semantics; they do not introduce a separate trait or dispatch mechanism.
 
 Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are currently built-in and are not customized through public operator traits.
 
@@ -784,17 +784,19 @@ Operator precedence from high to low:
 16. Value coalescing: `or else`
 17. Early-return propagation: `or return`
 
+When mixing `and then`, `or else`, and `or return` in one expression, use parentheses to make intent explicit.
+
 ## Selection Structure
 
 Selection structures are used to judge given conditions and control the flow of the program.
 
-In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed.
+In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed. With both `then` and `else`, `if` is an expression; without `else`, the single-branch `if` is a statement and its block branch defaults to `Void`.
 
 ```koral
 let main() Void = if 1 == 1 then println("yes") else println("no")
 ```
 
-`if` is also an expression. The `then` and `else` branches must be followed by expressions.
+`if` with `else` is also an expression. The `then` and `else` branches must be followed by expressions.
 
 ```koral
 let main() Void = println(if 1 == 1 then "yes" else "no")
@@ -807,13 +809,13 @@ let x = 0
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 ```
 
-When we don't need to handle the `else` branch, we can omit it, in which case its value is `Void`.
+When we don't need to handle the `else` branch, we can omit it. In that case the construct is a statement and does not produce a value; its block branch still defaults to `Void`.
 
 ```koral
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-When an `if` branch body is a block, that block still defaults to `Void`. Use `break <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early:
+When an `if` with `else` uses a block branch, that block still defaults to `Void`. Use `break <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early. `break <expression>` is not valid in single-branch `if` bodies.
 
 ```koral
 let label = if score >= 90 then {
@@ -983,7 +985,7 @@ Koral has powerful pattern matching capabilities, mainly used through `when` exp
 
 ### when Expression
 
-The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` is also an expression and returns the value of the matching branch.
+The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` can be used as an expression or a statement; as an expression, it returns the value of the matching branch.
 
 ```koral
 let x = 5
@@ -994,7 +996,7 @@ let result = when x in {
 }
 ```
 
-Like `if`, a block branch in `when` still defaults to `Void`. Use `break <expression>` to produce the enclosing `when` expression's value and to support early exit inside the branch body:
+Like `if`, a block branch in `when` still defaults to `Void`. Use `break <expression>` to produce the enclosing `when` expression's value and to support early exit inside the block branch body. `break <expression>` is valid only when `when` is used as an expression.
 
 ```koral
 let label = when score in {
@@ -1635,6 +1637,14 @@ The most commonly used core traits are:
 Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
 `Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source ptr mut Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
+
+### Method Receiver Forms
+
+- self: managed value receiver (equivalent to self Self).
+- self ref / self ref mut: borrowed receivers; auto-ref allowed on call sites.
+- self ref Self / self ref mut Self: explicit managed receivers; no auto-ref or auto-deref.
+- self ref <lifetime> Self / self ref <lifetime> mut Self: explicit borrowed receivers with a named lifetime.
+- Auto-ref and auto-deref apply only to self and self ref forms; explicit managed/borrowed forms require the caller to provide the exact binding.
 
 ### Trait Objects
 

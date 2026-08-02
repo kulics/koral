@@ -12,7 +12,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 ## 关键特性
 
-- 现代化、易于辨识的语法，支持可选分号和表达式导向控制流：`if`、`when` 与块表达式可以产值，`while` 和 `for` 仍然只作为语句使用。
+- 现代化、易于辨识的语法，支持可选分号和表达式导向控制流：`if` 和 `when` 既可作为表达式也可作为语句；块表达式在表达式上下文中可以产值，`while` 和 `for` 仍然只作为语句使用。
 - 基于引用计数、所有权分析和逃逸分析的自动内存管理。
 - 带有 Trait 约束的泛型系统，通过单态化实现零成本抽象。
 - 代数数据类型（结构体与枚举）配合穷尽式模式匹配。
@@ -607,7 +607,7 @@ println( a < b )      // < 小于
 println( a <= b )     // <= 小于或等于
 ```
 
-Koral 也支持同方向的链式顺序比较，作为区间式条件判断的语法糖：
+Koral 也支持链式顺序比较，作为区间式条件判断的语法糖：
 
 ```koral
 println(1 < x < 3)
@@ -615,7 +615,7 @@ println(10 >= y > 0)
 println(a <= b <= c)
 ```
 
-链式比较只允许使用 `<`、`<=`、`>`、`>=`，并且整条链里的方向必须一致。像 `a < b > c`、`a < b == c`、`a == b < c` 这样的混合形式会被拒绝；这类情况请显式写成 `and` 组合。
+链式比较只允许使用 `<`、`<=`、`>`、`>=`，并且整条链里的方向必须保持同一方向族（升序 `<`/`<=`或降序 `>`/`>=`）。像 `a < b > c`、`a < b == c`、`a == b < c` 这样的混合形式会被拒绝；这类情况请显式写成 `and` 组合。
 合法链中的每个操作数最多只会求值一次，并且整体按从左到右的顺序短路。
 
 ### 逻辑操作符
@@ -705,7 +705,7 @@ Koral 支持基于 Trait 的运算符重载，主要覆盖算术和比较操作�
 - `==` / `<>` -> `Eq`，对应 `equals(self, other Self) Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord`，对应 `compare(self, other Self) Int`
 
-像 `a < b < c` 这样的同方向链式顺序比较，本质上只是这些已有比较操作符的语法糖。编译器会把它降成相邻两段比较，并保证单次求值和短路行为；它不会引入新的 Trait 或新的分派机制。
+像 `a < b < c` 这样的同方向链式顺序比较，本质上只是这些已有比较操作符的语法糖。编译器会把它降成两两比较，并保证单次求值和短路行为；它不会引入新的 Trait 或新的分派机制。
 
 位运算符（`&`、`|`、`^`、`~`、`<<`、`>>`）目前仍是内建操作，不通过公开的运算符 Trait 自定义。
 
@@ -814,11 +814,13 @@ let load_port(path String) Result[Int] = {
 16. 值合并: `or else`
 17. 提前返回传播: `or return`
 
+当同时使用 `and then`、`or else`和 `or return` 时，建议使用括号明确意图。
+
 ## 选择结构
 
 选择结构用于判断给定的条件，根据判断的结果来控制程序的流程。
 
-在 Koral 中选择结构使用 `if` 语法表示，`if` 后面紧跟判断条件，在条件为 `true` 时执行条件后面的 `then` 分支，在条件为 `false` 时执行 `else` 关键字后面的 `else` 分支。
+在 Koral 中选择结构使用 `if` 语法表示，`if` 后面紧跟判断条件，在条件为 `true` 时执行条件后面的 `then` 分支，在条件为 `false` 时执行 `else` 关键字后面的 `else` 分支。当同时具备 `then` 和 `else` 时，`if` 是表达式；省略 `else` 时，单分支 `if` 是语句，其块分支默认为 `Void`。
 
 例如：
 
@@ -828,7 +830,7 @@ let main() Void = if 1 == 1 then println("yes") else println("no")
 
 执行上面的程序会看到 `yes`。
 
-`if` 同样也是表达式，`then` 和 `else` 分支后面都必须是表达式，根据 `if` 的条件，`if` 表达式的值可能是 `then` 或 `else` 分支其中的一个。
+`if`配合`else`时同样也是表达式，`then` 和 `else` 分支后面都必须是表达式，根据 `if` 的条件，`if` 表达式的值可能是 `then` 或 `else` 分支其中的一个。
 
 因此上面那段程序我们也可以这样写，两种写法结果等价。
 
@@ -843,13 +845,13 @@ let x = 0
 let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 ```
 
-当我们不需要处理 `else` 分支时，可以省略 `else` 分支，这时它的值是 `Void`。
+当我们不需要处理 `else` 分支时，可以省略 `else` 分支。此时该构造是语句形式，不产生值；其块分支仍默认为 `Void`。
 
 ```koral
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-当 `if` 分支 body 是块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `break <expression>`；这也提供了分支内的 early exit：
+当 `if`配合`else`且分支为块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `break <expression>`；这也提供了分支内的 early exit。单分支 `if` 中不允许使用 `break <expression>`。
 
 ```koral
 let label = if score >= 90 then {
@@ -1021,7 +1023,7 @@ Koral 拥有强大的模式匹配功能，主要通过 `when` 表达式和 `is` 
 
 ### when 表达式
 
-`when` 表达式允许你将一个值与一系列模式进行比较，并根据匹配的模式执行相应的代码。它类似于其他语言中的 `switch` 语句，但功能更为强大。`when` 也是一个表达式，会返回匹配分支的值。
+`when` 表达式允许你将一个值与一系列模式进行比较，并根据匹配的模式执行相应的代码。它类似于其他语言中的 `switch` 语句，但功能更为强大。`when` 既可作为表达式也可作为语句；作为表达式时，会返回匹配分支的值。
 
 ```koral
 let x = 5
@@ -1032,7 +1034,7 @@ let result = when x in {
 }
 ```
 
-和 `if` 一样，`when` 的分支如果写成块，这个块本身仍然默认是 `Void`。要给外层 `when` 表达式产值，需要在分支 body 中使用 `break <expression>`，并且可以在分支内部提前退出：
+和 `if` 一样，`when` 的分支如果写成块，这个块本身仍然默认是 `Void`。要给外层 `when` 表达式产值，需要在分支 body 中使用 `break <expression>`，并且可以在分支内部提前退出。`break <expression>` 仅在 `when` 作为表达式时才有效。
 
 ```koral
 let label = when score in {
@@ -1672,6 +1674,14 @@ let p = Point.origin()
 算术和比较操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`）。下标访问由编译器内建规则处理，不属于公开 trait 系统。
 
 `Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source ptr mut Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
+
+### 方法接收器形式
+
+- `​self`：托管值接收器（等价于 `self Self`）。
+- `self ref` / `self ref mut`：借用接收器，调用端允许 auto-ref。
+- `self ref Self` / `self ref mut Self`：显式托管接收器，不允许 auto-ref/auto-deref。
+- `self ref <lifetime> Self` / `self ref <lifetime> mut Self`：显式具名生命周期借用接收器。
+- Auto-ref 和 auto-deref 仅适用于 `self` 和 `self ref` 形式；显式托管/借用形式要求调用方提供确切的绑定。
 
 ### Trait Object
 
