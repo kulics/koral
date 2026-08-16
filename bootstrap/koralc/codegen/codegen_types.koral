@@ -13,6 +13,7 @@
 // Returns true if a type should be treated as void-like and needs a placeholder
 // in enum case fields. This includes VoidType, Unknown, and unresolved
 // GenericParameter types.
+
 private let is_void_like_type(t Type) Bool = {
     return when t in {
         .VoidType() then true,
@@ -24,7 +25,7 @@ private let is_void_like_type(t Type) Bool = {
 
 given CodeGen {
 
-    protected register_type_declaration_for_used_type(self ref mut Self, decl_map ref mut Dict[String, TypeDeclaration], seen ref mut Set[String], t Type) Void = {
+    protected register_type_declaration_for_used_type(*mut self, decl_map *mut Dict[String, TypeDeclaration], seen *mut Set[String], t Type) Void = {
         let concrete_type = self.concretize_codegen_type(t)
         let visit_key = self.concrete_layout_key_for_type(concrete_type)
         if seen.contains(visit_key) then { return }
@@ -32,42 +33,42 @@ given CodeGen {
 
         when concrete_type in {
             .ReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
             .MutableReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
-            .BorrowedReferenceType(inner, _) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+            .BorrowedReferenceType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
-            .MutableBorrowedReferenceType(inner, _) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+            .MutableBorrowedReferenceType(inner) then {
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
             .PointerType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
             .MutablePointerType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
             .WeakReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
             .MutableWeakReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *inner)
                 return
             },
             .FunctionType(params, return_type) then {
                 for entry in params then {
                     self.register_type_declaration_for_used_type(decl_map, seen, entry.param_type)
                 }
-                self.register_type_declaration_for_used_type(decl_map, seen, return_type.val)
+                self.register_type_declaration_for_used_type(decl_map, seen, *return_type)
                 return
             },
             .StructureType(def_id) then {
@@ -124,49 +125,49 @@ given CodeGen {
         }
     }
 
-    protected collect_used_type_declarations(self ref mut Self, decl_map ref mut Dict[String, TypeDeclaration]) Void = {
+    protected collect_used_type_declarations(*mut self, decl_map *mut Dict[String, TypeDeclaration]) Void = {
         let mut seen = Set[String].new()
 
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(_, params, return_type) then {
                     for param in params then {
-                        self.register_type_declaration_for_used_type(decl_map, seen.ref, param.param_type)
+                        self.register_type_declaration_for_used_type(decl_map, &mut seen, param.param_type)
                     }
-                    self.register_type_declaration_for_used_type(decl_map, seen.ref, return_type)
+                    self.register_type_declaration_for_used_type(decl_map, &mut seen, return_type)
                 },
                 .ForeignStruct(_, fields) then {
                     for field in fields then {
-                        self.register_type_declaration_for_used_type(decl_map, seen.ref, field.field_type)
+                        self.register_type_declaration_for_used_type(decl_map, &mut seen, field.field_type)
                     }
                 },
-                .ForeignGlobalVariable(_, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, seen.ref, decl_type),
-                .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, seen.ref, decl_type),
+                .ForeignGlobalVariable(_, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, &mut seen, decl_type),
+                .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(decl_map, &mut seen, decl_type),
                 .StructDeclaration(_, fields) then {
                     for field in fields then {
-                        self.register_type_declaration_for_used_type(decl_map, seen.ref, field.field_type)
+                        self.register_type_declaration_for_used_type(decl_map, &mut seen, field.field_type)
                     }
                 },
                 .EnumDeclaration(_, cases) then {
                     for case_info in cases then {
                         for field in case_info.fields then {
-                            self.register_type_declaration_for_used_type(decl_map, seen.ref, field.field_type)
+                            self.register_type_declaration_for_used_type(decl_map, &mut seen, field.field_type)
                         }
                     }
                 },
                 .Function(_, params, return_type, _) then {
                     for param in params then {
-                        self.register_type_declaration_for_used_type(decl_map, seen.ref, param.param_type)
+                        self.register_type_declaration_for_used_type(decl_map, &mut seen, param.param_type)
                     }
-                    self.register_type_declaration_for_used_type(decl_map, seen.ref, return_type)
+                    self.register_type_declaration_for_used_type(decl_map, &mut seen, return_type)
                 },
                 .Given(target_type, _, trait_type_args, methods) then {
-                    self.register_type_declaration_for_used_type(decl_map, seen.ref, target_type)
+                    self.register_type_declaration_for_used_type(decl_map, &mut seen, target_type)
                     for trait_arg in trait_type_args then {
-                        self.register_type_declaration_for_used_type(decl_map, seen.ref, trait_arg)
+                        self.register_type_declaration_for_used_type(decl_map, &mut seen, trait_arg)
                     }
                     for method in methods then {
-                        self.register_type_declaration_for_used_type(decl_map, seen.ref, method.symbol_type)
+                        self.register_type_declaration_for_used_type(decl_map, &mut seen, method.symbol_type)
                     }
                 },
                 .TraitVTable(_) then {},
@@ -177,13 +178,14 @@ given CodeGen {
 
         for function_ref in self.program.functions then {
             for param in function_ref.params then {
-                self.register_type_declaration_for_used_type(decl_map, seen.ref, param.param_type)
+                self.register_type_declaration_for_used_type(decl_map, &mut seen, param.param_type)
             }
-            self.register_type_declaration_for_used_type(decl_map, seen.ref, function_ref.return_type)
+            self.register_type_declaration_for_used_type(decl_map, &mut seen, function_ref.return_type)
             for local in function_ref.locals then {
-                self.register_type_declaration_for_used_type(decl_map, seen.ref, local.local_type)
+                self.register_type_declaration_for_used_type(decl_map, &mut seen, local.local_type)
             }
         }
+
     }
 
     protected concrete_struct_fields_from_def(self, def_id DefId) Option[List[TypedField]] = {
@@ -251,7 +253,7 @@ given CodeGen {
     /// 生成结构体类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_type_declaration(self ref mut Self, name String, fields List[TypedField]) Void = {
+    public generate_type_declaration(*mut self, name String, fields List[TypedField]) Void = {
         // 生成结构体定义
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
@@ -320,7 +322,7 @@ given CodeGen {
     /// 生成枚举类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    public generate_enum_declaration(self ref mut Self, name String, cases List[TypedEnumCase]) Void = {
+    public generate_enum_declaration(*mut self, name String, cases List[TypedEnumCase]) Void = {
         // 生成枚举结构体定义
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
@@ -461,7 +463,7 @@ given CodeGen {
     /// 生成 foreign struct 定义（无 copy/drop 函数）
     ///
     /// Requirements: 3.5
-    public generate_foreign_struct_declaration(self ref mut Self, name String, fields List[TypedField]) Void = {
+    public generate_foreign_struct_declaration(*mut self, name String, fields List[TypedField]) Void = {
         self.buffer.push_string("struct \(name) {\n")
         self.with_indent(() -> {
             for field in fields then {
@@ -476,7 +478,7 @@ given CodeGen {
 
     // ── 类型声明收集与拓扑排序 ────────────────────────────────────────────────
 
-    public collect_and_sort_type_declarations(self ref mut Self) List[TypeDeclaration] = {
+    public collect_and_sort_type_declarations(*mut self) List[TypeDeclaration] = {
         let mut decl_map = Dict[String, TypeDeclaration].new()
 
         for global in self.program.globals then {
@@ -530,7 +532,7 @@ given CodeGen {
             }
         }
 
-        self.collect_used_type_declarations(decl_map.ref)
+        self.collect_used_type_declarations(&mut decl_map)
 
         // 第二步：构建依赖图
         let mut all_names = List[String].new()

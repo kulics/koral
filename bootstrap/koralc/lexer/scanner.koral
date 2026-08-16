@@ -57,7 +57,7 @@ given Lexer {
         return .None()
     }
 
-    private advance(self ref mut) Option[Rune] = {
+    private advance(*mut self) Option[Rune] = {
         if self.is_at_end() then {
             return .None()
         }
@@ -86,7 +86,7 @@ given Lexer {
         return .Some(ch)
     }
 
-    private add(self ref mut, kind TokenKind, line UInt, column UInt) Void = {
+    private add(*mut self, kind TokenKind, line UInt, column UInt) Void = {
         self.tokens.push(Token(kind, line, column, self.has_newline_before))
         self.has_newline_before = false
     }
@@ -99,7 +99,7 @@ given Lexer {
         return .Error(box(text))
     }
 
-    private match_next(self ref mut, expected Rune) Bool = {
+    private match_next(*mut self, expected Rune) Bool = {
         let next = self.peek() or else {
             return false
         }
@@ -118,7 +118,7 @@ given Lexer {
 
     private is_identifier_continue(ch Rune) Bool = ch.is_identifier_continue()
 
-    private read_identifier(self ref mut, start_line UInt, start_col UInt, first Rune) Void = {
+    private read_identifier(*mut self, start_line UInt, start_col UInt, first Rune) Void = {
         let mut text = String.new()
         text.push_rune(first)
 
@@ -136,7 +136,7 @@ given Lexer {
         }
     }
 
-    private read_duration_suffix_if_present(self ref mut) Option[String] = {
+    private read_duration_suffix_if_present(*mut self) Option[String] = {
         let first = self.peek() or else {
             return .None()
         }
@@ -179,7 +179,7 @@ given Lexer {
         return .None()
     }
 
-    private read_number(self ref mut, start_line UInt, start_col UInt, first Rune) Result[Void] = {
+    private read_number(*mut self, start_line UInt, start_col UInt, first Rune) Result[Void] = {
         let mut text = String.new()
         text.push_rune(first)
 
@@ -380,7 +380,7 @@ given Lexer {
     }
 
     // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
-    private read_escape(self ref mut, start_line UInt, start_col UInt) Result[String] = {
+    private read_escape(*mut self, start_line UInt, start_col UInt) Result[String] = {
         let next = self.peek() or else {
             return .Error(box("Unterminated escape sequence"))
         }
@@ -502,7 +502,7 @@ given Lexer {
         return .Error(box("Unknown escape sequence"))
     }
 
-    private read_string(self ref mut, start_line UInt, start_col UInt) Result[Void] = {
+    private read_string(*mut self, start_line UInt, start_col UInt) Result[Void] = {
         let mut text = String.new()
 
         while self.peek() is .Some(ch) then {
@@ -518,11 +518,11 @@ given Lexer {
                 when self.peek() in {
                     .Some(next) then {
                         if next == '(' then {
-                            self.append_backslashes(text.ref, slash_count)
+                            self.append_backslashes(&mut text, slash_count)
                             if slash_count % 2 == 1 then {
                                 self.advance()
                                 text.push_rune('(')
-                                let _ = self.append_interpolation_tail(text.ref) or return
+                                let _ = self.append_interpolation_tail(&mut text) or return
                             }
                             continue
                         }
@@ -530,7 +530,7 @@ given Lexer {
                     .None() then {},
                 }
 
-                self.append_backslashes(text.ref, slash_count / 2)
+                self.append_backslashes(&mut text, slash_count / 2)
                 if slash_count % 2 == 1 then {
                     let escaped = self.read_escape(start_line, start_col) or return
                     text.push_string(escaped)
@@ -547,7 +547,7 @@ given Lexer {
         return .Error(box("Unterminated string literal"))
     }
 
-    private read_rune(self ref mut, start_line UInt, start_col UInt) Result[Void] = {
+    private read_rune(*mut self, start_line UInt, start_col UInt) Result[Void] = {
         let mut text = String.new()
 
         while self.peek() is .Some(ch) then {
@@ -569,7 +569,7 @@ given Lexer {
         return .Error(box("Unterminated rune literal"))
     }
 
-    private consume_backslash_run(self ref mut) UInt = {
+    private consume_backslash_run(*mut self) UInt = {
         let mut count UInt = 0
         while self.peek() is .Some(ch) then {
             if ch <> '\\' then {
@@ -581,7 +581,7 @@ given Lexer {
         return count
     }
 
-    private append_backslashes(self, text ref mut String, count UInt) Void = {
+    private append_backslashes(self, text *mut String, count UInt) Void = {
         let mut i UInt = 0
         while i < count then {
             text.push_rune('\\')
@@ -747,7 +747,7 @@ given Lexer {
                 }
 
                 if i + slash_count < total and runes[i + slash_count] == '(' then {
-                    self.append_backslashes(text.ref, slash_count)
+                    self.append_backslashes(&mut text, slash_count)
                     i += slash_count
                     if slash_count % 2 == 1 then {
                         text.push_rune('(')
@@ -775,7 +775,7 @@ given Lexer {
                     continue
                 }
 
-                self.append_backslashes(text.ref, slash_count / 2)
+                self.append_backslashes(&mut text, slash_count / 2)
                 i += slash_count
                 if slash_count % 2 == 1 then {
                     let escaped = self.read_escape_from_runes(runes, i) or return
@@ -792,7 +792,7 @@ given Lexer {
         return .Ok(text)
     }
 
-    private read_multiline_string(self ref mut, start_line UInt, start_col UInt) Result[Void] = {
+    private read_multiline_string(*mut self, start_line UInt, start_col UInt) Result[Void] = {
         // Caller has consumed the first quote; consume the remaining two of opening delimiter.
         self.advance()
         self.advance()
@@ -897,7 +897,7 @@ given Lexer {
         return .Ok({})
     }
 
-    private append_interpolation_tail(self ref mut, text ref mut String) Result[Void] = {
+    private append_interpolation_tail(*mut self, text *mut String) Result[Void] = {
         let mut depth UInt = 1
 
         while self.peek() is .Some(ch) then {
@@ -919,7 +919,7 @@ given Lexer {
         return .Error(box("unterminated string interpolation"))
     }
 
-    private skip_line_comment(self ref mut) Void = {
+    private skip_line_comment(*mut self) Void = {
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
                 break
@@ -928,7 +928,7 @@ given Lexer {
         }
     }
 
-    private skip_block_comment(self ref mut) Result[Void] = {
+    private skip_block_comment(*mut self) Result[Void] = {
         while self.peek() is .Some(ch) then {
             if ch == '*' then {
                 let next = self.peek_next() or else {
@@ -946,7 +946,7 @@ given Lexer {
         return .Error(box("Unterminated block comment"))
     }
 
-    public run(self ref mut) Result[List[Token]] = {
+    public run(*mut self) Result[List[Token]] = {
         while not self.is_at_end() then {
             let start_line = self.line
             let start_col = self.column
@@ -1035,7 +1035,7 @@ given Lexer {
                         }
                     } else {
                         // Lifetime identifier: 'a
-                        self.add(TokenKind.LifetimeIdentifier(name), start_line, start_col)
+                        self.add(TokenKind.Identifier(name), start_line, start_col)
                     }
                 } else {
                     // Not identifier start — rune literal
@@ -1223,7 +1223,10 @@ given Lexer {
                 }
                 continue
             }
-            if ch == ';' then {
+            if ch == '?' then {
+                self.add(TokenKind.QuestionMark(), start_line, start_col)
+                continue
+            } else if ch == ';' then {
                 self.add(TokenKind.Semicolon(), start_line, start_col)
                 continue
             }
@@ -1274,9 +1277,6 @@ private let keyword_kind(text String) Option[TokenKind] = {
         "is" then .Some(TokenKind.KwIs()),
         "in" then .Some(TokenKind.KwIn()),
         "as" then .Some(TokenKind.KwAs()),
-        "ref" then .Some(TokenKind.KwRef()),
-        "ptr" then .Some(TokenKind.KwPtr()),
-        "val" then .Some(TokenKind.KwVal()),
         "given" then .Some(TokenKind.KwGiven()),
         "trait" then .Some(TokenKind.KwTrait()),
         "intrinsic" then .Some(TokenKind.KwIntrinsic()),
@@ -1285,7 +1285,7 @@ private let keyword_kind(text String) Option[TokenKind] = {
         "private" then .Some(TokenKind.KwPrivate()),
         "protected" then .Some(TokenKind.KwProtected()),
         "public" then .Some(TokenKind.KwPublic()),
-        "weakref" then .Some(TokenKind.KwWeakref()),
+        "raw" then .Some(TokenKind.KwRaw()),
         "self" then .Some(TokenKind.KwSelf()),
         "Self" then .Some(TokenKind.KwSelfType()),
         "return" then .Some(TokenKind.KwReturn()),

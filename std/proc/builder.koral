@@ -14,13 +14,13 @@ using std::os { Path, IntoPath }
 
 /// Create a child process via posix_spawn (Unix) / CreateProcess (Windows).
 foreign let __koral_spawn(
-    program ptr UInt8,
-    argv ptr ptr UInt8, argc Int32,
-    envp ptr ptr UInt8, envc Int32,
-    cwd ptr UInt8,
+    program *raw UInt8,
+    argv *raw *raw UInt8, argc Int32,
+    envp *raw *raw UInt8, envc Int32,
+    cwd *raw UInt8,
     stdin_mode Int32, stdout_mode Int32, stderr_mode Int32,
     stdin_fd Int32, stdout_fd Int32, stderr_fd Int32,
-    out ptr KoralProcess
+    out *raw KoralProcess
 ) Int32
 
 /// Get pointer to errno value.
@@ -52,9 +52,9 @@ private let stdio_to_fd(s IoRedirect) Int32 = when s in {
 }
 
 /// Convert a list of strings to an array of UInt8 pointers for FFI.
-private let argv_to_ptrs(argv List[String]) ptr ptr UInt8 = {
+private let argv_to_ptrs(argv List[String]) *raw *raw UInt8 = {
     let count = argv.count()
-    let ptrs = alloc_memory[ptr UInt8](count)
+    let ptrs = alloc_memory[*raw UInt8](count)
     for i in 0..<count then {
         init_memory(ptrs + i, argv[i].borrow_ptr())
     }
@@ -76,12 +76,12 @@ private let build_env_strings(actions List[EnvAction]) List[String] = {
 }
 
 /// Convert env strings list to pointer array for FFI.
-private let env_strs_to_ptrs(strs List[String]) ptr ptr UInt8 = {
+private let env_strs_to_ptrs(strs List[String]) *raw *raw UInt8 = {
     let count = strs.count()
     if count == 0 then {
-        return null_ptr[ptr UInt8]()
+        return null_ptr[*raw UInt8]()
     }
-    let ptrs = alloc_memory[ptr UInt8](count)
+    let ptrs = alloc_memory[*raw UInt8](count)
     for i in 0..<count then {
         init_memory(ptrs + i, strs[i].borrow_ptr())
     }
@@ -124,7 +124,7 @@ private type CommandStorage(
 /// Command builder for configuring and launching child processes.
 /// Provides a fluent API for setting program, arguments, environment variables,
 /// working directory, and I/O redirection before spawning.
-public type Command(private mut storage ref mut CommandStorage)
+public type Command(private mut storage *mut CommandStorage)
 
 given Command {
 
@@ -235,7 +235,7 @@ given Command {
             stdin_fd,
             stdout_fd,
             stderr_fd,
-            proc.ptr
+            &raw proc
         )
 
         if result <> 0 then {

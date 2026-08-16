@@ -5,19 +5,19 @@ using std { .. }
 
 // FFI declarations for C runtime regex functions
 foreign let __koral_regex_compile(
-    pattern ptr UInt8, flags Int32,
-    out_handle ptr ptr UInt8,
-    out_error_buf ptr UInt8, error_buf_size Int32,
-    out_error_len ptr Int32
+    pattern *raw UInt8, flags Int32,
+    out_handle *raw *raw UInt8,
+    out_error_buf *raw UInt8, error_buf_size Int32,
+    out_error_len *raw Int32
 ) Int32
 
 foreign let __koral_regex_match(
-    handle ptr UInt8, text ptr UInt8, text_offset Int32,
+    handle *raw UInt8, text *raw UInt8, text_offset Int32,
     max_groups Int32,
-    out_starts ptr Int32, out_ends ptr Int32
+    out_starts *raw Int32, out_ends *raw Int32
 ) Int32
 
-foreign let __koral_regex_free(handle ptr UInt8) Void
+foreign let __koral_regex_free(handle *raw UInt8) Void
 
 // ============================================================================
 // Regex — Compilation
@@ -32,7 +32,7 @@ given Regex {
         let c_flags = flags.to_c_flags()
 
         // 分配输出缓冲区
-        let handle_out = alloc_memory[ptr UInt8](1)
+        let handle_out = alloc_memory[*raw UInt8](1)
         let error_buf = alloc_memory[UInt8](256)
         let error_len_out = alloc_memory[Int32](1)
         defer dealloc_memory(handle_out)
@@ -47,7 +47,7 @@ given Regex {
         )
 
         if rc <> 0 then {
-            let err_len = error_len_out.val
+            let err_len = *error_len_out
             let msg = String.from_utf8_ptr(error_buf, err_len(UInt))
             return when msg in {
                 .Ok(msg) then .Error(box(msg)),
@@ -55,7 +55,7 @@ given Regex {
             }
         }
 
-        let handle = handle_out.val
+        let handle = *handle_out
 
         // 计算捕获组数量：扫描 pattern 中未转义的 '('
         let groups = Regex.count_groups(pattern)
@@ -91,7 +91,7 @@ given Regex {
 given Regex {
 
     // 最快路径：不捕获任何 group，只测试是否匹配
-    public matches(self ref, text String) Bool = {
+    public matches(*self, text String) Bool = {
         let starts = alloc_memory[Int32](1)
         let ends = alloc_memory[Int32](1)
         defer dealloc_memory(starts)
@@ -106,11 +106,11 @@ given Regex {
     }
 
     // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
-    public find(self ref, text String) Option[Match] =
+    public find(*self, text String) Option[Match] =
         Regex.find_at(self, text, 0)
 
     // 从指定偏移开始查找（内部方法，仅 $0）
-    find_at(self ref, text String, offset UInt) Option[Match] = {
+    find_at(*self, text String, offset UInt) Option[Match] = {
         let starts = alloc_memory[Int32](1)
         let ends = alloc_memory[Int32](1)
         defer dealloc_memory(starts)
@@ -125,8 +125,8 @@ given Regex {
             return Option[Match].None()
         }
 
-        let s = starts.val(UInt)
-        let e = ends.val(UInt)
+        let s = (*starts)(UInt)
+        let e = (*ends)(UInt)
 
         return Option[Match].Some(Match(text, s, e))
     }
@@ -138,15 +138,15 @@ given Regex {
 
 given Regex {
 
-    public find_all(self ref, text String) MatchIterator =
-        MatchIterator(self.val, text, 0)
+    public find_all(*self, text String) MatchIterator =
+        MatchIterator(*self, text, 0)
 
     // 完整路径：捕获所有 group
-    public captures(self ref, text String) Option[Captures] =
+    public captures(*self, text String) Option[Captures] =
         Regex.captures_at(self, text, 0)
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
-    captures_at(self ref, text String, offset UInt) Option[Captures] = {
+    captures_at(*self, text String, offset UInt) Option[Captures] = {
         let max_groups = (self.storage.groups + 1)(Int32)  // +1 for $0
         let starts = alloc_memory[Int32](max_groups(UInt))
         let ends = alloc_memory[Int32](max_groups(UInt))
@@ -172,8 +172,8 @@ given Regex {
         return Option[Captures].Some(Captures(text, start_list, end_list))
     }
 
-    public captures_all(self ref, text String) CapturesIterator =
-        CapturesIterator(self.val, text, 0)
+    public captures_all(*self, text String) CapturesIterator =
+        CapturesIterator(*self, text, 0)
 }
 
 // ============================================================================
@@ -182,7 +182,7 @@ given Regex {
 
 given Regex {
 
-    public replace(self ref, text String, with: String) String = {
+    public replace(*self, text String, with: String) String = {
         when self.captures(text) in {
             .None then {
                 return text
@@ -201,7 +201,7 @@ given Regex {
         }
     }
 
-    public replace_all(self ref, text String, with: String) String = {
+    public replace_all(*self, text String, with: String) String = {
         let mut result = String.new()
         let mut offset UInt = 0
         let text_len = text.count()
@@ -275,6 +275,6 @@ given Regex {
 
 given Regex {
 
-    public split(self ref, text String) RegexSplitIterator =
-    RegexSplitIterator(self.val, text, 0, false)
+    public split(*self, text String) RegexSplitIterator =
+    RegexSplitIterator(*self, text, 0, false)
 }

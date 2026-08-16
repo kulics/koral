@@ -314,34 +314,12 @@ extension TypeChecker {
     case .inferredSelf:
       break
     case .reference(let inner, mutable: let mutable):
-      if mutable {
-        switch type {
-        case .mutableReference(let innerType), .mutableBorrowedReference(let innerType, _):
-          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
-        default:
-          try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
-        }
-      } else if !mutable {
-        switch type {
-        case .reference(let innerType), .mutableReference(let innerType),
-             .borrowedReference(let innerType, _), .mutableBorrowedReference(let innerType, _):
-          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
-        default:
-          try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
-        }
-      }
-    case .borrowedReference(let inner, _, mutable: let mutable):
-      if mutable, case .mutableBorrowedReference(let innerType, _) = type {
-        try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
-      } else if mutable {
+      if let actual = Type.reference(inner: .void).compatibleIndirectionInners(with: type)?.actualInner,
+         (!mutable || type.indirectionCompatibilityInfo?.mutable == true),
+         type.indirectionCompatibilityInfo?.family == .managedReference {
+        try unify(node: inner, type: actual, inferred: &inferred, typeParams: typeParams)
+      } else {
         try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
-      } else if !mutable {
-        switch type {
-        case .borrowedReference(let innerType, _), .mutableBorrowedReference(let innerType, _):
-          try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
-        default:
-          try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
-        }
       }
     case .pointer(let inner, mutable: let mutable):
       if mutable, case .mutablePointer(let elementType) = type {

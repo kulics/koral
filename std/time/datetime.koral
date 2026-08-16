@@ -6,7 +6,7 @@ using std { .. }
 using std::text { Parseable }
 
 // FFI Declaration
-foreign let __koral_wallclock_now(out_secs ptr Int64, out_nanos ptr Int64) Void
+foreign let __koral_wallclock_now(out_secs *raw Int64, out_nanos *raw Int64) Void
 
 // ============================================================================
 // DateTime Type
@@ -24,7 +24,7 @@ public type DateTime(private unix_secs Int64, private nanos Int32, private tz Ti
 given TimeZone {
 
     /// Returns the timezone name.
-    public name(self ref) String = 
+    public name(*self) String = 
         when self.kind in {
             .Utc() then "UTC",
             .Local(n) then n,
@@ -49,18 +49,18 @@ given TimeZone {
         }
 
     /// Returns the UTC offset at the given DateTime as a Duration.
-    public offset_at(self ref, datetime DateTime) Duration = 
+    public offset_at(*self, datetime DateTime) Duration = 
         when self.kind in {
             .Utc() then Duration.zero(),
             .Fixed(offset_secs) then 1s * offset_secs(Int),
             .Local(n) then {
                 let mut out Int32 = 0
-                __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, out.ptr)
+                __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, &raw out)
                 break 1s * out(Int)
             },
             .Named(n) then {
                 let mut out Int32 = 0
-                __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, out.ptr)
+                __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, &raw out)
                 break 1s * out(Int)
             },
         }
@@ -76,7 +76,7 @@ given DateTime {
     public now() DateTime = {
         let mut s Int64 = 0
         let mut n Int64 = 0
-        __koral_wallclock_now(s.ptr, n.ptr)
+        __koral_wallclock_now(&raw s, &raw n)
         return DateTime(s, n(Int32), TimeZone.local())
     }
 
@@ -84,7 +84,7 @@ given DateTime {
     public now_utc() DateTime = {
         let mut s Int64 = 0
         let mut n Int64 = 0
-        __koral_wallclock_now(s.ptr, n.ptr)
+        __koral_wallclock_now(&raw s, &raw n)
         return DateTime(s, n(Int32), TimeZone.utc())
     }
 
@@ -131,8 +131,8 @@ given DateTime {
 given DateTime {
 
     /// Returns the year.
-    public year(self ref) Int = {
-        let offset = self.tz.offset_at(self.val)
+    public year(*self) Int = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
         let civil = civil_from_days(days)
@@ -140,8 +140,8 @@ given DateTime {
     }
 
     /// Returns the month (1-12).
-    public month(self ref) Int = {
-        let offset = self.tz.offset_at(self.val)
+    public month(*self) Int = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
         let civil = civil_from_days(days)
@@ -149,8 +149,8 @@ given DateTime {
     }
 
     /// Returns the day of month (1-31).
-    public day(self ref) Int = {
-        let offset = self.tz.offset_at(self.val)
+    public day(*self) Int = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
         let civil = civil_from_days(days)
@@ -158,35 +158,35 @@ given DateTime {
     }
 
     /// Returns the hour (0-23).
-    public hour(self ref) Int = {
-        let offset = self.tz.offset_at(self.val)
+    public hour(*self) Int = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
         return (day_secs / 3600)(Int)
     }
 
     /// Returns the minute (0-59).
-    public minute(self ref) Int = {
-        let offset = self.tz.offset_at(self.val)
+    public minute(*self) Int = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
         return ((day_secs % 3600) / 60)(Int)
     }
 
     /// Returns the second (0-59).
-    public second(self ref) Int = {
-        let offset = self.tz.offset_at(self.val)
+    public second(*self) Int = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
         return (day_secs % 60)(Int)
     }
 
     /// Returns the associated timezone.
-    public timezone(self ref) TimeZone = self.tz
+    public timezone(*self) TimeZone = self.tz
 
     /// Returns the date part as a Date value.
-    public date(self ref) Date = {
-        let offset = self.tz.offset_at(self.val)
+    public date(*self) Date = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let days = floor_div(local_secs, 86400)
         let c = civil_from_days(days)
@@ -194,8 +194,8 @@ given DateTime {
     }
 
     /// Returns the time-of-day part as a ClockTime value.
-    public time(self ref) ClockTime = {
-        let offset = self.tz.offset_at(self.val)
+    public time(*self) ClockTime = {
+        let offset = self.tz.offset_at(*self)
         let local_secs = self.unix_secs + offset.secs
         let day_secs = local_secs - floor_div(local_secs, 86400) * 86400
         let h = (day_secs / 3600)(Int)
@@ -206,7 +206,7 @@ given DateTime {
     }
 
     /// Returns the day of week (0=Monday .. 6=Sunday, ISO 8601).
-    public weekday(self ref) Int = self.date().weekday()
+    public weekday(*self) Int = self.date().weekday()
 }
 
 // ============================================================================
@@ -216,23 +216,23 @@ given DateTime {
 given DateTime {
 
     /// Returns the Duration since the Unix epoch.
-    public to_unix_timestamp(self ref) Duration = Duration(self.unix_secs, self.nanos(Int64))
+    public to_unix_timestamp(*self) Duration = Duration(self.unix_secs, self.nanos(Int64))
 
     /// Returns the seconds since the Unix epoch.
-    public to_unix_seconds(self ref) Int64 = self.unix_secs
+    public to_unix_seconds(*self) Int64 = self.unix_secs
 
     /// Converts to the given timezone (same instant, different display).
-    public in_timezone(self ref, timezone TimeZone) DateTime = DateTime(self.unix_secs, self.nanos, timezone)
+    public in_timezone(*self, timezone TimeZone) DateTime = DateTime(self.unix_secs, self.nanos, timezone)
 
     /// Converts to UTC.
-    public in_utc(self ref) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.utc())
+    public in_utc(*self) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.utc())
 
     /// Converts to local timezone.
-    public in_local(self ref) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.local())
+    public in_local(*self) DateTime = DateTime(self.unix_secs, self.nanos, TimeZone.local())
 
     /// Return the Duration elapsed since this DateTime instant.
     /// If current wall clock is earlier than self, returns Duration.zero().
-    public elapsed(self ref) Duration = {
+    public elapsed(*self) Duration = {
         let current = DateTime.now()
         let mut diff_secs = current.unix_secs - self.unix_secs
         let mut diff_nanos = current.nanos(Int64) - self.nanos(Int64)
@@ -288,7 +288,7 @@ given DateTime as Sub[Duration] {
 given DateTime {
 
     /// Computes the Duration from self to other (returns other - self).
-    public duration_to(self ref, other DateTime) Duration = {
+    public duration_to(*self, other DateTime) Duration = {
         let mut diff_nanos = other.nanos(Int64) - self.nanos(Int64)
         let mut diff_secs = other.unix_secs - self.unix_secs
         if diff_nanos < 0 then {
@@ -333,23 +333,23 @@ given DateTime as ToString {
     /// UTC: "2024-01-15T10:30:00Z"
     /// Fixed offset: "2024-01-15T10:30:00+08:00"
     /// With nanos: "2024-01-15T10:30:00.123456789Z"
-    public to_string(self ref) String = {
+    public to_string(*self) String = {
         let mut result = String.new()
 
         // Date part
-        push_padded(result.ref, self.year(), 4)
+        push_padded(&mut result, self.year(), 4)
         result.push_byte('-')
-        push_padded(result.ref, self.month(), 2)
+        push_padded(&mut result, self.month(), 2)
         result.push_byte('-')
-        push_padded(result.ref, self.day(), 2)
+        push_padded(&mut result, self.day(), 2)
         result.push_byte('T')
 
         // Time part
-        push_padded(result.ref, self.hour(), 2)
+        push_padded(&mut result, self.hour(), 2)
         result.push_byte(':')
-        push_padded(result.ref, self.minute(), 2)
+        push_padded(&mut result, self.minute(), 2)
         result.push_byte(':')
-        push_padded(result.ref, self.second(), 2)
+        push_padded(&mut result, self.second(), 2)
 
         // Fractional seconds (if non-zero, trim trailing zeros)
         let ns = self.nanos(Int)
@@ -376,7 +376,7 @@ given DateTime as ToString {
         }
 
         // Timezone suffix
-        let offset = self.tz.offset_at(self.val)
+        let offset = self.tz.offset_at(*self)
         let offset_secs = offset.secs(Int)
         if offset_secs == 0 and offset.nanos == 0 then {
             result.push_byte('Z')
@@ -389,9 +389,9 @@ given DateTime as ToString {
             }
             let oh = abs_offset / 3600
             let om = (abs_offset % 3600) / 60
-            push_padded(result.ref, oh, 2)
+            push_padded(&mut result, oh, 2)
             result.push_byte(':')
-            push_padded(result.ref, om, 2)
+            push_padded(&mut result, om, 2)
         }
 
         return result

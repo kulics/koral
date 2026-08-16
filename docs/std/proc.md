@@ -70,60 +70,60 @@ given Command {
 }
 
 given CommandOutput {
-    public is_success(self ref) Bool
-    public code(self ref) Option[Int]
+    public is_success(*self) Bool
+    public code(*self) Option[Int]
 }
 
 given CommandOutput as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given ExitStatus {
-    public code(self ref) Option[Int]
-    public is_success(self ref) Bool
-    public signal(self ref) Option[Int]
+    public code(*self) Option[Int]
+    public is_success(*self) Bool
+    public signal(*self) Option[Int]
 }
 
 given ExitStatus as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given StdinPipe {
-    public fd(self ref) Int
+    public fd(*self) Int
 }
 
 given StdinPipe as Writer {
-    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
-    public flush(self ref) Result[Void]
+    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(*self) Result[Void]
 }
 
 given StdoutPipe {
-    public fd(self ref) Int
+    public fd(*self) Int
 }
 
 given StdoutPipe as Reader {
-    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given StderrPipe {
-    public fd(self ref) Int
+    public fd(*self) Int
 }
 
 given StderrPipe as Reader {
-    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given Process {
-    public pid(self ref) UInt32
-    public wait(self ref) Result[ExitStatus]
-    public wait_output(self ref) Result[CommandOutput]
-    public try_wait(self ref) Result[Option[ExitStatus]]
-    public take_stdin_pipe(self ref) Option[StdinPipe]
-    public take_stdout_pipe(self ref) Option[StdoutPipe]
-    public take_stderr_pipe(self ref) Option[StderrPipe]
+    public pid(*self) UInt32
+    public wait(*self) Result[ExitStatus]
+    public wait_output(*self) Result[CommandOutput]
+    public try_wait(*self) Result[Option[ExitStatus]]
+    public take_stdin_pipe(*self) Option[StdinPipe]
+    public take_stdout_pipe(*self) Option[StdoutPipe]
+    public take_stderr_pipe(*self) Option[StderrPipe]
 }
 
 given IoRedirect as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 ```

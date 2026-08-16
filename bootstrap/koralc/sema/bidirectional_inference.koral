@@ -62,7 +62,7 @@ given TypeChecker {
     }
 
     // 双向推断入口：根据是否有期望类型选择合成或检查模式。
-    protected bidirectional_check(self, expr ref Expr, expected Option[Type], scope Scope) TypedExpr = {
+    protected bidirectional_check(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expected in {
             .Some(et) then self.bidi_check_mode(expr, et, scope),
             .None() then self.bidi_synthesize_mode(expr, scope),
@@ -70,7 +70,7 @@ given TypeChecker {
     }
 
     // 合成模式：从表达式推断类型（Γ ⊢ e ⇒ τ）
-    protected bidi_synthesize_mode(self, expr ref Expr, scope Scope) TypedExpr = {
+    protected bidi_synthesize_mode(self, expr * Expr, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then {
                 let tv = self.fresh_literal_type_variable(LiteralDefaultKind.Int(), unknown_span())
@@ -102,7 +102,7 @@ given TypeChecker {
         return self.lower_dict_literal_expr(entries, Option[Type].Some(expected), scope)
     }
 
-    protected typed_collection_literal(self, elements List[ref Expr], expected Type, scope Scope) TypedExpr = {
+    protected typed_collection_literal(self, elements List[* Expr], expected Type, scope Scope) TypedExpr = {
         return self.lower_collection_literal_expr(elements, Option[Type].Some(expected), scope)
     }
 
@@ -110,13 +110,13 @@ given TypeChecker {
         return self.check_block(statements, .Some(expected), scope)
     }
 
-    protected typed_cast_expr(self, type_node ref TypeNode, inner ref Expr, scope Scope) TypedExpr = {
-        let target = self.resolve_type_in_scope(type_node.val, scope)
+    protected typed_cast_expr(self, type_node * TypeNode, inner * Expr, scope Scope) TypedExpr = {
+        let target = self.resolve_type_in_scope(*type_node, scope)
         let typed_inner = self.bidirectional_check(inner, .Some(target), scope)
         return make_typed_expr(TypedExprKind.CastExpr(target, box(typed_inner)), target)
     }
 
-    protected typed_float_literal(self, expr ref Expr, value String, expected Type, scope Scope) TypedExpr = {
+    protected typed_float_literal(self, expr * Expr, value String, expected Type, scope Scope) TypedExpr = {
         if self.is_float_type(expected) then {
             return make_typed_expr(TypedExprKind.FloatLiteral(value), expected)
         }
@@ -126,14 +126,14 @@ given TypeChecker {
         return self.bidi_synthesize_mode(expr, scope)
     }
 
-    protected typed_integer_literal(self, expr ref Expr, value String, expected Type, scope Scope) TypedExpr = {
+    protected typed_integer_literal(self, expr * Expr, value String, expected Type, scope Scope) TypedExpr = {
         if self.is_numeric_type(expected) then {
             return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected)
         }
         return self.bidi_synthesize_mode(expr, scope)
     }
 
-    protected bidi_check_mode(self, expr ref Expr, expected Type, scope Scope) TypedExpr = {
+    protected bidi_check_mode(self, expr * Expr, expected Type, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then self.typed_integer_literal(expr, value, expected, scope),
             .FloatLiteral(value, _) then self.typed_float_literal(expr, value, expected, scope),
@@ -151,7 +151,7 @@ given TypeChecker {
         }
     }
 
-    protected bidi_check_mode_fallback(self, expr ref Expr, expected Type, scope Scope) TypedExpr = {
+    protected bidi_check_mode_fallback(self, expr * Expr, expected Type, scope Scope) TypedExpr = {
         let checked = self.check_expr_scoped_ref(expr, .Some(expected), scope)
         let synth_type = checked.expr_type
         if not self.same_expr_type(synth_type, expected) then {
@@ -169,13 +169,13 @@ given TypeChecker {
         self,
         params List[LambdaParam],
         return_type Option[TypeNode],
-        body ref Expr,
+        body * Expr,
         expected Type,
         scope Scope,
     ) TypedExpr = {
         let fn_info = when expected in {
-            .FunctionType(fn_params, ret) then Option[Pair[List[ref Type], ref Type]].Some(Pair[List[ref Type], ref Type](param_entry_types(fn_params), ret)),
-            _ then Option[Pair[List[ref Type], ref Type]].None(),
+            .FunctionType(fn_params, ret) then Option[Pair[List[* Type], * Type]].Some(Pair[List[* Type], * Type](param_entry_types(fn_params), ret)),
+            _ then Option[Pair[List[* Type], * Type]].None(),
         }
 
         let mut typed_params = List[TypedParam].new()
@@ -188,7 +188,7 @@ given TypeChecker {
                 .None() then Type.Unknown(),
             }
             let param_type = if annotated_type is .Unknown() and fn_info is .Some(info) and i < info.first.count()
-                then info.first[i].val
+                then (*info.first[i])
                 else annotated_type
             typed_params.push(TypedParam(p.name, false, param_type, false))
             let kind = SymbolKind.Variable(VariableKind.Value())
@@ -203,7 +203,7 @@ given TypeChecker {
             .None() then Type.Unknown(),
         }
         let ret_type = if resolved_ret is .Unknown() and fn_info is .Some(info)
-            then info.second.val
+            then *(info.second)
             else resolved_ret
 
         let prev_function_return_context = self.storage.function_return_context
@@ -212,7 +212,7 @@ given TypeChecker {
         let prev_branch_break_targets = self.storage.branch_break_targets
         self.storage.in_loop = false
         self.storage.in_defer = false
-        self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
+        self.storage.branch_break_targets = List[*mut BranchBreakTarget].new()
         let infer_return_type_from_block_returns = return_type is .None() and resolved_ret is .Unknown() and fn_info is .None() and body is .Block(_, _)
         let infer_return_type_from_generic_block_returns = self.contains_generic_parameter(ret_type) and body is .Block(_, _)
         if infer_return_type_from_block_returns then {
@@ -256,7 +256,7 @@ given TypeChecker {
     }
 
     // 从 LambdaExpr 的 TypedExprKind 中提取参数类型和返回类型，构造 FunctionType。
-    protected build_lambda_function_type(self, expr ref TypedExpr) Type = {
+    protected build_lambda_function_type(self, expr * TypedExpr) Type = {
         return when expr.expr_kind in {
             .LambdaExpr(params, ret, _) then {
                 break self.build_function_type_from_params(params, ret)
@@ -273,7 +273,7 @@ given TypeChecker {
             .Unknown() then { has_unknown = true },
             _ then {},
         }
-        let mut param_type_refs = List[ref Type].new()
+        let mut param_type_refs = List[* Type].new()
         for p in params then {
             when p.param_type in {
                 .Unknown() then { has_unknown = true },
@@ -307,7 +307,7 @@ given TypeChecker {
             },
             .GenericStruct(template, args) then {
                 break if (template == "List" or template == "Set") and args.count() > 0(UInt)
-                    then Option[Type].Some(args[0(UInt)].val)
+                    then Option[Type].Some((*args[0(UInt)]))
                     else Option[Type].None()
             },
             _ then Option[Type].None(),
@@ -327,7 +327,7 @@ given TypeChecker {
             },
             .GenericStruct(template, args) then {
                 break if template == "Dict" and args.count() > 1(UInt)
-                    then Pair[Option[Type], Option[Type]](Option[Type].Some(args[0(UInt)].val), Option[Type].Some(args[1(UInt)].val))
+                    then Pair[Option[Type], Option[Type]](Option[Type].Some((*args[0(UInt)])), Option[Type].Some((*args[1(UInt)])))
                     else Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None())
             },
             _ then Pair[Option[Type], Option[Type]](Option[Type].None(), Option[Type].None()),

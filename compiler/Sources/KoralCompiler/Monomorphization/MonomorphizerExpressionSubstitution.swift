@@ -21,10 +21,10 @@ extension Monomorphizer {
         if case .mutableReference(let inner) = base.type {
             return inner
         }
-        if case .borrowedReference(let inner, _) = base.type {
+        if case .borrowedReference(let inner) = base.type {
             return inner
         }
-        if case .mutableBorrowedReference(let inner, _) = base.type {
+        if case .mutableBorrowedReference(let inner) = base.type {
             return inner
         }
         if case .weakReference(let inner) = base.type {

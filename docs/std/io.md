@@ -9,16 +9,16 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
+    read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 public trait Writer {
-    write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
-    flush(self ref) Result[Void]
+    write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    flush(*self) Result[Void]
 }
 
 public trait Seeker {
-    seek(self ref, pos SeekOrigin) Result[UInt64]
+    seek(*self, pos SeekOrigin) Result[UInt64]
 }
 ```
 
@@ -48,37 +48,37 @@ public type SeekOrigin {
 given[R Reader] BufReader[R] {
     public new(r R) BufReader[R]
     public with_capacity(cap UInt, r R) BufReader[R]
-    public read_byte(self ref) Result[Option[UInt8]]
-    public read_rune(self ref) Result[Option[Rune]]
-    public read_until(self ref, delim UInt8, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
-    public read_line(self ref) Result[Option[String]]
-    public skip(self ref, n UInt) Result[UInt]
+    public read_byte(*self) Result[Option[UInt8]]
+    public read_rune(*self) Result[Option[Rune]]
+    public read_until(*self, delim UInt8, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read_line(*self) Result[Option[String]]
+    public skip(*self, n UInt) Result[UInt]
 }
 
 given[R Reader] BufReader[R] as Reader {
-    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given[R Reader and Seeker] BufReader[R] as Seeker {
-    public seek(self ref, pos SeekOrigin) Result[UInt64]
+    public seek(*self, pos SeekOrigin) Result[UInt64]
 }
 
 given[W Writer] BufWriter[W] {
     public new(w W) BufWriter[W]
     public with_capacity(cap UInt, w W) BufWriter[W]
-    public write_byte(self ref, b UInt8) Result[Void]
-    public write_string(self ref, s String) Result[Void]
-    public write_line(self ref, s String) Result[Void]
-    public write_rune(self ref, r Rune) Result[Void]
+    public write_byte(*self, b UInt8) Result[Void]
+    public write_string(*self, s String) Result[Void]
+    public write_line(*self, s String) Result[Void]
+    public write_rune(*self, r Rune) Result[Void]
 }
 
 given[W Writer] BufWriter[W] as Writer {
-    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
-    public flush(self ref) Result[Void]
+    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(*self) Result[Void]
 }
 
 given[W Writer and Seeker] BufWriter[W] as Seeker {
-    public seek(self ref, pos SeekOrigin) Result[UInt64]
+    public seek(*self, pos SeekOrigin) Result[UInt64]
 }
 
 given ByteBuffer {
@@ -89,28 +89,28 @@ given ByteBuffer {
 }
 
 given ByteBuffer as Reader {
-    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given ByteBuffer as Writer {
-    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
-    public flush(self ref) Result[Void]
+    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(*self) Result[Void]
 }
 
 given ByteBuffer as Seeker {
-    public seek(self ref, pos SeekOrigin) Result[UInt64]
+    public seek(*self, pos SeekOrigin) Result[UInt64]
 }
 
 given IoError as Error {
-    public message(self ref) String
+    public message(*self) String
 }
 
 given Reader {
-    public read_all(self ref) Result[List[UInt8]]
+    public read_all(*self) Result[List[UInt8]]
     public copy_all_to[W Writer](self, dst W) Result[UInt]
 }
 
 given Writer {
-    public write_all(self ref, from: List[UInt8], range Range[UInt]) Result[Void]
+    public write_all(*self, from: List[UInt8], range Range[UInt]) Result[Void]
 }
 ```

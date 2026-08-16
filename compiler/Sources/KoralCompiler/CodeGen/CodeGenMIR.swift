@@ -644,6 +644,19 @@ final class MIRFunctionCodeEmitter {
       }
     }
 
+    // Follow the copy chain from a local back to find the originating
+    // heapOwnedRefLocal.  When a heapOwned ref flows through copies
+    // (e.g. %3 -> %5 -> %6) the intermediate locals are NOT in
+    // heapOwnedRefLocals, so a direct .contains() check misses them.
+    func findHeapOwnedRoot(_ localID: MIRLocalID) -> MIRLocalID? {
+      var current: MIRLocalID? = localID
+      while let candidate = current {
+        if heapOwnedRefLocals.contains(candidate) { return candidate }
+        current = copiedFromByLocal[candidate]
+      }
+      return nil
+    }
+
     var result: Set<MIRLocalID> = []
     for block in function.blocks {
       for statement in block.statements {
@@ -660,21 +673,21 @@ final class MIRFunctionCodeEmitter {
         for (index, argument) in call.arguments.enumerated() {
           guard index < parameterList.count,
                 let localID = localForwarded(in: argument),
-                heapOwnedRefLocals.contains(localID) else {
+                let rootLocal = findHeapOwnedRoot(localID) else {
             continue
           }
           let parameter = parameterList[index]
           let parameterType = parameter.type
           if parameter.kind == .byMutRef, localUseCounts[localID] == 1 {
-            result.insert(localID)
+            result.insert(rootLocal)
             continue
           }
           if isBorrowedParameterType(parameterType), localUseCounts[localID] == 1 {
-            result.insert(localID)
+            result.insert(rootLocal)
             continue
           }
           if isManagedReferenceParameterType(parameterType) {
-            markUnsafe(localID)
+            markUnsafe(rootLocal)
           }
         }
       }
@@ -688,12 +701,15 @@ final class MIRFunctionCodeEmitter {
   }
 
   private static func isBorrowedReferenceLikeType(_ type: Type) -> Bool {
-    switch type {
-    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .weakReference, .mutableWeakReference:
-      return true
-    default:
+    guard let info = type.indirectionCompatibilityInfo else {
       return false
     }
+    return info.family == .managedReference || info.family == .weakReference
+  }
+
+  private static func isOwnershipPreservingReferenceLikeCast(sourceType: Type, targetType: Type) -> Bool {
+    sourceType.compatibleIndirectionInners(with: targetType) != nil
+      || targetType.compatibleIndirectionInners(with: sourceType) != nil
   }
 
   private static func isNonOwningLocalValue(_ value: MIRValue, targetType: Type) -> Bool {
@@ -1597,7 +1613,7 @@ final class MIRFunctionCodeEmitter {
     }
 
     switch expectedType {
-    case .reference(let inner), .borrowedReference(let inner, _):
+    case .reference(let inner), .borrowedReference(let inner):
       guard borrowCompatible(actualType: actualType, expectedInner: inner) else { return nil }
       if isReferenceLikeType(actualType) {
         return emitValue(value, sourceMode: true)
@@ -1612,7 +1628,7 @@ final class MIRFunctionCodeEmitter {
         }
       }()
       return emitReference(place: place, kind: .shared, allocation: allocation)
-    case .mutableReference(let inner), .mutableBorrowedReference(let inner, _):
+    case .mutableReference(let inner), .mutableBorrowedReference(let inner):
       guard borrowCompatible(actualType: actualType, expectedInner: inner) else { return nil }
       if isReferenceLikeType(actualType) {
         return emitValue(value, sourceMode: true)
@@ -1650,10 +1666,13 @@ final class MIRFunctionCodeEmitter {
     if actualType == expectedInner || codeGen.context.containsGenericParameter(expectedInner) {
       return true
     }
-    if !isReferenceLikeType(actualType) {
+    guard let info = actualType.indirectionCompatibilityInfo else {
       return true
     }
-    return codeGen.context.getLayoutKey(actualType) == codeGen.context.getLayoutKey(expectedInner)
+    guard info.family == .managedReference || info.family == .weakReference else {
+      return true
+    }
+    return codeGen.context.getLayoutKey(info.inner) == codeGen.context.getLayoutKey(expectedInner)
   }
 
   private func globalFunctionParameterTypes(for symbol: Symbol) -> [Type]? {
@@ -1907,28 +1926,7 @@ final class MIRFunctionCodeEmitter {
 
   private func isOwnershipPreservingCast(sourceType: Type, targetType: Type) -> Bool {
     switch (sourceType, targetType) {
-    case (.reference, .reference),
-         (.reference, .mutableReference),
-         (.reference, .borrowedReference),
-         (.reference, .mutableBorrowedReference),
-         (.mutableReference, .reference),
-         (.mutableReference, .mutableReference),
-         (.mutableReference, .borrowedReference),
-         (.mutableReference, .mutableBorrowedReference),
-         (.borrowedReference, .reference),
-         (.borrowedReference, .mutableReference),
-         (.borrowedReference, .borrowedReference),
-         (.borrowedReference, .mutableBorrowedReference),
-         (.mutableBorrowedReference, .reference),
-         (.mutableBorrowedReference, .mutableReference),
-         (.mutableBorrowedReference, .borrowedReference),
-         (.mutableBorrowedReference, .mutableBorrowedReference),
-         (.weakReference, .weakReference),
-         (.weakReference, .mutableWeakReference),
-         (.mutableWeakReference, .weakReference),
-         (.mutableWeakReference, .mutableWeakReference),
-         (.pointer, .pointer),
-         (.pointer, .mutablePointer),
+    case _ where Self.isOwnershipPreservingReferenceLikeCast(sourceType: sourceType, targetType: targetType),
          (.mutablePointer, .pointer),
          (.mutablePointer, .mutablePointer):
       return true
@@ -2038,8 +2036,8 @@ final class MIRFunctionCodeEmitter {
       switch resolver.type(of: value) ?? .void {
       case .reference(let inner) where isTraitObjectType(inner),
            .mutableReference(let inner) where isTraitObjectType(inner),
-           .borrowedReference(let inner, _) where isTraitObjectType(inner),
-           .mutableBorrowedReference(let inner, _) where isTraitObjectType(inner):
+           .borrowedReference(let inner) where isTraitObjectType(inner),
+           .mutableBorrowedReference(let inner) where isTraitObjectType(inner):
         expression = codeGen.nextTempWithDecl(cType: "struct __koral_TraitWeakRef")
         let weakTemp = codeGen.nextTempWithDecl(cType: "struct __koral_WeakRef")
         codeGen.addIndent()
@@ -2269,7 +2267,7 @@ final class MIRFunctionCodeEmitter {
       let memberName = sanitizeCIdentifier(codeGen.context.getName(field.defId) ?? "field")
       switch baseType {
       case .reference(let inner), .mutableReference(let inner),
-           .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
+           .borrowedReference(let inner), .mutableBorrowedReference(let inner):
         let path = "((\(codeGen.cTypeName(inner))*)\(baseAccess.path).ptr)->\(memberName)"
         return MIRPlaceAccess(path: path, control: "\(baseAccess.path).control", cleanups: baseAccess.cleanups)
       case .pointer, .mutablePointer:
@@ -2520,7 +2518,7 @@ final class MIRFunctionCodeEmitter {
         setInitFlag(local, to: false)
       }
     case .ref(let place, _, let allocation):
-      if allocation == .heapOwned || allocation == .heapOwnedMove {
+      if allocation == .heapOwnedMove {
         consumeMovedPlace(place)
       }
     default:

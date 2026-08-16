@@ -41,26 +41,26 @@ given RegexFlag {
 
 // 编译后的正则表达式内部存储（持有 C 层资源）
 type RegexStorage(
-    handle ptr UInt8,  // C 层 regex_t 句柄（堆分配）
+    handle *raw UInt8,  // C 层 regex_t 句柄（堆分配）
     pat      String,     // 原始正则表达式字符串
     groups   UInt        // 捕获组数量（不含 $0）
 )
 
 given RegexStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         __koral_regex_free(source.handle)
     }
 }
 
-// 编译后的正则表达式（通过 ref 引用计数管理 C 层资源）
-public type Regex(storage ref RegexStorage)
+// 编译后的正则表达式（通过 * 引用计数管理 C 层资源）
+public type Regex(storage * RegexStorage)
 
 given Regex {
 
-    public pattern(self ref) String = self.storage.pat
+    public pattern(*self) String = self.storage.pat
 
-    public group_count(self ref) UInt = self.storage.groups
+    public group_count(*self) UInt = self.storage.groups
 }
 
 // 轻量匹配结果（仅位置，不含捕获组）
@@ -72,11 +72,11 @@ public type Match(
 
 given Match {
 
-    public text(self ref) String = self.source.substring(self.match_start..<self.match_end)
+    public text(*self) String = self.source.substring(self.match_start..<self.match_end)
 
-    public start(self ref) UInt = self.match_start
+    public start(*self) UInt = self.match_start
 
-    public end(self ref) UInt = self.match_end
+    public end(*self) UInt = self.match_end
 }
 
 // 带捕获组的匹配结果
@@ -88,19 +88,19 @@ public type Captures(
 
 given Captures {
 
-    public text(self ref) String = {
+    public text(*self) String = {
         let s = self.starts[0](UInt)
         let e = self.ends[0](UInt)
         return self.source.substring(s..<e)
     }
 
-    public start(self ref) UInt = self.starts[0](UInt)
+    public start(*self) UInt = self.starts[0](UInt)
 
-    public end(self ref) UInt = self.ends[0](UInt)
+    public end(*self) UInt = self.ends[0](UInt)
 
-    public group_count(self ref) UInt = self.starts.count()
+    public group_count(*self) UInt = self.starts.count()
 
-    public group(self ref, index UInt) Option[String] = {
+    public group(*self, index UInt) Option[String] = {
         if index >= self.starts.count() then {
             return Option[String].None()
         }
@@ -112,7 +112,7 @@ given Captures {
         return Option[String].Some(self.source.substring(s(UInt)..<e(UInt)))
     }
 
-    public group_start(self ref, index UInt) Option[UInt] = {
+    public group_start(*self, index UInt) Option[UInt] = {
         if index >= self.starts.count() then {
             return Option[UInt].None()
         }
@@ -123,7 +123,7 @@ given Captures {
         return Option[UInt].Some(s(UInt))
     }
 
-    public group_end(self ref, index UInt) Option[UInt] = {
+    public group_end(*self, index UInt) Option[UInt] = {
         if index >= self.ends.count() then {
             return Option[UInt].None()
         }
@@ -155,11 +155,11 @@ public type RegexSplitIterator(
 
 given MatchIterator as Iterator[Match] {
 
-    public next(self ref mut) Option[Match] = {
+    public next(*mut self) Option[Match] = {
         if self.offset > self.text.count() then {
             return Option[Match].None()
         }
-        when Regex.find_at(self.regex.ref, self.text, self.offset) in {
+        when Regex.find_at(&self.regex, self.text, self.offset) in {
             .Some(m) then {
                 if m.end() == self.offset then {
                     self.offset += 1
@@ -182,11 +182,11 @@ given MatchIterator as Iterator[Match] {
 
 given CapturesIterator as Iterator[Captures] {
 
-    public next(self ref mut) Option[Captures] = {
+    public next(*mut self) Option[Captures] = {
         if self.offset > self.text.count() then {
             return Option[Captures].None()
         }
-        when Regex.captures_at(self.regex.ref, self.text, self.offset) in {
+        when Regex.captures_at(&self.regex, self.text, self.offset) in {
             .Some(c) then {
                 if c.end() == self.offset then {
                     self.offset += 1
@@ -209,7 +209,7 @@ given CapturesIterator as Iterator[Captures] {
 
 given RegexSplitIterator as Iterator[String] {
 
-    public next(self ref mut) Option[String] = {
+    public next(*mut self) Option[String] = {
         if self.done then {
             return Option[String].None()
         }
@@ -220,7 +220,7 @@ given RegexSplitIterator as Iterator[String] {
             return Option[String].None()
         }
 
-        when Regex.find_at(self.regex.ref, self.text, self.offset) in {
+        when Regex.find_at(&self.regex, self.text, self.offset) in {
             .Some(m) then {
                 let mut part = self.text.substring(self.offset..<m.start())
 

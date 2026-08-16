@@ -5,20 +5,20 @@
 
 // Describes what kind of generic entity is being instantiated.
 public type InstantiationKind {
-    StructType(template GenericStructTemplate, args List[ref Type]),
-    EnumType(template GenericEnumTemplate, args List[ref Type]),
-    Function(template ref GenericFunctionTemplate, args List[ref Type]),
+    StructType(template GenericStructTemplate, args List[* Type]),
+    EnumType(template GenericEnumTemplate, args List[* Type]),
+    Function(template * GenericFunctionTemplate, args List[* Type]),
     ExtensionMethod(
         template_name String,
         base_type Type,
-        template ref GenericExtensionMethodTemplate,
-        type_args List[ref Type],
-        method_type_args List[ref Type],
+        template * GenericExtensionMethodTemplate,
+        type_args List[* Type],
+        method_type_args List[* Type],
     ),
     TraitMethod(
         base_type Type,
         method_name String,
-        method_type_args List[ref Type],
+        method_type_args List[* Type],
     ),
 }
 
@@ -36,16 +36,16 @@ public type InstantiationRequest(
 // Deduplication key derived from an InstantiationRequest.
 // Two requests with the same key represent the same instantiation.
 public type InstantiationKey {
-    StructType(template_def_id DefId, args List[ref Type]),
-    EnumType(template_def_id DefId, args List[ref Type]),
-    Function(template_def_id DefId, args List[ref Type]),
-    ExtensionMethod(template_name String, base_type Type, method_name String, type_args List[ref Type], method_type_args List[ref Type]),
-    TraitMethod(base_type Type, method_name String, method_type_args List[ref Type]),
+    StructType(template_def_id DefId, args List[* Type]),
+    EnumType(template_def_id DefId, args List[* Type]),
+    Function(template_def_id DefId, args List[* Type]),
+    ExtensionMethod(template_name String, base_type Type, method_name String, type_args List[* Type], method_type_args List[* Type]),
+    TraitMethod(base_type Type, method_name String, method_type_args List[* Type]),
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-private let type_parts_to_string(parts List[ref Type]) String = {
+private let type_parts_to_string(parts List[* Type]) String = {
     if parts.is_empty() then {
         return "-"
     }
@@ -53,7 +53,7 @@ private let type_parts_to_string(parts List[ref Type]) String = {
     let mut first = true
     for part in parts then {
         if not first then { out.push_byte(',') }
-        out.push_string(stable_type_key(part.val))
+        out.push_string(stable_type_key(*part))
         first = false
     }
     return out
@@ -63,7 +63,7 @@ private let type_parts_to_string(parts List[ref Type]) String = {
 
 given InstantiationKey {
     // Convert the key to its canonical string representation used for deduplication.
-    public to_string(self ref) String = {
+    public to_string(*self) String = {
         return when self in {
             .StructType(template_def_id, args) then
                 "struct:\(template_def_id.id):\(type_parts_to_string(args))",
@@ -130,38 +130,38 @@ given InstantiationKey as Hash {
         .StructType(template_def_id, args) then {
             let mut hash = 1(UInt).combine_hash(template_def_id.id)
             for arg in args then {
-                hash = hash.combine_hash(arg.val.hash())
+                hash = hash.combine_hash((*arg).hash())
             }
             break hash
         },
         .EnumType(template_def_id, args) then {
             let mut hash = 2(UInt).combine_hash(template_def_id.id)
             for arg in args then {
-                hash = hash.combine_hash(arg.val.hash())
+                hash = hash.combine_hash((*arg).hash())
             }
             break hash
         },
         .Function(template_def_id, args) then {
             let mut hash = 3(UInt).combine_hash(template_def_id.id)
             for arg in args then {
-                hash = hash.combine_hash(arg.val.hash())
+                hash = hash.combine_hash((*arg).hash())
             }
             break hash
         },
         .ExtensionMethod(template_name, base_type, method_name, type_args, method_type_args) then {
             let mut hash = 4(UInt).combine_hash(template_name.hash()).combine_hash(base_type.hash()).combine_hash(method_name.hash())
             for arg in type_args then {
-                hash = hash.combine_hash(arg.val.hash())
+                hash = hash.combine_hash((*arg).hash())
             }
             for arg in method_type_args then {
-                hash = hash.combine_hash(arg.val.hash())
+                hash = hash.combine_hash((*arg).hash())
             }
             break hash
         },
         .TraitMethod(base_type, method_name, method_type_args) then {
             let mut hash = 5(UInt).combine_hash(base_type.hash()).combine_hash(method_name.hash())
             for arg in method_type_args then {
-                hash = hash.combine_hash(arg.val.hash())
+                hash = hash.combine_hash((*arg).hash())
             }
             break hash
         },
@@ -189,7 +189,7 @@ given InstantiationRequest {
                 break InstantiationKey.ExtensionMethod(
                     template_name,
                     base_type,
-                    template.val.method.name,
+                    (*template).method.name,
                     type_args,
                     method_type_args,
                 )

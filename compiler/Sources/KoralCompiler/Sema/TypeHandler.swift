@@ -932,10 +932,10 @@ public class ReferenceHandler: TypeHandler {
         if case .mutableReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
-        if case .borrowedReference(let inner, _) = type, usesTraitObjectRefStorage(inner, context: context) {
+        if case .borrowedReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
-        if case .mutableBorrowedReference(let inner, _) = type, usesTraitObjectRefStorage(inner, context: context) {
+        if case .mutableBorrowedReference(let inner) = type, usesTraitObjectRefStorage(inner, context: context) {
             return "struct __koral_TraitRef"
         }
         return "struct __koral_Ref"
@@ -955,13 +955,13 @@ public class ReferenceHandler: TypeHandler {
     public func getQualifiedName(_ type: Type) -> String {
         switch type {
         case .reference(let inner):
-            return "ref \(inner.description)"
+            return "*\(inner.description)"
         case .mutableReference(let inner):
-            return "ref mut \(inner.description)"
-        case .borrowedReference(let inner, let lifetime):
-            return "ref \(lifetime) \(inner.description)"
-        case .mutableBorrowedReference(let inner, let lifetime):
-            return "ref \(lifetime) mut \(inner.description)"
+            return "*mut \(inner.description)"
+        case .borrowedReference(let inner):
+            return "ref *\(inner.description)"
+        case .mutableBorrowedReference(let inner):
+            return "ref mut *\(inner.description)"
         default:
             return ""
         }
@@ -972,7 +972,7 @@ public class ReferenceHandler: TypeHandler {
         switch type {
         case .reference(let resolvedInner), .mutableReference(let resolvedInner):
             inner = resolvedInner
-        case .borrowedReference(let resolvedInner, _), .mutableBorrowedReference(let resolvedInner, _):
+        case .borrowedReference(let resolvedInner), .mutableBorrowedReference(let resolvedInner):
             inner = resolvedInner
         default:
             return false
@@ -989,7 +989,7 @@ public class ReferenceHandler: TypeHandler {
     public func getInnerType(_ type: Type) -> Type? {
         switch type {
         case .reference(let inner), .mutableReference(let inner),
-             .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
+             .borrowedReference(let inner), .mutableBorrowedReference(let inner):
             return inner
         default:
             return nil

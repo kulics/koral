@@ -17,7 +17,7 @@ private type TcpListenerStorage(fd Int64)
 given TcpListenerStorage as Drop {
 
     /// Automatically close the socket when TcpListenerStorage is dropped.
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         if source.fd >= 0 then {
             __koral_socket_close(source.fd)
         }
@@ -29,9 +29,9 @@ given TcpListenerStorage as Drop {
 // ============================================================================
 
 /// TCP listener type.
-/// Internally holds a TcpListenerStorage ref, shared via reference counting.
+/// Internally holds a TcpListenerStorage *, shared via reference counting.
 /// The socket is automatically closed when the last reference is released.
-public type TcpListener(private storage ref TcpListenerStorage)
+public type TcpListener(private storage * TcpListenerStorage)
 
 // ============================================================================
 // TcpListener Methods
@@ -39,7 +39,7 @@ public type TcpListener(private storage ref TcpListenerStorage)
 given TcpListener {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(self ref) Int = self.storage.fd(Int)
+    public fd(*self) Int = self.storage.fd(Int)
 
     /// Bind to a socket address and start listening.
     /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
@@ -98,7 +98,7 @@ given TcpListener {
 
     /// Accept a connection. Blocks until a client connects.
     /// Returns a Pair of (TcpSocket, SocketAddr) on success.
-    public accept(self ref) Result[Pair[TcpSocket, SocketAddr]] = {
+    public accept(*self) Result[Pair[TcpSocket, SocketAddr]] = {
         // Allocate a 128-byte buffer for the peer address
         let addr_buf = alloc_memory[UInt8](128)
         defer dealloc_memory(addr_buf)
@@ -107,7 +107,7 @@ given TcpListener {
         }
         let mut addr_len UInt32 = 128(UInt32)
 
-        let new_fd = __koral_socket_accept(self.storage.fd, addr_buf, addr_len.ptr)
+        let new_fd = __koral_socket_accept(self.storage.fd, addr_buf, &raw addr_len)
         if new_fd < 0 then {
             return Result[Pair[TcpSocket, SocketAddr]].Error(box(last_error_message()))
         }
@@ -133,7 +133,7 @@ given TcpListener {
     }
 
     /// Get the local address this listener is bound to.
-    public local_addr(self ref) Result[SocketAddr] = {
+    public local_addr(*self) Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128)
         defer dealloc_memory(addr_buf)
         for i in 0(UInt)..<128(UInt) then {
@@ -141,7 +141,7 @@ given TcpListener {
         }
         let mut addr_len UInt32 = 128(UInt32)
 
-        let result = __koral_socket_getsockname(self.storage.fd, addr_buf, addr_len.ptr)
+        let result = __koral_socket_getsockname(self.storage.fd, addr_buf, &raw addr_len)
         if result <> 0 then {
               return Result[SocketAddr].Error(box(last_error_message()))
         }

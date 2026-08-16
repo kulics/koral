@@ -6,6 +6,52 @@ import Foundation
 
 extension TypeChecker {
 
+  private func wrapManagedReference(inner: Type, mutable: Bool) -> Type {
+    return mutable ? .mutableReference(inner: inner) : .reference(inner: inner)
+  }
+
+  private func wrapWeakReference(inner: Type, mutable: Bool) -> Type {
+    mutable ? .mutableWeakReference(inner: inner) : .weakReference(inner: inner)
+  }
+
+  private func resolveIndirectionTypeNode(
+    inner: TypeNode,
+    mutable: Bool,
+    substitution: [String: Type]? = nil,
+    wrap: (Type, Bool) -> Type
+  ) throws -> Type {
+    let resolveChild: (TypeNode) throws -> Type = { node in
+      if let substitution {
+        return try self.resolveTypeNodeWithSubstitution(node, substitution: substitution)
+      }
+      return try self.resolveTypeNode(node)
+    }
+
+    if case .identifier(let name) = inner, traits[name] != nil {
+      let (safe, reasons) = try checkObjectSafety(name)
+      if !safe {
+        throw SemanticError(.generic(
+          "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
+        ), span: currentSpan)
+      }
+      return wrap(.traitObject(traitName: name, typeArgs: []), mutable)
+    }
+
+    if case .generic(let base, let args) = inner, traits[base] != nil {
+      let (safe, reasons) = try checkObjectSafety(base)
+      if !safe {
+        throw SemanticError(.generic(
+          "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
+        ), span: currentSpan)
+      }
+      let resolvedArgs = try args.map { try resolveChild($0) }
+      return wrap(.traitObject(traitName: base, typeArgs: resolvedArgs), mutable)
+    }
+
+    let base = try resolveChild(inner)
+    return wrap(base, mutable)
+  }
+
   private func modulePath(of type: Type) -> [String]? {
     switch type {
     case .structure(let defId), .`enum`(let defId), .opaque(let defId):
@@ -116,60 +162,7 @@ extension TypeChecker {
       }
       return t
     case .reference(let inner, let mutable):
-      // Check if inner is a trait name → trait object reference
-      if case .identifier(let name) = inner, traits[name] != nil {
-        let (safe, reasons) = try checkObjectSafety(name)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        return mutable
-          ? .mutableReference(inner: .traitObject(traitName: name, typeArgs: []))
-          : .reference(inner: .traitObject(traitName: name, typeArgs: []))
-      }
-      // Check if inner is a generic trait → [Args]TraitName ref
-      if case .generic(let base, let args) = inner, traits[base] != nil {
-        let (safe, reasons) = try checkObjectSafety(base)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return mutable
-          ? .mutableReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-          : .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-      }
-      let base = try resolveTypeNode(inner)
-      return mutable ? .mutableReference(inner: base) : .reference(inner: base)
-
-    case .borrowedReference(let inner, let lifetime, let mutable):
-      if case .identifier(let name) = inner, traits[name] != nil {
-        let (safe, reasons) = try checkObjectSafety(name)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        return mutable
-          ? .mutableBorrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
-          : .borrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
-      }
-      if case .generic(let base, let args) = inner, traits[base] != nil {
-        let (safe, reasons) = try checkObjectSafety(base)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return mutable
-          ? .mutableBorrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
-          : .borrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
-      }
-      let base = try resolveTypeNode(inner)
-      return mutable ? .mutableBorrowedReference(inner: base, lifetime: lifetime) : .borrowedReference(inner: base, lifetime: lifetime)
+      return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapManagedReference)
     case .pointer(let inner, let mutable):
       let base = try resolveTypeNode(inner)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
@@ -261,32 +254,7 @@ extension TypeChecker {
       return .function(parameters: parameters, returns: resolvedReturnType)
       
     case .weakReference(let inner, let mutable):
-      // Check if inner is a trait name → trait object weakref
-      if case .identifier(let name) = inner, traits[name] != nil {
-        let (safe, reasons) = try checkObjectSafety(name)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        return mutable
-          ? .mutableWeakReference(inner: .traitObject(traitName: name, typeArgs: []))
-          : .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
-      }
-      if case .generic(let base, let args) = inner, traits[base] != nil {
-        let (safe, reasons) = try checkObjectSafety(base)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return mutable
-          ? .mutableWeakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-          : .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-      }
-      let base = try resolveTypeNode(inner)
-      return mutable ? .mutableWeakReference(inner: base) : .weakReference(inner: base)
+      return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapWeakReference)
     }
   }
   
@@ -302,59 +270,7 @@ extension TypeChecker {
       return try resolveTypeNode(node)
       
     case .reference(let inner, let mutable):
-      // Check if inner is a trait name → trait object reference
-      if case .identifier(let name) = inner, traits[name] != nil {
-        let (safe, reasons) = try checkObjectSafety(name)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        return mutable
-          ? .mutableReference(inner: .traitObject(traitName: name, typeArgs: []))
-          : .reference(inner: .traitObject(traitName: name, typeArgs: []))
-      }
-      if case .generic(let base, let args) = inner, traits[base] != nil {
-        let (safe, reasons) = try checkObjectSafety(base)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-        return mutable
-          ? .mutableReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-          : .reference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-      }
-      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
-      return mutable ? .mutableReference(inner: base) : .reference(inner: base)
-
-    case .borrowedReference(let inner, let lifetime, let mutable):
-      if case .identifier(let name) = inner, traits[name] != nil {
-        let (safe, reasons) = try checkObjectSafety(name)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        return mutable
-          ? .mutableBorrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
-          : .borrowedReference(inner: .traitObject(traitName: name, typeArgs: []), lifetime: lifetime)
-      }
-      if case .generic(let base, let args) = inner, traits[base] != nil {
-        let (safe, reasons) = try checkObjectSafety(base)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-        return mutable
-          ? .mutableBorrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
-          : .borrowedReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs), lifetime: lifetime)
-      }
-      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
-      return mutable ? .mutableBorrowedReference(inner: base, lifetime: lifetime) : .borrowedReference(inner: base, lifetime: lifetime)
+      return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, substitution: substitution, wrap: wrapManagedReference)
 
     case .pointer(let inner, let mutable):
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
@@ -388,31 +304,7 @@ extension TypeChecker {
       return try resolveTypeNode(node)
       
     case .weakReference(let inner, let mutable):
-      if case .identifier(let name) = inner, traits[name] != nil {
-        let (safe, reasons) = try checkObjectSafety(name)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        return mutable
-          ? .mutableWeakReference(inner: .traitObject(traitName: name, typeArgs: []))
-          : .weakReference(inner: .traitObject(traitName: name, typeArgs: []))
-      }
-      if case .generic(let base, let args) = inner, traits[base] != nil {
-        let (safe, reasons) = try checkObjectSafety(base)
-        if !safe {
-          throw SemanticError(.generic(
-            "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
-          ), span: currentSpan)
-        }
-        let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-        return mutable
-          ? .mutableWeakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-          : .weakReference(inner: .traitObject(traitName: base, typeArgs: resolvedArgs))
-      }
-      let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
-      return mutable ? .mutableWeakReference(inner: base) : .weakReference(inner: base)
+      return try resolveIndirectionTypeNode(inner: inner, mutable: mutable, substitution: substitution, wrap: wrapWeakReference)
     }
   }
   
@@ -503,31 +395,21 @@ extension TypeChecker {
   
   /// Extracts the inner type from a type modifier (.reference, .pointer, .weakReference).
   private func typeModifierInnerType(_ type: Type) -> Type? {
-    switch type {
-    case .reference(let inner): return inner
-    case .mutableReference(let inner): return inner
-    case .borrowedReference(let inner, _): return inner
-    case .mutableBorrowedReference(let inner, _): return inner
-    case .pointer(let element): return element
-    case .mutablePointer(let element): return element
-    case .weakReference(let inner): return inner
-    case .mutableWeakReference(let inner): return inner
-    default: return nil
-    }
+    type.indirectionCompatibilityInfo?.inner
   }
 
   /// Returns the base name string for a type modifier type.
   private func typeModifierBaseName(_ type: Type) -> String {
-    switch type {
-    case .reference: return "Ref"
-    case .mutableReference: return "MutRef"
-    case .borrowedReference: return "Ref"
-    case .mutableBorrowedReference: return "MutRef"
-    case .pointer: return "Ptr"
-    case .mutablePointer: return "MutPtr"
-    case .weakReference: return "WeakRef"
-    case .mutableWeakReference: return "MutWeakRef"
-    default: return ""
+    guard let info = type.indirectionCompatibilityInfo else {
+      return ""
+    }
+    switch (info.family, info.mutable) {
+    case (.managedReference, false): return "Ref"
+    case (.managedReference, true): return "MutRef"
+    case (.rawPointer, false): return "Ptr"
+    case (.rawPointer, true): return "MutPtr"
+    case (.weakReference, false): return "WeakRef"
+    case (.weakReference, true): return "MutWeakRef"
     }
   }
 

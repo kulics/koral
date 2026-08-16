@@ -382,7 +382,7 @@ private let make_prepared_compilation(
 }
 
 private let load_manifest_modules_into_prepared(
-    resolver ref mut ModuleResolver,
+    resolver *mut ModuleResolver,
     manifest PackageManifest,
     package_kind ResolvedPackageKind,
     std_root_module_name Option[String],
@@ -585,7 +585,7 @@ private let prepare_single_file_compilation(options InvocationOptions) Result[Pr
         .Some(std_manifest_path) then {
             let std_manifest = load_package_manifest(std_manifest_path) or return
             let std_prepared = load_manifest_modules_into_prepared(
-                resolver.ref,
+                &mut resolver,
                 std_manifest,
                 ResolvedPackageKind.Std(),
                 Option[String].None(),
@@ -770,12 +770,12 @@ private let build_c_output_path(artifact_base_name String, default_output_dir Pa
     }
 }
 
-private let lower_mir_after_typecheck(result ref BodyCheckerOutput, typed_program ref TypedProgram, phase_prefix String) Pair[ref MIRProgram, CompilerContext] = {
+private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program * TypedProgram, phase_prefix String) Pair[* MIRProgram, CompilerContext] = {
     let mut context = result.context
 
     debug_phase("\(phase_prefix): monomorphize")
     let mut mono = Monomorphizer.new_with_inputs(
-        typed_program.val,
+        *typed_program,
         result.instantiation_requests,
         result.generic_templates,
         context,
@@ -785,23 +785,23 @@ private let lower_mir_after_typecheck(result ref BodyCheckerOutput, typed_progra
         result.trait_registry,
         result.conformance_index,
     )
-    let mut mono_program = mono.ref.monomorphize()
+    let mut mono_program = (&mut mono).monomorphize()
 
     debug_phase("\(phase_prefix): mir lower")
-    let mut lowerer = MIRLowerer.new(mono_program.ref, context.ref)
+    let mut lowerer = MIRLowerer.new(&mut mono_program, &mut context)
     let mir_program = lowerer.lower()
 
     // MIR lowering has consumed the concrete body caches; release them
     // before codegen to reduce peak RSS from retained typecheck artifacts.
     context.drop_concrete_bodies()
 
-    return Pair[ref MIRProgram, CompilerContext](mir_program, context)
+    return Pair[* MIRProgram, CompilerContext](mir_program, context)
 }
 
 type EmitCGenerationInput(
     output_path Path,
     linked_libraries List[String],
-    mir_program ref MIRProgram,
+    mir_program * MIRProgram,
     context CompilerContext,
 )
 
@@ -811,7 +811,7 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
         eprintln(it.message())
         return Option[EmitCGenerationInput].None()
     }
-    let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
+    let mut result = type_check_resolved_graph(prepared.graph, prepared.display_name)
 
     if result.diagnostics.has_errors() then {
         debug_phase("\(phase_prefix): render diagnostics")
@@ -819,7 +819,10 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
         return Option[EmitCGenerationInput].None()
     }
 
-    let typed_program = if result.typed_program is .Some(program) then program else { return Option[EmitCGenerationInput].None() }
+    let mut typed_program = if result.typed_program is .Some(program) then program else {
+        eprintln("\(phase_prefix): typed program unavailable after successful semantic checks")
+        return Option[EmitCGenerationInput].None()
+    }
 
     let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir)
 
@@ -828,7 +831,7 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
         return Option[EmitCGenerationInput].None()
     }
 
-    let lowered = lower_mir_after_typecheck(result.ref, typed_program.ref, phase_prefix)
+    let lowered = lower_mir_after_typecheck(&result, &typed_program, phase_prefix)
     return Option[EmitCGenerationInput].Some(EmitCGenerationInput(
         output_path,
         prepared.linked_libraries,
@@ -837,17 +840,17 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
     ))
 }
 
-private let generate_c_from_mir(mir_program ref MIRProgram, context CompilerContext, phase_prefix String) String = {
+private let generate_c_from_mir(mir_program * MIRProgram, context CompilerContext, phase_prefix String) String = {
     let mut concrete_mir_program = mir_program
 
     debug_phase("\(phase_prefix): codegen")
     let mut cg = CodeGen.new(concrete_mir_program, context)
-    cg.ref.validate_inputs_for_generate()
-    cg.ref.generate_prelude_into_buffer()
-    cg.ref.emit_mir_function_implementations()
-    cg.ref.finalize_program_into_buffer()
+    (&mut cg).validate_inputs_for_generate()
+    (&mut cg).generate_prelude_into_buffer()
+    (&mut cg).emit_mir_function_implementations()
+    (&mut cg).finalize_program_into_buffer()
 
-    let generated_c = cg.ref.into_generated_string()
+    let generated_c = (&mut cg).into_generated_string()
     return generated_c
 }
 

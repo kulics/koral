@@ -3,8 +3,8 @@ given TypeChecker {
     protected should_use_trait_placeholder_for_eq_ord_receiver(self, receiver_type Type) Bool = {
         return when receiver_type in {
             .GenericParameter(_) then true,
-            .BorrowedReferenceType(inner, _) then self.contains_generic_parameter(inner.val),
-            .MutableBorrowedReferenceType(inner, _) then self.contains_generic_parameter(inner.val),
+            .BorrowedReferenceType(inner) then self.contains_generic_parameter(*inner),
+            .MutableBorrowedReferenceType(inner) then self.contains_generic_parameter(*inner),
             _ then false,
         }
     }
@@ -15,8 +15,8 @@ given TypeChecker {
                 if params.count() < 2(UInt) then {
                     return false
                 }
-                let receiver_type = params[0(UInt)].val.param_type
-                let arg_type = params[1(UInt)].val.param_type
+                let receiver_type = (*params[0(UInt)]).param_type
+                let arg_type = (*params[1(UInt)]).param_type
                 let receiver_matches = self.same_expr_type(receiver_type, base_type)
                     or self.type_matches_expected_pattern(receiver_type, base_type)
                 let arg_matches = self.same_expr_type(arg_type, rhs_type)
@@ -52,7 +52,7 @@ given TypeChecker {
         }
     }
 
-    protected check_arithmetic_expr_ref(self, left ref Expr, op ArithmeticOperator, right ref Expr, expected Option[Type], scope Scope) TypedExpr = {
+    protected check_arithmetic_expr_ref(self, left * Expr, op ArithmeticOperator, right * Expr, expected Option[Type], scope Scope) TypedExpr = {
 
         let initial_typed_left = when left in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
@@ -62,14 +62,14 @@ given TypeChecker {
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref.val,
-                    .ReferenceType(inner_ref) then inner_ref.val,
-                    .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
-                    .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
-                    .WeakReferenceType(inner_ref) then inner_ref.val,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
-                    .MutablePointerType(inner_ref) then inner_ref.val,
-                    .PointerType(inner_ref) then inner_ref.val,
+                    .MutableReferenceType(inner_ref) then *inner_ref,
+                    .ReferenceType(inner_ref) then *inner_ref,
+                    .MutableBorrowedReferenceType(inner_ref) then *inner_ref,
+                    .BorrowedReferenceType(inner_ref) then *inner_ref,
+                    .WeakReferenceType(inner_ref) then *inner_ref,
+                    .MutableWeakReferenceType(inner_ref) then *inner_ref,
+                    .MutablePointerType(inner_ref) then *inner_ref,
+                    .PointerType(inner_ref) then *inner_ref,
                     _ then Type.Unknown(),
                 }
                 break make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -84,14 +84,14 @@ given TypeChecker {
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
                 let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref.val,
-                    .ReferenceType(inner_ref) then inner_ref.val,
-                    .MutableBorrowedReferenceType(inner_ref, _) then inner_ref.val,
-                    .BorrowedReferenceType(inner_ref, _) then inner_ref.val,
-                    .WeakReferenceType(inner_ref) then inner_ref.val,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref.val,
-                    .MutablePointerType(inner_ref) then inner_ref.val,
-                    .PointerType(inner_ref) then inner_ref.val,
+                    .MutableReferenceType(inner_ref) then *inner_ref,
+                    .ReferenceType(inner_ref) then *inner_ref,
+                    .MutableBorrowedReferenceType(inner_ref) then *inner_ref,
+                    .BorrowedReferenceType(inner_ref) then *inner_ref,
+                    .WeakReferenceType(inner_ref) then *inner_ref,
+                    .MutableWeakReferenceType(inner_ref) then *inner_ref,
+                    .MutablePointerType(inner_ref) then *inner_ref,
+                    .PointerType(inner_ref) then *inner_ref,
                     _ then Type.Unknown(),
                 }
                 break make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
@@ -144,8 +144,8 @@ given TypeChecker {
                 // Unwrap reference types before checking for GenericParameter
                 // (Swift's enforceTraitConformance unwraps references via typeModifierInnerType)
                 let unwrapped_left = when left_t in {
-                    .ReferenceType(inner) then inner.val,
-                    .MutableReferenceType(inner) then inner.val,
+                    .ReferenceType(inner) then *inner,
+                    .MutableReferenceType(inner) then *inner,
                     _ then left_t,
                 }
                 when unwrapped_left in {
@@ -214,18 +214,18 @@ given TypeChecker {
         return result
     }
 
-    protected check_bitwise_expr_ref(self, left ref Expr, op BitwiseOperator, right ref Expr, expected Option[Type], scope Scope) TypedExpr = {
+    protected check_bitwise_expr_ref(self, left * Expr, op BitwiseOperator, right * Expr, expected Option[Type], scope Scope) TypedExpr = {
 
         let chain = self.collect_bitwise_chain(left, op, right)
         let operands = chain.first
         let ops = chain.second
 
-        let first_operand = operands[0(UInt)].val
+        let first_operand = (*operands[0(UInt)])
         let mut current = self.check_operand_expr_ref(box(first_operand), expected, scope)
 
         let mut i UInt = 1
         while i < operands.count() then {
-            let next_operand = operands[i].val
+            let next_operand = (*operands[i])
             let typed_right = self.check_operand_expr_ref(box(next_operand), .Some(current.expr_type), scope)
             let op_i = ops[i - 1(UInt)]
             current = make_typed_expr(TypedExprKind.BitwiseExpr(box(current), op_i, box(typed_right)), current.expr_type)
@@ -236,7 +236,7 @@ given TypeChecker {
         return result
     }
 
-    protected describe_expr_shallow(self, expr ref Expr) String = {
+    protected describe_expr_shallow(self, expr * Expr) String = {
         return when expr in {
             .Identifier(_, _) then "identifier",
             .IntegerLiteral(_, _) then "int",
@@ -254,7 +254,7 @@ given TypeChecker {
             .OrExpr(_, _, _) then "or",
             .RangeExpr(_, _, _, _) then "range",
             .Unary(_, _, _) then "unary",
-            .RefExpr(_, _) then "ref",
+            .RefExpr(_, _, _) then "ref",
             .WeakrefExpr(_, _) then "weakref",
             .PtrExpr(_, _) then "ptr",
             .CastExpr(_, _, _) then "cast",
@@ -318,17 +318,17 @@ given TypeChecker {
         )
     }
 
-    protected validate_lambda_captures(self, params List[TypedParam], body ref TypedExpr) Void = {
+    protected validate_lambda_captures(self, params List[TypedParam], body * TypedExpr) Void = {
         let mut local_names = Set[String].new()
         for p in params then {
             local_names.insert(p.name)
         }
         let mut local_ids = Set[UInt].new()
         let mut reported_ids = Set[UInt].new()
-        self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids.ref)
+        self.validate_lambda_captures_in_expr(body, local_names, local_ids, &mut reported_ids)
     }
 
-    protected is_lambda_captured_symbol(self, symbol ref Symbol, local_names Set[String], local_ids Set[UInt]) Bool = {
+    protected is_lambda_captured_symbol(self, symbol * Symbol, local_names Set[String], local_ids Set[UInt]) Bool = {
         let is_variable = when symbol.kind in {
             .Variable(_) then true,
             _ then false,
@@ -336,7 +336,7 @@ given TypeChecker {
         if not is_variable then {
             return false
         }
-        let symbol_name = self.context().symbol_name(symbol.val)
+        let symbol_name = self.context().symbol_name(*symbol)
         if local_names.contains(symbol_name) or local_ids.contains(symbol.def_id.id) then {
             return false
         }
@@ -345,7 +345,7 @@ given TypeChecker {
         return module_path.is_empty() and source_file.is_empty()
     }
 
-    protected report_mutable_lambda_capture(self, symbol ref Symbol, reported_ids ref mut Set[UInt]) Void = {
+    protected report_mutable_lambda_capture(self, symbol * Symbol, reported_ids *mut Set[UInt]) Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return
         }
@@ -354,12 +354,12 @@ given TypeChecker {
             make_diagnostic(
                 DiagnosticStage.Semantic(),
                 self.storage.file_path,
-                "Cannot capture mutable variable '\(self.context().symbol_name(symbol.val))'"
+                "Cannot capture mutable variable '\(self.context().symbol_name(*symbol))'"
             )
         )
     }
 
-    protected report_borrowed_lambda_capture(self, symbol ref Symbol, reported_ids ref mut Set[UInt]) Void = {
+    protected report_borrowed_lambda_capture(self, symbol * Symbol, reported_ids *mut Set[UInt]) Void = {
         if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(symbol.def_id.id) then {
             return
         }
@@ -368,15 +368,15 @@ given TypeChecker {
             make_diagnostic(
                 DiagnosticStage.Semantic(),
                 self.storage.file_path,
-                "Cannot capture borrowed reference '\(self.context().symbol_name(symbol.val))'"
+                "Cannot capture borrowed reference '\(self.context().symbol_name(*symbol))'"
             )
         )
     }
 
-    protected collect_pattern_binding_names(self, pattern ref TypedPattern, names ref mut Set[String]) Void = {
+    protected collect_pattern_binding_names(self, pattern * TypedPattern, names *mut Set[String]) Void = {
         when pattern in {
             .Variable(symbol) then {
-                let symbol_name = self.context().symbol_name(symbol.val)
+                let symbol_name = self.context().symbol_name(*symbol)
                 if not (symbol_name == "_") then {
                     names.insert(symbol_name)
                 }
@@ -403,7 +403,7 @@ given TypeChecker {
         }
     }
 
-    protected validate_lambda_captures_in_stmt(self, stmt ref TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids ref mut Set[UInt]) Void = {
+    protected validate_lambda_captures_in_stmt(self, stmt * TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids *mut Set[UInt]) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
@@ -456,7 +456,7 @@ given TypeChecker {
         }
     }
 
-    protected validate_lambda_captures_in_expr(self, expr ref TypedExpr, local_names Set[String], local_ids Set[UInt], reported_ids ref mut Set[UInt]) Void = {
+    protected validate_lambda_captures_in_expr(self, expr * TypedExpr, local_names Set[String], local_ids Set[UInt], reported_ids *mut Set[UInt]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -479,21 +479,21 @@ given TypeChecker {
                     when stmt in {
                         .LetStmt(symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
-                            block_local_names.insert(self.context().symbol_name(symbol.val))
+                            block_local_names.insert(self.context().symbol_name(*symbol))
                             block_local_ids.insert(symbol.def_id.id)
                         },
                         .PairLetStmt(_, first_symbol, second_symbol, value_ref, _) then {
                             self.validate_lambda_captures_in_expr(value_ref, block_local_names, block_local_ids, reported_ids)
                             when first_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(self.context().symbol_name(symbol.val))
+                                    block_local_names.insert(self.context().symbol_name(*symbol))
                                     block_local_ids.insert(symbol.def_id.id)
                                 },
                                 .None() then {},
                             }
                             when second_symbol in {
                                 .Some(symbol) then {
-                                    block_local_names.insert(self.context().symbol_name(symbol.val))
+                                    block_local_names.insert(self.context().symbol_name(*symbol))
                                     block_local_ids.insert(symbol.def_id.id)
                                 },
                                 .None() then {},
@@ -632,7 +632,7 @@ given TypeChecker {
                     for name in local_names.iterator() then {
                         arm_local_names.insert(name)
                     }
-                    self.collect_pattern_binding_names(arm.pattern, arm_local_names.ref)
+                    self.collect_pattern_binding_names(arm.pattern, &mut arm_local_names)
                     self.validate_lambda_captures_in_expr(arm.body, arm_local_names, local_ids, reported_ids)
                 }
             },
@@ -645,7 +645,7 @@ given TypeChecker {
         }
     }
 
-    protected is_null_ptr_call_expr(self, expr ref Expr) Bool = {
+    protected is_null_ptr_call_expr(self, expr * Expr) Bool = {
         return when expr in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then name == "null_ptr" and args.is_empty(),
@@ -658,9 +658,9 @@ given TypeChecker {
     protected normalize_comparison_operands(
         self,
         initial_left TypedExpr,
-        left_source Option[ref Expr],
+        left_source Option[* Expr],
         initial_right TypedExpr,
-        right_source Option[ref Expr],
+        right_source Option[* Expr],
         scope Scope,
     ) Pair[TypedExpr, TypedExpr] = {
         let mut typed_left = initial_left
@@ -676,21 +676,21 @@ given TypeChecker {
         }
 
         let left_value_type = when typed_left.expr_type in {
-            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .PointerType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .ReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .MutableReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .WeakReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .PointerType(inner_ref) then Option[Type].Some(*inner_ref),
+            .MutablePointerType(inner_ref) then Option[Type].Some(*inner_ref),
             _ then Option[Type].None(),
         }
         let right_value_type = when typed_right.expr_type in {
-            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .PointerType(inner_ref) then Option[Type].Some(inner_ref.val),
-            .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref.val),
+            .ReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .MutableReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .WeakReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(*inner_ref),
+            .PointerType(inner_ref) then Option[Type].Some(*inner_ref),
+            .MutablePointerType(inner_ref) then Option[Type].Some(*inner_ref),
             _ then Option[Type].None(),
         }
         when left_value_type in {
@@ -793,17 +793,17 @@ given TypeChecker {
 
     protected lower_comparison_chain_step(
         self,
-        operands List[ref Expr],
+        operands List[* Expr],
         operators List[ComparisonOperator],
         index UInt,
         left_expr TypedExpr,
-        left_source Option[ref Expr],
+        left_source Option[* Expr],
         scope Scope,
     ) TypedExpr = {
-        let mut right_source = operands[index + 1(UInt)].val
+        let mut right_source = (*operands[index + 1(UInt)])
         let right_source_ref = box(right_source)
         let raw_right = self.check_expr_scoped_ref(right_source_ref, .Some(left_expr.expr_type), scope)
-        let normalized = self.normalize_comparison_operands(left_expr, left_source, raw_right, Option[ref Expr].Some(right_source_ref), scope)
+        let normalized = self.normalize_comparison_operands(left_expr, left_source, raw_right, Option[* Expr].Some(right_source_ref), scope)
 
         if index + 1(UInt) == operators.count() then {
             return self.build_typed_comparison_expr(normalized.first, operators[index], normalized.second)
@@ -812,37 +812,37 @@ given TypeChecker {
         let temp_symbol = self.make_expr_temp_symbol("__cmp_chain", normalized.second.expr_type, VariableKind.Value())
         let temp_ref = make_typed_expr(TypedExprKind.Variable(temp_symbol), temp_symbol.symbol_type)
         let condition = self.build_typed_comparison_expr(normalized.first, operators[index], temp_ref)
-        let next = self.lower_comparison_chain_step(operands, operators, index + 1(UInt), temp_ref, Option[ref Expr].None(), scope)
-        let mut block_statements = List[ref TypedStatement].new()
+        let next = self.lower_comparison_chain_step(operands, operators, index + 1(UInt), temp_ref, Option[* Expr].None(), scope)
+        let mut block_statements = List[* TypedStatement].new()
         block_statements.push(box(TypedStatement.LetStmt(temp_symbol, box(normalized.second), unknown_span())))
         let else_false = make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType())
         let if_expr = make_typed_expr(
-            TypedExprKind.IfExpr(box(condition), box(next), Option[ref TypedExpr].Some(box(else_false))),
+            TypedExprKind.IfExpr(box(condition), box(next), Option[* TypedExpr].Some(box(else_false))),
             Type.BoolType(),
         )
         block_statements.push(box(TypedStatement.ExprStmt(box(if_expr), unknown_span())))
         return make_typed_expr(TypedExprKind.Block(block_statements), Type.BoolType())
     }
 
-    protected check_comparison_chain_expr_ref(self, operands List[ref Expr], operators List[ComparisonOperator], scope Scope) TypedExpr = {
+    protected check_comparison_chain_expr_ref(self, operands List[* Expr], operators List[ComparisonOperator], scope Scope) TypedExpr = {
         if operands.is_empty() or operands.count() <> operators.count() + 1(UInt) or operators.count() < 2(UInt) then {
             self.push_diagnostic_at_span("Invalid comparison chain", unknown_span())
             return self.empty_typed_block(Type.Unknown())
         }
-        let mut first_operand = operands[0(UInt)].val
+        let mut first_operand = (*operands[0(UInt)])
         let first_operand_ref = box(first_operand)
         let typed_left = self.check_expr_core_ref(first_operand_ref, .None(), scope)
-        return self.lower_comparison_chain_step(operands, operators, 0(UInt), typed_left, Option[ref Expr].Some(first_operand_ref), scope)
+        return self.lower_comparison_chain_step(operands, operators, 0(UInt), typed_left, Option[* Expr].Some(first_operand_ref), scope)
     }
 
-    protected check_comparison_expr_ref(self, left ref Expr, op ComparisonOperator, right ref Expr, scope Scope) TypedExpr = {
+    protected check_comparison_expr_ref(self, left * Expr, op ComparisonOperator, right * Expr, scope Scope) TypedExpr = {
         let typed_left = self.check_expr_core_ref(left, .None(), scope)
         let typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
         let normalized = self.normalize_comparison_operands(
             typed_left,
-            Option[ref Expr].Some(left),
+            Option[* Expr].Some(left),
             typed_right,
-            Option[ref Expr].Some(right),
+            Option[* Expr].Some(right),
             scope,
         )
         return self.build_typed_comparison_expr(normalized.first, op, normalized.second)
@@ -889,15 +889,15 @@ given TypeChecker {
 
     protected build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
         if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "operator 'equals'") then {
-            return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
+            return make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown())
         }
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
             self.maybe_record_trait_method_instantiation(lhs.expr_type, "equals", List[Type].new())
             let method_symbol = self.make_binary_method_placeholder_symbol(lhs.expr_type, rhs.expr_type, "equals", Type.BoolType())
-            let mut args = List[ref TypedExpr].new()
+            let mut args = List[* TypedExpr].new()
             args.push(box(rhs))
             let callee = make_typed_expr(
-                TypedExprKind.TraitMethodPlaceholder(box(lhs), Type.TraitObject("Eq", List[ref Type].new()), box(method_symbol), List[Type].new(), .None()),
+                TypedExprKind.TraitMethodPlaceholder(box(lhs), Type.TraitObject("Eq", List[* Type].new()), box(method_symbol), List[Type].new(), .None()),
                 method_symbol.symbol_type,
             )
             return make_typed_expr(TypedExprKind.Call(box(callee), args), Type.BoolType())
@@ -905,7 +905,7 @@ given TypeChecker {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, "equals", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "equals")
         let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, "equals", ret_type)
-        let mut args = List[ref TypedExpr].new()
+        let mut args = List[* TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then Type.BoolType(),
@@ -920,15 +920,15 @@ given TypeChecker {
 
     protected build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
         if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "operator 'compare'") then {
-            return make_typed_expr(TypedExprKind.Block(List[ref TypedStatement].new()), Type.Unknown())
+            return make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown())
         }
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
             self.maybe_record_trait_method_instantiation(lhs.expr_type, "compare", List[Type].new())
             let method_symbol = self.make_binary_method_placeholder_symbol(lhs.expr_type, rhs.expr_type, "compare", Type.IntType())
-            let mut args = List[ref TypedExpr].new()
+            let mut args = List[* TypedExpr].new()
             args.push(box(rhs))
             let callee = make_typed_expr(
-                TypedExprKind.TraitMethodPlaceholder(box(lhs), Type.TraitObject("Ord", List[ref Type].new()), box(method_symbol), List[Type].new(), .None()),
+                TypedExprKind.TraitMethodPlaceholder(box(lhs), Type.TraitObject("Ord", List[* Type].new()), box(method_symbol), List[Type].new(), .None()),
                 method_symbol.symbol_type,
             )
             return make_typed_expr(TypedExprKind.Call(box(callee), args), Type.IntType())
@@ -936,7 +936,7 @@ given TypeChecker {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, "compare", List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, "compare")
         let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, "compare", ret_type)
-        let mut args = List[ref TypedExpr].new()
+        let mut args = List[* TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then Type.IntType(),
@@ -1000,7 +1000,7 @@ given TypeChecker {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
         let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type)
-        let mut args = List[ref TypedExpr].new()
+        let mut args = List[* TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then fallback_type,
@@ -1017,7 +1017,7 @@ given TypeChecker {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
         let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type)
-        let mut args = List[ref TypedExpr].new()
+        let mut args = List[* TypedExpr].new()
         args.push(box(rhs))
         let call_ret_type = when ret_type in {
             .Unknown() then fallback_type,
@@ -1031,7 +1031,7 @@ given TypeChecker {
     }
 
     protected build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
-        let call_expr = self.lower_receiver_method_call_expr(operand, method_name, List[ref TypedExpr].new())
+        let call_expr = self.lower_receiver_method_call_expr(operand, method_name, List[* TypedExpr].new())
         return when call_expr.expr_type in {
             .Unknown() then make_typed_expr_ref(call_expr.expr_kind, fallback_type),
             _ then call_expr,
@@ -1048,7 +1048,7 @@ given TypeChecker {
                         let _ = self.enforce_explicit_trait_requirement(typed.expr_type, "ToString")
                         self.maybe_record_extension_method_instantiation(typed.expr_type, "to_string", List[Type].new())
                         let ret_type = self.resolve_method_return_type(typed.expr_type, "to_string")
-                        let call_expr = self.lower_receiver_method_call_expr(typed, "to_string", List[ref TypedExpr].new())
+                        let call_expr = self.lower_receiver_method_call_expr(typed, "to_string", List[* TypedExpr].new())
                         break when call_expr.expr_type in {
                             .Unknown() then make_typed_expr_ref(call_expr.expr_kind, self.builtin_string_type()),
                             _ then call_expr,
@@ -1071,8 +1071,8 @@ given TypeChecker {
         let uint_type = Type.UIntType()
         let byte_ptr_type = Type.PointerType(box(Type.UInt8Type()))
         let mut_byte_ptr_type = Type.MutablePointerType(box(Type.UInt8Type()))
-        let mut block_statements = List[ref TypedStatement].new()
-        let mut part_symbols = List[ref Symbol].new()
+        let mut block_statements = List[* TypedStatement].new()
+        let mut part_symbols = List[* Symbol].new()
 
         for part in parts then {
             when part in {
@@ -1090,11 +1090,11 @@ given TypeChecker {
             return make_typed_expr(TypedExprKind.StringLiteral(""), string_type)
         }
 
-        let first_part_var = make_typed_expr(TypedExprKind.Variable(box(part_symbols[0(UInt)].val)), part_symbols[0(UInt)].val.symbol_type)
+        let first_part_var = make_typed_expr(TypedExprKind.Variable(box((*part_symbols[0(UInt)]))), (*part_symbols[0(UInt)]).symbol_type)
         let mut total_expr = self.build_unary_method_call(first_part_var, "count", uint_type)
         let mut part_idx UInt = 1
         while part_idx < part_symbols.count() then {
-            let part_var = make_typed_expr(TypedExprKind.Variable(box(part_symbols[part_idx].val)), part_symbols[part_idx].val.symbol_type)
+            let part_var = make_typed_expr(TypedExprKind.Variable(box((*part_symbols[part_idx]))), (*part_symbols[part_idx]).symbol_type)
             let part_count = self.build_unary_method_call(part_var, "count", uint_type)
             total_expr = make_typed_expr(TypedExprKind.ArithmeticExpr(box(total_expr), ArithmeticOperator.Add(), box(part_count)), uint_type)
             part_idx += 1
@@ -1169,7 +1169,7 @@ given TypeChecker {
             ),
             uint_type,
         )
-        let mut build_args = List[ref TypedExpr].new()
+        let mut build_args = List[* TypedExpr].new()
         build_args.push(box(final_data))
         build_args.push(box(final_total))
         build_args.push(box(final_cap))

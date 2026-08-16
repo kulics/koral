@@ -6,7 +6,6 @@ extension Parser {
 
   private enum TypeModifierPrefix {
     case reference(mutable: Bool)
-    case borrowedReference(lifetime: String, mutable: Bool)
     case pointer(mutable: Bool)
     case weakReference(mutable: Bool)
   }
@@ -15,8 +14,6 @@ extension Parser {
     switch prefix {
     case .reference(let mutable):
       return .reference(base, mutable: mutable)
-    case .borrowedReference(let lifetime, let mutable):
-      return .borrowedReference(base, lifetime: lifetime, mutable: mutable)
     case .pointer(let mutable):
       return .pointer(base, mutable: mutable)
     case .weakReference(let mutable):
@@ -28,42 +25,39 @@ extension Parser {
     var prefixes: [TypeModifierPrefix] = []
 
     while true {
-      if currentToken === .refKeyword {
-        try match(.refKeyword)
-        let lifetime: String?
-        if case .lifetimeIdentifier(let lifetimeName) = currentToken {
-          lifetime = lifetimeName
-          try match(.lifetimeIdentifier(lifetimeName))
-        } else {
-          lifetime = nil
+      if currentToken === .questionMark {
+        try match(.questionMark)
+        guard currentToken === .multiply else {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "'*' after '?'"
+          )
         }
-        let mutable = currentToken === .mutKeyword
-        if mutable {
-          try match(.mutKeyword)
-        }
-        if let lifetime {
-          prefixes.append(.borrowedReference(lifetime: lifetime, mutable: mutable))
-        } else {
-          prefixes.append(.reference(mutable: mutable))
-        }
-        continue
-      }
-      if currentToken === .ptrKeyword {
-        try match(.ptrKeyword)
-        let mutable = currentToken === .mutKeyword
-        if mutable {
-          try match(.mutKeyword)
-        }
-        prefixes.append(.pointer(mutable: mutable))
-        continue
-      }
-      if currentToken === .weakrefKeyword {
-        try match(.weakrefKeyword)
+        try match(.multiply)
         let mutable = currentToken === .mutKeyword
         if mutable {
           try match(.mutKeyword)
         }
         prefixes.append(.weakReference(mutable: mutable))
+        continue
+      }
+      if currentToken === .multiply {
+        try match(.multiply)
+        if currentToken === .rawKeyword {
+          try match(.rawKeyword)
+          let mutable = currentToken === .mutKeyword
+          if mutable {
+            try match(.mutKeyword)
+          }
+          prefixes.append(.pointer(mutable: mutable))
+          continue
+        }
+        let mutable = currentToken === .mutKeyword
+        if mutable {
+          try match(.mutKeyword)
+        }
+        prefixes.append(.reference(mutable: mutable))
         continue
       }
       break
@@ -127,7 +121,7 @@ extension Parser {
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
   /// - Function types: Func[ParamType1, ParamType2, ReturnType]
-  /// - Reference types: ref Int, ref List[T]
+  /// - U2 reference types: *T, *mut T, ?*T, *raw T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]
   func parseType() throws -> TypeNode {

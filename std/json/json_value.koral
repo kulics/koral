@@ -14,8 +14,8 @@ public type JsonValue {
     Bool(value Bool),
     Number(value Float64),
     String(value String),
-    Array(elements List[ref JsonValue]),
-    Object(entries Dict[String, ref JsonValue]),
+    Array(elements List[* JsonValue]),
+    Object(entries Dict[String, * JsonValue]),
 }
 
 // ============================================================================
@@ -136,7 +136,7 @@ private let make_indent(level UInt) String = {
     return out
 }
 
-private let to_string_pretty_array(elements List[ref JsonValue], level UInt) String = {
+private let to_string_pretty_array(elements List[* JsonValue], level UInt) String = {
     let count = elements.count()
     if count == 0 then {
         return "[]"
@@ -150,7 +150,7 @@ private let to_string_pretty_array(elements List[ref JsonValue], level UInt) Str
             result.push_string(",\n")
         }
         result.push_string(child_indent)
-        result.push_string(to_string_pretty_impl(elements[i].val, level + 1))
+        result.push_string(to_string_pretty_impl(*elements[i], level + 1))
     }
     result.push_byte('\n')
     result.push_string(make_indent(level))
@@ -158,7 +158,7 @@ private let to_string_pretty_array(elements List[ref JsonValue], level UInt) Str
     return result
 }
 
-private let to_string_pretty_object(entries Dict[String, ref JsonValue], level UInt) String = {
+private let to_string_pretty_object(entries Dict[String, * JsonValue], level UInt) String = {
     if entries.count() == 0 then {
         return "{}"
     }
@@ -175,7 +175,7 @@ private let to_string_pretty_object(entries Dict[String, ref JsonValue], level U
         result.push_string(child_indent)
         result.push_string(escape_json_string(entry.first))
         result.push_string(": ")
-        result.push_string(to_string_pretty_impl(entry.second.val, level + 1))
+        result.push_string(to_string_pretty_impl(*entry.second, level + 1))
     }
     result.push_byte('\n')
     result.push_string(make_indent(level))
@@ -201,58 +201,58 @@ given JsonValue {
 
     // --- Type checking methods ---
 
-    public is_null(self ref) Bool = self is .Null
+    public is_null(*self) Bool = self is .Null
 
-    public is_bool(self ref) Bool = self is .Bool(_)
+    public is_bool(*self) Bool = self is .Bool(_)
 
-    public is_number(self ref) Bool = self is .Number(_)
+    public is_number(*self) Bool = self is .Number(_)
 
-    public is_string(self ref) Bool = self is .String(_)
+    public is_string(*self) Bool = self is .String(_)
 
-    public is_array(self ref) Bool = self is .Array(_)
+    public is_array(*self) Bool = self is .Array(_)
 
-    public is_object(self ref) Bool = self is .Object(_)
+    public is_object(*self) Bool = self is .Object(_)
 
     // --- Value extraction methods ---
 
-    public as_bool(self ref) Option[Bool] = when self in {
+    public as_bool(*self) Option[Bool] = when self in {
         .Bool(v) then Option[Bool].Some(v),
         _ then Option[Bool].None(),
     }
 
-    public as_number(self ref) Option[Float64] = when self in {
+    public as_number(*self) Option[Float64] = when self in {
         .Number(v) then Option[Float64].Some(v),
         _ then Option[Float64].None(),
     }
 
-    public as_string(self ref) Option[String] = when self in {
+    public as_string(*self) Option[String] = when self in {
         .String(v) then Option[String].Some(v),
         _ then Option[String].None(),
     }
 
-    public as_array(self ref) Option[List[ref JsonValue]] = when self in {
-        .Array(v) then Option[List[ref JsonValue]].Some(v),
-        _ then Option[List[ref JsonValue]].None(),
+    public as_array(*self) Option[List[* JsonValue]] = when self in {
+        .Array(v) then Option[List[* JsonValue]].Some(v),
+        _ then Option[List[* JsonValue]].None(),
     }
 
-    public as_object(self ref) Option[Dict[String, ref JsonValue]] = when self in {
-        .Object(v) then Option[Dict[String, ref JsonValue]].Some(v),
-        _ then Option[Dict[String, ref JsonValue]].None(),
+    public as_object(*self) Option[Dict[String, * JsonValue]] = when self in {
+        .Object(v) then Option[Dict[String, * JsonValue]].Some(v),
+        _ then Option[Dict[String, * JsonValue]].None(),
     }
 
     // --- Indexed access methods ---
 
-    public get_field(self ref, key String) Option[ref JsonValue] = when self in {
+    public get_field(*self, key String) Option[* JsonValue] = when self in {
         .Object(entries) then entries.get(key),
-        _ then Option[ref JsonValue].None(),
+        _ then Option[* JsonValue].None(),
     }
 
-    public get_element(self ref, index UInt) Option[ref JsonValue] = when self in {
+    public get_element(*self, index UInt) Option[* JsonValue] = when self in {
         .Array(elements) then elements.get(index),
-        _ then Option[ref JsonValue].None(),
+        _ then Option[* JsonValue].None(),
     }
 
-    public to_string_pretty(self ref) String = to_string_pretty_impl(self.val, 0)
+    public to_string_pretty(*self) String = to_string_pretty_impl(*self, 0)
 }
 
 // ============================================================================
@@ -283,7 +283,7 @@ given JsonValue as Eq {
                     return false
                 }
                 for i in 0..<a.count() then {
-                    if a[i].val <> b[i].val then {
+                    if *a[i] <> *b[i] then {
                         return false
                     }
                 }
@@ -300,7 +300,7 @@ given JsonValue as Eq {
                     when b.get(entry.first) in {
                         .None then { return false },
                         .Some(bval) then {
-                            if entry.second.val <> bval.val then {
+                            if *entry.second <> *bval then {
                                 return false
                             }
                         },

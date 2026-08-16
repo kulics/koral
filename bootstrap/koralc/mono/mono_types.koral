@@ -21,8 +21,94 @@
 //   - GenericParameter: use the parameter name directly
 //   - TraitObject:     use the trait name directly
 //   - TypeVar / Unknown: "?"
+private type MonoLayoutKeyWrapperKind {
+    Reference(),
+    MutableReference(),
+    BorrowedReference(),
+    MutableBorrowedReference(),
+    Pointer(),
+    MutablePointer(),
+    WeakReference(),
+    MutableWeakReference(),
+}
+
+private type MonoLayoutKeyWrapperChain(
+    wrappers List[MonoLayoutKeyWrapperKind],
+    inner Type,
+)
+
+private let split_layout_key_wrappers(t Type) MonoLayoutKeyWrapperChain = {
+    let mut wrappers = List[MonoLayoutKeyWrapperKind].new()
+    let mut current = t
+    while true then {
+        when current in {
+            .ReferenceType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.Reference())
+                current = *inner
+            },
+            .MutableReferenceType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.MutableReference())
+                current = *inner
+            },
+            .BorrowedReferenceType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.BorrowedReference())
+                current = *inner
+            },
+            .MutableBorrowedReferenceType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.MutableBorrowedReference())
+                current = *inner
+            },
+            .PointerType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.Pointer())
+                current = *inner
+            },
+            .MutablePointerType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.MutablePointer())
+                current = *inner
+            },
+            .WeakReferenceType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.WeakReference())
+                current = *inner
+            },
+            .MutableWeakReferenceType(inner) then {
+                wrappers.push(MonoLayoutKeyWrapperKind.MutableWeakReference())
+                current = *inner
+            },
+            _ then { break },
+        }
+    }
+    return MonoLayoutKeyWrapperChain(wrappers, current)
+}
+
+private let layout_key_wrapper_prefix(kind MonoLayoutKeyWrapperKind) String = {
+    return when kind in {
+        .Reference() then "ref_",
+        .MutableReference() then "mutref_",
+        .BorrowedReference() then "bref_",
+        .MutableBorrowedReference() then "mutbref_",
+        .Pointer() then "ptr_",
+        .MutablePointer() then "mutptr_",
+        .WeakReference() then "weakref_",
+        .MutableWeakReference() then "mutweakref_",
+    }
+}
+
+private let prefix_layout_key(base String, wrappers List[MonoLayoutKeyWrapperKind]) String = {
+    if wrappers.is_empty() then {
+        return base
+    }
+
+    let mut out = String.new()
+    for wrapper in wrappers then {
+        out.push_string(layout_key_wrapper_prefix(wrapper))
+    }
+    out.push_string(base)
+    return out
+}
+
 public let layout_key(t Type) String = {
-    return when t in {
+    let chain = split_layout_key_wrappers(t)
+    let inner_key = when chain.inner in {
         .IntType()     then "Int",
         .Int8Type()    then "Int8",
         .Int16Type()   then "Int16",
@@ -38,24 +124,24 @@ public let layout_key(t Type) String = {
         .BoolType()    then "Bool",
         .VoidType()    then "Void",
         .NeverType()   then "Never",
-        .ReferenceType(inner) then "ref_\(layout_key(inner.val))",
-        .MutableReferenceType(inner) then "mutref_\(layout_key(inner.val))",
-        .BorrowedReferenceType(inner, lifetime) then "bref_\(lifetime)_\(layout_key(inner.val))",
-        .MutableBorrowedReferenceType(inner, lifetime) then "mutbref_\(lifetime)_\(layout_key(inner.val))",
-        .PointerType(inner)   then "ptr_\(layout_key(inner.val))",
-        .MutablePointerType(inner) then "mutptr_\(layout_key(inner.val))",
-        .WeakReferenceType(inner) then "weakref_\(layout_key(inner.val))",
-        .MutableWeakReferenceType(inner) then "mutweakref_\(layout_key(inner.val))",
+        .ReferenceType(inner) then "ref_\(layout_key(*inner))",
+        .MutableReferenceType(inner) then "mutref_\(layout_key(*inner))",
+        .BorrowedReferenceType(inner) then "bref_\(layout_key(*inner))",
+        .MutableBorrowedReferenceType(inner) then "mutbref_\(layout_key(*inner))",
+        .PointerType(inner)   then "ptr_\(layout_key(*inner))",
+        .MutablePointerType(inner) then "mutptr_\(layout_key(*inner))",
+        .WeakReferenceType(inner) then "weakref_\(layout_key(*inner))",
+        .MutableWeakReferenceType(inner) then "mutweakref_\(layout_key(*inner))",
 
         .FunctionType(fn_params, return_type) then {
             let param_types = param_entry_types(fn_params)
             let mut out = "fn"
             for pt in param_types then {
                 out.push_string("_")
-                out.push_string(layout_key(pt.val))
+                out.push_string(layout_key(*pt))
             }
             out.push_string("_")
-            out.push_string(layout_key(return_type.val))
+            out.push_string(layout_key(*return_type))
             break out
         },
 
@@ -63,7 +149,7 @@ public let layout_key(t Type) String = {
             let mut out = template
             for a in args then {
                 out.push_string("_")
-                out.push_string(layout_key(a.val))
+                out.push_string(layout_key(*a))
             }
             break out
         },
@@ -72,7 +158,7 @@ public let layout_key(t Type) String = {
             let mut out = template
             for a in args then {
                 out.push_string("_")
-                out.push_string(layout_key(a.val))
+                out.push_string(layout_key(*a))
             }
             break out
         },
@@ -93,12 +179,13 @@ public let layout_key(t Type) String = {
         .TypeVar(_) then "?",
         .Unknown()  then "?",
     }
+    return prefix_layout_key(inner_key, chain.wrappers)
 }
 
 // Like layout_key but uses get_name for StructureType/EnumType to match
 // the key format used by instantiate_extension_method_from_entry.
 // This ensures extension method registration and lookup use the same key format.
-public let contextual_layout_key(mono ref Monomorphizer, t Type) String = {
+public let contextual_layout_key(mono * Monomorphizer, t Type) String = {
     return when t in {
         .StructureType(def_id) then mono.storage.context.get_name(def_id) or else layout_key(t),
         .EnumType(def_id) then mono.storage.context.get_name(def_id) or else layout_key(t),
@@ -106,32 +193,33 @@ public let contextual_layout_key(mono ref Monomorphizer, t Type) String = {
     }
 }
 
-private let instantiation_layout_key(mono ref Monomorphizer, t Type) String = {
-    return when t in {
-        .ReferenceType(inner) then "ref_\(instantiation_layout_key(mono, inner.val))",
-        .MutableReferenceType(inner) then "mutref_\(instantiation_layout_key(mono, inner.val))",
-        .BorrowedReferenceType(inner, lifetime) then "bref_\(lifetime)_\(instantiation_layout_key(mono, inner.val))",
-        .MutableBorrowedReferenceType(inner, lifetime) then "mutbref_\(lifetime)_\(instantiation_layout_key(mono, inner.val))",
-        .PointerType(inner) then "ptr_\(instantiation_layout_key(mono, inner.val))",
-        .MutablePointerType(inner) then "mutptr_\(instantiation_layout_key(mono, inner.val))",
-        .WeakReferenceType(inner) then "weakref_\(instantiation_layout_key(mono, inner.val))",
-        .MutableWeakReferenceType(inner) then "mutweakref_\(instantiation_layout_key(mono, inner.val))",
+private let instantiation_layout_key(mono * Monomorphizer, t Type) String = {
+    let chain = split_layout_key_wrappers(t)
+    let inner_key = when chain.inner in {
+        .ReferenceType(inner) then "ref_\(instantiation_layout_key(mono, *inner))",
+        .MutableReferenceType(inner) then "mutref_\(instantiation_layout_key(mono, *inner))",
+        .BorrowedReferenceType(inner) then "bref_\(instantiation_layout_key(mono, *inner))",
+        .MutableBorrowedReferenceType(inner) then "mutbref_\(instantiation_layout_key(mono, *inner))",
+        .PointerType(inner) then "ptr_\(instantiation_layout_key(mono, *inner))",
+        .MutablePointerType(inner) then "mutptr_\(instantiation_layout_key(mono, *inner))",
+        .WeakReferenceType(inner) then "weakref_\(instantiation_layout_key(mono, *inner))",
+        .MutableWeakReferenceType(inner) then "mutweakref_\(instantiation_layout_key(mono, *inner))",
         .FunctionType(fn_params, return_type) then {
             let param_types = param_entry_types(fn_params)
             let mut out = "fn"
             for pt in param_types then {
                 out.push_string("_")
-                out.push_string(instantiation_layout_key(mono, pt.val))
+                out.push_string(instantiation_layout_key(mono, *pt))
             }
             out.push_string("_")
-            out.push_string(instantiation_layout_key(mono, return_type.val))
+            out.push_string(instantiation_layout_key(mono, *return_type))
             break out
         },
         .GenericStruct(template, args) then {
             let mut out = template
             for a in args then {
                 out.push_string("_")
-                out.push_string(instantiation_layout_key(mono, a.val))
+                out.push_string(instantiation_layout_key(mono, *a))
             }
             break out
         },
@@ -139,7 +227,7 @@ private let instantiation_layout_key(mono ref Monomorphizer, t Type) String = {
             let mut out = template
             for a in args then {
                 out.push_string("_")
-                out.push_string(instantiation_layout_key(mono, a.val))
+                out.push_string(instantiation_layout_key(mono, *a))
             }
             break out
         },
@@ -148,9 +236,10 @@ private let instantiation_layout_key(mono ref Monomorphizer, t Type) String = {
         .OpaqueType(def_id) then concrete_layout_key(mono, def_id) or else layout_key(t),
         _ then layout_key(t),
     }
+    return prefix_layout_key(inner_key, chain.wrappers)
 }
 
-private let concrete_layout_key(mono ref Monomorphizer, def_id DefId) Option[String] = {
+private let concrete_layout_key(mono * Monomorphizer, def_id DefId) Option[String] = {
     let name = mono.storage.context.get_name(def_id) or else { return Option[String].None() }
     let module_path = mono.storage.context.get_module_path(def_id) or else List[String].new()
     let is_private = when mono.storage.context.get_access(def_id) in {
@@ -203,17 +292,17 @@ private let concrete_layout_key(mono ref Monomorphizer, def_id DefId) Option[Str
 // Examples:
 //   make_layout_name("List",   [Int])          → "List_Int"
 //   make_layout_name("Dict",    [String, Int])  → "Dict_String_Int"
-//   make_layout_name("Option", [ref String])   → "Option_ref_String"
-public let make_layout_name(mono ref Monomorphizer, template_name String, args List[ref Type]) String = {
+//   make_layout_name("Option", [* String])   → "Option_ref_String"
+public let make_layout_name(mono * Monomorphizer, template_name String, args List[* Type]) String = {
     let mut out = template_name
     for a in args then {
         out.push_string("_")
-        out.push_string(instantiation_layout_key(mono, a.val))
+        out.push_string(instantiation_layout_key(mono, *a))
     }
     return out
 }
 
-private let is_std_drop_trait_conformance(mono ref Monomorphizer, conformance_trait_name Option[String]) Bool = {
+private let is_std_drop_trait_conformance(mono * Monomorphizer, conformance_trait_name Option[String]) Bool = {
     return when conformance_trait_name in {
         .Some(trait_name) then {
             if trait_name <> "Drop" and not trait_name.ends_with(".Drop") then { return false }
@@ -245,36 +334,36 @@ private let is_std_drop_trait_conformance(mono ref Monomorphizer, conformance_tr
 //   make_extension_method_layout_name("Dict",   [String, Int], "get",   [])       → "Dict_String_Int_get"
 //   make_extension_method_layout_name("List",  [Int],         "map",   [String]) → "List_Int_map_String"
 public let make_extension_method_layout_name(
-    mono ref Monomorphizer,
+    mono * Monomorphizer,
     template_name String,
-    type_args List[ref Type],
+    type_args List[* Type],
     method_name String,
-    method_type_args List[ref Type],
+    method_type_args List[* Type],
 ) String = {
     let mut out = template_name
     for a in type_args then {
         out.push_string("_")
-        out.push_string(instantiation_layout_key(mono, a.val))
+        out.push_string(instantiation_layout_key(mono, *a))
     }
     out.push_string("_")
     out.push_string(method_name)
     for a in method_type_args then {
         out.push_string("_")
-        out.push_string(instantiation_layout_key(mono, a.val))
+        out.push_string(instantiation_layout_key(mono, *a))
     }
     return out
 }
 
 public let make_extension_method_lookup_key(
-    mono ref Monomorphizer,
+    mono * Monomorphizer,
     base_name String,
     method_name String,
-    method_type_args List[ref Type],
+    method_type_args List[* Type],
 ) String = {
     let mut out = "\(base_name).\(method_name)"
     for a in method_type_args then {
         out.push_string(".")
-        out.push_string(instantiation_layout_key(mono, a.val))
+        out.push_string(instantiation_layout_key(mono, *a))
     }
     return out
 }
@@ -286,29 +375,29 @@ public let make_extension_method_lookup_key(
 public let has_generic_parameter(t Type) Bool = {
     return when t in {
         .GenericParameter(_) then true,
-        .ReferenceType(inner) then has_generic_parameter(inner.val),
-        .MutableReferenceType(inner) then has_generic_parameter(inner.val),
-        .BorrowedReferenceType(inner, _) then has_generic_parameter(inner.val),
-        .MutableBorrowedReferenceType(inner, _) then has_generic_parameter(inner.val),
-        .PointerType(inner) then has_generic_parameter(inner.val),
-        .MutablePointerType(inner) then has_generic_parameter(inner.val),
-        .WeakReferenceType(inner) then has_generic_parameter(inner.val),
+        .ReferenceType(inner) then has_generic_parameter(*inner),
+        .MutableReferenceType(inner) then has_generic_parameter(*inner),
+        .BorrowedReferenceType(inner) then has_generic_parameter(*inner),
+        .MutableBorrowedReferenceType(inner) then has_generic_parameter(*inner),
+        .PointerType(inner) then has_generic_parameter(*inner),
+        .MutablePointerType(inner) then has_generic_parameter(*inner),
+        .WeakReferenceType(inner) then has_generic_parameter(*inner),
         .FunctionType(fn_params, return_type) then {
             let param_types = param_entry_types(fn_params)
             for pt in param_types then {
-                if has_generic_parameter(pt.val) then { return true }
+                if has_generic_parameter(*pt) then { return true }
             }
-            break has_generic_parameter(return_type.val)
+            break has_generic_parameter(*return_type)
         },
         .GenericStruct(_, args) then {
             for a in args then {
-                if has_generic_parameter(a.val) then { return true }
+                if has_generic_parameter(*a) then { return true }
             }
             break false
         },
         .GenericEnum(_, args) then {
             for a in args then {
-                if has_generic_parameter(a.val) then { return true }
+                if has_generic_parameter(*a) then { return true }
             }
             break false
         },
@@ -320,9 +409,9 @@ public let has_generic_parameter(t Type) Bool = {
 
 // Returns true if any type in the args list is still unresolved enough that
 // monomorphization should not materialize a concrete layout yet.
-public let args_have_generic_parameter(args List[ref Type]) Bool = {
+public let args_have_generic_parameter(args List[* Type]) Bool = {
     for a in args then {
-        if has_generic_parameter(a.val) or is_placeholder_inferred_type(a.val) then { return true }
+        if has_generic_parameter(*a) or is_placeholder_inferred_type(*a) then { return true }
     }
     return false
 }
@@ -346,7 +435,7 @@ public let args_have_generic_parameter(args List[ref Type]) Bool = {
 //   l. If template has drop, enqueue ExtensionMethod instantiation request
 //   m. Return StructureType(def_id)
 //
-public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemplate, args List[ref Type]) Type = {
+public let instantiate_struct(mono * Monomorphizer, template GenericStructTemplate, args List[* Type]) Type = {
     if args.count() <> template.type_parameters.count() then {
         panic("Monomorphization error: struct type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
     }
@@ -374,7 +463,7 @@ public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemp
 
     let mut type_arg_list = List[Type].new()
     for a in args then {
-        type_arg_list.push(a.val)
+        type_arg_list.push(*a)
     }
     mono.storage.context.set_struct_info(def_id, StructTypeInfo(
         List[StructField].new(),
@@ -397,7 +486,7 @@ public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemp
     while param_idx < template.type_parameters.count() then {
         let param = template.type_parameters[param_idx]
         let arg = args[param_idx]
-        substitution.insert(param.name, arg.val)
+        substitution.insert(param.name, *arg)
         param_idx += 1(UInt)
     }
 
@@ -471,7 +560,7 @@ public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemp
                         template_lookup_name,
                         ext_template,
                         args,
-                        List[ref Type].new(),
+                        List[* Type].new(),
                     )
                 }
             }
@@ -502,7 +591,7 @@ public let instantiate_struct(mono ref Monomorphizer, template GenericStructTemp
 //   l. If template has drop, enqueue ExtensionMethod instantiation request
 //   m. Return EnumType(def_id)
 //
-public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate, args List[ref Type]) Type = {
+public let instantiate_enum(mono * Monomorphizer, template GenericEnumTemplate, args List[* Type]) Type = {
     if args.count() <> template.type_parameters.count() then {
         panic("Monomorphization error: enum type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
     }
@@ -530,7 +619,7 @@ public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate
 
     let mut type_arg_list = List[Type].new()
     for a in args then {
-        type_arg_list.push(a.val)
+        type_arg_list.push(*a)
     }
     mono.storage.context.set_enum_info(def_id, EnumTypeInfo(
         List[EnumCaseInfo].new(),
@@ -553,7 +642,7 @@ public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate
     while param_idx < template.type_parameters.count() then {
         let param = template.type_parameters[param_idx]
         let arg = args[param_idx]
-        substitution.insert(param.name, arg.val)
+        substitution.insert(param.name, *arg)
         param_idx += 1(UInt)
     }
 
@@ -635,7 +724,7 @@ public let instantiate_enum(mono ref Monomorphizer, template GenericEnumTemplate
                         template_lookup_name,
                         ext_template,
                         args,
-                        List[ref Type].new(),
+                        List[* Type].new(),
                     )
                 }
             }

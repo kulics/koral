@@ -24,6 +24,46 @@ private struct StableTypeHasher {
     combine(0xff)
   }
 }
+extension Type {
+  enum IndirectionFamily {
+    case managedReference
+    case weakReference
+    case rawPointer
+  }
+
+  var indirectionCompatibilityInfo: (family: IndirectionFamily, inner: Type, mutable: Bool)? {
+    switch self {
+    case .reference(let inner):
+      return (.managedReference, inner, false)
+    case .mutableReference(let inner):
+      return (.managedReference, inner, true)
+    case .borrowedReference(let inner):
+      return (.managedReference, inner, false)
+    case .mutableBorrowedReference(let inner):
+      return (.managedReference, inner, true)
+    case .weakReference(let inner):
+      return (.weakReference, inner, false)
+    case .mutableWeakReference(let inner):
+      return (.weakReference, inner, true)
+    case .pointer(let element):
+      return (.rawPointer, element, false)
+    case .mutablePointer(let element):
+      return (.rawPointer, element, true)
+    default:
+      return nil
+    }
+  }
+
+  func compatibleIndirectionInners(with actual: Type) -> (expectedInner: Type, actualInner: Type)? {
+    guard let expected = indirectionCompatibilityInfo,
+          let actual = actual.indirectionCompatibilityInfo,
+          expected.family == actual.family,
+          (!expected.mutable || actual.mutable) else {
+      return nil
+    }
+    return (expected.inner, actual.inner)
+  }
+}
 
 // MARK: - Type Declaration Entities
 
@@ -171,8 +211,8 @@ public indirect enum Type: CustomStringConvertible {
   case structure(defId: DefId)
   case reference(inner: Type)
   case mutableReference(inner: Type)
-  case borrowedReference(inner: Type, lifetime: String)
-  case mutableBorrowedReference(inner: Type, lifetime: String)
+  case borrowedReference(inner: Type)
+  case mutableBorrowedReference(inner: Type)
   case pointer(element: Type)
   case mutablePointer(element: Type)
   case weakReference(inner: Type)
@@ -314,21 +354,21 @@ public indirect enum Type: CustomStringConvertible {
       }
       return "enum(\(defId.id))"
     case .reference(let inner):
-      return "ref \(inner.description)"
+      return "*\(inner.description)"
     case .mutableReference(let inner):
+      return "*mut \(inner.description)"
+    case .borrowedReference(let inner):
+      return "ref \(inner.description)"
+    case .mutableBorrowedReference(let inner):
       return "ref mut \(inner.description)"
-    case .borrowedReference(let inner, let lifetime):
-      return "ref \(lifetime) \(inner.description)"
-    case .mutableBorrowedReference(let inner, let lifetime):
-      return "ref \(lifetime) mut \(inner.description)"
     case .pointer(let element):
-      return "ptr \(element.description)"
+      return "*raw \(element.description)"
     case .mutablePointer(let element):
-      return "ptr mut \(element.description)"
+      return "*raw mut \(element.description)"
     case .weakReference(let inner):
-      return "weakref \(inner.description)"
+      return "?*\(inner.description)"
     case .mutableWeakReference(let inner):
-      return "weakref mut \(inner.description)"
+      return "?*mut \(inner.description)"
     case .genericParameter(let name):
       return name
     case .genericStruct(let template, let args):
@@ -424,14 +464,12 @@ public indirect enum Type: CustomStringConvertible {
     case .mutableReference(let inner):
       hasher.combine(19)
       hasher.combine(inner.stableHashKey)
-    case .borrowedReference(let inner, let lifetime):
+    case .borrowedReference(let inner):
       hasher.combine(32)
       hasher.combine(inner.stableHashKey)
-      hasher.combine(lifetime)
-    case .mutableBorrowedReference(let inner, let lifetime):
+    case .mutableBorrowedReference(let inner):
       hasher.combine(33)
       hasher.combine(inner.stableHashKey)
-      hasher.combine(lifetime)
     case .pointer(let element):
       hasher.combine(20)
       hasher.combine(element.stableHashKey)
@@ -516,10 +554,10 @@ public indirect enum Type: CustomStringConvertible {
       return "Ref(\(inner.stableKey))"
     case .mutableReference(let inner):
       return "MutRef(\(inner.stableKey))"
-    case .borrowedReference(let inner, let lifetime):
-      return "BorrowRef(\(lifetime))(\(inner.stableKey))"
-    case .mutableBorrowedReference(let inner, let lifetime):
-      return "BorrowMutRef(\(lifetime))(\(inner.stableKey))"
+    case .borrowedReference(let inner):
+      return "BorrowRef(\(inner.stableKey))"
+    case .mutableBorrowedReference(let inner):
+      return "BorrowMutRef(\(inner.stableKey))"
     case .pointer(let element):
       return "Ptr(\(element.stableKey))"
     case .mutablePointer(let element):
@@ -573,8 +611,8 @@ public indirect enum Type: CustomStringConvertible {
       .uint, .uint8, .uint16, .uint32, .uint64,
       .float32, .float64, .bool, .void, .never: return self
     case .reference(_), .mutableReference(_): return .reference(inner: .void)
-    case .borrowedReference(_, let lifetime): return .borrowedReference(inner: .void, lifetime: lifetime)
-    case .mutableBorrowedReference(_, let lifetime): return .borrowedReference(inner: .void, lifetime: lifetime)
+    case .borrowedReference: return .borrowedReference(inner: .void)
+    case .mutableBorrowedReference: return .borrowedReference(inner: .void)
     case .pointer(let element): return .pointer(element: element.canonical)
     case .mutablePointer(let element): return .pointer(element: element.canonical)
     case .weakReference(let inner): return .weakReference(inner: inner.canonical)
@@ -721,10 +759,10 @@ extension Type: Equatable, Hashable {
       return l == r
     case (.mutableReference(let l), .mutableReference(let r)):
       return l == r
-    case (.borrowedReference(let lInner, let lLifetime), .borrowedReference(let rInner, let rLifetime)):
-      return lInner == rInner && lLifetime == rLifetime
-    case (.mutableBorrowedReference(let lInner, let lLifetime), .mutableBorrowedReference(let rInner, let rLifetime)):
-      return lInner == rInner && lLifetime == rLifetime
+    case (.borrowedReference(let lInner), .borrowedReference(let rInner)):
+      return lInner == rInner
+    case (.mutableBorrowedReference(let lInner), .mutableBorrowedReference(let rInner)):
+      return lInner == rInner
     case (.pointer(let l), .pointer(let r)):
        return l == r
     case (.mutablePointer(let l), .mutablePointer(let r)):

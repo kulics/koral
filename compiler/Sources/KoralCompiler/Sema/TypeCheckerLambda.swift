@@ -148,7 +148,7 @@ extension TypeChecker {
         }
       }
       if actualReturnType.containsBorrowedReference {
-        throw SemanticError(.generic("lambda return type cannot contain borrowed reference type '\(actualReturnType)'"), span: currentSpan)
+        throw SemanticError(.generic("lambda return type cannot contain borrowed reference types: '\(actualReturnType)'"), span: currentSpan)
       }
       
       // Build function type
@@ -210,7 +210,7 @@ extension TypeChecker {
         guard case .variable(_) = kind else { return }
 
         if info.type.containsBorrowedReference {
-          throw SemanticError(.generic("Cannot capture borrowed reference '\(name)'"), span: currentSpan)
+          throw SemanticError(.generic("Cannot capture borrowed reference value '\(name)'"), span: currentSpan)
         }
 
         // Avoid duplicates
@@ -256,9 +256,8 @@ extension TypeChecker {
     case .notExpression(let inner),
        .bitwiseNotExpression(let inner),
        .unaryMinusExpression(let inner),
+       .addressOfExpression(let inner, _),
        .derefExpression(let inner),
-        .refExpression(let inner),
-        .weakrefExpression(let inner),
         .ptrExpression(let inner):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       

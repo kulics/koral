@@ -2,56 +2,56 @@
 
 // Test 1: Direct reference to local variable in struct constructor
 // The reference expression is directly in the constructor call
-type IntBox(value ref Int)
+type IntBox(value * Int)
 
 let return_direct_ref() IntBox = {
     let mut x Int = 42
-    return IntBox(x.ref)  // x.ref is directly passed, x should be heap allocated
+    return IntBox(&x)  // &x is directly passed, x should be heap allocated
 }
 
 let test_return_direct_ref() Void = {
     let box = return_direct_ref()
-    let value = box.value.val
-    assert(value == 42, "return direct ref value")
+    let value = *box.value
+    assert(value == 42, "return direct * value")
 }
 
 // Test 2: Return parameter reference (should NOT escape - parameter outlives function)
-let identity_ref(x ref Int) ref Int = {
+let identity_ref(x * Int) * Int = {
     return x  // Just return the parameter reference
 }
 
 let test_return_param_ref() Void = {
     let mut x Int = 100
-    let r = identity_ref(x.ref)
-    let value = r.val
-    assert(value == 100, "return param ref value")
+    let r = identity_ref(&x)
+    let value = *r
+    assert(value == 100, "return param * value")
 }
 
 // Test 3: Direct reference in struct field (should use heap allocation)
-type RefHolder(data ref Int)
+type RefHolder(data * Int)
 
 let create_ref_holder_direct() RefHolder = {
     let mut local Int = 999
-    return RefHolder(local.ref)  // local.ref is directly passed
+    return RefHolder(&local)  // &local is directly passed
 }
 
 let test_store_ref_to_field() Void = {
     let holder = create_ref_holder_direct()
-    let value = holder.data.val
-    assert(value == 999, "store ref to field value")
+    let value = *holder.data
+    assert(value == 999, "store * to field value")
 }
 
 // Test 4: Non-escaping reference (should use stack allocation)
 let use_local_ref() Int = {
     let mut x Int = 50
-    let r ref Int = x.ref  // x does NOT escape - r is only used locally
-    let value = r.val
+    let r * Int = &x  // x does NOT escape - r is only used locally
+    let value = *r
     return value + 10
 }
 
 let test_non_escaping_ref() Void = {
     let result = use_local_ref()
-    assert(result == 60, "non-escaping ref result")
+    assert(result == 60, "non-escaping * result")
 }
 
 // Test 5: Multiple non-escaping references
@@ -60,12 +60,12 @@ let mixed_non_escape() Int = {
     let mut b Int = 20
     
     // r1 doesn't escape - only used locally
-    let r1 ref Int = a.ref
-    let val1 = r1.val
+    let r1 * Int = &a
+    let val1 = *r1
     
     // r2 doesn't escape either - only used locally
-    let r2 ref Int = b.ref
-    let val2 = r2.val
+    let r2 * Int = &b
+    let val2 = *r2
     
     return val1 + val2
 }
@@ -80,50 +80,50 @@ let conditional_ref_simple(flag Bool) Int = {
     let mut x Int = 1
     let mut y Int = 2
     return if flag then {
-        let r ref Int = x.ref  // x doesn't escape - r is only used locally
-        break r.val
+        let r * Int = &x  // x doesn't escape - r is only used locally
+        break *r
     } else {
-        let r ref Int = y.ref  // y doesn't escape - r is only used locally
-        break r.val
+        let r * Int = &y  // y doesn't escape - r is only used locally
+        break *r
     }
 }
 
 let test_conditional_ref() Void = {
     let val1 = conditional_ref_simple(true)
     let val2 = conditional_ref_simple(false)
-    assert(val1 == 1, "conditional ref true")
-    assert(val2 == 2, "conditional ref false")
+    assert(val1 == 1, "conditional * true")
+    assert(val2 == 2, "conditional * false")
 }
 
 
 // Test 7: Reference passed to function but not stored
-let read_ref(r ref Int) Int = {
-    return r.val
+let read_ref(r * Int) Int = {
+    return *r
 }
 
 let test_ref_passed_not_stored() Void = {
     let mut x Int = 77
-    let r ref Int = x.ref  // x doesn't escape - r is only read
+    let r * Int = &x  // x doesn't escape - r is only read
     let value = read_ref(r)
-    assert(value == 77, "ref passed not stored")
+    assert(value == 77, "* passed not stored")
 }
 
 // Test 8: Reference to rvalue (always heap allocated)
 let test_rvalue_ref() Void = {
-    // ref 100 creates a reference to an rvalue, which must be heap allocated
-    let r ref Int = box(100)
-    let value = r.val
-    assert(value == 100, "rvalue ref value")
+    // * 100 creates a reference to an rvalue, which must be heap allocated
+    let r * Int = box(100)
+    let value = *r
+    assert(value == 100, "rvalue * value")
 }
 
 // Test 9: Direct reference in chained call
 let create_box_direct(v Int) IntBox = {
     let mut x Int = v
-    return IntBox(x.ref)  // x.ref is directly passed
+    return IntBox(&x)  // &x is directly passed
 }
 
 let get_box_value(box IntBox) Int = {
-    return box.value.val
+    return *box.value
 }
 
 let test_chained_direct() Void = {
@@ -132,9 +132,9 @@ let test_chained_direct() Void = {
 }
 
 // Test 10: Existing struct_with_ref pattern (from existing test)
-type Box(value ref Int)
+type Box(value * Int)
 
-type NestedRefBox(data ref Int)
+type NestedRefBox(data * Int)
 type NestedOuter(inner NestedRefBox)
 type NestedUnion {
     None(),
@@ -142,27 +142,27 @@ type NestedUnion {
 }
 
 let getBox() Box = {
-    let r ref Int = box(100)  // 100 is rvalue, so heap allocated
+    let r * Int = box(100)  // 100 is rvalue, so heap allocated
     return Box(r)
 }
 
 let test_existing_pattern() Void = {
     let b = getBox()
-    let value = b.value.val
+    let value = *b.value
     assert(value == 100, "existing pattern value")
 }
 
-// Test 11: ref alias nested in multi-level type + enum construction
+// Test 11: * alias nested in multi-level type + enum construction
 let build_nested_enum_alias() NestedUnion = {
     let mut x Int = 314
-    let r ref Int = x.ref
+    let r * Int = &x
     return NestedUnion.Some(NestedOuter(NestedRefBox(r)))
 }
 
 let test_nested_enum_alias_escape() Void = {
     let v = build_nested_enum_alias()
     when v in {
-        .Some(outer) then assert(outer.inner.data.val == 314, "nested enum alias value"),
+        .Some(outer) then assert(*outer.inner.data == 314, "nested enum alias value"),
         _ then assert(false, "nested enum alias should be Some"),
     }
 }

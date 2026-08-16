@@ -28,8 +28,8 @@ using app::services { run_server }
 foreign type FILE {}
 foreign type Point(x Int, y Int)        // 带字段的外部类型
 
-foreign let fopen(path ptr UInt8, mode ptr UInt8) ptr FILE
-foreign let fclose(file ptr FILE) Int32
+foreign let fopen(path *raw UInt8, mode *raw UInt8) *raw FILE
+foreign let fclose(file *raw FILE) Int32
 
 
 // ============================================================
@@ -304,8 +304,8 @@ let named_func_type() Void = {
 }
 
 // Foreign 函数不支持命名参数
-// foreign let fopen(path: ptr UInt8) ptr FILE  // 错误
-foreign let fclose(file ptr FILE) Int32          // 正确：位置参数
+// foreign let fopen(path: *raw UInt8) *raw FILE  // 错误
+foreign let fclose(file *raw FILE) Int32          // 正确：位置参数
 
 // ============================================================
 // break value（仅用于 if / when 分支表达式的分支 body）
@@ -536,7 +536,7 @@ type Counter(mut count Int)
 // enum（和类型 / 枚举）
 type TreeNode {
     Empty(),
-    Node(value Int, left ref TreeNode, right ref TreeNode),
+    Node(value Int, left *TreeNode, right *TreeNode),
 }
 
 // 泛型 enum（ADT）
@@ -555,60 +555,60 @@ type Table[T Any](mut data T)
 
 
 // ============================================================
-// 类型修饰符：ref / ref mut / ptr / ptr mut / weakref / weakref mut / val
+// 类型修饰符：* / *mut / *raw / *raw mut / ?* / ?*mut
 // ============================================================
 
 let type_modifiers() Void = {
-    // ref：只读受管理引用
-    // - 可通过不可变左值上的 .ref 形成（产出 ref T）
-    // - 也可通过 box() 创建（返回 ref mut T，可隐式宽化为 ref T）
+    // *：只读受管理引用
+    // - 可通过不可变左值上的 & 形成（产出 *T）
+    // - 也可通过 box() 创建（返回 *mut T，可隐式宽化为 *T）
     // - 成员访问自动解引用（对结构体/枚举类型）
-    // - .val 读取值，但不支持 .val 赋值（ref 是只读引用）
+    // - *expr 读取值，但不支持 *expr 赋值（* 是只读引用）
     let local Int = 7
-    let borrowed ref Int = local.ref    // let 绑定 → ref T
-    let a ref Int = box(42)             // box() 返回 ref mut T，隐式宽化为 ref T
-    println(a.val)          // 显式解引用读取
-    let point_ref ref Point = box(Point(10, 20))
+    let borrowed *Int = &local    // let 绑定 → *T
+    let a *Int = box(42)             // box() 返回 *mut T，可隐式宽化为 *T
+    println(*a)          // 显式解引用读取
+    let point_ref *Point = box(Point(10, 20))
     println(point_ref.x)    // 对结构体做成员访问时自动解引用
-    // a.val = 99           // 错误：ref 不支持 .val 赋值
+    // *a = 99           // 错误：* 不支持解引用赋值
 
-    // ref mut：可变受管理引用
-    // - 可通过可变左值上的 .ref 形成（产出 ref mut T）
-    // - box() 返回 ref mut T
-    // - 支持 .val 读取和 .val = expr 赋值
-    // - ref mut T 可隐式转换为 ref T（丢弃写权限），反向不允许
+    // *mut：可变受管理引用
+    // - 可通过可变左值上的 &mut 形成（产出 *mut T）
+    // - box() 返回 *mut T
+    // - 支持 *expr 读取和 *expr = value 赋值
+    // - *mut T 可隐式转换为 *T（丢弃写权限），反向不允许
     let mut local2 Int = 7
-    let mut_borrowed ref mut Int = local2.ref  // let mut 绑定 → ref mut T
-    let owned ref mut Int = box(42)            // box() 返回 ref mut T
-    println(owned.val)      // .val 读取
-    owned.val = 99          // .val 赋值（ref mut 支持）
+    let mut_borrowed *mut Int = &mut local2  // let mut 绑定 → *mut T
+    let owned *mut Int = box(42)            // box() 返回 *mut T
+    println(*owned)      // *expr 读取
+    *owned = 99          // *expr 赋值（*mut 支持）
 
-    // ptr：只读原始指针
-    // - 支持 .val 读取，但不支持 .val 赋值
+    // *raw：只读原始指针
+    // - 支持 *expr 读取，但不支持 *expr 赋值
     // - 支持下标读取 p[i]，但不支持下标赋值
     // - 支持指针算术（+ / -）
-    let b ptr Int = a.ptr
-    let value = b.val       // .val 读取
-    // b.val = 99           // 错误：ptr 不支持 .val 赋值
-    let v0 = b[0]           // 下标读取（等价于 (b + 0).val）
-    // b[1] = 200           // 错误：ptr 不支持下标赋值
+    let b *raw Int = &raw a
+    let value = *b       // *expr 读取
+    // *b = 99           // 错误：*raw 不支持 *expr 赋值
+    let v0 = b[0]           // 下标读取（等价于 *(b + 0)）
+    // b[1] = 200           // 错误：*raw 不支持下标赋值
 
-    // ptr mut：可变原始指针
-    // - 支持 .val 读取和 .val 赋值
+    // *raw mut：可变原始指针
+    // - 支持 *expr 读取和 *expr = value 赋值
     // - 支持下标读取和下标赋值（指针偏移语义）
     // - 支持指针算术（+ / -）
-    let mp ptr mut Int = alloc_memory[Int](2)
-    mp.val = 99             // .val 赋值
-    mp[0] = 111             // 下标赋值（等价于 (mp + 0).val = 111）
-    mp[1] = 222             // 下标赋值（等价于 (mp + 1).val = 222）
+    let mp *raw mut Int = alloc_memory[Int](2)
+    *mp = 99             // *expr 赋值
+    mp[0] = 111             // 下标赋值（等价于 *(mp + 0) = 111）
+    mp[1] = 222             // 下标赋值（等价于 *(mp + 1) = 222）
 
-    // weakref / weakref mut：弱引用（不增加引用计数）
-    // weakref T 是只读弱引用，weakref mut T 是可变弱引用
-    let c weakref Int = a.weakref                  // ref T → weakref T
-    let d weakref mut Int = owned.weakref          // ref mut T → weakref mut T
+    // ?* / ?*mut：弱引用（不增加引用计数）
+    // ?*T 是只读弱引用，?*mut T 是可变弱引用
+    let c ?*Int = downgrade(a)                  // *T → ?*T
+    let d ?*mut Int = downgrade_mut(owned)          // *mut T → ?*mut T
 
     // 类型注解中使用
-    let f Func[ref Int, Void] = (x) -> println(x.val)
+    let f Func[*Int, Void] = (x) -> println(*x)
 }
 
 // ============================================================
@@ -616,12 +616,12 @@ let type_modifiers() Void = {
 // ============================================================
 
 let heap_allocation() Void = {
-    // box() 将值分配到堆上，返回 ref mut
-    let r ref mut Int = box(42)
-    let p ref mut Point = box(Point(10, 20))
+    // box() 将值分配到堆上，返回 *mut
+    let r *mut Int = box(42)
+    let p *mut Point = box(Point(10, 20))
     println(p.x)            // 成员访问自动解引用
     println(p.y)            // 另一侧字段同样可直接访问
-    r.val = 100             // ref mut 支持 .val 赋值
+    *r = 100             // *mut 支持 *expr 赋值
 }
 
 // ============================================================
@@ -629,25 +629,25 @@ let heap_allocation() Void = {
 // ============================================================
 
 let weakref_example() Void = {
-    let strong ref mut Int = box(42)
+    let strong *mut Int = box(42)
 
-    // 降级为可变弱引用（ref mut → weakref mut）
-    let weak weakref mut Int = strong.weakref
+    // 降级为可变弱引用（*mut → ?*mut）
+    let weak ?*mut Int = downgrade_mut(strong)
 
-    // 升级回可变强引用（weakref mut T → Option[ref mut T]）
-    when weak.to_ref() in {
+    // 升级回可变强引用（?*mut T → Option[*mut T]）
+    when upgrade_mut(weak) in {
         .Some(r) then {
-            println(r.val)
-            r.val = 100       // ref mut 支持赋值
+            println(*r)
+            *r = 100       // *mut 支持赋值
         },
         .None then println("expired"),
     }
 
-    // 只读版本：ref T → weakref T → Option[ref T]
-    let ro ref Int = strong           // ref mut 隐式宽化为 ref
-    let ro_weak weakref Int = ro.weakref
-    when ro_weak.to_ref() in {
-        .Some(r) then println(r.val),
+    // 只读版本：*T → ?*T → Option[*T]
+    let ro *Int = strong           // *mut 隐式宽化为 *
+    let ro_weak ?*Int = downgrade(ro)
+    when upgrade(ro_weak) in {
+        .Some(r) then println(*r),
         .None    then println("expired"),
     }
 }
@@ -657,27 +657,27 @@ let weakref_example() Void = {
 // ============================================================
 
 let pointer_ops() Void = {
-    let p ptr mut Int = alloc_memory[Int](2)  // 分配 2 个 Int 的内存，返回 ptr mut
+    let p *raw mut Int = alloc_memory[Int](2)  // 分配 2 个 Int 的内存，返回 *raw mut
 
-    init_memory(p, 100)           // 初始化（要求 ptr mut）
-    let value = p.val             // 解引用读取
+    init_memory(p, 100)           // 初始化（要求 *raw mut）
+    let value = *p             // 解引用读取
 
     let p2 = p + 1                // 指针偏移
     init_memory(p2, 200)
 
-    p.val = 999                   // 解引用赋值（ptr mut 支持）
+    *p = 999                   // 解引用赋值（*raw mut 支持）
 
     // 下标访问（指针偏移 + 解引用）
-    let v0 = p[0]                 // 等价于 (p + 0).val
-    let v1 = p[1]                 // 等价于 (p + 1).val
-    p[0] = 111                    // 下标赋值（ptr mut 支持）
+    let v0 = p[0]                 // 等价于 *(p + 0)
+    let v1 = p[1]                 // 等价于 *(p + 1)
+    p[0] = 111                    // 下标赋值（*raw mut 支持）
     p[1] = 222
 
-    deinit_memory(p)              // 析构（要求 ptr mut）
+    deinit_memory(p)              // 析构（要求 *raw mut）
     deinit_memory(p2)
     dealloc_memory(p)             // 释放内存
 
-    let np ptr Int = null_ptr()   // null 指针（返回 ptr T）
+    let np *raw Int = null_ptr()   // null 指针（返回 *raw T）
     println(p == null_ptr())
 }
 
@@ -698,7 +698,7 @@ trait Ord Eq {
 
 // trait 继承（多继承，and 连接）
 trait ToString {
-    to_string(self ref) String
+    to_string(*self) String
 }
 
 trait PrettyPrint ToString and Eq {
@@ -707,7 +707,7 @@ trait PrettyPrint ToString and Eq {
 
 // 泛型 trait
 trait Iterator[T Any] {
-    next(self ref mut) Option[T]
+    next(*mut self) Option[T]
 }
 
 // ============================================================
@@ -734,7 +734,7 @@ given Foo as Ord {
 type Table[T Any](mut data T)
 
 given[T Any] Table[T] {
-    set_data(self ref mut, d T) Void = {
+    set_data(*mut self, d T) Void = {
         self.data = d
     }
 }
@@ -817,20 +817,20 @@ let builtin_subscript() Void = {
 // ============================================================
 
 trait Shape {
-    area(self ref) Float64
-    reset(self ref mut) Void
+    area(*self) Float64
+    reset(*mut self) Void
 }
 
 type Circle(mut radius Float64)
 given Circle as Shape {
-    area(self ref) Float64 = 3.14159 * self.radius * self.radius
-    reset(self ref mut) Void = {
+    area(*self) Float64 = 3.14159 * self.radius * self.radius
+    reset(*mut self) Void = {
         self.radius = 0.0
     }
 }
 
 let trait_object_example() Void = {
-    // ref TraitName / ref mut TraitName 类型 + box() = 动态分发
+    // *TraitName / *mut TraitName 类型 + box() = 动态分发
     let s ref Shape = box(Circle(5.0))
     let ms ref mut Shape = box(Circle(6.0))
     println(s.area())

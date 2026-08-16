@@ -1,8 +1,8 @@
 given TypeChecker {
-    protected validate_drop_member_signature(self, target_type Type, members List[ref TypedGivenMember]) Void = {
+    protected validate_drop_member_signature(self, target_type Type, members List[* TypedGivenMember]) Void = {
         let expected_param_type = Type.MutablePointerType(box(target_type))
         for member_ref in members then {
-            let member = member_ref.val
+            let member = *member_ref
             if member.name <> "drop" then {
                 continue
             }
@@ -11,7 +11,7 @@ given TypeChecker {
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        "drop must have exactly one parameter of type 'ptr mut Self'"
+                            "drop must have exactly one parameter of type '*raw mut Self'"
                     )
                 )
                 return
@@ -39,7 +39,7 @@ given TypeChecker {
         }
     }
 
-    protected check_decl(self ref mut, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
+    protected check_decl(*mut self, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
@@ -61,7 +61,7 @@ given TypeChecker {
                     let mut context = self.context()
                     let placeholder_id = self.get_or_allocate_top_level_def_id(name, DefKind.Variable(), access, span)
                     context.set_concrete_global_initializer(placeholder_id, box(typed_init))
-                    break box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), resolved))
+                    break box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved))
                 } else box(typed_init)
                 let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
                 let sym = box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable))
@@ -75,7 +75,7 @@ given TypeChecker {
                 let prev_branch_break_targets = self.storage.branch_break_targets
                 self.storage.in_loop = false
                 self.storage.in_defer = false
-                self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
+                self.storage.branch_break_targets = List[*mut BranchBreakTarget].new()
                 self.storage.function_return_context.inferred_return_type = Option[Type].None()
                 self.storage.function_return_context.is_inferring = false
                 defer {
@@ -110,7 +110,7 @@ given TypeChecker {
                     let typed_body = self.check_expr_scoped_ref(body, .Some(resolved_ret), fn_scope)
                     let stable_params = typed_params
                     let stable_ret = resolved_ret
-                    let mut param_refs = List[ref Type].new()
+                    let mut param_refs = List[* Type].new()
                     for param in stable_params then {
                         param_refs.push(box(param.param_type))
                     }
@@ -123,7 +123,7 @@ given TypeChecker {
                             fn_sym.def_id,
                             ConcreteExprSource(body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
                         )
-                        break box(TypedExpr(box(TypedExprKind.Block(List[ref TypedStatement].new())), stable_ret))
+                        break box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), stable_ret))
                     } else box(typed_body)
                     break TypedDecl.FunctionDecl(
                         access,
@@ -173,8 +173,8 @@ given TypeChecker {
                         println("[template-retain] generic-fn checked-body file=\(self.storage.file_path) name=\(name)")
                     }
                     let generic_fn_checked_body = if self.skip_template_typed_body_boxing_debug_enabled()
-                        then Option[ref TypedExpr].None()
-                        else Option[ref TypedExpr].Some(box(typed_body))
+                        then Option[* TypedExpr].None()
+                        else Option[* TypedExpr].Some(box(typed_body))
                     self.register_generic_function_template(
                         name,
                         type_params,
@@ -217,7 +217,7 @@ given TypeChecker {
                 signature_types.push(resolved_ret)
                 self.validate_signature_type_visibility(name, access, signature_types, span)
                 self.storage.current_scope = prev
-                let mut param_refs = List[ref Type].new()
+                let mut param_refs = List[* Type].new()
                 for param in typed_params then {
                     param_refs.push(box(param.param_type))
                 }
@@ -253,7 +253,7 @@ given TypeChecker {
                         )
                     }
                 }
-                let mut param_refs = List[ref Type].new()
+                let mut param_refs = List[* Type].new()
                 for param in typed_params then {
                     param_refs.push(box(param.param_type))
                 }
@@ -412,7 +412,7 @@ given TypeChecker {
                         .Generic(_, args) then {
                             let mut nodes = List[TypeNode].new()
                             for arg in args then {
-                                nodes.push(arg.val)
+                                nodes.push(*arg)
                             }
                             break nodes
                         },
@@ -427,7 +427,7 @@ given TypeChecker {
             },
             .GivenDecl(target_type, type_params, members, span) then {
                 break if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.GivenDecl(Type.Unknown(), List[ref TypedGivenMember].new(), span)
+                then TypedDecl.GivenDecl(Type.Unknown(), List[* TypedGivenMember].new(), span)
                 else {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                     self.register_generic_constraints(type_params)
@@ -438,17 +438,17 @@ given TypeChecker {
                     // Given locality check: target type must be in current module
                     let locality_checker = GivenLocalityChecker.new(
                         self.context(),
-                        self.storage.trait_registry.ref,
+                        &mut (self.storage.trait_registry),
                         self.storage.module_path,
                         self.storage.generic_templates,
-                        self.storage.global_scope.ref,
+                        &mut (self.storage.global_scope),
                     )
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies)
+                    let mut typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies)
                     if not self.contains_generic_parameter(resolved_target) then {
-                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, typed_members.ref)
+                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mut typed_members)
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members)
                     self.restore_generic_constraints(generic_constraint_snapshot)
@@ -457,7 +457,7 @@ given TypeChecker {
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
                 break if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), List[Type].new(), List[ref TypedGivenMember].new(), span)
+                then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), List[Type].new(), List[* TypedGivenMember].new(), span)
                 else {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                     self.register_generic_constraints(type_params)
@@ -473,20 +473,20 @@ given TypeChecker {
                     // Given conformance locality check (orphan rule)
                     let locality_checker = GivenLocalityChecker.new(
                         self.context(),
-                        self.storage.trait_registry.ref,
+                        &mut (self.storage.trait_registry),
                         self.storage.module_path,
                         self.storage.generic_templates,
-                        self.storage.global_scope.ref,
+                        &mut (self.storage.global_scope),
                     )
                     if locality_checker.check_given_conformance_locality(resolved_target, trait_name) is .Some(msg) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, msg))
                     }
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].Some(trait_name), retain_checked_template_bodies)
+                    let mut typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].Some(trait_name), retain_checked_template_bodies)
                     if self.is_std_drop_trait(trait_name) then {
                         self.validate_drop_member_signature(resolved_target, typed_members)
                     }
                     // 检查 Trait 一致性
-                    let checker = TraitChecker.new(self.storage.trait_registry.ref, self.storage.method_table.ref)
+                    let checker = TraitChecker.new(&mut (self.storage.trait_registry), &mut (self.storage.method_table))
                     when self.storage.trait_registry.get(trait_name) in {
                         .Some(info) then {
                             for parent in info.parent_traits then {
@@ -548,11 +548,11 @@ given TypeChecker {
                             resolved_target,
                             type_params,
                             trait_name,
-                            typed_members.ref,
+                            &mut typed_members,
                         )
                     }
                     if not self.contains_generic_parameter(resolved_target) then {
-                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, typed_members.ref)
+                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mut typed_members)
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), typed_members)
                     self.restore_generic_constraints(generic_constraint_snapshot)
@@ -561,7 +561,7 @@ given TypeChecker {
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
                 break if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
-                then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), List[ref TypedGivenMember].new(), span)
+                then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), List[* TypedGivenMember].new(), span)
                 else {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
                     self.register_generic_constraints(type_params)
@@ -569,9 +569,9 @@ given TypeChecker {
                     let resolved_target = if type_params.is_empty()
                         then self.resolve_type(target_type)
                         else self.resolve_type_with_bindings(target_type, bindings)
-                    let typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies)
+                    let mut typed_members = self.check_given_members_for_type(members, resolved_target, type_params, Option[String].None(), retain_checked_template_bodies)
                     if not self.contains_generic_parameter(resolved_target) then {
-                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, typed_members.ref)
+                        self.register_conformance_method_signatures_for_concrete_type(resolved_target, &mut typed_members)
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members)
                     self.restore_generic_constraints(generic_constraint_snapshot)
@@ -594,7 +594,7 @@ given TypeChecker {
     }
 
     protected concrete_type_modifier_given_message(self) String = {
-        return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+        return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] *T as SomeTrait { ... }'"
     }
 
     protected is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
@@ -658,7 +658,7 @@ given TypeChecker {
                 .Generic(base, args) then {
                     self.validate_trait_parent_arity(base, args.count())
                     for arg in args then {
-                        let _ = self.resolve_type_in_scope(arg.val, scope)
+                        let _ = self.resolve_type_in_scope(*arg, scope)
                     }
                 },
                 _ then {},

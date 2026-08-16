@@ -417,8 +417,8 @@ final class MIRVerifier {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
-         .borrowedReference(let inner, _),
-         .mutableBorrowedReference(let inner, _):
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner):
       return inner
     default:
       return nil
@@ -431,8 +431,8 @@ final class MIRVerifier {
       return (traitName, typeArguments)
     case .reference(let inner),
          .mutableReference(let inner),
-         .borrowedReference(let inner, _),
-         .mutableBorrowedReference(let inner, _):
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner):
       if case .traitObject(let traitName, let typeArguments) = inner {
         return (traitName, typeArguments)
       }

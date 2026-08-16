@@ -9,16 +9,16 @@ using std { .. }
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let __koral_timer_context_create() ptr UInt8
-foreign let __koral_timer_context_cancel(ctx ptr UInt8) Void
-foreign let __koral_timer_context_destroy(ctx ptr UInt8) Void
-foreign let __koral_timer_sleep(ctx ptr UInt8, secs Int64, nanos Int64) Int32
+foreign let __koral_timer_context_create() *raw UInt8
+foreign let __koral_timer_context_cancel(ctx *raw UInt8) Void
+foreign let __koral_timer_context_destroy(ctx *raw UInt8) Void
+foreign let __koral_timer_sleep(ctx *raw UInt8, secs Int64, nanos Int64) Int32
 
 // ============================================================================
 // TimerStorage (internal, for Timer)
 // ============================================================================
 private type TimerStorage(
-    ctx ptr UInt8,
+    ctx *raw UInt8,
     mut d_secs  Int64,
     mut d_nanos Int64,
     mut fired   Bool,
@@ -27,7 +27,7 @@ private type TimerStorage(
 
 given TimerStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         if not source.cancelled then {
             __koral_timer_context_cancel(source.ctx)
         }
@@ -43,7 +43,7 @@ given TimerStorage as Drop {
 /// wait() blocks for the given duration, then marks the timer as fired.
 /// Subsequent wait() calls return immediately until reset() is called.
 /// reset() clears the fired state and sets a new duration.
-public type Timer(private storage ref mut TimerStorage)
+public type Timer(private storage *mut TimerStorage)
 
 given Timer {
 
@@ -57,7 +57,7 @@ given Timer {
 
     /// Block for the timer's duration. Returns immediately if already fired or cancelled.
     /// Marks the timer as fired on return.
-    public wait(self ref) Void = {
+    public wait(*self) Void = {
         if self.storage.fired or self.storage.cancelled then { return }
         __koral_timer_sleep(self.storage.ctx, self.storage.d_secs, self.storage.d_nanos)
         self.storage.fired = true
@@ -65,7 +65,7 @@ given Timer {
 
     /// Reset the timer: clears fired state and sets a new duration.
     /// The next wait() will block for the new duration.
-    public reset(self ref, d Duration) Void = {
+    public reset(*self, d Duration) Void = {
         if d < Duration.zero() then {
             panic("Timer.reset: duration must not be negative")
         }
@@ -75,7 +75,7 @@ given Timer {
     }
 
     /// Cancel the timer. Any blocked wait() returns immediately.
-    public cancel(self ref) Void = {
+    public cancel(*self) Void = {
         if not self.storage.cancelled then {
             __koral_timer_context_cancel(self.storage.ctx)
             self.storage.cancelled = true
@@ -87,7 +87,7 @@ given Timer {
 // TickerStorage (internal, for Ticker)
 // ============================================================================
 private type TickerStorage(
-    ctx ptr UInt8,
+    ctx *raw UInt8,
     mut i_secs      Int64,
     mut i_nanos     Int64,
     mut cancelled   Bool,
@@ -95,7 +95,7 @@ private type TickerStorage(
 
 given TickerStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         if not source.cancelled then {
             __koral_timer_context_cancel(source.ctx)
         }
@@ -109,7 +109,7 @@ given TickerStorage as Drop {
 
 /// A periodic ticker. Created via Ticker.new(interval).
 /// Each wait() call blocks for one interval from the moment wait() is called.
-public type Ticker(private storage ref mut TickerStorage)
+public type Ticker(private storage *mut TickerStorage)
 
 given Ticker {
 
@@ -122,13 +122,13 @@ given Ticker {
     }
 
     /// Block until the next tick. Returns immediately if cancelled.
-    public wait(self ref) Void = {
+    public wait(*self) Void = {
         if self.storage.cancelled then { return }
         __koral_timer_sleep(self.storage.ctx, self.storage.i_secs, self.storage.i_nanos)
     }
 
     /// Change the interval. Takes effect on the next wait() call.
-    public reset(self ref, interval Duration) Void = {
+    public reset(*self, interval Duration) Void = {
         if interval <= Duration.zero() then {
             panic("Ticker.reset: interval must be positive")
         }
@@ -137,7 +137,7 @@ given Ticker {
     }
 
     /// Cancel the ticker. Any blocked wait() returns immediately.
-    public cancel(self ref) Void = {
+    public cancel(*self) Void = {
         if not self.storage.cancelled then {
             __koral_timer_context_cancel(self.storage.ctx)
             self.storage.cancelled = true

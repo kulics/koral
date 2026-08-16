@@ -16,24 +16,24 @@ using std { .. }
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let __koral_atomic_load_i32(p ptr Int32) Int32
-foreign let __koral_atomic_store_i32(p ptr Int32, value Int32) Void
-foreign let __koral_atomic_swap_i32(p ptr Int32, value Int32) Int32
-foreign let __koral_atomic_cas_i32(p ptr Int32, expected Int32, desired Int32) Int32
+foreign let __koral_atomic_load_i32(p *raw Int32) Int32
+foreign let __koral_atomic_store_i32(p *raw Int32, value Int32) Void
+foreign let __koral_atomic_swap_i32(p *raw Int32, value Int32) Int32
+foreign let __koral_atomic_cas_i32(p *raw Int32, expected Int32, desired Int32) Int32
 
-foreign let __koral_atomic_load_iptr(p ptr Int) Int
-foreign let __koral_atomic_store_iptr(p ptr Int, value Int) Void
-foreign let __koral_atomic_swap_iptr(p ptr Int, value Int) Int
-foreign let __koral_atomic_cas_iptr(p ptr Int, expected Int, desired Int) Int32
-foreign let __koral_atomic_fetch_add_iptr(p ptr Int, delta Int) Int
-foreign let __koral_atomic_fetch_sub_iptr(p ptr Int, delta Int) Int
+foreign let __koral_atomic_load_iptr(p *raw Int) Int
+foreign let __koral_atomic_store_iptr(p *raw Int, value Int) Void
+foreign let __koral_atomic_swap_iptr(p *raw Int, value Int) Int
+foreign let __koral_atomic_cas_iptr(p *raw Int, expected Int, desired Int) Int32
+foreign let __koral_atomic_fetch_add_iptr(p *raw Int, delta Int) Int
+foreign let __koral_atomic_fetch_sub_iptr(p *raw Int, delta Int) Int
 
-foreign let __koral_atomic_load_uptr(p ptr UInt) UInt
-foreign let __koral_atomic_store_uptr(p ptr UInt, value UInt) Void
-foreign let __koral_atomic_swap_uptr(p ptr UInt, value UInt) UInt
-foreign let __koral_atomic_cas_uptr(p ptr UInt, expected UInt, desired UInt) Int32
-foreign let __koral_atomic_fetch_add_uptr(p ptr UInt, delta UInt) UInt
-foreign let __koral_atomic_fetch_sub_uptr(p ptr UInt, delta UInt) UInt
+foreign let __koral_atomic_load_uptr(p *raw UInt) UInt
+foreign let __koral_atomic_store_uptr(p *raw UInt, value UInt) Void
+foreign let __koral_atomic_swap_uptr(p *raw UInt, value UInt) UInt
+foreign let __koral_atomic_cas_uptr(p *raw UInt, expected UInt, desired UInt) Int32
+foreign let __koral_atomic_fetch_add_uptr(p *raw UInt, delta UInt) UInt
+foreign let __koral_atomic_fetch_sub_uptr(p *raw UInt, delta UInt) UInt
 
 // ============================================================================
 // AtomicBool
@@ -42,25 +42,25 @@ private type AtomicBoolStorage(mut value Int32)
 
 /// 原子布尔，用于标志位和开关
 /// 所有操作使用顺序一致性内存序
-public type AtomicBool(private storage ref AtomicBoolStorage)
+public type AtomicBool(private storage * AtomicBoolStorage)
 
 given AtomicBool {
 
     public new(value Bool) AtomicBool =
         AtomicBool(box(AtomicBoolStorage(if value then 1 else 0)))
 
-    public load(self ref) Bool = __koral_atomic_load_i32(self.storage.value.ptr) <> 0
+    public load(*self) Bool = __koral_atomic_load_i32(&raw self.storage.value) <> 0
 
-    public store(self ref, value Bool) Void = {
-        __koral_atomic_store_i32(self.storage.value.ptr, if value then 1 else 0)
+    public store(*self, value Bool) Void = {
+        __koral_atomic_store_i32(&raw self.storage.value, if value then 1 else 0)
     }
 
-    public swap(self ref, value Bool) Bool =
-        __koral_atomic_swap_i32(self.storage.value.ptr, if value then 1 else 0) <> 0
+    public swap(*self, value Bool) Bool =
+        __koral_atomic_swap_i32(&raw self.storage.value, if value then 1 else 0) <> 0
 
-    public compare_exchange(self ref, expected: Bool, desired: Bool) Bool = {
+    public compare_exchange(*self, expected: Bool, desired: Bool) Bool = {
         return __koral_atomic_cas_i32(
-            self.storage.value.ptr,
+            &raw self.storage.value,
             if expected then 1 else 0,
             if desired then 1 else 0
         ) == 1
@@ -70,7 +70,7 @@ given AtomicBool {
 
 given AtomicBool as ToString {
 
-    public to_string(self ref) String = self.load().to_string()
+    public to_string(*self) String = self.load().to_string()
 }
 
 // ============================================================================
@@ -80,36 +80,36 @@ private type AtomicIntStorage(mut value Int)
 
 /// 原子有符号整数（Int，平台相关宽度），支持无锁的原子读写和 CAS 操作
 /// 所有操作使用顺序一致性内存序
-public type AtomicInt(private storage ref AtomicIntStorage)
+public type AtomicInt(private storage * AtomicIntStorage)
 
 given AtomicInt {
 
     public new(value Int) AtomicInt =
         AtomicInt(box(AtomicIntStorage(value)))
 
-    public load(self ref) Int = __koral_atomic_load_iptr(self.storage.value.ptr)
+    public load(*self) Int = __koral_atomic_load_iptr(&raw self.storage.value)
 
-    public store(self ref, value Int) Void = {
-        __koral_atomic_store_iptr(self.storage.value.ptr, value)
+    public store(*self, value Int) Void = {
+        __koral_atomic_store_iptr(&raw self.storage.value, value)
     }
 
-    public swap(self ref, value Int) Int =
-        __koral_atomic_swap_iptr(self.storage.value.ptr, value)
+    public swap(*self, value Int) Int =
+        __koral_atomic_swap_iptr(&raw self.storage.value, value)
 
-    public compare_exchange(self ref, expected: Int, desired: Int) Bool =
-        __koral_atomic_cas_iptr(self.storage.value.ptr, expected, desired) == 1
+    public compare_exchange(*self, expected: Int, desired: Int) Bool =
+        __koral_atomic_cas_iptr(&raw self.storage.value, expected, desired) == 1
 
-    public fetch_add(self ref, delta Int) Int =
-        __koral_atomic_fetch_add_iptr(self.storage.value.ptr, delta)
+    public fetch_add(*self, delta Int) Int =
+        __koral_atomic_fetch_add_iptr(&raw self.storage.value, delta)
 
-    public fetch_sub(self ref, delta Int) Int =
-        __koral_atomic_fetch_sub_iptr(self.storage.value.ptr, delta)
+    public fetch_sub(*self, delta Int) Int =
+        __koral_atomic_fetch_sub_iptr(&raw self.storage.value, delta)
 
 }
 
 given AtomicInt as ToString {
 
-    public to_string(self ref) String = self.load().to_string()
+    public to_string(*self) String = self.load().to_string()
 }
 
 // ============================================================================
@@ -119,34 +119,34 @@ private type AtomicUIntStorage(mut value UInt)
 
 /// 原子无符号整数（UInt，平台相关宽度），支持无锁的原子读写和 CAS 操作
 /// 所有操作使用顺序一致性内存序
-public type AtomicUInt(private storage ref AtomicUIntStorage)
+public type AtomicUInt(private storage * AtomicUIntStorage)
 
 given AtomicUInt {
 
     public new(value UInt) AtomicUInt =
         AtomicUInt(box(AtomicUIntStorage(value)))
 
-    public load(self ref) UInt = __koral_atomic_load_uptr(self.storage.value.ptr)
+    public load(*self) UInt = __koral_atomic_load_uptr(&raw self.storage.value)
 
-    public store(self ref, value UInt) Void = {
-        __koral_atomic_store_uptr(self.storage.value.ptr, value)
+    public store(*self, value UInt) Void = {
+        __koral_atomic_store_uptr(&raw self.storage.value, value)
     }
 
-    public swap(self ref, value UInt) UInt =
-        __koral_atomic_swap_uptr(self.storage.value.ptr, value)
+    public swap(*self, value UInt) UInt =
+        __koral_atomic_swap_uptr(&raw self.storage.value, value)
 
-    public compare_exchange(self ref, expected: UInt, desired: UInt) Bool =
-        __koral_atomic_cas_uptr(self.storage.value.ptr, expected, desired) == 1
+    public compare_exchange(*self, expected: UInt, desired: UInt) Bool =
+        __koral_atomic_cas_uptr(&raw self.storage.value, expected, desired) == 1
 
-    public fetch_add(self ref, delta UInt) UInt =
-        __koral_atomic_fetch_add_uptr(self.storage.value.ptr, delta)
+    public fetch_add(*self, delta UInt) UInt =
+        __koral_atomic_fetch_add_uptr(&raw self.storage.value, delta)
 
-    public fetch_sub(self ref, delta UInt) UInt =
-        __koral_atomic_fetch_sub_uptr(self.storage.value.ptr, delta)
+    public fetch_sub(*self, delta UInt) UInt =
+        __koral_atomic_fetch_sub_uptr(&raw self.storage.value, delta)
 
 }
 
 given AtomicUInt as ToString {
 
-    public to_string(self ref) String = self.load().to_string()
+    public to_string(*self) String = self.load().to_string()
 }

@@ -197,8 +197,8 @@ final class MIRPrinter {
       return "trait_object_conversion[\(conversion.sourceOwnership)] \(renderTraitName(conversion.traitName, conversion.traitTypeArguments)) inner=\(renderValue(conversion.inner)) concrete=\(context.getDebugName(conversion.concreteType)): \(context.getDebugName(conversion.type))"
     case .traitMethodCall(let call):
       return "trait_call[receiver=\(call.receiverOwnership), args=\(renderOwnerships(call.argumentOwnerships))] \(renderTraitName(call.traitName, call.traitTypeArguments)).\(call.methodName) receiver=\(renderValue(call.receiver))(\(call.arguments.map(renderValue).joined(separator: ", "))): \(context.getDebugName(call.type))"
-    case .ref(_, let kind, let allocation):
-      return "ref[\(kind), \(allocation)]"
+    case .ref(let place, let kind, let allocation):
+      return "ref[\(kind), \(allocation)] \(renderPlace(place))"
     case .pointer(let place):
       return "ptr \(renderPlace(place))"
     case .cast(let operand, let type):

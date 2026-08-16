@@ -465,6 +465,13 @@ extension Parser {
     var left = try parsePrefixExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .remainder {
+      // If there is a newline before a multiplicative operator, do not treat it
+      // as a binary continuation.  This allows deref-assignment (`*r = 2`) on a
+      // new line to be parsed as a new statement rather than as multiplication
+      // of the previous expression.
+      if lexer.newlineBeforeCurrent {
+        break
+      }
       let op = currentToken
       try match(op)
       let right = try parsePrefixExpression()
@@ -513,6 +520,29 @@ extension Parser {
       let expr = try parsePrefixExpression()
       return .bitwiseNotExpression(expr)
     }
+    if currentToken === .ampersand {
+      try match(.ampersand)
+      if currentToken === .rawKeyword {
+        try match(.rawKeyword)
+        let mutable = currentToken === .mutKeyword
+        if mutable {
+          try match(.mutKeyword)
+        }
+        let expr = try parsePrefixExpression()
+        return .ptrExpression(expr)
+      }
+      let mutable = currentToken === .mutKeyword
+      if mutable {
+        try match(.mutKeyword)
+      }
+      let expr = try parsePrefixExpression()
+      return .addressOfExpression(expr, mutable: mutable)
+    }
+    if currentToken === .multiply {
+      try match(.multiply)
+      let expr = try parsePrefixExpression()
+      return .derefExpression(expr)
+    }
     return try parsePostfixExpression()
   }
 
@@ -534,28 +564,6 @@ extension Parser {
       
       if currentToken === .dot {
         try match(.dot)
-
-        // Postfix storage modifiers: .ref, .ptr, .val
-        if currentToken === .refKeyword {
-          try match(.refKeyword)
-          expr = .refExpression(expr)
-          continue
-        }
-        if currentToken === .weakrefKeyword {
-          try match(.weakrefKeyword)
-          expr = .weakrefExpression(expr)
-          continue
-        }
-        if currentToken === .ptrKeyword {
-          try match(.ptrKeyword)
-          expr = .ptrExpression(expr)
-          continue
-        }
-        if currentToken === .valKeyword {
-          try match(.valKeyword)
-          expr = .derefExpression(expr)
-          continue
-        }
 
         // Qualified disambiguation call:
         // - base.(TraitName)method(...)

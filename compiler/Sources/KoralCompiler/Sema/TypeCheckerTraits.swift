@@ -256,7 +256,7 @@ extension TypeChecker {
       if let receiver = method.parameters.first, receiver.name == "self",
          !isObjectSafeReceiverType(receiver.type)
       {
-        reasons.append("method '\(name)' receiver must be 'self ref' or 'self ref mut'")
+        reasons.append("method '\(name)' receiver must be '*self' or '*mut self'")
       }
 
       // Rule 2: Self must not appear in parameter types (except receiver) or return type
@@ -293,8 +293,6 @@ extension TypeChecker {
       return name == "Self"
     case .reference(let inner, _):
       return containsSelfType(inner)
-    case .borrowedReference(let inner, _, _):
-      return containsSelfType(inner)
     case .pointer(let inner, _):
       return containsSelfType(inner)
     case .weakReference(let inner, _):
@@ -308,9 +306,9 @@ extension TypeChecker {
 
   private func isObjectSafeReceiverType(_ node: TypeNode) -> Bool {
     switch node {
-    case .borrowedReference(.inferredSelf, _, _):
+    case .reference(.inferredSelf, _):
       return true
-    case .borrowedReference(.identifier(let name), _, _):
+    case .reference(.identifier(let name), _):
       return name == "Self"
     default:
       return false

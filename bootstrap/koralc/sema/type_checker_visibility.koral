@@ -174,14 +174,14 @@ given TypeChecker {
                     .None() then Option[Pair[String, AccessModifier]].None(),
                 }
             },
-            .ReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
-            .MutableReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
-            .BorrowedReferenceType(inner, _) then self.first_signature_visibility_violation(inner.val, required_access),
-            .MutableBorrowedReferenceType(inner, _) then self.first_signature_visibility_violation(inner.val, required_access),
-            .PointerType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
-            .MutablePointerType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
-            .WeakReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
-            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(inner.val, required_access),
+            .ReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .MutableReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .BorrowedReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .MutableBorrowedReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .PointerType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .MutablePointerType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .WeakReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
+            .MutableWeakReferenceType(inner) then self.first_signature_visibility_violation(*inner, required_access),
             .FunctionType(params, return_type) then {
                 for param in params then {
                     when self.first_signature_visibility_violation(param.param_type, required_access) in {
@@ -189,11 +189,11 @@ given TypeChecker {
                         .None() then {},
                     }
                 }
-                break self.first_signature_visibility_violation(return_type.val, required_access)
+                break self.first_signature_visibility_violation(*return_type, required_access)
             },
             .GenericStruct(_, args) then {
                 for arg in args then {
-                    when self.first_signature_visibility_violation(arg.val, required_access) in {
+                    when self.first_signature_visibility_violation(*arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation) },
                         .None() then {},
                     }
@@ -202,7 +202,7 @@ given TypeChecker {
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
-                    when self.first_signature_visibility_violation(arg.val, required_access) in {
+                    when self.first_signature_visibility_violation(*arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation) },
                         .None() then {},
                     }
@@ -211,7 +211,7 @@ given TypeChecker {
             },
             .TraitObject(_, type_args) then {
                 for arg in type_args then {
-                    when self.first_signature_visibility_violation(arg.val, required_access) in {
+                    when self.first_signature_visibility_violation(*arg, required_access) in {
                         .Some(violation) then { return Option[Pair[String, AccessModifier]].Some(violation) },
                         .None() then {},
                     }
@@ -741,7 +741,7 @@ given TypeChecker {
             .Generic(_, trait_args) then {
                 let mut out = List[Type].new()
                 for arg in trait_args then {
-                    out.push(self.resolve_type_with_bindings(arg.val, bindings))
+                    out.push(self.resolve_type_with_bindings(*arg, bindings))
                 }
                 break out
             },
@@ -779,8 +779,8 @@ given TypeChecker {
         return when target_type in {
             .ReferenceType(_) then "Ref",
             .MutableReferenceType(_) then "MutRef",
-            .BorrowedReferenceType(_, _) then "Ref",
-            .MutableBorrowedReferenceType(_, _) then "MutRef",
+            .BorrowedReferenceType(_) then "Ref",
+            .MutableBorrowedReferenceType(_) then "MutRef",
             .PointerType(_) then "Ptr",
             .MutablePointerType(_) then "MutPtr",
             .WeakReferenceType(_) then "WeakRef",
@@ -804,14 +804,14 @@ given TypeChecker {
     protected type_modifier_inner_type(self, target_type Type) Option[Type] = {
         let _ = self
         return when target_type in {
-            .ReferenceType(inner) then Option[Type].Some(inner.val),
-            .MutableReferenceType(inner) then Option[Type].Some(inner.val),
-            .BorrowedReferenceType(inner, _) then Option[Type].Some(inner.val),
-            .MutableBorrowedReferenceType(inner, _) then Option[Type].Some(inner.val),
-            .PointerType(inner) then Option[Type].Some(inner.val),
-            .MutablePointerType(inner) then Option[Type].Some(inner.val),
-            .WeakReferenceType(inner) then Option[Type].Some(inner.val),
-            .MutableWeakReferenceType(inner) then Option[Type].Some(inner.val),
+            .ReferenceType(inner) then Option[Type].Some(*inner),
+            .MutableReferenceType(inner) then Option[Type].Some(*inner),
+            .BorrowedReferenceType(inner) then Option[Type].Some(*inner),
+            .MutableBorrowedReferenceType(inner) then Option[Type].Some(*inner),
+            .PointerType(inner) then Option[Type].Some(*inner),
+            .MutablePointerType(inner) then Option[Type].Some(*inner),
+            .WeakReferenceType(inner) then Option[Type].Some(*inner),
+            .MutableWeakReferenceType(inner) then Option[Type].Some(*inner),
             _ then Option[Type].None(),
         }
     }
@@ -886,7 +886,7 @@ given TypeChecker {
         return Option[GenericTraitConformanceStatus].Some(GenericTraitConformanceStatus.MissingBlanketGiven(modifier_display_name))
     }
 
-    protected conformance_type_key_matches(self, pattern Type, actual Type, bindings ref mut Dict[String, Type]) Bool = {
+    protected conformance_type_key_matches(self, pattern Type, actual Type, bindings *mut Dict[String, Type]) Bool = {
         return when pattern in {
             .GenericParameter(name) then {
                 return when bindings.get(name) in {
@@ -898,45 +898,45 @@ given TypeChecker {
                 }
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .BorrowedReferenceType(a_inner, _) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
             .MutableReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
-            .BorrowedReferenceType(p_inner, _) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .BorrowedReferenceType(a_inner, _) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+            .BorrowedReferenceType(p_inner) then when actual in {
+                .ReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
-            .MutableBorrowedReferenceType(p_inner, _) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+            .MutableBorrowedReferenceType(p_inner) then when actual in {
+                .MutableReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
             .MutableWeakReferenceType(p_inner) then when actual in {
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
-                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
             .MutablePointerType(p_inner) then when actual in {
-                .MutablePointerType(a_inner) then self.conformance_type_key_matches(p_inner.val, a_inner.val, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_matches(*p_inner, *a_inner, bindings),
                 _ then false,
             },
             .GenericStruct(template, p_args) then when actual in {
@@ -946,7 +946,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args[i].val, a_args[i].val, bindings) then {
+                        if not self.conformance_type_key_matches((*p_args[i]), (*a_args[i]), bindings) then {
                             return false
                         }
                         i += 1
@@ -965,7 +965,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args[i].val, actual_args[i], bindings) then {
+                        if not self.conformance_type_key_matches((*p_args[i]), actual_args[i], bindings) then {
                             return false
                         }
                         i += 1
@@ -981,7 +981,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args[i].val, a_args[i].val, bindings) then {
+                        if not self.conformance_type_key_matches((*p_args[i]), (*a_args[i]), bindings) then {
                             return false
                         }
                         i += 1
@@ -1000,7 +1000,7 @@ given TypeChecker {
                     }
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        if not self.conformance_type_key_matches(p_args[i].val, actual_args[i], bindings) then {
+                        if not self.conformance_type_key_matches((*p_args[i]), actual_args[i], bindings) then {
                             return false
                         }
                         i += 1
@@ -1106,45 +1106,45 @@ given TypeChecker {
                 }
             },
             .ReferenceType(p_inner) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .BorrowedReferenceType(a_inner, _) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableReferenceType(p_inner) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
-            .BorrowedReferenceType(p_inner, _) then when actual in {
-                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .BorrowedReferenceType(a_inner, _) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+            .BorrowedReferenceType(p_inner) then when actual in {
+                .ReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .BorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
-            .MutableBorrowedReferenceType(p_inner, _) then when actual in {
-                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableBorrowedReferenceType(a_inner, _) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+            .MutableBorrowedReferenceType(p_inner) then when actual in {
+                .MutableReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableBorrowedReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .WeakReferenceType(p_inner) then when actual in {
-                .WeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+                .WeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutableWeakReferenceType(p_inner) then when actual in {
-                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+                .MutableWeakReferenceType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .PointerType(p_inner) then when actual in {
-                .PointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
-                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+                .PointerType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .MutablePointerType(p_inner) then when actual in {
-                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(p_inner.val, a_inner.val, bindings),
+                .MutablePointerType(a_inner) then self.conformance_type_key_bindings_with(*p_inner, *a_inner, bindings),
                 _ then Option[Dict[String, Type]].None(),
             },
             .GenericStruct(template, p_args) then when actual in {
@@ -1155,7 +1155,7 @@ given TypeChecker {
                     let mut current_bindings = bindings
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with(p_args[i].val, a_args[i].val, current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), (*a_args[i]), current_bindings) or else {
                             return Option[Dict[String, Type]].None()
                         }
                         i += 1
@@ -1175,7 +1175,7 @@ given TypeChecker {
                     let mut current_bindings = bindings
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with(p_args[i].val, actual_args[i], current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), actual_args[i], current_bindings) or else {
                             return Option[Dict[String, Type]].None()
                         }
                         i += 1
@@ -1192,7 +1192,7 @@ given TypeChecker {
                     let mut current_bindings = bindings
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with(p_args[i].val, a_args[i].val, current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), (*a_args[i]), current_bindings) or else {
                             return Option[Dict[String, Type]].None()
                         }
                         i += 1
@@ -1212,7 +1212,7 @@ given TypeChecker {
                     let mut current_bindings = bindings
                     let mut i UInt = 0
                     while i < p_args.count() then {
-                        current_bindings = self.conformance_type_key_bindings_with(p_args[i].val, actual_args[i], current_bindings) or else {
+                        current_bindings = self.conformance_type_key_bindings_with((*p_args[i]), actual_args[i], current_bindings) or else {
                             return Option[Dict[String, Type]].None()
                         }
                         i += 1
@@ -1343,7 +1343,7 @@ given TypeChecker {
             .Generic(_, trait_args) then {
                 if trait_args.count() > 0(UInt) then {
                     // Use resolution_scope-aware resolution so generic params like T are found
-                    let item_type = self.resolve_type(trait_args[0(UInt)].val)
+                    let item_type = self.resolve_type((*trait_args[0(UInt)]))
                     let mut args = List[Type].new()
                     args.push(item_type)
                     self.record_explicit_trait_conformance(target_type, "Iterator", args)
@@ -1361,7 +1361,7 @@ given TypeChecker {
         when trait_type in {
             .Generic(_, trait_args) then {
                 if trait_args.count() > 0(UInt) then {
-                    let item_type = self.resolve_type_with_bindings(trait_args[0(UInt)].val, bindings)
+                    let item_type = self.resolve_type_with_bindings((*trait_args[0(UInt)]), bindings)
                     let mut args = List[Type].new()
                     args.push(item_type)
                     self.record_explicit_trait_conformance(target_type, "Iterator", args)

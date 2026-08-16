@@ -16,12 +16,12 @@ using std::io { IoError }
 // ============================================================================
 
 // File system operations
-foreign let __koral_remove(path ptr UInt8) Int32
-foreign let __koral_rename(old ptr UInt8, new ptr UInt8) Int32
+foreign let __koral_remove(path *raw UInt8) Int32
+foreign let __koral_rename(old *raw UInt8, new *raw UInt8) Int32
 
 // Disk query functions
-foreign let __koral_path_exists(path ptr UInt8) Int32
-foreign let __koral_realpath(path ptr UInt8, buf ptr UInt8, size UInt) Int32
+foreign let __koral_path_exists(path *raw UInt8) Int32
+foreign let __koral_realpath(path *raw UInt8, buf *raw UInt8, size UInt) Int32
 
 // File metadata (stat)
 foreign type KoralStatResult(
@@ -35,19 +35,19 @@ foreign type KoralStatResult(
     created_secs Int64,
     created_nanos Int64,
 )
-foreign let __koral_stat(path ptr UInt8, out ptr KoralStatResult) Int32
-foreign let __koral_lstat(path ptr UInt8, out ptr KoralStatResult) Int32
+foreign let __koral_stat(path *raw UInt8, out *raw KoralStatResult) Int32
+foreign let __koral_lstat(path *raw UInt8, out *raw KoralStatResult) Int32
 
 // File open (unbuffered I/O)
-foreign let __koral_open(path ptr UInt8, open_mode Int32, perm UInt32) Int32
+foreign let __koral_open(path *raw UInt8, open_mode Int32, perm UInt32) Int32
 
 // File system operations
-foreign let __koral_chmod(path ptr UInt8, mode UInt32) Int32
-foreign let __koral_link(src ptr UInt8, dst ptr UInt8) Int32
-foreign let __koral_symlink(src ptr UInt8, dst ptr UInt8) Int32
-foreign let __koral_readlink(path ptr UInt8, buf ptr UInt8, buf_size UInt) Int32
-foreign let __koral_truncate(path ptr UInt8, size Int64) Int32
-foreign let __koral_mkstemp(template ptr UInt8) Int32
+foreign let __koral_chmod(path *raw UInt8, mode UInt32) Int32
+foreign let __koral_link(src *raw UInt8, dst *raw UInt8) Int32
+foreign let __koral_symlink(src *raw UInt8, dst *raw UInt8) Int32
+foreign let __koral_readlink(path *raw UInt8, buf *raw UInt8, buf_size UInt) Int32
+foreign let __koral_truncate(path *raw UInt8, size Int64) Int32
+foreign let __koral_mkstemp(template *raw UInt8) Int32
 
 // ============================================================================
 // Byte-Oriented File Operations
@@ -60,7 +60,7 @@ public let read_file[T IntoPath](path T) Result[List[UInt8]] = {
             let mut out List[UInt8] = []
             let mut chunk = make_bytes(4096)
             while true then {
-                when f.read(into: chunk.ref, ..) in {
+                when f.read(into: &mut chunk, ..) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return Result[List[UInt8]].Ok(out)
@@ -262,7 +262,7 @@ public let create_file[T IntoPath](path T) Result[File] = open_file(path, .Creat
 public let file_info[T IntoPath](path T) Result[FileInfo] = {
     let s = path.into_path().normalize().to_string()
     let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
-    let result = __koral_stat(s.storage.data, stat_buf.ptr)
+    let result = __koral_stat(s.storage.data, &raw stat_buf)
     if result <> 0 then {
         return Result[FileInfo].Error(box(last_error_message()))
     }
@@ -286,7 +286,7 @@ public let file_info[T IntoPath](path T) Result[FileInfo] = {
 public let symlink_info[T IntoPath](path T) Result[FileInfo] = {
     let s = path.into_path().normalize().to_string()
     let mut stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0)
-    let result = __koral_lstat(s.storage.data, stat_buf.ptr)
+    let result = __koral_lstat(s.storage.data, &raw stat_buf)
     if result <> 0 then {
         return Result[FileInfo].Error(box(last_error_message()))
     }

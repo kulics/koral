@@ -15,7 +15,7 @@ public type ModuleError {
 }
 
 given ModuleError {
-    public message(self ref) String = {
+    public message(*self) String = {
         return when self in {
             .FileNotFound(file, search_path) then "File '\(file).koral' not found in '\(search_path)'",
             .CircularDependency(path) then "Circular dependency detected: \(join_path(path, " -> "))",
@@ -39,7 +39,7 @@ protected type ModuleResolverStorage(
     mut manifest_module_aliases List[ResolvedModuleAliasRule],
 )
 
-public type ModuleResolver(protected mut storage ref mut ModuleResolverStorage)
+public type ModuleResolver(protected mut storage *mut ModuleResolverStorage)
 
 public type ResolvedModuleGraph(
     root_module_path String,
@@ -57,11 +57,11 @@ given ModuleResolver {
         return ModuleResolver(s)
     }
 
-    public set_manifest_module_aliases(self ref mut, aliases List[ResolvedModuleAliasRule]) Void = {
+    public set_manifest_module_aliases(*mut self, aliases List[ResolvedModuleAliasRule]) Void = {
         self.storage.manifest_module_aliases = aliases
     }
 
-    private resolve_manifest_aliased_module_path(self ref, path_segments List[String]) List[String] = {
+    private resolve_manifest_aliased_module_path(*self, path_segments List[String]) List[String] = {
         if self.storage.manifest_module_aliases.is_empty() then {
             return path_segments
         }
@@ -148,13 +148,13 @@ given ModuleResolver {
 
     public resolve_for_typecheck(self, entry_file String, no_std Bool) Result[ResolvedModuleGraph] = {
         let mut user_unit_opt = Option[CompilationUnit].None()
-        let mut resolve_error = Option[ref Error].None()
+        let mut resolve_error = Option[* Error].None()
         when self.resolve_module(entry_file) in {
             .Ok(u) then {
                 user_unit_opt = Option[CompilationUnit].Some(u)
             },
             .Error(e) then {
-                resolve_error = Option[ref Error].Some(e)
+                resolve_error = Option[* Error].Some(e)
             },
         }
         if resolve_error is .Some(e) then {
@@ -169,23 +169,23 @@ given ModuleResolver {
         return Result[ResolvedModuleGraph].Ok(self.build_resolved_module_graph(std_unit, user_unit_ref))
     }
 
-    private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) Option[ref CompilationUnit] = {
+    private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) Option[* CompilationUnit] = {
         if no_std or user_has_std then {
-            return Option[ref CompilationUnit].None()
+            return Option[* CompilationUnit].None()
         }
         let std_path = find_std_entry_path() or else {
-            return Option[ref CompilationUnit].None()
+            return Option[* CompilationUnit].None()
         }
         return when self.resolve_module(std_path) in {
-            .Ok(unit) then Option[ref CompilationUnit].Some(box(unit)),
-            .Error(_) then Option[ref CompilationUnit].None(),
+            .Ok(unit) then Option[* CompilationUnit].Some(box(unit)),
+            .Error(_) then Option[* CompilationUnit].None(),
         }
     }
 
     private collect_effective_std_nodes_with_path(
         self,
-        std_unit Option[ref CompilationUnit],
-        user_unit ref CompilationUnit,
+        std_unit Option[* CompilationUnit],
+        user_unit * CompilationUnit,
     ) List[Pair[LoadedNode, List[String]]] = {
         let mut result = List[Pair[LoadedNode, List[String]]].new()
         when std_unit in {
@@ -234,8 +234,8 @@ given ModuleResolver {
 
     private build_resolved_module_graph(
         self,
-        std_unit Option[ref CompilationUnit],
-        user_unit ref CompilationUnit,
+        std_unit Option[* CompilationUnit],
+        user_unit * CompilationUnit,
     ) ResolvedModuleGraph = {
         let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
         for pair in self.collect_effective_std_nodes_with_path(std_unit, user_unit) then {

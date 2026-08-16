@@ -1,6 +1,6 @@
 // Inter-procedural escape analysis integration test
 //
-// Tests that local_var.ref is correctly heap-allocated when passed to
+// Tests that &local_var is correctly heap-allocated when passed to
 // functions that store the value via init_memory or .val assignment
 // (e.g. List.push, Set.insert), preventing dangling pointers.
 //
@@ -15,7 +15,7 @@
 
 public type Node {
     Leaf(value Int),
-    Branch(children List[ref Node]),
+    Branch(children List[* Node]),
 }
 
 public type Builder(mut dummy Int)
@@ -24,44 +24,44 @@ given Builder {
 
     public new() Builder = Builder(0)
 
-    public make_leaf(self ref, v Int) Node = Node.Leaf(v)
+    public make_leaf(*self, v Int) Node = Node.Leaf(v)
 
-    // Core test: build() creates a local variable, pushes ref into List,
+    // Core test: build() creates a local variable, pushes * into List,
     // returns the List inside a enum. Without inter-procedural escape
     // analysis, `child` would be stack-allocated and become a dangling pointer.
-    public build(self ref) Node = {
-        let mut kids = List[ref Node].new()
+    public build(*self) Node = {
+        let mut kids = List[* Node].new()
         let mut child = self.make_leaf(42)
-        kids.push(child.ref)
+        kids.push(&child)
         return Node.Branch(kids)
     }
 
     // Multiple refs pushed into a list
-    public build_multi(self ref) List[ref Node] = {
-        let mut kids = List[ref Node].new()
+    public build_multi(*self) List[* Node] = {
+        let mut kids = List[* Node].new()
         let mut c1 = self.make_leaf(10)
         let mut c2 = self.make_leaf(20)
         let mut c3 = self.make_leaf(30)
-        kids.push(c1.ref)
-        kids.push(c2.ref)
-        kids.push(c3.ref)
+        kids.push(&c1)
+        kids.push(&c2)
+        kids.push(&c3)
         return kids
     }
 
     // Nested: build calls another method that also pushes refs
-    public build_nested(self ref) Node = {
-        let mut kids = List[ref Node].new()
+    public build_nested(*self) Node = {
+        let mut kids = List[* Node].new()
         let mut inner = self.make_leaf(77)
-        kids.push(inner.ref)
+        kids.push(&inner)
         return Node.Branch(kids)
     }
 }
 
 
-// Helper: a function that takes a ref but does NOT store it anywhere.
-// The ref should remain stack-allocated (no escape).
-let read_ref(n ref Node) Int = {
-    return when n.val in {
+// Helper: a function that takes a * but does NOT store it anywhere.
+// The * should remain stack-allocated (no escape).
+let read_ref(n * Node) Int = {
+    return when *n in {
         .Leaf(v) then v,
         .Branch(_) then 0 - 1,
     }
@@ -79,7 +79,7 @@ let box_value(v Int) IntBox = {
 let print_node(label String, node Node) Void = {
     when node in {
         .Branch(ch) then {
-            let n = ch[0].val
+            let n = *ch[0]
             when n in {
                 .Leaf(v) then println(label + "Leaf " + v.to_string()),
                 _ then println(label + "FAIL"),
@@ -91,9 +91,9 @@ let print_node(label String, node Node) Void = {
 
 public let main() Void = {
     // Test 1: Direct construction (baseline, no method call)
-    let mut kids1 = List[ref Node].new()
+    let mut kids1 = List[* Node].new()
     let mut c1 = Node.Leaf(10)
-    kids1.push(c1.ref)
+    kids1.push(&c1)
     let tree1 = Node.Branch(kids1)
     print_node("Test 1 direct: ", tree1)
 
@@ -105,9 +105,9 @@ public let main() Void = {
     // Test 3: Multiple refs pushed into a list via method
     let kids3 = b.build_multi()
     println("Test 3 multi push: " + kids3.count().to_string())
-    let n0 = kids3[0].val
-    let n1 = kids3[1].val
-    let n2 = kids3[2].val
+    let n0 = *kids3[0]
+    let n1 = *kids3[1]
+    let n2 = *kids3[2]
     let mut vals = String.new()
     when n0 in { .Leaf(v) then { vals.push_string(v.to_string()); }, _ then {}, }
     vals.push_string(" ")
@@ -116,12 +116,12 @@ public let main() Void = {
     when n2 in { .Leaf(v) then { vals.push_string(v.to_string()); }, _ then {}, }
     println("Test 3 values: " + vals)
 
-    // Test 4: Non-escaping ref — should still use stack allocation
+    // Test 4: Non-escaping * — should still use stack allocation
     let mut leaf4 = Node.Leaf(99)
-    let result4 = read_ref(leaf4.ref)
+    let result4 = read_ref(&leaf4)
     println("Test 4 no escape: " + result4.to_string())
 
-    // Test 5: Nested method call with ref
+    // Test 5: Nested method call with *
     let tree5 = b.build_nested()
     print_node("Test 5 nested: ", tree5)
 

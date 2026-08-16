@@ -6,53 +6,53 @@
 // EXPECT: T4 nested match: 77
 // EXPECT: T5 nested let: 55
 // EXPECT: T6 nested block: 33
-// EXPECT: T7 field assign via ref: 88
-// EXPECT: T8 param ref in struct: 123
-// EXPECT: T9 param ref in enum: 456
-// EXPECT: T10 param ref via call chain: 789
+// EXPECT: T7 field assign via *: 88
+// EXPECT: T8 param * in struct: 123
+// EXPECT: T9 param * in enum: 456
+// EXPECT: T10 param * via call chain: 789
 // EXPECT: T11 lambda capture: 66
 // EXPECT: T12 multi-level nesting: 44
-// EXPECT: T13 ref in if branch of constructor: 22
-// EXPECT: T14 ref in match branch of constructor: 33
+// EXPECT: T13 * in if branch of constructor: 22
+// EXPECT: T14 * in match branch of constructor: 33
 // EXPECT: T15 deref assignment: 111
 // EXPECT: T16 non-escape local: 200
 // EXPECT: T17 conditional non-escape: 30
 // EXPECT: All escape analysis coverage tests passed
 
 // Helper types
-type IntBox(value ref Int)
-type EscPair(a ref Int, b ref Int)
+type IntBox(value * Int)
+type EscPair(a * Int, b * Int)
 type Wrapper(inner IntBox)
 type MaybeRef {
     None(),
-    Some(value ref Int),
+    Some(value * Int),
 }
 type NestedWrapper(data MaybeRef)
-type MutBox(mut value ref Int)
+type MutBox(mut value * Int)
 type SimpleBox(mut value Int)
 
-// T1: Direct ref in struct constructor
+// T1: Direct * in struct constructor
 let t1_make() IntBox = {
     let mut x = 42
-    return IntBox(x.ref)
+    return IntBox(&x)
 }
 
 let test_direct_struct() Void = {
     let box = t1_make()
-    println("T1 direct struct: " + (box.value.val).to_string())
+    println("T1 direct struct: " + (*box.value).to_string())
 }
 
-// T2: Direct ref in enum constructor
+// T2: Direct * in enum constructor
 let t2_make() MaybeRef = {
     let mut x = 99
-    return MaybeRef.Some(x.ref)
+    return MaybeRef.Some(&x)
 }
 
 
 let test_enum_construction() Void = {
     let result = t2_make()
     when result in {
-        .Some(v) then println("T2 enum construction: " + (v.val).to_string()),
+        .Some(v) then println("T2 enum construction: " + (*v).to_string()),
         _ then println("T2 FAIL"),
     }
 }
@@ -61,108 +61,108 @@ let test_enum_construction() Void = {
 let t3_make(flag Bool) IntBox = {
     let mut a = 10
     let mut b = 20
-    return IntBox(if flag then a.ref else b.ref)
+    return IntBox(if flag then &a else &b)
 }
 
 let test_nested_if() Void = {
     let box = t3_make(true)
-    println("T3 nested if: " + (box.value.val).to_string())
+    println("T3 nested if: " + (*box.value).to_string())
 }
 
 // T4: Ref inside match-expression passed to struct constructor
 let t4_make(choice Int) IntBox = {
     let mut a = 77
     let mut b = 88
-    let r ref Int = when choice in {
-        1 then a.ref,
-        _ then b.ref,
+    let r * Int = when choice in {
+        1 then &a,
+        _ then &b,
     }
     return IntBox(r)
 }
 
 let test_nested_match() Void = {
     let box = t4_make(1)
-    println("T4 nested match: " + (box.value.val).to_string())
+    println("T4 nested match: " + (*box.value).to_string())
 }
 
 // T5: Ref inside let-expression passed to struct constructor
 let t5_make() IntBox = {
     let mut x = 55
-    let r ref Int = x.ref
+    let r * Int = &x
     return IntBox(r)
 }
 
 let test_nested_let() Void = {
     let box = t5_make()
-    println("T5 nested let: " + (box.value.val).to_string())
+    println("T5 nested let: " + (*box.value).to_string())
 }
 
 // T6: Ref inside block-expression passed to struct constructor
 let t6_make() IntBox = {
     let mut x = 33
-    return IntBox(x.ref)
+    return IntBox(&x)
 }
 
 let test_nested_block() Void = {
     let box = t6_make()
-    println("T6 nested block: " + (box.value.val).to_string())
+    println("T6 nested block: " + (*box.value).to_string())
 }
 
 // T7: Field assignment through a reference to a struct
 let t7_make() MutBox = {
     let mut x = 88
     let mut dummy = 0
-    let mut box = MutBox(dummy.ref)
-    box.value = x.ref
+    let mut box = MutBox(&dummy)
+    box.value = &x
     return box
 }
 
 let test_field_assign_via_ref() Void = {
     let box = t7_make()
-    println("T7 field assign via ref: " + (box.value.val).to_string())
+    println("T7 field assign via *: " + (*box.value).to_string())
 }
 
-// T8: Parameter ref stored in struct constructor (inter-procedural)
-let wrap_ref(r ref Int) IntBox = {
+// T8: Parameter * stored in struct constructor (inter-procedural)
+let wrap_ref(r * Int) IntBox = {
     return IntBox(r)
 }
 
 let test_param_ref_in_struct() Void = {
     let mut x = 123
-    let box = wrap_ref(x.ref)
-    println("T8 param ref in struct: " + (box.value.val).to_string())
+    let box = wrap_ref(&x)
+    println("T8 param * in struct: " + (*box.value).to_string())
 }
 
-// T9: Parameter ref stored in enum constructor (inter-procedural)
-let wrap_ref_enum(r ref Int) MaybeRef = {
+// T9: Parameter * stored in enum constructor (inter-procedural)
+let wrap_ref_enum(r * Int) MaybeRef = {
     return MaybeRef.Some(r)
 }
 
 let test_param_ref_in_enum() Void = {
     let mut x = 456
-    let result = wrap_ref_enum(x.ref)
+    let result = wrap_ref_enum(&x)
     when result in {
-        .Some(v) then println("T9 param ref in enum: " + (v.val).to_string()),
+        .Some(v) then println("T9 param * in enum: " + (*v).to_string()),
         _ then println("T9 FAIL"),
     }
 }
 
-// T10: Parameter ref escapes through a chain of function calls
+// T10: Parameter * escapes through a chain of function calls
 let make_box_from(v Int) IntBox = {
     let mut x = v
-    return wrap_ref(x.ref)
+    return wrap_ref(&x)
 }
 
 let test_param_ref_via_call_chain() Void = {
     let box = make_box_from(789)
-    println("T10 param ref via call chain: " + (box.value.val).to_string())
+    println("T10 param * via call chain: " + (*box.value).to_string())
 }
 
 // T11: Lambda captures cause escape
 let t11_make_getter() Func[Int] = {
     let mut x = 66
-    let r ref Int = x.ref
-    return () -> r.val
+    let r * Int = &x
+    return () -> *r
 }
 
 let test_lambda_capture() Void = {
@@ -170,19 +170,19 @@ let test_lambda_capture() Void = {
     println("T11 lambda capture: " + getter().to_string())
 }
 
-// T12: Multi-level nesting: ref in if inside enum inside struct
+// T12: Multi-level nesting: * in if inside enum inside struct
 let t12_make(flag Bool) NestedWrapper = {
     let mut x = 44
     let mut y = 55
     return NestedWrapper(
-        if flag then MaybeRef.Some(x.ref) else MaybeRef.Some(y.ref)
+        if flag then MaybeRef.Some(&x) else MaybeRef.Some(&y)
     )
 }
 
 let test_multi_level_nesting() Void = {
     let w = t12_make(true)
     when w.data in {
-        .Some(v) then println("T12 multi-level nesting: " + (v.val).to_string()),
+        .Some(v) then println("T12 multi-level nesting: " + (*v).to_string()),
         _ then println("T12 FAIL"),
     }
 }
@@ -191,12 +191,12 @@ let test_multi_level_nesting() Void = {
 let t13_make() EscPair = {
     let mut a = 22
     let mut b = 33
-    return EscPair(a.ref, if true then b.ref else a.ref)
+    return EscPair(&a, if true then &b else &a)
 }
 
 let test_ref_in_if_branch_constructor() Void = {
     let p = t13_make()
-    println("T13 ref in if branch of constructor: " + (p.a.val).to_string())
+    println("T13 * in if branch of constructor: " + (*p.a).to_string())
 }
 
 // T14: Ref in match-branch as argument to struct constructor
@@ -204,14 +204,14 @@ let t14_make(choice Int) IntBox = {
     let mut a = 33
     let mut b = 44
     return IntBox(when choice in {
-        0 then a.ref,
-        _ then b.ref,
+        0 then &a,
+        _ then &b,
     })
 }
 
 let test_ref_in_match_branch_constructor() Void = {
     let box = t14_make(0)
-    println("T14 ref in match branch of constructor: " + (box.value.val).to_string())
+    println("T14 * in match branch of constructor: " + (*box.value).to_string())
 }
 
 // T15: Simple value assignment
@@ -226,11 +226,11 @@ let test_deptr_assignment() Void = {
     println("T15 deref assignment: " + b.value.to_string())
 }
 
-// T16: Non-escaping ref (negative test)
+// T16: Non-escaping * (negative test)
 let t16_compute() Int = {
     let mut x = 100
-    let r = x.ref
-    let value = r.val
+    let r = &x
+    let value = *r
     return value + 100
 }
 
@@ -239,12 +239,12 @@ let test_non_escape_local() Void = {
     println("T16 non-escape local: " + result.to_string())
 }
 
-// T17: Conditional ref that doesn't escape
+// T17: Conditional * that doesn't escape
 let t17_compute(flag Bool) Int = {
     let mut a = 10
     let mut b = 20
-    let r = if flag then a.ref else b.ref
-    return r.val + 10
+    let r = if flag then &a else &b
+    return *r + 10
 }
 
 let test_conditional_non_escape() Void = {

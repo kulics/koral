@@ -76,19 +76,19 @@
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
 <method-first-param> ::= "self"                                          // bare self (equivalent to self Self)
-                       | "self" "ref"                                    // borrowed receiver sugar (self ref '_ Self)
-                       | "self" "ref" "mut"                              // borrowed mutable receiver sugar (self ref '_ mut Self)
+                       | "*self"                                          // managed receiver sugar (*self Self)
+                       | "*mut self"                                      // mutable managed receiver sugar (*mut self Self)
                        | "self" "Self"                                   // explicit managed value receiver
-                       | "self" "ref" "Self"                             // explicit managed ref receiver
-                       | "self" "ref" "mut" "Self"                       // explicit managed mutable ref receiver
-                       | "self" "ref" <lifetime> "Self"                  // explicit borrowed ref with lifetime
-                       | "self" "ref" <lifetime> "mut" "Self"            // explicit borrowed mutable ref with lifetime
+                       | "*self" "Self"                                  // explicit managed ref receiver
+                       | "*mut self" "Self"                              // explicit managed mutable ref receiver
+                       | "*self" <lifetime> "Self"                       // explicit ref with lifetime
+                       | "*mut self" <lifetime> "Self"                    // explicit mutable ref with lifetime
                        | <func-param>
 // Receiver rules:
-// - self ref / self ref mut: borrowed receiver sugar, auto-ref allowed
-// - self Self / self ref Self / self ref mut Self: managed receiver, no auto-ref
+// - *self / *mut self: borrowed receiver sugar, auto-ref allowed
+// - self Self / *self Self / *mut self Self: managed receiver, no auto-ref
 // - bare self: equivalent to self Self
-// - auto-deref (ref T → T) only applies to self receivers (following Go)
+// - auto-deref (*T → T) only applies to self receivers (following Go)
 
 <type-annotation> ::= <type>
 
@@ -170,18 +170,18 @@
               | <function-type>
               | "Self"
 
-<type-prefix> ::= "ref" <lifetime>? "mut"?
-               | "ptr" "mut"?
-               | "weakref" "mut"?
-// ref T          — managed read-only reference
-// ref mut T      — managed mutable reference
-// ref '_ T       — borrowed read-only reference (anonymous lifetime)
-// ref '_ mut T   — borrowed mutable reference (anonymous lifetime)
-// ptr T          — read-only pointer
-// ptr mut T      — mutable pointer
-// weakref T      — read-only weak reference
-// weakref mut T  — mutable weak reference
-// Note: `mut` must follow the keyword, not precede it (e.g. `ref mut T`, not `mut ref T`).
+<type-prefix> ::= "*" "mut"?
+               | "?*" "mut"?
+               | "*raw" "mut"?
+// *T             — managed read-only reference
+// *mut T         — managed mutable reference
+// *_ T           — borrowed read-only reference (anonymous lifetime)
+// *_ mut T       — borrowed mutable reference (anonymous lifetime)
+// *raw T         — read-only pointer
+// *raw mut T     — mutable pointer
+// ?*T            — read-only weak reference
+// ?*mut T        — mutable weak reference
+// Note: `mut` must follow the keyword, not precede it (e.g. `*mut T`, not `mut *T`).
 
 <lifetime> ::= "'" <identifier>
 // Lifetime identifiers use a leading ' sigil followed by a lowercase identifier.
@@ -350,7 +350,7 @@
 <call-suffix> ::= "(" <argument-list>? ")"
 <subscript-suffix> ::= "[" <expression-list> "]"
 <member-suffix> ::= "." <identifier>
-<storage-modifier-suffix> ::= "." ("ref" | "ptr" | "val" | "weakref")
+<storage-modifier-suffix> ::= "." ("ref" | "ptr" | "val" | "weakref")  // legacy; new surface uses prefix & / * / *raw / ?*
 <cast-suffix> ::= "(" <type> ")"
 
 // 限定方法调用：消歧义，指定 trait。可选地附带方法级泛型参数。
@@ -537,7 +537,7 @@
 //   using, self, Self, as
 //   if, then, else, while, for, when, is, in, it
 //   and, or, not
-//   ref, val, ptr, weakref, mut
+//   raw, mut
 //   return, break, continue, defer
 //   true, false
 //   public, private, protected, protected public
@@ -562,13 +562,13 @@
 // Implicit Conversion Rules (semantic, not grammar)
 // ============================================================================
 
-// No implicit ref promotion (T → ref T) for function/method arguments.
-// No auto-deref (ref T → T) for function/method arguments.
-// Use explicit .ref / .val at call sites.
+// No implicit ref promotion (T → *T) for function/method arguments.
+// No auto-deref (*T → T) for function/method arguments.
+// Use explicit &/* at call sites.
 // Auto-ref and auto-deref only apply to method receivers (self).
-// - self ref: auto-ref allowed (T → ref '_ T)
-// - self: auto-deref allowed (ref T → T, following Go's pointer receiver behavior)
-// - self ref Self / self Self: no auto-ref or auto-deref
+// - *self: auto-ref allowed (T → *T)
+// - self: auto-deref allowed (*T → T, following Go's pointer receiver behavior)
+// - *self Self / self Self: no auto-ref or auto-deref
 
 // Closures: let mut variables are captured by reference (byMutReference).
 // Mutations inside the closure are visible outside.

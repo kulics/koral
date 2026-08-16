@@ -833,7 +833,7 @@ public class CodeGen {
     let storageType: Type
     switch storageMember.type {
     case .reference(let resolvedStorageType), .mutableReference(let resolvedStorageType),
-         .borrowedReference(let resolvedStorageType, _), .mutableBorrowedReference(let resolvedStorageType, _):
+         .borrowedReference(let resolvedStorageType), .mutableBorrowedReference(let resolvedStorageType):
       storageType = resolvedStorageType
     default:
       fatalError("String literal requires String.storage: ref StringStorage")

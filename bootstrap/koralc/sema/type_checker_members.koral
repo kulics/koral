@@ -31,7 +31,7 @@ given TypeChecker {
     }
 
     protected make_method_callable_symbol(self, method_name String, params List[TypedParam], return_type Type) Symbol = {
-        let mut param_types = List[ref Type].new()
+        let mut param_types = List[* Type].new()
         for param in params then {
             param_types.push(box(param.param_type))
         }
@@ -57,7 +57,7 @@ given TypeChecker {
         if not (access is .Private()) then {
             return self.make_method_callable_symbol(method_name, params, return_type)
         }
-        let mut param_types = List[ref Type].new()
+        let mut param_types = List[* Type].new()
         for param in params then {
             param_types.push(box(param.param_type))
         }
@@ -126,7 +126,7 @@ given TypeChecker {
 
     protected make_method_symbol(self, method_name String, return_type Type) Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
-        return Symbol(def_id, Type.FunctionType(List[ref FunctionParamEntry].new(), box(return_type)), SymbolKind.Function())
+        return Symbol(def_id, Type.FunctionType(List[* FunctionParamEntry].new(), box(return_type)), SymbolKind.Function())
     }
 
     protected reused_given_member_signature(self, method_symbol Symbol) Option[ReusedGivenMemberSignature] = {
@@ -144,7 +144,7 @@ given TypeChecker {
                         params.push(TypedParam(spec.name, spec.mutable, entry.param_type, spec.named))
                         idx += 1(UInt)
                     }
-                    break Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, return_type_ref.val))
+                    break Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, *return_type_ref))
                 },
                 _ then Option[ReusedGivenMemberSignature].None(),
             },
@@ -153,7 +153,7 @@ given TypeChecker {
     }
 
     // Recover static receiver types from member chains like Time.DateTime.
-    protected resolve_static_receiver_type(self, expr ref TypedExpr) Option[Type] = {
+    protected resolve_static_receiver_type(self, expr * TypedExpr) Option[Type] = {
         return when expr.expr_kind in {
             .MemberPath(_, path) then if not path.is_empty() then {
                 let member_name = path[path.count() - 1]
@@ -166,7 +166,7 @@ given TypeChecker {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
                     return Option[Type].Some(sym.symbol_type)
                 }
-                let sym_name = self.context().symbol_name(sym.val)
+                let sym_name = self.context().symbol_name(*sym)
                 if self.storage.global_scope.lookup_type(sym_name) is .Some(t) then {
                     return Option[Type].Some(t)
                 }
@@ -281,7 +281,7 @@ given TypeChecker {
                 },
             },
             .Reference(inner, mutable) then {
-                let trait_ref_override = when inner.val in {
+                let trait_ref_override = when *inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
                         break Option[Type].Some(if mutable
@@ -292,7 +292,7 @@ given TypeChecker {
                         break if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mut resolved_args = List[Type].new()
                             for arg in args then {
-                                resolved_args.push(self.resolve_type_with_self_and_bindings(arg.val, self_type, bindings))
+                                resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings))
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                             break Option[Type].Some(if mutable
@@ -306,24 +306,24 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { break resolved_trait_ref },
                     .None() then {},
                 }
-                let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
+                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
                 break if mutable
                     then self.resolve_mutable_reference_type(resolved_inner)
                     else self.resolve_reference_type(resolved_inner)
             },
-            .BorrowedReference(inner, lifetime, mutable) then {
-                let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
+            .BorrowedReference(inner, mutable) then {
+                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
                 break if mutable
-                    then Type.MutableBorrowedReferenceType(box(resolved_inner), lifetime)
-                    else Type.BorrowedReferenceType(box(resolved_inner), lifetime)
+                    then Type.MutableBorrowedReferenceType(box(resolved_inner))
+                    else Type.BorrowedReferenceType(box(resolved_inner))
             },
             .Pointer(inner, mutable) then {
-                let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
+                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
                 break if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
             },
             .WeakReference(inner, mutable) then {
                 // Check if inner is a trait name → trait object weakref
-                let trait_ref_override = when inner.val in {
+                let trait_ref_override = when *inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
                         break Option[Type].Some(if mutable
@@ -334,7 +334,7 @@ given TypeChecker {
                         break if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mut resolved_args = List[Type].new()
                             for arg in args then {
-                                resolved_args.push(self.resolve_type_with_self_and_bindings(arg.val, self_type, bindings))
+                                resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings))
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
                             break Option[Type].Some(if mutable
@@ -348,13 +348,13 @@ given TypeChecker {
                     .Some(resolved_trait_ref) then { break resolved_trait_ref },
                     .None() then {},
                 }
-                let resolved_inner = self.resolve_type_with_self_and_bindings(inner.val, self_type, bindings)
+                let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
                 break if mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
             },
             .Generic(base, args) then {
-                let mut resolved_args = List[ref Type].new()
+                let mut resolved_args = List[* Type].new()
                 for a in args then {
-                    resolved_args.push(box(self.resolve_type_with_self_and_bindings(a.val, self_type, bindings)))
+                    resolved_args.push(box(self.resolve_type_with_self_and_bindings(*a, self_type, bindings)))
                 }
                 if self.is_enum_base_name(base) then {
                     return Type.GenericEnum(base, resolved_args)
@@ -363,11 +363,11 @@ given TypeChecker {
             },
             .InferredSelf() then self_type,
             .FunctionType(param_types, return_type) then {
-                let mut resolved_params = List[ref Type].new()
+                let mut resolved_params = List[* Type].new()
                 for pt in param_types then {
-                    resolved_params.push(box(self.resolve_type_with_self_and_bindings(pt.val, self_type, bindings)))
+                    resolved_params.push(box(self.resolve_type_with_self_and_bindings(*pt, self_type, bindings)))
                 }
-                let resolved_ret = self.resolve_type_with_self_and_bindings(return_type.val, self_type, bindings)
+                let resolved_ret = self.resolve_type_with_self_and_bindings(*return_type, self_type, bindings)
                 return make_function_type(resolved_params, resolved_ret)
             },
         }
@@ -543,14 +543,14 @@ given TypeChecker {
         return out
     }
 
-    protected check_given_members(self, members List[GivenMember]) List[ref TypedGivenMember] = {
-        let mut out = List[ref TypedGivenMember].with_capacity(members.count())
+    protected check_given_members(self, members List[GivenMember]) List[* TypedGivenMember] = {
+        let mut out = List[* TypedGivenMember].with_capacity(members.count())
         for m in members then {
             let typed_params = self.check_params(m.params)
             let ret = self.resolve_type(m.return_type)
             let typed_body = when m.body in {
-                .Some(b) then Option[ref TypedExpr].Some(box(self.check_expr_global_ref(b, .Some(ret)))),
-                .None() then Option[ref TypedExpr].None(),
+                .Some(b) then Option[* TypedExpr].Some(box(self.check_expr_global_ref(b, .Some(ret)))),
+                .None() then Option[* TypedExpr].None(),
             }
             let mut context = self.context()
             let method_def_id = context.allocate(m.name, DefKind.Function())
@@ -575,17 +575,17 @@ given TypeChecker {
     }
 
     protected check_given_members_for_type(
-        self ref mut,
+        *mut self,
         members List[GivenMember],
         target_type Type,
         type_params List[TypeParameter],
         conformance_trait_name Option[String],
         retain_checked_template_bodies Bool,
-    ) List[ref TypedGivenMember] = {
+    ) List[* TypedGivenMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params)
         self.register_generic_constraints(type_params)
         defer { self.restore_generic_constraints(owner_constraint_snapshot) }
-        let mut out = List[ref TypedGivenMember].with_capacity(members.count())
+        let mut out = List[* TypedGivenMember].with_capacity(members.count())
         let is_generic_given_target = when target_type in {
             .TraitObject(_, _) then true,
             _ then self.contains_generic_parameter(target_type),
@@ -601,7 +601,7 @@ given TypeChecker {
                     .None() then Option[List[GenericConstraintBound]].None(),
                 }
                 let mut args = List[Type].new()
-                for trait_arg in trait_args then { args.push(trait_arg.val) }
+                for trait_arg in trait_args then { args.push(*trait_arg) }
                 let mut constraints = List[GenericConstraintBound].new()
                 constraints.push(GenericConstraintBound(trait_name, args))
                 self.storage.generic_param_constraints.insert("Self", constraints)
@@ -653,7 +653,7 @@ given TypeChecker {
             let typed_body = when m.body in {
                 .Some(b) then {
                     if self.skip_given_body_debug_enabled() then {
-                        break Option[ref TypedExpr].None()
+                        break Option[* TypedExpr].None()
                     }
                     // Enter function context for body checking (Swift: withNewScope)
                     let prev_function_return_context = self.storage.function_return_context
@@ -665,7 +665,7 @@ given TypeChecker {
                     self.storage.function_return_context.is_inferring = false
                     self.storage.in_loop = false
                     self.storage.in_defer = false
-                    self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
+                    self.storage.branch_break_targets = List[*mut BranchBreakTarget].new()
                     defer {
                         self.storage.function_return_context = prev_function_return_context
                         self.storage.in_loop = prev_in_loop
@@ -681,14 +681,14 @@ given TypeChecker {
                     self.storage.current_scope = method_scope
                     defer { self.storage.current_scope = prev_scope }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
-                    break if should_store_checked_body then Option[ref TypedExpr].Some(box(result)) else Option[ref TypedExpr].None()
+                    break if should_store_checked_body then Option[* TypedExpr].Some(box(result)) else Option[* TypedExpr].None()
                 },
                 .None() then {
                     self.storage.current_scope = prev_scope
-                    break Option[ref TypedExpr].None()
+                    break Option[* TypedExpr].None()
                 },
             }
-            let template_body = if should_retain_template_body then {
+            let mut template_body = if should_retain_template_body then {
                 break typed_body
             } else {
                 break self.template_checked_body(typed_body, retain_checked_template_bodies)
@@ -704,7 +704,7 @@ given TypeChecker {
                     method_name,
                     m.type_params.count(),
                     conformance_trait_name,
-                    template_body.ref,
+                    &mut template_body,
                     Option[List[Symbol]].Some(self.typed_params_to_checked_symbols(typed_params)),
                     template_ret,
                 )
@@ -748,7 +748,7 @@ given TypeChecker {
                     method_name,
                     typed_params,
                     ret,
-                    Option[ref TypedExpr].None(),
+                    Option[* TypedExpr].None(),
                 )))
                 continue
             }
@@ -801,7 +801,7 @@ given TypeChecker {
                 method_name,
                 typed_params,
                 ret,
-                Option[ref TypedExpr].None(),
+                Option[* TypedExpr].None(),
             )))
         }
         return out
@@ -817,7 +817,7 @@ given TypeChecker {
 
 
     public recheck_concrete_given_member_body(
-        self ref mut,
+        *mut self,
         target_type Type,
         params List[TypedParam],
         return_type Type,
@@ -846,7 +846,7 @@ given TypeChecker {
         self.storage.function_return_context.is_inferring = false
         self.storage.in_loop = false
         self.storage.in_defer = false
-        self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
+        self.storage.branch_break_targets = List[*mut BranchBreakTarget].new()
         let mut method_scope = self.make_method_scope(params, target_type, List[TypeParameter].new())
         self.storage.current_scope = method_scope
         let result = self.check_expr_scoped_ref(source.body, .Some(return_type), method_scope)
@@ -870,7 +870,7 @@ given TypeChecker {
     }
 
     public recheck_concrete_function_body(
-        self ref mut,
+        *mut self,
         params List[TypedParam],
         return_type Type,
         source ConcreteExprSource,
@@ -898,7 +898,7 @@ given TypeChecker {
         self.storage.function_return_context.is_inferring = false
         self.storage.in_loop = false
         self.storage.in_defer = false
-        self.storage.branch_break_targets = List[ref mut BranchBreakTarget].new()
+        self.storage.branch_break_targets = List[*mut BranchBreakTarget].new()
         let mut fn_scope = self.make_fn_scope(params)
         self.storage.current_scope = fn_scope
         let result = self.check_expr_scoped_ref(source.body, .Some(return_type), fn_scope)

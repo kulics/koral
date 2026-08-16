@@ -1,15 +1,15 @@
 public type MIRLowerer(
-    program ref mut MonomorphizedProgram,
-    context ref CompilerContext,
-    mut pending_work_items List[ref MIRFunctionWorkItem],
+    program *mut MonomorphizedProgram,
+    context * CompilerContext,
+    mut pending_work_items List[* MIRFunctionWorkItem],
     mut streaming_nodes_prepared Bool,
 )
 
 given MIRLowerer {
-    public new(program ref mut MonomorphizedProgram, context ref CompilerContext) MIRLowerer =
-        MIRLowerer(program, context, List[ref MIRFunctionWorkItem].new(), false)
+    public new(program *mut MonomorphizedProgram, context * CompilerContext) MIRLowerer =
+        MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false)
 
-    public metadata_program(self) ref MIRProgram = {
+    public metadata_program(self) * MIRProgram = {
         let mut globals_reversed = List[MIRGlobal].new()
 
         for request in self.program.vtable_requests then {
@@ -50,7 +50,7 @@ given MIRLowerer {
                     globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases))
                 },
                 .GivenDecl(target_type, members, _) then {
-                    let mut method_symbols = List[ref Symbol].new()
+                    let mut method_symbols = List[* Symbol].new()
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
@@ -62,7 +62,7 @@ given MIRLowerer {
                     }
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
-                    let mut method_symbols = List[ref Symbol].new()
+                    let mut method_symbols = List[* Symbol].new()
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
@@ -76,7 +76,7 @@ given MIRLowerer {
                 .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
                     let mut copied_trait_args = List[Type].new()
                     for arg in trait_args then { copied_trait_args.push(arg) }
-                    let mut method_symbols = List[ref Symbol].new()
+                    let mut method_symbols = List[* Symbol].new()
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
@@ -110,8 +110,8 @@ given MIRLowerer {
 
         let program = box(MIRProgram(
             globals,
-            List[ref MIRFunction].new(),
-            self.context.val,
+            List[* MIRFunction].new(),
+            *(self.context),
             self.program.static_method_by_key,
             self.program.traits,
             self.program.receiver_method_dispatch,
@@ -120,29 +120,29 @@ given MIRLowerer {
         return program
     }
 
-    public lower_next_work_item(self ref mut) Option[ref MIRFunction] = {
+    public lower_next_work_item(*mut self) Option[* MIRFunction] = {
         self.prepare_streaming_nodes()
 
         while true then {
             when self.pending_work_items.pop() in {
                 .Some(item) then {
-                    return Option[ref MIRFunction].Some(self.lower_work_item(item))
+                    return Option[* MIRFunction].Some(self.lower_work_item(item))
                 },
                 .None() then {},
             }
 
-            let node_ref = self.program.global_nodes.pop() or else { return Option[ref MIRFunction].None() }
+            let node_ref = self.program.global_nodes.pop() or else { return Option[* MIRFunction].None() }
             self.enqueue_node_work_items(node_ref)
         }
-        return Option[ref MIRFunction].None()
+        return Option[* MIRFunction].None()
     }
 
-    protected prepare_streaming_nodes(self ref mut) Void = {
+    protected prepare_streaming_nodes(*mut self) Void = {
         if self.streaming_nodes_prepared then {
             return
         }
 
-        let mut reversed = List[ref TypedDecl].new()
+        let mut reversed = List[* TypedDecl].new()
         while not self.program.global_nodes.is_empty() then {
             reversed.push(self.program.global_nodes.pop() or else { break })
         }
@@ -150,7 +150,7 @@ given MIRLowerer {
         self.streaming_nodes_prepared = true
     }
 
-    protected enqueue_node_work_items(self ref mut, node_ref ref TypedDecl) Void = {
+    protected enqueue_node_work_items(*mut self, node_ref * TypedDecl) Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier)
@@ -178,7 +178,7 @@ given MIRLowerer {
                         .Some(existing_body) then existing_body,
                         .None() then when context.take_concrete_function_source(identifier.def_id) in {
                             .Some(source) then {
-                                let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                 let resolved = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
                                 break resolved
@@ -197,7 +197,7 @@ given MIRLowerer {
             },
             .GivenDecl(target_type, members, _) then {
                 let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
+                let mut methods_reversed = List[* MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
                     let mut context = self.context
@@ -210,7 +210,7 @@ given MIRLowerer {
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                    let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                     let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
@@ -235,7 +235,7 @@ given MIRLowerer {
                 let mut copied_trait_args = List[Type].new()
                 for arg in trait_args then { copied_trait_args.push(arg) }
                 let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
-                let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
+                let mut methods_reversed = List[* MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
                     let mut context = self.context
@@ -248,7 +248,7 @@ given MIRLowerer {
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                    let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                     let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
@@ -271,7 +271,7 @@ given MIRLowerer {
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
                 let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                let mut methods_reversed = List[ref MIRFunctionWorkItem].new()
+                let mut methods_reversed = List[* MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
                     let mut context = self.context
@@ -284,7 +284,7 @@ given MIRLowerer {
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mut checker = TypeChecker.new(self.program.global_scope, self.context.val, source.source_file)
+                                    let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                     let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
@@ -309,9 +309,9 @@ given MIRLowerer {
         }
     }
 
-    public lower(self ref mut) ref MIRProgram = {
+    public lower(*mut self) * MIRProgram = {
         let program = self.metadata_program()
-        let mut functions = List[ref MIRFunction].new()
+        let mut functions = List[* MIRFunction].new()
         while true then {
             when self.lower_next_work_item() in {
                 .Some(function) then functions.push(function),
@@ -331,39 +331,39 @@ given MIRLowerer {
         return promoter.promote()
     }
 
-    public lower_work_item(self, item ref MIRFunctionWorkItem) ref MIRFunction = {
+    public lower_work_item(self, item * MIRFunctionWorkItem) * MIRFunction = {
         return self.make_function(item.identifier, item.params, item.return_type, item.kind, item.body)
     }
 
     protected make_function(
         self,
-        identifier ref Symbol,
+        identifier * Symbol,
         params List[TypedParam],
         return_type Type,
         kind MIRFunctionKind,
-        body ref TypedExpr,
-    ) ref MIRFunction = {
+        body * TypedExpr,
+    ) * MIRFunction = {
         let mut builder = MIRFunctionBuilder.new(
             self.program,
             identifier,
             params,
-            List[ref Symbol].new(),
+            List[* Symbol].new(),
             return_type,
             kind,
             body,
             self.context,
         )
-        return builder.ref.lower()
+        return (&mut builder).lower()
     }
 
-    protected should_lower_function(self, identifier ref Symbol) Bool = {
+    protected should_lower_function(self, identifier * Symbol) Bool = {
         let _ = self
         return not self.context.contains_generic_parameter(identifier.symbol_type)
     }
 
-    protected make_global_initializer_symbol(self, identifier ref Symbol) ref Symbol = {
-        let function_type = Type.FunctionType(List[ref FunctionParamEntry].new(), box(identifier.symbol_type))
-        let mut context = self.context.val
+    protected make_global_initializer_symbol(self, identifier * Symbol) * Symbol = {
+        let function_type = Type.FunctionType(List[* FunctionParamEntry].new(), box(identifier.symbol_type))
+        let mut context = *(self.context)
         return box(context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
             self.context.get_module_path(identifier.def_id) or else List[String].new(),
@@ -377,11 +377,11 @@ given MIRLowerer {
         ))
     }
 
-    protected make_given_member_symbol(self, member ref TypedGivenMember) ref Symbol = {
+    protected make_given_member_symbol(self, member * TypedGivenMember) * Symbol = {
         let function_type = when self.context.get_function_type(member.def_id) in {
             .Some(t) then t,
             .None() then {
-                let mut param_types = List[ref Type].new()
+                let mut param_types = List[* Type].new()
                 for param in member.params then {
                     param_types.push(box(param.param_type))
                 }
@@ -400,9 +400,9 @@ given MIRLowerer {
         )
     }
 
-    protected copy_type_ref_list(self, values List[ref Type]) List[Type] = {
+    protected copy_type_ref_list(self, values List[* Type]) List[Type] = {
         let mut out = List[Type].new()
-        for value in values then { out.push(value.val) }
+        for value in values then { out.push(*value) }
         return out
     }
 
@@ -459,7 +459,7 @@ given MIRLowerer {
             .Some(trait_info) then {
                 let mut index UInt = 0
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {
-                    bindings.insert(trait_info.type_params[index].name, request.trait_type_args[index].val)
+                    bindings.insert(trait_info.type_params[index].name, (*request.trait_type_args[index]))
                     index += 1
                 }
             },
@@ -473,34 +473,34 @@ given MIRLowerer {
         if bindings.is_empty() then { return t }
         return when t in {
             .GenericParameter(name) then when bindings.get(name) in { .Some(bound) then bound, .None() then t },
-            .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
-            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
-            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
-            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.apply_type_bindings(inner.val, bindings))),
-            .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(inner.val, bindings))),
-            .MutablePointerType(inner) then Type.MutablePointerType(box(self.apply_type_bindings(inner.val, bindings))),
-            .BorrowedReferenceType(inner, lifetime) then Type.BorrowedReferenceType(box(self.apply_type_bindings(inner.val, bindings)), lifetime),
-            .MutableBorrowedReferenceType(inner, lifetime) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(inner.val, bindings)), lifetime),
+            .ReferenceType(inner) then Type.ReferenceType(box(self.apply_type_bindings(*inner, bindings))),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(box(self.apply_type_bindings(*inner, bindings))),
+            .WeakReferenceType(inner) then Type.WeakReferenceType(box(self.apply_type_bindings(*inner, bindings))),
+            .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.apply_type_bindings(*inner, bindings))),
+            .PointerType(inner) then Type.PointerType(box(self.apply_type_bindings(*inner, bindings))),
+            .MutablePointerType(inner) then Type.MutablePointerType(box(self.apply_type_bindings(*inner, bindings))),
+            .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
+            .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
             .FunctionType(params, return_type) then {
-                let mut bound_params = List[ref Type].new()
+                let mut bound_params = List[* Type].new()
                 for param in params then {
                     bound_params.push(box(self.apply_type_bindings(param.param_type, bindings)))
                 }
-                break make_function_type(bound_params, self.apply_type_bindings(return_type.val, bindings))
+                break make_function_type(bound_params, self.apply_type_bindings(*return_type, bindings))
             },
             .GenericStruct(template, args) then {
-                let mut bound_args = List[ref Type].new()
-                for arg in args then { bound_args.push(box(self.apply_type_bindings(arg.val, bindings))) }
+                let mut bound_args = List[* Type].new()
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
                 break Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
-                let mut bound_args = List[ref Type].new()
-                for arg in args then { bound_args.push(box(self.apply_type_bindings(arg.val, bindings))) }
+                let mut bound_args = List[* Type].new()
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
                 break Type.GenericEnum(template, bound_args)
             },
             .TraitObject(trait_name, args) then {
-                let mut bound_args = List[ref Type].new()
-                for arg in args then { bound_args.push(box(self.apply_type_bindings(arg.val, bindings))) }
+                let mut bound_args = List[* Type].new()
+                for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
                 break Type.TraitObject(trait_name, bound_args)
             },
             _ then t,
@@ -525,8 +525,8 @@ given MIRLowerer {
                 self_by_value = when param.param_type in {
                     .ReferenceType(_) then false,
                     .MutableReferenceType(_) then false,
-                    .BorrowedReferenceType(_, _) then false,
-                    .MutableBorrowedReferenceType(_, _) then false,
+                    .BorrowedReferenceType(_) then false,
+                    .MutableBorrowedReferenceType(_) then false,
                     .WeakReferenceType(_) then false,
                     .MutableWeakReferenceType(_) then false,
                     .PointerType(_) then false,
@@ -542,18 +542,19 @@ given MIRLowerer {
 }
 
 type MIRReferenceAllocationPromoter(
-    program ref MIRProgram,
+    program * MIRProgram,
 )
 
 type MIRReferenceAllocationFunctionPromoter(
-    function ref MIRFunction,
-    parameter_types_by_def_id Dict[UInt, List[ref FunctionParamEntry]],
-    parameter_types_by_name Dict[String, List[ref FunctionParamEntry]],
-    context ref CompilerContext,
+    function * MIRFunction,
+    parameter_types_by_def_id Dict[UInt, List[* FunctionParamEntry]],
+    parameter_types_by_name Dict[String, List[* FunctionParamEntry]],
+    context * CompilerContext,
     receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     local_types_by_id Dict[UInt, Type],
     local_storages_by_id Dict[UInt, MIRStorage],
+    owned_reference_locals Dict[UInt, Bool],
 )
 
 private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
@@ -561,7 +562,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
         .Ref(_, _, allocation) then allocation is .StackBorrow(),
         .Call(call) then {
             for argument in call.arguments then {
-                if mir_value_contains_stack_borrow_ref(argument.val) then {
+                if mir_value_contains_stack_borrow_ref(*argument) then {
                     return true
                 }
             }
@@ -569,7 +570,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
-                if mir_value_contains_stack_borrow_ref(field.val) then {
+                if mir_value_contains_stack_borrow_ref(*field) then {
                     return true
                 }
             }
@@ -577,28 +578,28 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
         },
         .EnumCase(construction) then {
             for argument in construction.arguments then {
-                if mir_value_contains_stack_borrow_ref(argument.val) then {
+                if mir_value_contains_stack_borrow_ref(*argument) then {
                     return true
                 }
             }
             break false
         },
-        .TraitObjectConversion(conversion) then mir_value_contains_stack_borrow_ref(conversion.inner.val),
+        .TraitObjectConversion(conversion) then mir_value_contains_stack_borrow_ref(*(conversion.inner)),
         .TraitMethodCall(call) then {
-            if mir_value_contains_stack_borrow_ref(call.receiver.val) then {
+            if mir_value_contains_stack_borrow_ref(*(call.receiver)) then {
                 return true
             }
             for argument in call.arguments then {
-                if mir_value_contains_stack_borrow_ref(argument.val) then {
+                if mir_value_contains_stack_borrow_ref(*argument) then {
                     return true
                 }
             }
             break false
         },
-        .EnumTag(tag) then mir_value_contains_stack_borrow_ref(tag.subject.val),
+        .EnumTag(tag) then mir_value_contains_stack_borrow_ref(*(tag.subject)),
         .Intrinsic(node) then when node in {
-            .InitMemory(_, value) then mir_value_contains_stack_borrow_ref(value.val),
-            .SpawnThread(_, _, closure, _) then mir_value_contains_stack_borrow_ref(closure.val),
+            .InitMemory(_, value) then mir_value_contains_stack_borrow_ref(*value),
+            .SpawnThread(_, _, closure, _) then mir_value_contains_stack_borrow_ref(*closure),
             _ then false,
         },
         _ then false,
@@ -614,10 +615,24 @@ private let mir_statement_needs_reference_allocation_promotion(statement MIRStat
     }
 }
 
-private let mir_function_needs_reference_allocation_promotion(function ref MIRFunction) Bool = {
+private let mir_local_source_for_owned_reference_storage(value MIRValue) Option[MIRLocalID] = {
+    return when value in {
+        .Operand(operand) then when operand in {
+            .Local(local) then Option[MIRLocalID].Some(local),
+            _ then Option[MIRLocalID].None(),
+        },
+        .PlaceRead(place, _) then when place in {
+            .Local(local) then Option[MIRLocalID].Some(local),
+            _ then Option[MIRLocalID].None(),
+        },
+        _ then Option[MIRLocalID].None(),
+    }
+}
+
+private let mir_function_needs_reference_allocation_promotion(function * MIRFunction) Bool = {
     for block in function.blocks then {
         for statement in block.statements then {
-            if mir_statement_needs_reference_allocation_promotion(statement.val) then {
+            if mir_statement_needs_reference_allocation_promotion(*statement) then {
                 return true
             }
         }
@@ -626,11 +641,11 @@ private let mir_function_needs_reference_allocation_promotion(function ref MIRFu
 }
 
 given MIRReferenceAllocationPromoter {
-    public new(program ref MIRProgram) MIRReferenceAllocationPromoter = {
+    public new(program * MIRProgram) MIRReferenceAllocationPromoter = {
         return MIRReferenceAllocationPromoter(program)
     }
 
-    public promote(self ref mut) ref MIRProgram = {
+    public promote(*mut self) * MIRProgram = {
         let mut needs_promotion = false
         for function_ref in self.program.functions then {
             if mir_function_needs_reference_allocation_promotion(function_ref) then {
@@ -645,14 +660,13 @@ given MIRReferenceAllocationPromoter {
         let parameter_types_by_def_id = self.build_parameter_types_by_def_id()
         let parameter_types_by_name = self.build_parameter_types_by_name()
 
-        let mut functions = List[ref MIRFunction].new()
+        let mut functions = List[* MIRFunction].new()
         for function_ref in self.program.functions then {
-            let function = function_ref.val
             let mut promoter = MIRReferenceAllocationFunctionPromoter.new(
-                function.ref,
+                function_ref,
                 parameter_types_by_def_id,
                 parameter_types_by_name,
-                self.program.context.ref,
+                &self.program.context,
                 self.program.receiver_method_dispatch,
                 self.program.concrete_callables_by_def_id,
             )
@@ -670,21 +684,19 @@ given MIRReferenceAllocationPromoter {
         ))
     }
 
-    protected build_parameter_types_by_def_id(self) Dict[UInt, List[ref FunctionParamEntry]] = {
-        let mut map = Dict[UInt, List[ref FunctionParamEntry]].new()
+    protected build_parameter_types_by_def_id(self) Dict[UInt, List[* FunctionParamEntry]] = {
+        let mut map = Dict[UInt, List[* FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
-            let function = function_ref.val
-            map.insert(function.identifier.def_id.id, self.function_param_entries(function.ref))
+            map.insert(function_ref.identifier.def_id.id, self.function_param_entries(function_ref))
         }
         return map
     }
 
-    protected build_parameter_types_by_name(self) Dict[String, List[ref FunctionParamEntry]] = {
-        let mut map = Dict[String, List[ref FunctionParamEntry]].new()
+    protected build_parameter_types_by_name(self) Dict[String, List[* FunctionParamEntry]] = {
+        let mut map = Dict[String, List[* FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
-            let function = function_ref.val
-            let param_types = self.function_param_entries(function.ref)
-            for name in self.callable_name_aliases(function.identifier) then {
+            let param_types = self.function_param_entries(function_ref)
+            for name in self.callable_name_aliases(function_ref.identifier) then {
                 when map.get(name) in {
                     .Some(_) then {},
                     .None() then { map.insert(name, param_types) },
@@ -694,7 +706,7 @@ given MIRReferenceAllocationPromoter {
         return map
     }
 
-    protected callable_logical_name(self, symbol ref Symbol) String = {
+    protected callable_logical_name(self, symbol * Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.program.receiver_method_dispatch.get(symbol.def_id) in {
                 .Some(info) then { return info.method_name },
@@ -709,16 +721,16 @@ given MIRReferenceAllocationPromoter {
                 .None() then {},
             }
         }
-        return self.program.context.symbol_name(symbol.val)
+        return self.program.context.symbol_name(*symbol)
     }
 
-    protected callable_name_aliases(self, symbol ref Symbol) List[String] = {
+    protected callable_name_aliases(self, symbol * Symbol) List[String] = {
         let mut names = List[String].new()
         let logical = self.callable_logical_name(symbol)
         if not logical.is_empty() then {
             names.push(logical)
         }
-        let symbol_name = self.program.context.symbol_name(symbol.val)
+        let symbol_name = self.program.context.symbol_name(*symbol)
         if not symbol_name.is_empty() and not names.contains(symbol_name) then {
             names.push(symbol_name)
         }
@@ -733,12 +745,12 @@ given MIRReferenceAllocationPromoter {
         return names
     }
 
-    protected function_param_entries(self, function ref MIRFunction) List[ref FunctionParamEntry] = {
+    protected function_param_entries(self, function * MIRFunction) List[* FunctionParamEntry] = {
         when function.identifier.symbol_type in {
             .FunctionType(params, _) then { return params },
             _ then {},
         }
-        let mut params = List[ref FunctionParamEntry].new()
+        let mut params = List[* FunctionParamEntry].new()
         for param in function.params then {
             params.push(box(make_function_param_entry(param.param_type)))
         }
@@ -748,10 +760,10 @@ given MIRReferenceAllocationPromoter {
 
 given MIRReferenceAllocationFunctionPromoter {
     public new(
-        function ref MIRFunction,
-        parameter_types_by_def_id Dict[UInt, List[ref FunctionParamEntry]],
-        parameter_types_by_name Dict[String, List[ref FunctionParamEntry]],
-        context ref CompilerContext,
+        function * MIRFunction,
+        parameter_types_by_def_id Dict[UInt, List[* FunctionParamEntry]],
+        parameter_types_by_name Dict[String, List[* FunctionParamEntry]],
+        context * CompilerContext,
         receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
         concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     ) MIRReferenceAllocationFunctionPromoter = {
@@ -760,6 +772,35 @@ given MIRReferenceAllocationFunctionPromoter {
         for local in function.locals then {
             local_types_by_id.insert(local.id.raw_value, local.local_type)
             local_storages_by_id.insert(local.id.raw_value, local.storage)
+        }
+        let mut owned_reference_locals = Dict[UInt, Bool].new()
+        for block in function.blocks then {
+            for statement in block.statements then {
+                when statement in {
+                    .Evaluate(value) then when value in {
+                        .Intrinsic(node) then when node in {
+                            .InitMemory(_, stored_value) then when mir_local_source_for_owned_reference_storage(*stored_value) in {
+                                .Some(local_id) then {
+                                    if local_storages_by_id.get(local_id.raw_value) is .Some(storage) and storage is .Local() then {
+                                        when local_types_by_id.get(local_id.raw_value) in {
+                                            .Some(local_type) then {
+                                                if MIRReferenceAllocationFunctionPromoter(function, parameter_types_by_def_id, parameter_types_by_name, context, receiver_method_dispatch, concrete_callables_by_def_id, local_types_by_id, local_storages_by_id, Dict[UInt, Bool].new()).type_requires_owned_reference_storage(local_type) then {
+                                                    owned_reference_locals.insert(local_id.raw_value, true)
+                                                }
+                                            },
+                                            .None() then {},
+                                        }
+                                    }
+                                },
+                                .None() then {},
+                            },
+                            _ then {},
+                        },
+                        _ then {},
+                    },
+                    _ then {},
+                }
+            }
         }
         return MIRReferenceAllocationFunctionPromoter(
             function,
@@ -770,19 +811,20 @@ given MIRReferenceAllocationFunctionPromoter {
             concrete_callables_by_def_id,
             local_types_by_id,
             local_storages_by_id,
+            owned_reference_locals,
         )
     }
 
-    public promote(self ref mut) ref MIRFunction = {
+    public promote(*mut self) * MIRFunction = {
         if not mir_function_needs_reference_allocation_promotion(self.function) then {
             return self.function
         }
 
-        let mut blocks = List[ref MIRBasicBlock].new()
+        let mut blocks = List[* MIRBasicBlock].new()
         for block in self.function.blocks then {
-            let mut statements = List[ref MIRStatement].new()
+            let mut statements = List[* MIRStatement].new()
             for statement in block.statements then {
-                statements.push(box(self.promote_statement(statement.val)))
+                statements.push(box(self.promote_statement(*statement)))
             }
             blocks.push(box(MIRBasicBlock(block.id, statements, block.terminator)))
         }
@@ -797,7 +839,7 @@ given MIRReferenceAllocationFunctionPromoter {
         ))
     }
 
-    protected promote_statement(self ref mut, statement MIRStatement) MIRStatement = {
+    protected promote_statement(*mut self, statement MIRStatement) MIRStatement = {
         return when statement in {
             .Assign(place, value) then {
                 let destination_type = self.destination_type_for_place(place)
@@ -814,10 +856,12 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected destination_type_for_place(self ref, place MIRPlace) Option[Type] = {
+    protected destination_type_for_place(*self, place MIRPlace) Option[Type] = {
         return when place in {
             .Local(local) then when self.local_storage(local) in {
-                .Local() then Option[Type].None(),
+                .Local() then if self.owned_reference_locals.get(local.raw_value) is .Some(_)
+                    then Option[Type].Some(self.local_type(local))
+                    else Option[Type].None(),
                 .Temporary() then Option[Type].Some(self.local_type(local)),
                 .Parameter() then Option[Type].Some(self.local_type(local)),
                 .Capture() then Option[Type].Some(self.local_type(local)),
@@ -829,7 +873,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_value(self ref mut, value MIRValue, destination_type Option[Type]) MIRValue = {
+    protected promote_value(*mut self, value MIRValue, destination_type Option[Type]) MIRValue = {
         let promoted = when value in {
             .Call(call) then MIRValue.Call(MIRCall(
                 call.callee,
@@ -839,28 +883,28 @@ given MIRReferenceAllocationFunctionPromoter {
             )),
             .Intrinsic(node) then MIRValue.Intrinsic(self.promote_intrinsic(node)),
             .Aggregate(aggregate) then {
-                let mut fields = List[ref MIRValue].new()
+                let mut fields = List[* MIRValue].new()
                 for field in aggregate.fields then {
-                    fields.push(box(self.promote_value(field.val, Option[Type].None())))
+                    fields.push(box(self.promote_value(*field, Option[Type].None())))
                 }
                 break MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
             },
             .EnumCase(construction) then {
-                let mut args = List[ref MIRValue].new()
+                let mut args = List[* MIRValue].new()
                 for arg in construction.arguments then {
-                    args.push(box(self.promote_value(arg.val, Option[Type].None())))
+                    args.push(box(self.promote_value(*arg, Option[Type].None())))
                 }
                 break MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
             },
-            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_value(conversion.inner.val, Option[Type].None())), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
+            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_value(*(conversion.inner), Option[Type].None())), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mut args = List[ref MIRValue].new()
+                let mut args = List[* MIRValue].new()
                 for arg in call.arguments then {
-                    args.push(box(self.promote_value(arg.val, Option[Type].None())))
+                    args.push(box(self.promote_value(*arg, Option[Type].None())))
                 }
-                break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(call.receiver.val, Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
-            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(tag.subject.val, Option[Type].None())), tag.enum_type)),
+            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(*(tag.subject), Option[Type].None())), tag.enum_type)),
             _ then value,
         }
         if destination_type is .Some(dt) then {
@@ -871,18 +915,18 @@ given MIRReferenceAllocationFunctionPromoter {
         return promoted
     }
 
-    protected promote_call_arguments(self ref mut, arguments List[ref MIRValue], callee MIROperand, result_type Type) List[ref MIRValue] = {
+    protected promote_call_arguments(*mut self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {
         let params = when callee in {
             .Function(symbol) then self.parameters_for_call(symbol),
-            _ then List[ref FunctionParamEntry].new(),
+            _ then List[* FunctionParamEntry].new(),
         }
         if params.is_empty() then {
             return arguments
         }
-        let mut promoted = List[ref MIRValue].new()
+        let mut promoted = List[* MIRValue].new()
         let mut index = 0(UInt)
         while index < arguments.count() then {
-            let argument = arguments[index].val
+            let argument = (*arguments[index])
             let param_type = if index < params.count() and params[index].pass_kind is .ByValue()
                 then Option[Type].Some(params[index].param_type)
                 else Option[Type].None()
@@ -892,11 +936,11 @@ given MIRReferenceAllocationFunctionPromoter {
         return promoted
     }
 
-    protected parameters_for_call(self ref, symbol ref Symbol) List[ref FunctionParamEntry] = {
+    protected parameters_for_call(*self, symbol * Symbol) List[* FunctionParamEntry] = {
         when self.parameter_types_by_def_id.get(symbol.def_id.id) in {
             .Some(types) then {
-                let mut params = List[ref FunctionParamEntry].new()
-                for t in types then { params.push(box(t.val)) }
+                let mut params = List[* FunctionParamEntry].new()
+                for t in types then { params.push(box(*t)) }
                 return params
             },
             .None() then {},
@@ -904,8 +948,8 @@ given MIRReferenceAllocationFunctionPromoter {
         for name in self.callable_name_aliases(symbol) then {
             when self.parameter_types_by_name.get(name) in {
                 .Some(types) then {
-                    let mut params = List[ref FunctionParamEntry].new()
-                    for t in types then { params.push(box(t.val)) }
+                    let mut params = List[* FunctionParamEntry].new()
+                    for t in types then { params.push(box(*t)) }
                     return params
                 },
                 .None() then {},
@@ -918,23 +962,23 @@ given MIRReferenceAllocationFunctionPromoter {
             },
             _ then {},
         }
-        return List[ref FunctionParamEntry].new()
+        return List[* FunctionParamEntry].new()
     }
 
-    protected promote_intrinsic(self ref mut, node MIRIntrinsic) MIRIntrinsic = {
+    protected promote_intrinsic(*mut self, node MIRIntrinsic) MIRIntrinsic = {
         return when node in {
-            .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(pointer, box(self.promote_direct_references(value.val))),
-            .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(out_handle, out_tid, box(self.promote_direct_references(closure.val)), stack_size),
+            .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(pointer, box(self.promote_direct_references(*value))),
+            .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(out_handle, out_tid, box(self.promote_direct_references(*closure)), stack_size),
             _ then node,
         }
     }
 
-    protected type_requires_owned_reference_storage(self ref, t Type) Bool = {
+    protected type_requires_owned_reference_storage(*self, t Type) Bool = {
         return when t in {
             .ReferenceType(_) then true,
             .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_, _) then false,
-            .MutableBorrowedReferenceType(_, _) then false,
+            .BorrowedReferenceType(_) then false,
+            .MutableBorrowedReferenceType(_) then false,
             .WeakReferenceType(_) then true,
             .MutableWeakReferenceType(_) then true,
             .FunctionType(_, _) then true,
@@ -961,13 +1005,13 @@ given MIRReferenceAllocationFunctionPromoter {
             },
             .GenericStruct(_, args) then {
                 for arg in args then {
-                    if self.type_requires_owned_reference_storage(arg.val) then { return true }
+                    if self.type_requires_owned_reference_storage(*arg) then { return true }
                 }
                 break false
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
-                    if self.type_requires_owned_reference_storage(arg.val) then { return true }
+                    if self.type_requires_owned_reference_storage(*arg) then { return true }
                 }
                 break false
             },
@@ -975,40 +1019,40 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_direct_references(self ref mut, value MIRValue) MIRValue = {
+    protected promote_direct_references(*mut self, value MIRValue) MIRValue = {
         return when value in {
             .Ref(place, kind, allocation) then when allocation in {
                 .StackBorrow() then MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned()),
                 .HeapOwned() then value,
             },
             .Aggregate(aggregate) then {
-                let mut fields = List[ref MIRValue].new()
+                let mut fields = List[* MIRValue].new()
                 for field in aggregate.fields then {
-                    fields.push(box(self.promote_direct_references(field.val)))
+                    fields.push(box(self.promote_direct_references(*field)))
                 }
                 break MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
             },
             .EnumCase(construction) then {
-                let mut args = List[ref MIRValue].new()
+                let mut args = List[* MIRValue].new()
                 for arg in construction.arguments then {
-                    args.push(box(self.promote_direct_references(arg.val)))
+                    args.push(box(self.promote_direct_references(*arg)))
                 }
                 break MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
             },
-            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_direct_references(conversion.inner.val)), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
+            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_direct_references(*(conversion.inner))), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mut args = List[ref MIRValue].new()
+                let mut args = List[* MIRValue].new()
                 for arg in call.arguments then {
-                    args.push(box(self.promote_direct_references(arg.val)))
+                    args.push(box(self.promote_direct_references(*arg)))
                 }
-                break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(call.receiver.val)), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(*(call.receiver))), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
-            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_direct_references(tag.subject.val)), tag.enum_type)),
+            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_direct_references(*(tag.subject))), tag.enum_type)),
             _ then value,
         }
     }
 
-    protected callable_logical_name(self, symbol ref Symbol) String = {
+    protected callable_logical_name(self, symbol * Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.receiver_method_dispatch.get(symbol.def_id) in {
                 .Some(info) then { return info.method_name },
@@ -1023,16 +1067,16 @@ given MIRReferenceAllocationFunctionPromoter {
                 .None() then {},
             }
         }
-        return self.context.symbol_name(symbol.val)
+        return self.context.symbol_name(*symbol)
     }
 
-    protected callable_name_aliases(self, symbol ref Symbol) List[String] = {
+    protected callable_name_aliases(self, symbol * Symbol) List[String] = {
         let mut names = List[String].new()
         let logical = self.callable_logical_name(symbol)
         if not logical.is_empty() then {
             names.push(logical)
         }
-        let symbol_name = self.context.symbol_name(symbol.val)
+        let symbol_name = self.context.symbol_name(*symbol)
         if not symbol_name.is_empty() and not names.contains(symbol_name) then {
             names.push(symbol_name)
         }
@@ -1047,7 +1091,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return names
     }
 
-    protected type_of_value(self ref, value MIRValue) Type = {
+    protected type_of_value(*self, value MIRValue) Type = {
         return when value in {
             .Operand(operand) then self.type_of_operand(operand),
             .PlaceRead(place, _) then self.type_of_place(place),
@@ -1081,7 +1125,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_of_place(self ref, place MIRPlace) Type = {
+    protected type_of_place(*self, place MIRPlace) Type = {
         return when place in {
             .Local(local) then self.local_type(local),
             .Global(def_id) then self.context.get_symbol_type(def_id) or else Type.Unknown(),
@@ -1092,7 +1136,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_of_operand(self ref, operand MIROperand) Type = {
+    protected type_of_operand(*self, operand MIROperand) Type = {
         return when operand in {
             .Local(local) then self.local_type(local),
             .Function(symbol) then symbol.symbol_type,
@@ -1106,7 +1150,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_of_ref(self ref, place MIRPlace, kind MIRReferenceKind) Type = {
+    protected type_of_ref(*self, place MIRPlace, kind MIRReferenceKind) Type = {
         let inner = self.type_of_place(place)
         return when kind in {
             .Mutable() then Type.MutableReferenceType(box(inner)),
@@ -1116,11 +1160,11 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected local_type(self ref, local MIRLocalID) Type = {
+    protected local_type(*self, local MIRLocalID) Type = {
         return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
     }
 
-    protected local_storage(self ref, local MIRLocalID) MIRStorage = {
+    protected local_storage(*self, local MIRLocalID) MIRStorage = {
         return self.local_storages_by_id.get(local.raw_value) or else MIRStorage.Local()
     }
 

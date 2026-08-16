@@ -4,34 +4,34 @@
 // EXPECT: rvalue convert released
 
 trait Ping {
-    ping(self ref) Int
+    ping(*self) Int
 }
 
 type Box(value Int)
 
 given Box as Ping {
 
-    public ping(self ref) Int = self.value
+    public ping(*self) Int = self.value
 }
 
 let main() Int = {
     // Lvalue conversion should retain once.
     let concrete = box(Box(7))
-    let obj ref Ping = concrete
+    let obj * Ping = concrete
 
     print("before call unique: ")
-    println(is_unique_mutable(concrete.ptr))
+    println(is_unique_mutable(&raw concrete))
 
-    // Dynamic dispatch with lvalue receiver should retain/release the trait ref receiver, net zero.
+    // Dynamic dispatch with lvalue receiver should retain/release the trait * receiver, net zero.
     let _ = obj.ping()
 
     print("after call unique: ")
-    println(is_unique_mutable(concrete.ptr))
+    println(is_unique_mutable(&raw concrete))
 
     // Rvalue conversion should transfer ownership (no extra retain), so object is released at scope end.
     let weakObj = make_weak_object()
 
-    let upgraded = weakObj.to_ref()
+    let upgraded = upgrade(weakObj)
     when upgraded in {
         .Some(_) then println("rvalue convert leaked"),
         .None then println("rvalue convert released"),
@@ -40,7 +40,7 @@ let main() Int = {
     return 0
 }
 
-let make_weak_object() weakref Ping = {
-    let tmp ref Ping = box(Box(1))
-    return tmp.weakref
+let make_weak_object() ?* Ping = {
+    let tmp * Ping = box(Box(1))
+    return downgrade(tmp)
 }

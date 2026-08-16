@@ -59,7 +59,7 @@ given Parser {
         }
     }
 
-    protected expr_is_ordering_comparison(self, expr ref Expr) Bool = {
+    protected expr_is_ordering_comparison(self, expr * Expr) Bool = {
         return when expr in {
             .ComparisonExpr(_, op, _, _) then when op in {
                 .Greater() then true,
@@ -73,29 +73,30 @@ given Parser {
         }
     }
 
-    protected invalid_comparison_chain_error(self) Result[ref Expr] = {
+    protected invalid_comparison_chain_error(self) Result[* Expr] = {
         return .Error(box("Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."))
     }
 
-    protected parse_factor(self ref mut) Result[ref Expr] = {
+    protected parse_factor(*mut self) Result[* Expr] = {
         let mut expr = self.parse_unary() or return
 
         while true then {
             when self.current().kind in {
                 .Star() then {
+                    if self.current().has_newline_before then { break }
                     self.advance()
                     let rhs = self.parse_unary() or return
-                    expr = box(Expr.ArithmeticExpr(box(expr.val), ArithmeticOperator.Multiply(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Multiply(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .Slash() then {
                     self.advance()
                     let rhs = self.parse_unary() or return
-                    expr = box(Expr.ArithmeticExpr(box(expr.val), ArithmeticOperator.Divide(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Divide(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .Percent() then {
                     self.advance()
                     let rhs = self.parse_unary() or return
-                    expr = box(Expr.ArithmeticExpr(box(expr.val), ArithmeticOperator.Remainder(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Remainder(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -104,7 +105,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_term(self ref mut) Result[ref Expr] = {
+    protected parse_term(*mut self) Result[* Expr] = {
         let mut expr = self.parse_factor() or return
 
         while true then {
@@ -112,12 +113,12 @@ given Parser {
                 .Plus() then {
                     self.advance()
                     let rhs = self.parse_factor() or return
-                    expr = box(Expr.ArithmeticExpr(box(expr.val), ArithmeticOperator.Add(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Add(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .Minus() then {
                     self.advance()
                     let rhs = self.parse_factor() or return
-                    expr = box(Expr.ArithmeticExpr(box(expr.val), ArithmeticOperator.Subtract(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Subtract(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -126,7 +127,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_range(self ref mut) Result[ref Expr] = {
+    protected parse_range(*mut self) Result[* Expr] = {
         let mut expr = self.parse_term() or return
 
         while true then {
@@ -135,29 +136,29 @@ given Parser {
                     self.advance()
                     if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
                         let rhs = self.parse_term() or return
-                        expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(box(expr.val)), .Some(box(rhs.val)), self.span_from_expr_start(expr)))
+                        expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
-                        expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(box(expr.val)), Option[ref Expr].None(), self.span_from_expr_start(expr)))
+                        expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(box(*expr)), Option[* Expr].None(), self.span_from_expr_start(expr)))
                     }
                 },
                 .RangeLess() then {
                     self.advance()
                     let rhs = self.parse_term() or return
-                    expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(box(expr.val)), .Some(box(rhs.val)), self.span_from_expr_start(expr)))
+                    expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                 },
                 .LessRange() then {
                     self.advance()
                     if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
                         let rhs = self.parse_term() or return
-                        expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(box(expr.val)), .Some(box(rhs.val)), self.span_from_expr_start(expr)))
+                        expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
-                        expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(box(expr.val)), Option[ref Expr].None(), self.span_from_expr_start(expr)))
+                        expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(box(*expr)), Option[* Expr].None(), self.span_from_expr_start(expr)))
                     }
                 },
                 .LessRangeLess() then {
                     self.advance()
                     let rhs = self.parse_term() or return
-                    expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(box(expr.val)), .Some(box(rhs.val)), self.span_from_expr_start(expr)))
+                    expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -166,7 +167,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_shift(self ref mut) Result[ref Expr] = {
+    protected parse_shift(*mut self) Result[* Expr] = {
         let mut expr = self.parse_range() or return
 
         while true then {
@@ -174,12 +175,12 @@ given Parser {
                 .LeftShift() then {
                     self.advance()
                     let rhs = self.parse_range() or return
-                    expr = box(Expr.BitwiseExpr(box(expr.val), BitwiseOperator.LeftShift(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.LeftShift(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .RightShift() then {
                     self.advance()
                     let rhs = self.parse_range() or return
-                    expr = box(Expr.BitwiseExpr(box(expr.val), BitwiseOperator.RightShift(), box(rhs.val), self.span_from_expr_start(expr)))
+                    expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.RightShift(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
             }
@@ -188,43 +189,43 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_bitwise_and(self ref mut) Result[ref Expr] = {
+    protected parse_bitwise_and(*mut self) Result[* Expr] = {
         let mut expr = self.parse_comparison() or return
 
         while self.current().kind is .Ampersand() then {
             self.advance()
             let rhs = self.parse_comparison() or return
-            expr = box(Expr.BitwiseExpr(box(expr.val), BitwiseOperator.BitAnd(), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitAnd(), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_bitwise_xor(self ref mut) Result[ref Expr] = {
+    protected parse_bitwise_xor(*mut self) Result[* Expr] = {
         let mut expr = self.parse_bitwise_and() or return
 
         while self.current().kind is .Caret() then {
             self.advance()
             let rhs = self.parse_bitwise_and() or return
-            expr = box(Expr.BitwiseExpr(box(expr.val), BitwiseOperator.BitXor(), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitXor(), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_bitwise_or(self ref mut) Result[ref Expr] = {
+    protected parse_bitwise_or(*mut self) Result[* Expr] = {
         let mut expr = self.parse_bitwise_xor() or return
 
         while self.current().kind is .Pipe() then {
             self.advance()
             let rhs = self.parse_bitwise_xor() or return
-            expr = box(Expr.BitwiseExpr(box(expr.val), BitwiseOperator.BitOr(), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitOr(), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_comparison(self ref mut) Result[ref Expr] = {
+    protected parse_comparison(*mut self) Result[* Expr] = {
         let start = self.current()
         let expr = self.parse_shift() or return
 
@@ -242,7 +243,7 @@ given Parser {
             return .Ok(box(Expr.ComparisonExpr(expr, first_op, first_right, self.span_from_expr_start(expr))))
         }
 
-        let mut operands = List[ref Expr].new()
+        let mut operands = List[* Expr].new()
         operands.push(expr)
         operands.push(first_right)
         let mut operators = List[ComparisonOperator].new()
@@ -263,7 +264,7 @@ given Parser {
         return .Ok(box(Expr.ComparisonChainExpr(operands, operators, self.span_from_start(start))))
     }
 
-    protected parse_equality(self ref mut) Result[ref Expr] = {
+    protected parse_equality(*mut self) Result[* Expr] = {
         let expr = self.parse_bitwise_or() or return
 
         if not self.comparison_kind_is_equality(self.current().kind) then {
@@ -287,7 +288,7 @@ given Parser {
         return .Ok(result)
     }
 
-    protected parse_is(self ref mut) Result[ref Expr] = {
+    protected parse_is(*mut self) Result[* Expr] = {
         let mut expr = self.parse_equality() or return
 
         if self.current().kind is .KwIs() then {
@@ -305,7 +306,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_logical_not(self ref mut) Result[ref Expr] = {
+    protected parse_logical_not(*mut self) Result[* Expr] = {
         if self.current().kind is .KwNot() then {
             let start = self.current()
             self.advance()
@@ -316,7 +317,7 @@ given Parser {
         return self.parse_is()
     }
 
-    protected parse_and_then(self ref mut) Result[ref Expr] = {
+    protected parse_and_then(*mut self) Result[* Expr] = {
         let mut expr = self.parse_logical_not() or return
 
         while self.current().kind is .KwAnd() then {
@@ -327,13 +328,13 @@ given Parser {
             self.advance()
             self.advance()
             let rhs = self.parse_logical_not() or return
-            expr = box(Expr.AndThenExpr(box(expr.val), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.AndThenExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_and(self ref mut) Result[ref Expr] = {
+    protected parse_and(*mut self) Result[* Expr] = {
         let mut expr = self.parse_and_then() or return
 
         while self.current().kind is .KwAnd() then {
@@ -342,13 +343,13 @@ given Parser {
             }
             self.advance()
             let rhs = self.parse_and_then() or return
-            expr = box(Expr.AndExpr(box(expr.val), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.AndExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_or_else(self ref mut) Result[ref Expr] = {
+    protected parse_or_else(*mut self) Result[* Expr] = {
         let mut expr = self.parse_and() or return
 
         while self.current().kind is .KwOr() then {
@@ -359,13 +360,13 @@ given Parser {
             self.advance()
             self.advance()
             let rhs = self.parse_and() or return
-            expr = box(Expr.OrElseExpr(box(expr.val), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.OrElseExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_or(self ref mut) Result[ref Expr] = {
+    protected parse_or(*mut self) Result[* Expr] = {
         let mut expr = self.parse_or_else() or return
 
         while self.current().kind is .KwOr() then {
@@ -377,13 +378,13 @@ given Parser {
             }
             self.advance()
             let rhs = self.parse_or_else() or return
-            expr = box(Expr.OrExpr(box(expr.val), box(rhs.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.OrExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_or_return(self ref mut) Result[ref Expr] = {
+    protected parse_or_return(*mut self) Result[* Expr] = {
         let mut expr = self.parse_or() or return
 
         while self.current().kind is .KwOr() then {
@@ -393,17 +394,17 @@ given Parser {
             }
             self.advance()
             self.advance()
-            expr = box(Expr.OrReturnExpr(box(expr.val), self.span_from_expr_start(expr)))
+            expr = box(Expr.OrReturnExpr(box(*expr), self.span_from_expr_start(expr)))
         }
 
         return .Ok(expr)
     }
 
-    protected parse_expression(self ref mut) Result[ref Expr] = {
+    protected parse_expression(*mut self) Result[* Expr] = {
         return self.parse_or_return()
     }
 
-    protected parse_access_modifier(self ref mut, default AccessModifier) AccessModifier = {
+    protected parse_access_modifier(*mut self, default AccessModifier) AccessModifier = {
         when self.current().kind in {
             .KwPublic() then {
                 self.advance()
@@ -427,7 +428,7 @@ given Parser {
         }
     }
 
-    protected parse_trait_member(self ref mut) Result[TraitMember] = {
+    protected parse_trait_member(*mut self) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public())
         let name = self.expect_identifier("trait member") or else {
             return .Error(box("parse trait member error"))
@@ -462,7 +463,7 @@ given Parser {
         return .Ok(TraitMember(name, type_params, access, params, return_type))
     }
 
-    protected parse_given_member(self ref mut, allow_body Bool) Result[GivenMember] = {
+    protected parse_given_member(*mut self, allow_body Bool) Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.Protected())
         let name = self.expect_identifier("given member") or else {
             return .Error(box("parse given member error"))
@@ -493,7 +494,7 @@ given Parser {
             return .Error(box("parse given member return type error"))
         }
 
-        let mut body = Option[ref Expr].None()
+        let mut body = Option[* Expr].None()
         if self.current().kind is .Assign() then {
             if not allow_body then {
                 return .Error(box("intrinsic given member cannot have a body"))
@@ -510,7 +511,7 @@ given Parser {
         return .Ok(GivenMember(name, type_params, access, params, return_type, body))
     }
 
-    protected parse_trait_members(self ref mut) Result[List[TraitMember]] = {
+    protected parse_trait_members(*mut self) Result[List[TraitMember]] = {
         let mut members = List[TraitMember].new()
 
         while true then {
@@ -539,7 +540,7 @@ given Parser {
         return .Ok(members)
     }
 
-    protected parse_given_members(self ref mut, allow_body Bool) Result[List[GivenMember]] = {
+    protected parse_given_members(*mut self, allow_body Bool) Result[List[GivenMember]] = {
         let mut members = List[GivenMember].new()
 
         while true then {
@@ -569,7 +570,7 @@ given Parser {
         return .Ok(members)
     }
 
-    protected parse_module_using_items(self ref mut) Result[List[UsingModuleItem]] = {
+    protected parse_module_using_items(*mut self) Result[List[UsingModuleItem]] = {
         let mut items = List[UsingModuleItem].new()
         let mut saw_all_public = false
 
@@ -644,7 +645,7 @@ given Parser {
         return .Ok(items)
     }
 
-    protected parse_using_decl(self ref mut, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_using_decl(*mut self, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
@@ -703,7 +704,7 @@ given Parser {
         return .Ok(Decl.ModuleUsingDecl(path_segments, items, self.span_from_start(start)))
     }
 
-    protected parse_trait_decl(self ref mut, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_trait_decl(*mut self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
         let name = self.expect_identifier("trait declaration") or return
@@ -739,7 +740,7 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    protected parse_given_decl(self ref mut, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_given_decl(*mut self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
         let type_params = self.parse_type_parameters() or else {
@@ -779,7 +780,7 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    protected parse_top_level_decl(self ref mut) Result[Decl] = {
+    protected parse_top_level_decl(*mut self) Result[Decl] = {
         let flags = self.parse_decl_flags()
 
         when flags.invalid_access_message in {
@@ -817,7 +818,7 @@ given Parser {
         }
     }
 
-    public parse_program(self ref mut) Result[Program] = {
+    public parse_program(*mut self) Result[Program] = {
         let mut declarations = List[Decl].new()
         let mut has_non_using_decl = false
 
@@ -853,7 +854,7 @@ given Parser {
 
 given Parser {
 
-    protected parse_string_literal_expr(self ref mut, value String, span SourceSpan) Result[ref Expr] = {
+    protected parse_string_literal_expr(*mut self, value String, span SourceSpan) Result[* Expr] = {
         if not value.contains("\\(") then {
             return .Ok(box(Expr.StringLiteral(value, span)))
         }
@@ -881,7 +882,7 @@ given Parser {
         return .Ok(box(Expr.InterpolatedString(parts, span)))
     }
 
-    protected parse_interpolated_parts(self ref mut, value String) Result[List[InterpolatedStringPart]] = {
+    protected parse_interpolated_parts(*mut self, value String) Result[List[InterpolatedStringPart]] = {
         let runes = value.to_runes()
         let total = runes.count()
         let mut i UInt = 0
@@ -956,7 +957,7 @@ given Parser {
                     let expr = self.parse_embedded_expression(expr_source) or else {
                         return .Error(box("Invalid interpolation expression: \(it.message())"))
                     }
-                    parts.push(InterpolatedStringPart.Expression(box(expr.val)))
+                    parts.push(InterpolatedStringPart.Expression(box(*expr)))
                     continue
                 }
 
@@ -981,7 +982,7 @@ given Parser {
         return .Ok(parts)
     }
 
-    protected parse_embedded_expression(self ref mut, expr_source String) Result[ref Expr] = {
+    protected parse_embedded_expression(*mut self, expr_source String) Result[* Expr] = {
         let tokens = lex(expr_source) or else {
             return .Error(box("lex failed: \(it.message())"))
         }
@@ -1007,7 +1008,6 @@ let token_text(token Token) String = {
         .FloatLiteral(v) then v,
         .StringLiteral(v) then "\"\(v)\"",
         .RuneLiteral(v) then "'\(v)'",
-        .LifetimeIdentifier(name) then name,
         .KwLet() then "let",
         .KwMut() then "mut",
         .KwType() then "type",
@@ -1018,9 +1018,6 @@ let token_text(token Token) String = {
         .KwIs() then "is",
         .KwIn() then "in",
         .KwAs() then "as",
-        .KwRef() then "ref",
-        .KwPtr() then "ptr",
-        .KwVal() then "val",
         .KwGiven() then "given",
         .KwTrait() then "trait",
         .KwIntrinsic() then "intrinsic",
@@ -1029,7 +1026,6 @@ let token_text(token Token) String = {
         .KwPrivate() then "private",
         .KwProtected() then "protected",
         .KwPublic() then "public",
-        .KwWeakref() then "weakref",
         .KwSelf() then "self",
         .KwSelfType() then "Self",
         .KwReturn() then "return",
@@ -1088,6 +1084,8 @@ let token_text(token Token) String = {
         .LessRange() then "<..",
         .LessRangeLess() then "<..<",
         .Arrow() then "->",
+        .KwRaw() then "raw",
+        .QuestionMark() then "?",
         .Eof() then "<eof>",
     }
 }

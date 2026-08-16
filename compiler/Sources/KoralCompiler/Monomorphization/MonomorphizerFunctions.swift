@@ -17,8 +17,7 @@ extension Monomorphizer {
         for parameterType: TypeNode
     ) -> PassKind {
         switch parameterType {
-        case .reference(_, let mutable),
-             .borrowedReference(_, _, let mutable):
+        case .reference(_, let mutable):
             return mutable ? .byMutRef : .byRef
         default:
             return .byVal
@@ -58,10 +57,7 @@ extension Monomorphizer {
                 return nil
             }
 
-            let normalizedBaseType = normalizeBorrowedExtensionBaseType(
-                selfType,
-                templateName: structureName
-            )
+            let normalizedBaseType = canonicalReferenceLikeBaseType(selfType)
             let resolvedMethodTypeArgs = try inferExtensionMethodTypeArgs(
                 methodInfo: ext,
                 baseType: normalizedBaseType,
@@ -82,28 +78,35 @@ extension Monomorphizer {
             return instantiated
         }
 
+        let candidates: (inner: Type, names: [String])?
         switch selfType {
         case .reference(let inner):
-            return try instantiateModifierMethod(structureName: "Ref", innerType: inner)
+            candidates = (inner, ["Ref"])
         case .mutableReference(let inner):
-            return try instantiateModifierMethod(structureName: "MutRef", innerType: inner)
-                ?? instantiateModifierMethod(structureName: "Ref", innerType: inner)
-        case .borrowedReference(let inner, _):
-            return try instantiateModifierMethod(structureName: "BorrowRef", innerType: inner)
-                ?? instantiateModifierMethod(structureName: "Ref", innerType: inner)
-        case .mutableBorrowedReference(let inner, _):
-            return try instantiateModifierMethod(structureName: "BorrowMutRef", innerType: inner)
-                ?? instantiateModifierMethod(structureName: "MutRef", innerType: inner)
-                ?? instantiateModifierMethod(structureName: "BorrowRef", innerType: inner)
-                ?? instantiateModifierMethod(structureName: "Ref", innerType: inner)
+            candidates = (inner, ["MutRef", "Ref"])
+        case .borrowedReference(let inner):
+            candidates = (inner, ["Ref"])
+        case .mutableBorrowedReference(let inner):
+            candidates = (inner, ["MutRef", "Ref"])
         case .weakReference(let inner):
-            return try instantiateModifierMethod(structureName: "WeakRef", innerType: inner)
+            candidates = (inner, ["WeakRef"])
         case .mutableWeakReference(let inner):
-            return try instantiateModifierMethod(structureName: "MutWeakRef", innerType: inner)
-                ?? instantiateModifierMethod(structureName: "WeakRef", innerType: inner)
+            candidates = (inner, ["MutWeakRef", "WeakRef"])
         default:
+            candidates = nil
+        }
+
+        guard let candidates else {
             return nil
         }
+
+        for structureName in candidates.names {
+            if let instantiated = try instantiateModifierMethod(structureName: structureName, innerType: candidates.inner) {
+                return instantiated
+            }
+        }
+
+        return nil
     }
 
     private func resolvedReceiverMethodName(_ methodSymbol: Symbol) -> String {
@@ -126,11 +129,11 @@ extension Monomorphizer {
         switch (base.type, receiverType) {
         case (.mutableReference(let inner), .reference(let expectedInner)) where inner == expectedInner:
             return base
-        case (.borrowedReference(let inner, _), .reference(let expectedInner)) where inner == expectedInner:
+        case (.borrowedReference(let inner), .reference(let expectedInner)) where inner == expectedInner:
             return base
-        case (.mutableBorrowedReference(let inner, _), .reference(let expectedInner)) where inner == expectedInner:
+        case (.mutableBorrowedReference(let inner), .reference(let expectedInner)) where inner == expectedInner:
             return base
-        case (.mutableBorrowedReference(let inner, _), .borrowedReference(let expectedInner, _)) where inner == expectedInner:
+        case (.mutableBorrowedReference(let inner), .borrowedReference(let expectedInner)) where inner == expectedInner:
             return base
         case (.mutableWeakReference(let inner), .weakReference(let expectedInner)) where inner == expectedInner:
             return base
@@ -138,9 +141,9 @@ extension Monomorphizer {
             return .referenceExpression(expression: base, type: receiverType)
         case (_, .mutableReference(let inner)) where inner == base.type:
             return .referenceExpression(expression: base, type: receiverType)
-        case (_, .borrowedReference(let inner, _)) where inner == base.type:
+        case (_, .borrowedReference(let inner)) where inner == base.type:
             return .referenceExpression(expression: base, type: receiverType)
-        case (_, .mutableBorrowedReference(let inner, _)) where inner == base.type:
+        case (_, .mutableBorrowedReference(let inner)) where inner == base.type:
             return .referenceExpression(expression: base, type: receiverType)
         case (_, .weakReference(let inner)) where inner == base.type:
             return .referenceExpression(expression: base, type: receiverType)
@@ -150,9 +153,9 @@ extension Monomorphizer {
             return .derefExpression(expression: base, type: inner)
         case (.mutableReference(let inner), _) where inner == receiverType:
             return .derefExpression(expression: base, type: inner)
-        case (.borrowedReference(let inner, _), _) where inner == receiverType:
+        case (.borrowedReference(let inner), _) where inner == receiverType:
             return .derefExpression(expression: base, type: inner)
-        case (.mutableBorrowedReference(let inner, _), _) where inner == receiverType:
+        case (.mutableBorrowedReference(let inner), _) where inner == receiverType:
             return .derefExpression(expression: base, type: inner)
         case (.weakReference(let inner), _) where inner == receiverType:
             return .derefExpression(expression: base, type: inner)
@@ -169,11 +172,11 @@ extension Monomorphizer {
             switch (inner.type, receiverType) {
             case (.mutableReference(let innerType), .reference(let expectedInner)) where innerType == expectedInner:
                 return inner
-            case (.borrowedReference(let innerType, _), .reference(let expectedInner)) where innerType == expectedInner:
+            case (.borrowedReference(let innerType), .reference(let expectedInner)) where innerType == expectedInner:
                 return inner
-            case (.mutableBorrowedReference(let innerType, _), .reference(let expectedInner)) where innerType == expectedInner:
+            case (.mutableBorrowedReference(let innerType), .reference(let expectedInner)) where innerType == expectedInner:
                 return inner
-            case (.mutableBorrowedReference(let innerType, _), .borrowedReference(let expectedInner, _)) where innerType == expectedInner:
+            case (.mutableBorrowedReference(let innerType), .borrowedReference(let expectedInner)) where innerType == expectedInner:
                 return inner
             case (.mutableWeakReference(let innerType), .weakReference(let expectedInner)) where innerType == expectedInner:
                 return inner
@@ -390,10 +393,7 @@ extension Monomorphizer {
         methodTypeArgs: [Type]
     ) throws -> Symbol {
         // Resolve the base type if it's a parameterized type
-        let resolvedBaseType = normalizeBorrowedExtensionBaseType(
-            resolveParameterizedType(baseType),
-            templateName: templateName
-        )
+        let resolvedBaseType = canonicalReferenceLikeBaseType(resolveParameterizedType(baseType))
         
         // Derive the structure name from the base type
         let structureName: String
@@ -443,13 +443,11 @@ extension Monomorphizer {
         )
     }
 
-    private func normalizeBorrowedExtensionBaseType(_ baseType: Type, templateName: String) -> Type {
-        switch (templateName, baseType) {
-        case ("Ref", .borrowedReference(let inner, _)):
+    private func canonicalReferenceLikeBaseType(_ baseType: Type) -> Type {
+        switch baseType {
+        case .borrowedReference(let inner):
             return .reference(inner: inner)
-        case ("Ref", .mutableBorrowedReference(let inner, _)):
-            return .reference(inner: inner)
-        case ("MutRef", .mutableBorrowedReference(let inner, _)):
+        case .mutableBorrowedReference(let inner):
             return .mutableReference(inner: inner)
         default:
             return baseType
@@ -783,7 +781,7 @@ extension Monomorphizer {
                 expectedMethodType: expectedMethodType
             )
 
-        case .borrowedReference(let inner, _):
+        case .borrowedReference(let inner):
             if let instantiated = try instantiateReferenceLikeExtensionMethod(
                 on: selfType,
                 name: name,
@@ -799,7 +797,7 @@ extension Monomorphizer {
                 expectedMethodType: expectedMethodType
             )
 
-        case .mutableBorrowedReference(let inner, _):
+        case .mutableBorrowedReference(let inner):
             if let instantiated = try instantiateReferenceLikeExtensionMethod(
                 on: selfType,
                 name: name,
@@ -815,7 +813,7 @@ extension Monomorphizer {
                 expectedMethodType: expectedMethodType
             )
 
-        case .weakReference(let inner):
+        case .weakReference:
             if let instantiated = try instantiateReferenceLikeExtensionMethod(
                 on: selfType,
                 name: name,
@@ -826,7 +824,7 @@ extension Monomorphizer {
             }
             return nil
 
-        case .mutableWeakReference(let inner):
+        case .mutableWeakReference:
             if let instantiated = try instantiateReferenceLikeExtensionMethod(
                 on: selfType,
                 name: name,
@@ -1333,10 +1331,10 @@ extension Monomorphizer {
             return .reference(inner: normalizeTypeArgument(inner))
         case .mutableReference(let inner):
             return .mutableReference(inner: normalizeTypeArgument(inner))
-        case .borrowedReference(let inner, let lifetime):
-            return .borrowedReference(inner: normalizeTypeArgument(inner), lifetime: lifetime)
-        case .mutableBorrowedReference(let inner, let lifetime):
-            return .mutableBorrowedReference(inner: normalizeTypeArgument(inner), lifetime: lifetime)
+        case .borrowedReference(let inner):
+            return .borrowedReference(inner: normalizeTypeArgument(inner))
+        case .mutableBorrowedReference(let inner):
+            return .mutableBorrowedReference(inner: normalizeTypeArgument(inner))
         case .weakReference(let inner):
             return .weakReference(inner: normalizeTypeArgument(inner))
         case .mutableWeakReference(let inner):
@@ -1366,9 +1364,9 @@ extension Monomorphizer {
         case .mutableReference:
             return ["MutRef", "Ref"]
         case .borrowedReference:
-            return ["BorrowRef", "Ref"]
+            return ["Ref"]
         case .mutableBorrowedReference:
-            return ["BorrowMutRef", "MutRef", "BorrowRef", "Ref"]
+            return ["MutRef", "Ref"]
         case .weakReference:
             return ["WeakRef"]
         case .mutableWeakReference:
@@ -1406,9 +1404,9 @@ extension Monomorphizer {
         case .mutableReference:
             return "MutRef"
         case .borrowedReference:
-            return "BorrowRef"
+            return "Ref"
         case .mutableBorrowedReference:
-            return "BorrowMutRef"
+            return "MutRef"
         case .weakReference:
             return "WeakRef"
         case .mutableWeakReference:
@@ -1450,51 +1448,17 @@ extension Monomorphizer {
         switch expected {
         case .genericParameter:
             return true
-        case .reference(let expectedInner):
-            switch actual {
-            case .reference(let actualInner), .mutableReference(let actualInner),
-                 .borrowedReference(let actualInner, _), .mutableBorrowedReference(let actualInner, _):
-                return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-            default:
+        case .reference(let expectedInner),
+             .mutableReference(let expectedInner),
+             .borrowedReference(let expectedInner),
+             .mutableBorrowedReference(let expectedInner),
+             .weakReference(let expectedInner),
+             .mutableWeakReference(let expectedInner),
+             .pointer(let expectedInner),
+             .mutablePointer(let expectedInner):
+            guard let (_, actualInner) = expected.compatibleIndirectionInners(with: actual) else {
                 return false
             }
-        case .mutableReference(let expectedInner):
-            switch actual {
-            case .mutableReference(let actualInner), .mutableBorrowedReference(let actualInner, _):
-                return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-            default:
-                return false
-            }
-        case .borrowedReference(let expectedInner, _):
-            switch actual {
-            case .reference(let actualInner), .mutableReference(let actualInner),
-                 .borrowedReference(let actualInner, _), .mutableBorrowedReference(let actualInner, _):
-                return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-            default:
-                return false
-            }
-        case .mutableBorrowedReference(let expectedInner, _):
-            switch actual {
-            case .mutableReference(let actualInner), .mutableBorrowedReference(let actualInner, _):
-                return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-            default:
-                return false
-            }
-        case .weakReference(let expectedInner):
-            switch actual {
-            case .weakReference(let actualInner), .mutableWeakReference(let actualInner):
-                return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-            default:
-                return false
-            }
-        case .mutableWeakReference(let expectedInner):
-            guard case .mutableWeakReference(let actualInner) = actual else { return false }
-            return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-        case .pointer(let expectedInner):
-            guard case .pointer(let actualInner) = actual else { return false }
-            return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-        case .mutablePointer(let expectedInner):
-            guard case .mutablePointer(let actualInner) = actual else { return false }
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
         case .function(let expectedParams, let expectedReturn):
             guard case .function(let actualParams, let actualReturn) = actual,
@@ -1618,29 +1582,29 @@ extension Monomorphizer {
         case .reference(let pInner):
             switch actual {
             case .reference(let aInner), .mutableReference(let aInner),
-                 .borrowedReference(let aInner, _), .mutableBorrowedReference(let aInner, _):
+                 .borrowedReference(let aInner), .mutableBorrowedReference(let aInner):
                 return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
             default:
                 return false
             }
         case .mutableReference(let pInner):
             switch actual {
-            case .mutableReference(let aInner), .mutableBorrowedReference(let aInner, _):
+            case .mutableReference(let aInner), .mutableBorrowedReference(let aInner):
                 return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
             default:
                 return false
             }
-        case .borrowedReference(let pInner, _):
+        case .borrowedReference(let pInner):
             switch actual {
             case .reference(let aInner), .mutableReference(let aInner),
-                 .borrowedReference(let aInner, _), .mutableBorrowedReference(let aInner, _):
+                 .borrowedReference(let aInner), .mutableBorrowedReference(let aInner):
                 return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
             default:
                 return false
             }
-        case .mutableBorrowedReference(let pInner, _):
+        case .mutableBorrowedReference(let pInner):
             switch actual {
-            case .mutableReference(let aInner), .mutableBorrowedReference(let aInner, _):
+            case .mutableReference(let aInner), .mutableBorrowedReference(let aInner):
                 return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
             default:
                 return false
@@ -2089,7 +2053,7 @@ extension Monomorphizer {
         case .traitObject(let traitName, let typeArgs):
             return (traitName, typeArgs)
         case .reference(let inner), .mutableReference(let inner),
-             .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
+             .borrowedReference(let inner), .mutableBorrowedReference(let inner):
             if case .traitObject(let traitName, let typeArgs) = inner {
                 return (traitName, typeArgs)
             }

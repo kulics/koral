@@ -492,6 +492,12 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         printExpression(operand)
       }
+
+    case .addressOfExpression(let expr, let mutable):
+      print("\(indent)AddressOfExpression\(mutable ? " mut" : ""):")
+      withIndent {
+        printExpression(expr)
+      }
     case .andExpression(let left, let right):
       print("\(indent)AndExpression:")
       withIndent {
@@ -536,29 +542,10 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
-    case .refExpression(let expr):
-      print("\(indent)RefExpression:")
-      withIndent {
-        printExpression(expr)
-      }
-
-    case .weakrefExpression(let expr):
-      print("\(indent)WeakrefExpression:")
-      withIndent {
-        printExpression(expr)
-      }
-
     case .ptrExpression(let expr):
       print("\(indent)PtrExpression:")
       withIndent {
         printExpression(expr)
-      }
-
-    case .memberPath(let base, let path):
-      print("\(indent)MemberPath: \(path.joined(separator: "."))")
-      print("\(indent)  Base:")
-      withIndent {
-        printExpression(base)
       }
 
     case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments):
@@ -725,6 +712,15 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           printExpression(operand)
+        }
+      }
+
+    case .memberPath(let base, let path):
+      print("\(indent)MemberPath: .\(path.joined(separator: "."))")
+      print("\(indent)  Base:")
+      withIndent {
+        withIndent {
+          printExpression(base)
         }
       }
     }

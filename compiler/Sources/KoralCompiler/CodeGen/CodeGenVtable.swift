@@ -313,7 +313,7 @@ extension CodeGen {
   /// The wrapper receives `struct Ref` as the first parameter (matching the vtable signature),
   /// reads the concrete type value from `ref.ptr` using the copy function, then calls the actual method.
   ///
-  /// For `self ref` methods, returns `nil` — no wrapper is needed since the actual method
+  /// For `*self`/`*mut self` methods, returns `nil` — no wrapper is needed since the actual method
   /// already takes `struct Ref`.
   ///
   /// Example output for `String` implementing `Error.message(self) String`:
@@ -331,7 +331,7 @@ extension CodeGen {
     method: MIRTraitVTableMethod,
     actualMethodCName: String
   ) -> String? {
-    // self ref methods don't need a wrapper
+    // Managed receiver methods don't need a wrapper
     guard method.selfByValue else {
       return nil
     }
@@ -455,7 +455,7 @@ extension CodeGen {
   ///
   /// For each method in the trait (ordered by declaration, parent methods first):
   /// - If `self` by value: uses the wrapper function name
-  /// - If `self ref`: uses the actual method C name directly (no wrapper needed)
+  /// - If `*self` / `*mut self`: uses the actual method C name directly (no wrapper needed)
   ///
   /// Returns `nil` if the trait is not found or if this combination has already been generated.
   func generateVtableInstance(
@@ -494,7 +494,7 @@ extension CodeGen {
           methodName: methodName
         )
       } else {
-        // self ref: vtable entry points directly to the actual method
+        // Managed receiver: vtable entry points directly to the actual method
         guard let actualName = actualMethodCNames[methodName] else {
           continue
         }

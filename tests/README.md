@@ -78,34 +78,45 @@ Use this bucket when changing declaration parsing, package visibility, import ru
 - `generic_template_requires_import_error_test`
 - `generic_template_import_test`
 
-### Explicit managed receiver semantics
+### New reference surface (`*T`, `?*T`, `*raw T`)
 
-Use this bucket when changing receiver adaptation, auto-ref rules, or `self ref Self` / `self ref mut Self` behavior.
+Use this bucket when changing managed reference, weak reference, or raw pointer syntax/semantics.
 
-- `managed_self_ref_mut_self_smoke`
-- `no_auto_ref_managed_mut_receiver_error`
-- `managed_self_ref_self_trait_generic_test`
-- `managed_self_ref_mut_self_trait_generic_test`
-- `no_auto_ref_managed_mut_receiver_generic_error`
-- `generic_owner_managed_self_ref_smoke`
-- `generic_owner_managed_self_ref_mut_smoke`
-- `generic_owner_no_auto_ref_managed_mut_receiver_error`
+- `weakref_basic`
+- `weakref_lifecycle`
+- `weakref_struct`
+- `mut_weakref_basic`
+- `trait_object_weakref`
+- `trait_object_mut_weakref_roundtrip`
 
-### Escape analysis with lambda capture and storage
+### Escape analysis and managed reference promotion
 
-Use this bucket when changing borrow-first `.ref`, escape promotion, conditional branch merge logic, or closure capture/storage rules.
+Use this bucket when changing escape promotion, conditional branch merge logic, inter-procedural escape, or container store paths.
 
-- `escape_branch_managed_ref_return`
-- `conditional_borrowed_ref_lambda_capture_error`
+- `escape_alias_container_store_regression`
+- `inter_procedural_escape`
+- `inter_procedural_escape_recursive_ref_regression`
 - `conditional_managed_ref_lambda_return`
-- `conditional_managed_refmut_lambda_list_store`
+- `escape_analysis`
+- `escape_analysis_coverage`
+- `explicit_ref_promotion`
+- `box_escape_analysis`
+- `builtin_subscript_ref_escape`
+- `no_implicit_ref_promotion_error`
+- `mut_ref_receiver_copy_field_escape_regression`
+- `ref_escape_pattern_alias`
 
-### Trait object safety for explicit managed receivers
+### Receiver syntax migration (`*self`, `*mut self`)
 
-Use this bucket when changing trait object formation, object-safety checks, or reference/weak-reference wrappers around trait objects.
+Use this bucket when changing receiver auto-ref/auto-deref, managed receiver return paths, or U2 receiver syntax migration behavior.
 
-- `managed_receiver_trait_object_safety_error`
-- `managed_mut_receiver_trait_object_safety_error`
+- `when_ref_in_private_fn`
+- `mut_ref_method_dispatch_widening`
+- `self_ref_receiver_temp_cleanup_unique_mutable`
+- `self_mut_ref_rvalue_receiver_error`
+- `value_semantics_self_ref_on_immutable_base_error`
+
+Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mut self`, `&`, `&mut`, `&raw`, `*`).
 
 ## Rerun a bucket
 
@@ -113,17 +124,16 @@ Because `--filter` is substring-only, the most reliable workflow is to loop over
 
 ```bash
 cases=(
-	conditional_borrowed_ref_lambda_capture_error
+	escape_alias_container_store_regression
+	inter_procedural_escape
+	inter_procedural_escape_recursive_ref_regression
 	conditional_managed_ref_lambda_return
-	conditional_managed_refmut_lambda_list_store
-	managed_self_ref_self_trait_generic_test
-	managed_self_ref_mut_self_trait_generic_test
-	no_auto_ref_managed_mut_receiver_generic_error
-	generic_owner_managed_self_ref_smoke
-	generic_owner_managed_self_ref_mut_smoke
-	generic_owner_no_auto_ref_managed_mut_receiver_error
-	managed_receiver_trait_object_safety_error
-	managed_mut_receiver_trait_object_safety_error
+	weakref_basic
+	weakref_lifecycle
+	weakref_struct
+	mut_weakref_basic
+	trait_object_weakref
+	trait_object_mut_weakref_roundtrip
 )
 
 for case_name in "${cases[@]}"; do

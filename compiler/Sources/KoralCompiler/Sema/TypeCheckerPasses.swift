@@ -4,17 +4,14 @@ import Foundation
 // This extension contains Pass 1/2/3 logic and module symbol building.
 
 extension TypeChecker {
-  private func filterLifetimeTypeParameters(_ typeParameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
-    typeParameters.filter { !$0.name.hasPrefix("'") }
-  }
-
+  
   private func assertNoBorrowedReferenceType(
     _ type: Type,
     context description: String,
     span: SourceSpan
   ) throws {
     guard !type.containsBorrowedReference else {
-      throw SemanticError(.generic("\(description) cannot contain borrowed reference type '\(type)'"), span: span)
+      throw SemanticError(.generic("\(description) cannot contain borrowed `ref` / `ref mut` types: '\(type)'"), span: span)
     }
   }
 
@@ -25,7 +22,7 @@ extension TypeChecker {
   ) throws {
     guard params.count == 1 else {
       throw SemanticError.invalidOperation(
-        op: "drop must have exactly one parameter of type 'ptr mut Self'", type1: "", type2: "")
+        op: "drop must have exactly one parameter of type '*raw mut Self'", type1: "", type2: "")
     }
     let expectedParamType = Type.mutablePointer(element: selfType)
     guard params[0].type == expectedParamType else {
@@ -68,8 +65,8 @@ extension TypeChecker {
       return (context.getName(defId) ?? type.description, typeAccess)
     case .reference(let inner),
          .mutableReference(let inner),
-         .borrowedReference(let inner, _),
-         .mutableBorrowedReference(let inner, _),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner),
          .pointer(let inner),
          .mutablePointer(let inner),
          .weakReference(let inner),
@@ -684,8 +681,6 @@ extension TypeChecker {
       return (mutable ? "MutPtr" : "Ptr", [inner])
     case .reference(let inner, let mutable):
       return (mutable ? "MutRef" : "Ref", [inner])
-    case .borrowedReference(let inner, _, let mutable):
-      return (mutable ? "BorrowMutRef" : "BorrowRef", [inner])
     case .weakReference(let inner, let mutable):
       return (mutable ? "MutWeakRef" : "WeakRef", [inner])
     default:
@@ -711,10 +706,6 @@ extension TypeChecker {
       return .reference(inner: genericArgs[0])
     case "MutRef":
       return .mutableReference(inner: genericArgs[0])
-    case "BorrowRef":
-      return .borrowedReference(inner: genericArgs[0], lifetime: "'_")
-    case "BorrowMutRef":
-      return .mutableBorrowedReference(inner: genericArgs[0], lifetime: "'_")
     case "WeakRef":
       return .weakReference(inner: genericArgs[0])
     case "MutWeakRef":
@@ -726,7 +717,7 @@ extension TypeChecker {
 
   private func isTypeModifierBaseName(_ baseName: String) -> Bool {
     switch baseName {
-    case "Ref", "MutRef", "BorrowRef", "BorrowMutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef":
+    case "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef":
       return true
     default:
       return false
@@ -737,8 +728,6 @@ extension TypeChecker {
     switch typeNode {
     case .reference(_, let mutable):
       return mutable ? "MutRef" : "Ref"
-    case .borrowedReference(_, _, let mutable):
-      return mutable ? "BorrowMutRef" : "BorrowRef"
     case .pointer(_, let mutable):
       return mutable ? "MutPtr" : "Ptr"
     case .weakReference(_, let mutable):
@@ -1311,7 +1300,7 @@ extension TypeChecker {
         case .reference, .pointer, .weakReference:
           throw SemanticError(.generic(
             "Concrete type modifier given declarations are not allowed. " +
-            "Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+            "Use generic form instead, e.g., 'given [T SomeTrait] *T as SomeTrait { ... }'"
           ), span: span)
         default:
           break
@@ -1448,7 +1437,7 @@ extension TypeChecker {
         case .reference, .pointer, .weakReference:
           throw SemanticError(.generic(
             "Concrete type modifier given declarations are not allowed. " +
-            "Use generic form instead, e.g., 'given [T SomeTrait] T ref SomeTrait { ... }'"
+            "Use generic form instead, e.g., 'given [T SomeTrait] *T as SomeTrait { ... }'"
           ), span: span)
         default:
           break
@@ -1784,7 +1773,7 @@ extension TypeChecker {
       
     case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span):
       self.currentSpan = span
-      let genericTypeParameters = filterLifetimeTypeParameters(typeParameters)
+      let genericTypeParameters = typeParameters
       // Register function signature so it can be called from methods defined earlier
       if genericTypeParameters.isEmpty {
         // Non-generic function: register signature now
@@ -1874,7 +1863,7 @@ extension TypeChecker {
       
     case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span):
       self.currentSpan = span
-      let genericTypeParameters = filterLifetimeTypeParameters(typeParameters)
+      let genericTypeParameters = typeParameters
       // Register intrinsic function signature so it can be called from methods defined earlier
       if genericTypeParameters.isEmpty {
         let returnType = try resolveTypeNode(returnTypeNode)
@@ -2112,7 +2101,7 @@ extension TypeChecker {
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
       let span):
       self.currentSpan = span
-      let genericTypeParameters = filterLifetimeTypeParameters(typeParameters)
+      let genericTypeParameters = typeParameters
       let declaredDefId = declaredDefIdForCurrentGlobal(name: name, access: access)
 
       // For non-generic functions, allow the same declaration pre-registered in Pass 2.

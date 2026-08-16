@@ -15,23 +15,23 @@ foreign type CDirHandle {}
 foreign type CDirEntry {}
 
 // Directory I/O
-foreign let __koral_opendir(path ptr UInt8) ptr CDirHandle
-foreign let __koral_readdir(dir ptr CDirHandle) ptr CDirEntry
-foreign let __koral_closedir(dir ptr CDirHandle) Int32
-foreign let __koral_dirent_name(entry ptr CDirEntry) ptr UInt8
-foreign let __koral_dirent_type(entry ptr CDirEntry) Int32
+foreign let __koral_opendir(path *raw UInt8) *raw CDirHandle
+foreign let __koral_readdir(dir *raw CDirHandle) *raw CDirEntry
+foreign let __koral_closedir(dir *raw CDirHandle) Int32
+foreign let __koral_dirent_name(entry *raw CDirEntry) *raw UInt8
+foreign let __koral_dirent_type(entry *raw CDirEntry) Int32
 
 // Directory manipulation
-foreign let __koral_mkdir(path ptr UInt8, mode UInt32) Int32
-foreign let __koral_rmdir(path ptr UInt8) Int32
-foreign let __koral_mkdtemp(template ptr UInt8) ptr UInt8
+foreign let __koral_mkdir(path *raw UInt8, mode UInt32) Int32
+foreign let __koral_rmdir(path *raw UInt8) Int32
+foreign let __koral_mkdtemp(template *raw UInt8) *raw UInt8
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
 /// Convert a dirent type code to FileType
-private let dir_entry_type(entry ptr CDirEntry) FileType = {
+private let dir_entry_type(entry *raw CDirEntry) FileType = {
     let t = __koral_dirent_type(entry)
     return when t in {
         0 then FileType.RegularFile(),
@@ -56,26 +56,26 @@ public type DirEntry(
 given DirEntry {
 
     /// File/directory name
-    public name(self ref) String = self._name
+    public name(*self) String = self._name
 
     /// Full path
-    public path(self ref) Path = self._path
+    public path(*self) Path = self._path
 
     /// File type
-    public file_type(self ref) FileType = self._file_type
+    public file_type(*self) FileType = self._file_type
 
-    public is_file(self ref) Bool = self._file_type.is_file()
-    public is_dir(self ref) Bool = self._file_type.is_dir()
-    public is_symlink(self ref) Bool = self._file_type.is_symlink()
+    public is_file(*self) Bool = self._file_type.is_file()
+    public is_dir(*self) Bool = self._file_type.is_dir()
+    public is_symlink(*self) Bool = self._file_type.is_symlink()
 
     /// Get full file metadata (triggers stat system call)
-    public info(self ref) Result[FileInfo] = file_info(self._path)
+    public info(*self) Result[FileInfo] = file_info(self._path)
 
 }
 
 given DirEntry as ToString {
 
-    public to_string(self ref) String = {
+    public to_string(*self) String = {
         let mut s = String.new()
         s.push_string("DirEntry(")
         s.push_string(self._name)
@@ -86,26 +86,26 @@ given DirEntry as ToString {
     }
 }
 
-private type DirIteratorStorage(handle ptr CDirHandle, base Path)
+private type DirIteratorStorage(handle *raw CDirHandle, base Path)
 
 given DirIteratorStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         if source.handle <> null_ptr[CDirHandle]() then {
             __koral_closedir(source.handle)
         }
     }
 }
 
-public type DirIterator(protected storage ref mut DirIteratorStorage)
+public type DirIterator(protected storage *mut DirIteratorStorage)
 
 private type WalkDirStorage(mut stack List[DirIterator])
 
-public type WalkDirIterator(protected mut storage ref mut WalkDirStorage)
+public type WalkDirIterator(protected mut storage *mut WalkDirStorage)
 
 given DirIterator as Iterator[DirEntry] {
 
-    public next(self ref mut) Option[DirEntry] = {
+    public next(*mut self) Option[DirEntry] = {
         let entry = __koral_readdir(self.storage.handle)
         if entry == null_ptr[CDirEntry]() then {
             return Option[DirEntry].None()
@@ -124,7 +124,7 @@ given DirIterator as Iterator[DirEntry] {
 
 given WalkDirIterator as Iterator[DirEntry] {
 
-    public next(self ref mut) Option[DirEntry] = {
+    public next(*mut self) Option[DirEntry] = {
         let top_opt = self.storage.stack.pop()
         if top_opt is .None then {
             return Option[DirEntry].None()

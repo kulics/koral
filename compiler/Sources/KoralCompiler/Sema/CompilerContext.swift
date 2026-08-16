@@ -290,14 +290,14 @@ public final class CompilerContext: @unchecked Sendable {
         case .function(let params, let returns):
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
             return "(\(paramStr)) -> \(getDebugName(returns))"
-        case .reference(let inner): return "ref \(getDebugName(inner))"
-        case .mutableReference(let inner): return "ref mut \(getDebugName(inner))"
-        case .borrowedReference(let inner, let lifetime): return "ref \(lifetime) \(getDebugName(inner))"
-        case .mutableBorrowedReference(let inner, let lifetime): return "ref \(lifetime) mut \(getDebugName(inner))"
-        case .pointer(let element): return "ptr \(getDebugName(element))"
-        case .mutablePointer(let element): return "ptr mut \(getDebugName(element))"
-        case .weakReference(let inner): return "weakref \(getDebugName(inner))"
-        case .mutableWeakReference(let inner): return "weakref mut \(getDebugName(inner))"
+        case .reference(let inner): return "*\(getDebugName(inner))"
+        case .mutableReference(let inner): return "*mut \(getDebugName(inner))"
+        case .borrowedReference(let inner): return "ref *\(getDebugName(inner))"
+        case .mutableBorrowedReference(let inner): return "ref mut *\(getDebugName(inner))"
+        case .pointer(let element): return "*raw \(getDebugName(element))"
+        case .mutablePointer(let element): return "*raw mut \(getDebugName(element))"
+        case .weakReference(let inner): return "?*\(getDebugName(inner))"
+        case .mutableWeakReference(let inner): return "?*mut \(getDebugName(inner))"
         case .structure(let defId):
             var name = defIdMap.getName(defId) ?? "<unknown>"
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {
@@ -368,9 +368,9 @@ public final class CompilerContext: @unchecked Sendable {
             return freeTypeVariables(in: inner)
         case .mutableReference(let inner):
             return freeTypeVariables(in: inner)
-        case .borrowedReference(let inner, _):
+        case .borrowedReference(let inner):
             return freeTypeVariables(in: inner)
-        case .mutableBorrowedReference(let inner, _):
+        case .mutableBorrowedReference(let inner):
             return freeTypeVariables(in: inner)
         case .pointer(let element):
             return freeTypeVariables(in: element)
@@ -419,8 +419,8 @@ public final class CompilerContext: @unchecked Sendable {
         case .function: return "Fn"
         case .reference(let inner): return "R_\(getLayoutKey(inner))"
         case .mutableReference(let inner): return "MR_\(getLayoutKey(inner))"
-        case .borrowedReference(let inner, let lifetime): return "BR_\(sanitizeLifetimeKey(lifetime))_\(getLayoutKey(inner))"
-        case .mutableBorrowedReference(let inner, let lifetime): return "BMR_\(sanitizeLifetimeKey(lifetime))_\(getLayoutKey(inner))"
+        case .borrowedReference(let inner): return "R_BR_\(getLayoutKey(inner))"
+        case .mutableBorrowedReference(let inner): return "MR_BR_\(getLayoutKey(inner))"
         case .pointer(let element): return "P_\(getLayoutKey(element))"
         case .mutablePointer(let element): return "MP_\(getLayoutKey(element))"
         case .weakReference(let inner): return "W_\(getLayoutKey(inner))"
@@ -448,11 +448,6 @@ public final class CompilerContext: @unchecked Sendable {
             let argsKeys = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
             return "TO_\(traitName)_\(argsKeys)"
         }
-    }
-
-    private func sanitizeLifetimeKey(_ lifetime: String) -> String {
-        lifetime
-          .replacingOccurrences(of: "'", with: "Q")
     }
 
     private func layoutKey(for defId: DefId) -> String {
@@ -519,9 +514,9 @@ public final class CompilerContext: @unchecked Sendable {
             return containsGenericParameterInternal(inner, visited: &visited)
         case .mutableReference(let inner):
             return containsGenericParameterInternal(inner, visited: &visited)
-        case .borrowedReference(let inner, _):
+        case .borrowedReference(let inner):
             return containsGenericParameterInternal(inner, visited: &visited)
-        case .mutableBorrowedReference(let inner, _):
+        case .mutableBorrowedReference(let inner):
             return containsGenericParameterInternal(inner, visited: &visited)
         case .pointer(let element):
             return containsGenericParameterInternal(element, visited: &visited)

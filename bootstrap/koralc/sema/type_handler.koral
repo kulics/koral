@@ -49,8 +49,8 @@ public let type_handler_kind_from(t Type) TypeHandlerKind = {
         .FunctionType(_, _) then TypeHandlerKind.Function(),
         .ReferenceType(_) then TypeHandlerKind.Reference(),
         .MutableReferenceType(_) then TypeHandlerKind.MutableReference(),
-        .BorrowedReferenceType(_, _) then TypeHandlerKind.Reference(),
-        .MutableBorrowedReferenceType(_, _) then TypeHandlerKind.MutableReference(),
+        .BorrowedReferenceType(_) then TypeHandlerKind.Reference(),
+        .MutableBorrowedReferenceType(_) then TypeHandlerKind.MutableReference(),
         .PointerType(_) then TypeHandlerKind.Pointer(),
         .MutablePointerType(_) then TypeHandlerKind.MutablePointer(),
         .WeakReferenceType(_) then TypeHandlerKind.WeakReference(),
@@ -101,8 +101,8 @@ public let type_needs_drop(t Type) Bool = {
         .EnumType(_) then true,
         .ReferenceType(_) then true,
         .MutableReferenceType(_) then true,
-        .BorrowedReferenceType(_, _) then true,
-        .MutableBorrowedReferenceType(_, _) then true,
+        .BorrowedReferenceType(_) then true,
+        .MutableBorrowedReferenceType(_) then true,
         .FunctionType(_, _) then true,
         .WeakReferenceType(_) then true,
         .MutableWeakReferenceType(_) then true,
@@ -137,9 +137,9 @@ public let primitive_c_type_name(t Type) String = {
 }
 
 /// 检查类型是否包含泛型参数（递归检查，带循环检测）
-public let type_contains_generic_parameter(t Type, context ref CompilerContext) Bool = {
+public let type_contains_generic_parameter(t Type, context * CompilerContext) Bool = {
     let mut visited = Set[UInt].new()
-    return type_contains_generic_parameter_internal(t, context, visited.ref)
+    return type_contains_generic_parameter_internal(t, context, &mut visited)
 }
 
 /// 仅检查类型表面是否仍提及未解析的泛型占位。
@@ -147,164 +147,132 @@ public let type_contains_generic_parameter(t Type, context ref CompilerContext) 
 /// 这与 `type_contains_generic_parameter` 的语义不同：它不会递归展开
 /// 已定义的结构体/枚举，只用于判断当前类型节点是否还未完全具体化。
 public let type_mentions_unresolved_generic_placeholder(t Type) Bool = {
-    return when t in {
-        .GenericParameter(_) then true,
-        .TypeVar(_) then true,
-        .FunctionType(params, ret) then {
-            if type_mentions_unresolved_generic_placeholder(ret.val) then {
-                return true
-            }
-            for entry in params then {
-                if type_mentions_unresolved_generic_placeholder(entry.param_type) then {
-                    return true
+    let mut worklist = List[* Type].new()
+    worklist.push(box(t))
+
+    while not worklist.is_empty() then {
+        let current_opt = worklist.pop()
+        if current_opt is .None() then { break }
+        let current = current_opt.unwrap()
+        when *current in {
+            .GenericParameter(_) then { return true },
+            .TypeVar(_) then { return true },
+            .FunctionType(params, ret) then {
+                worklist.push(ret)
+                for entry in params then {
+                    worklist.push(box(entry.param_type))
                 }
-            }
-            break false
-        },
-        .ReferenceType(inner) then type_mentions_unresolved_generic_placeholder(inner.val),
-        .MutableReferenceType(inner) then type_mentions_unresolved_generic_placeholder(inner.val),
-        .PointerType(inner) then type_mentions_unresolved_generic_placeholder(inner.val),
-        .MutablePointerType(inner) then type_mentions_unresolved_generic_placeholder(inner.val),
-        .WeakReferenceType(inner) then type_mentions_unresolved_generic_placeholder(inner.val),
-        .MutableWeakReferenceType(inner) then type_mentions_unresolved_generic_placeholder(inner.val),
-        .GenericStruct(_, args) then {
-            for a in args then {
-                if type_mentions_unresolved_generic_placeholder(a.val) then {
-                    return true
+            },
+            .ReferenceType(inner) then { worklist.push(inner) },
+            .MutableReferenceType(inner) then { worklist.push(inner) },
+            .PointerType(inner) then { worklist.push(inner) },
+            .MutablePointerType(inner) then { worklist.push(inner) },
+            .WeakReferenceType(inner) then { worklist.push(inner) },
+            .MutableWeakReferenceType(inner) then { worklist.push(inner) },
+            .GenericStruct(_, args) then {
+                for a in args then {
+                    worklist.push(a)
                 }
-            }
-            break false
-        },
-        .GenericEnum(_, args) then {
-            for a in args then {
-                if type_mentions_unresolved_generic_placeholder(a.val) then {
-                    return true
+            },
+            .GenericEnum(_, args) then {
+                for a in args then {
+                    worklist.push(a)
                 }
-            }
-            break false
-        },
-        _ then false,
+            },
+            _ then {},
+        }
     }
+    return false
 }
 
-private let type_contains_generic_parameter_internal(t Type, context ref CompilerContext, visited ref mut Set[UInt]) Bool = {
-    return when t in {
-        .IntType() then false,
-        .Int8Type() then false,
-        .Int16Type() then false,
-        .Int32Type() then false,
-        .Int64Type() then false,
-        .UIntType() then false,
-        .UInt8Type() then false,
-        .UInt16Type() then false,
-        .UInt32Type() then false,
-        .UInt64Type() then false,
-        .Float32Type() then false,
-        .Float64Type() then false,
-        .BoolType() then false,
-        .VoidType() then false,
-        .NeverType() then false,
-        .GenericParameter(_) then true,
-        .TypeVar(_) then true,
+/// Returns the children types that need to be checked for generic parameters.
+/// This is used by the iterative version to avoid deep recursion.
+private let collect_type_children(t Type, context * CompilerContext, visited *mut Set[UInt]) List[* Type] = {
+    let mut children = List[* Type].new()
+    when t in {
         .FunctionType(params, ret) then {
-            if type_contains_generic_parameter_internal(ret.val, context, visited) then {
-                return true
-            }
+            children.push(ret)
             for entry in params then {
-                if type_contains_generic_parameter_internal(entry.param_type, context, visited) then {
-                    return true
+                children.push(box(entry.param_type))
+            }
+        },
+        .ReferenceType(inner) then { children.push(inner) },
+        .MutableReferenceType(inner) then { children.push(inner) },
+        .BorrowedReferenceType(inner) then { children.push(inner) },
+        .MutableBorrowedReferenceType(inner) then { children.push(inner) },
+        .PointerType(inner) then { children.push(inner) },
+        .MutablePointerType(inner) then { children.push(inner) },
+        .WeakReferenceType(inner) then { children.push(inner) },
+        .MutableWeakReferenceType(inner) then { children.push(inner) },
+        .StructureType(def_id) then {
+            if not visited.contains(def_id.id) then {
+                visited.insert(def_id.id)
+                when context.get_type_arguments(def_id) in {
+                    .Some(args) then {
+                        for a in args then { children.push(box(a)) }
+                    },
+                    .None() then {
+                        when context.get_struct_fields(def_id) in {
+                            .Some(fields) then {
+                                for f in fields then { children.push(box(f.field_type)) }
+                            },
+                            .None() then {},
+                        }
+                    },
                 }
             }
-            break false
-        },
-        .ReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .MutableReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .BorrowedReferenceType(inner, _) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .MutableBorrowedReferenceType(inner, _) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .PointerType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .MutablePointerType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .WeakReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
-        .StructureType(def_id) then {
-            let result = when context.get_type_arguments(def_id) in {
-                .None() then if visited.contains(def_id.id) then false else {
-                    visited.insert(def_id.id)
-                    let nested = when context.get_struct_fields(def_id) in {
-                        .Some(fields) then {
-                            let mut found = false
-                            for f in fields then {
-                                if type_contains_generic_parameter_internal(f.field_type, context, visited) then {
-                                    found = true
-                                }
-                            }
-                            break found
-                        },
-                        .None() then false,
-                    }
-                    break nested
-                },
-                .Some(args) then {
-                    let mut found = false
-                    for a in args then {
-                        if type_contains_generic_parameter_internal(a, context, visited) then {
-                            found = true
-                        }
-                    }
-                    break found
-                },
-            }
-            break result
         },
         .EnumType(def_id) then {
-            break when context.get_type_arguments(def_id) in {
-                .Some(args) then {
-                    for a in args then {
-                        if type_contains_generic_parameter_internal(a, context, visited) then {
-                            return true
-                        }
-                    }
-                    break false
-                },
-                .None() then {
-                    break if visited.contains(def_id.id) then false else {
-                        visited.insert(def_id.id)
-                        break when context.get_enum_cases(def_id) in {
+            if not visited.contains(def_id.id) then {
+                visited.insert(def_id.id)
+                when context.get_type_arguments(def_id) in {
+                    .Some(args) then {
+                        for a in args then { children.push(box(a)) }
+                    },
+                    .None() then {
+                        when context.get_enum_cases(def_id) in {
                             .Some(cases) then {
-                                let mut found = false
                                 for c in cases then {
-                                    for p in c.params then {
-                                        if type_contains_generic_parameter_internal(p.param_type, context, visited) then {
-                                            found = true
-                                        }
-                                    }
+                                    for p in c.params then { children.push(box(p.param_type)) }
                                 }
-                                break found
                             },
-                            .None() then false,
+                            .None() then {},
                         }
-                    }
-                },
+                    },
+                }
             }
         },
         .GenericStruct(_, args) then {
-            for a in args then {
-                if type_contains_generic_parameter_internal(a.val, context, visited) then {
-                    return true
-                }
-            }
-            break false
+            for a in args then { children.push(a) }
         },
         .GenericEnum(_, args) then {
-            for a in args then {
-                if type_contains_generic_parameter_internal(a.val, context, visited) then {
-                    return true
-                }
-            }
-            break false
+            for a in args then { children.push(a) }
         },
-        .ModuleType(_) then false,
-        .OpaqueType(_) then false,
-        .TraitObject(_, _) then false,
-        .Unknown() then false,
-        .MutableWeakReferenceType(inner) then type_contains_generic_parameter_internal(inner.val, context, visited),
+        _ then {},
     }
+    return children
+}
+
+/// Iterative version of type_contains_generic_parameter_internal.
+/// Uses an explicit worklist to avoid stack overflow on deeply nested types.
+private let type_contains_generic_parameter_internal(t Type, context * CompilerContext, visited *mut Set[UInt]) Bool = {
+    let mut worklist = List[* Type].new()
+    worklist.push(box(t))
+
+    while not worklist.is_empty() then {
+        let current_opt = worklist.pop()
+        if current_opt is .None() then { break }
+        let current = current_opt.unwrap()
+        when *current in {
+            .GenericParameter(_) then { return true },
+            .TypeVar(_) then { return true },
+            _ then {
+                let children = collect_type_children(*current, context, visited)
+                for child in children then {
+                    worklist.push(child)
+                }
+            },
+        }
+    }
+    return false
 }

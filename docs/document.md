@@ -168,61 +168,61 @@ let (_, g) = (1, 2)                   // Discard first element
 
 The compiler moves fields directly from the Pair value into the target variables, avoiding unnecessary copies and drop overhead.
 
-#### Reference Creation Rules (`.ref` / `box`)
+#### Reference Creation Rules (`&` / `box`)
 
 Koral distinguishes between managed references and borrowed references:
 
-- `ref T` / `ref mut T` are managed references.
+- `*T` / `*mut T` are managed references.
   - May escape; can be returned, stored in fields, containers, or enum payloads.
-- `ref '_ T` / `ref '_ mut T` are borrowed references (anonymous lifetime).
+- `*_ T` / `*_ mut T` are borrowed references (anonymous lifetime).
   - Must not escape; cannot be returned, stored in fields, enum payloads, globals, or closure environments.
   - Only allowed in function parameter and receiver positions.
 - Both share the same runtime layout and retain/release behavior; the difference is frontend static semantics only.
-- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
+- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
 
-`.ref` uses "borrow-first" semantics:
+`&` uses "borrow-first" semantics:
 
-- Only allowed on value paths, e.g. `x.ref`, `self.field.ref`.
-- `.ref` on rvalues is rejected (e.g. `make_value().ref` is an error).
-- Without an explicit managed expected type, `.ref` defaults to producing a borrowed reference.
-- When the local context explicitly requires a managed `ref` / `ref mut`, the compiler promotes that `.ref` to a managed reference within the current function.
-- `box(expr)` is explicit managed construction, returning `ref mut T`.
+- Only allowed on value paths, e.g. `&x`, `&self.field`.
+- `&` on rvalues is rejected (e.g. `&make_value()` is an error).
+- Without an explicit managed expected type, `&` defaults to producing a borrowed reference.
+- When the local context explicitly requires a managed `*` / `*mut`, the compiler promotes that `&` to a managed reference within the current function.
+- `box(expr)` is explicit managed construction, returning `*mut T`.
 
 Implicit conversion rules:
 
-- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref, following Go's pointer receiver behavior).
+- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must use `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T` or `*mut T` (auto-deref, following Go's pointer receiver behavior).
 
 Receiver adjustment rules:
 
-- `self ref` is a borrowed receiver; it accepts both lvalue and rvalue receiver expressions. For rvalue receivers, the compiler materializes a stable temporary for the duration of the call.
-- `self ref mut` is a borrowed mutable receiver; it still requires a writable lvalue receiver; rvalues are rejected.
-- `self ref` on rvalues may introduce hidden retain/allocation cost due to temporary materialization.
+- `*self` is a managed receiver; it accepts both lvalue and rvalue receiver expressions. For rvalue receivers, the compiler materializes a stable temporary for the duration of the call.
+- `*mut self` is a mutable managed receiver; it still requires a writable lvalue receiver; rvalues are rejected.
+- `*self` on rvalues may introduce hidden retain/allocation cost due to temporary materialization.
 
 ```koral
 let mut x = 10
-let rx ref mut Int = x.ref   // managed expected type triggers local promotion
+let rx *mut Int = &mut x   // managed expected type triggers local promotion
 
 let y = 10
-let ry ref '_ Int = y.ref    // defaults to borrowed reference
+let ry *_ Int = &y    // defaults to borrowed reference
 
-let owned ref mut Int = box(42) // box() returns ref mut T
+let owned *mut Int = box(42) // box() returns *mut T
 
-// let rz = 42.ref           // error: rvalue cannot be borrowed
+// let rz = &42           // error: rvalue cannot be borrowed
 
-// No implicit ref promotion for function arguments:
-let takes_ref(r ref Int) Int = r.val
+// No implicit managed-ref promotion for function arguments:
+let takes_ref(r * Int) Int = *r
 let v = 42
-// takes_ref(v)              // error: expected ref Int, got Int
-takes_ref(v.ref)             // OK: explicit .ref
+// takes_ref(v)              // error: expected *Int, got Int
+takes_ref(&v)                // OK: explicit &
 
 // Auto-deref only for method receivers:
 type Counter(mut value Int)
 given Counter {
-    public get(self ref) Int = self.value
+    public get(*self) Int = self.value
 }
 let c = Counter(10)
-c.get()                      // OK: auto-ref for self ref receiver
+c.get()                      // OK: auto-ref for *self receiver
 ```
 
 ### Assignment
@@ -493,53 +493,53 @@ Rules:
 
 Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Koral distinguishes between managed references and borrowed references:
 
-- `ref T` — managed read-only reference. Supports `.val` read but NOT `.val = expr` assignment.
-- `ref mut T` — managed mutable reference. Supports both `.val` read and `.val = expr` assignment.
-- `ref '_ T` — borrowed read-only reference. Same runtime layout as `ref T`, but frontend forbids escaping.
-- `ref '_ mut T` — borrowed mutable reference. Same runtime layout as `ref mut T`, but frontend forbids escaping.
-- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
+- `*T` — managed read-only reference. Supports `*expr` dereference read but NOT `*expr = value` assignment.
+- `*mut T` — managed mutable reference. Supports both `*expr` dereference read and `*expr = value` assignment.
+- `*_ T` — borrowed read-only reference. Same runtime layout as `*T`, but frontend forbids escaping.
+- `*_ mut T` — borrowed mutable reference. Same runtime layout as `*mut T`, but frontend forbids escaping.
+- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
 
-Use the `.ref` postfix expression to create a reference. The result type depends on the source's mutability:
+Use the `&` prefix expression to create a reference. The result depends on the source's mutability:
 
 ```koral
 let mut n = 42
-let a ref '_ mut Int = n.ref
-let b = a.val            // Dereference, gets 42
-a.val = 100              // Deref assignment (ref mut supports .val = expr)
+let a *_ mut Int = &mut n
+let b = *a            // Dereference, gets 42
+*a = 100              // Deref assignment (*mut supports *expr = value)
 
 let m = 42
-let c ref '_ Int = m.ref
-let d = c.val            // Dereference read, gets 42
-// c.val = 100           // Error: ref does not support .val assignment
+let c *_ Int = &m
+let d = *c            // Dereference read, gets 42
+// *c = 100           // Error: * does not support deref assignment
 
-let owned ref mut Int = n.ref // managed expected type triggers local promotion
+let owned *mut Int = &mut n // managed expected type triggers local promotion
 ```
 
-`ref` / `ref mut` and `ref '_` / `ref '_ mut` share the same ABI, memory layout, and retain/release behavior at runtime. The difference is only frontend semantics: borrowed references cannot escape, while managed references can be held long-term. `.ref` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does the compiler promote the construction to managed within the current function. `box(expr)` always explicitly constructs a managed `ref mut T`.
+`*` / `*mut` and `*_` / `*_ mut` share the same ABI, memory layout, and retain/release behavior at runtime. The difference is only frontend semantics: borrowed references cannot escape, while managed references can be held long-term. `&` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does the compiler promote the construction to managed within the current function. `box(expr)` always explicitly constructs a managed `*mut T`.
 
 Pointer types follow the same read-only / mutable distinction:
 
-- `ptr T` — read-only pointer. Supports `.val` read but NOT `.val` assignment or `p[i]` assignment.
-- `ptr mut T` — mutable pointer. Supports `.val` read, `.val = expr` assignment, `p[i]` read, and `p[i] = expr` assignment.
-- `ptr mut T` implicitly converts to `ptr T`. The reverse is not allowed.
+- `*raw T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
+- `*raw mut T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
+- `*raw mut T` implicitly converts to `*raw T`. The reverse is not allowed.
 
 #### Weak References
 
-Weak references don't increase the reference count, used to break reference cycles. Like `ref`/`ref mut`, weak references also distinguish mutability: `weakref T` (read-only) and `weakref mut T` (mutable).
+Weak references don't increase the reference count, used to break reference cycles. Like `*`/`*mut`, weak references also distinguish mutability: `?*T` (read-only) and `?*mut T` (mutable).
 
-Use the `.weakref` postfix expression to create a weak reference from a ref type, and the `.to_ref()` method to attempt upgrading a weak reference back to a strong reference (returns an `Option` type).
+Use `downgrade(*T)` to create `?*T` (or `downgrade_mut(*mut T)` for `?*mut T`), and `upgrade(?*T)` to attempt upgrading back to `Option[*T]` (or `upgrade_mut(?*mut T)` for `Option[*mut T]`).
 
 ```koral
-let strong ref mut Int = box(42)
+let strong *mut Int = box(42)
 
-// Mutable path: ref mut → weakref mut → Option[ref mut T]
-let weak = strong.weakref              // ref mut T → weakref mut T
-let upgraded = weak.to_ref()           // weakref mut T → Option[ref mut T]
+// Mutable path: *mut → ?*mut → Option[*mut T]
+let weak = downgrade_mut(strong)              // *mut T → ?*mut T
+let upgraded = upgrade_mut(weak)           // ?*mut T → Option[*mut T]
 
-// Read-only path: ref → weakref → Option[ref T]
-let ro ref Int = strong                // implicit widening
-let ro_weak = ro.weakref               // ref T → weakref T
-let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
+// Read-only path: * → ?* → Option[*T]
+let ro *Int = strong                // implicit widening
+let ro_weak = downgrade(ro)         // *T → ?*T
+let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 ```
 
 ### Memory Management
@@ -547,7 +547,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `ref` / `ref mut` are escaping managed references; `ref '_` / `ref '_ mut` are non-escaping borrowed references. Both share the same runtime layout and retain/release behavior; the difference is only frontend static semantics. `.ref` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does local promotion occur. `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `ref T`) is not allowed for function arguments — callers must use `.ref` explicitly. Auto-deref (`ref T` → `T`) is not allowed for regular function arguments — callers must use `.val` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `self ref` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `.ref` on rvalues legal, and `self ref mut` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `*` / `*mut` are escaping managed references; `*_` / `*_ mut` are non-escaping borrowed references. Both share the same runtime layout and retain/release behavior; the difference is only frontend static semantics. `&` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does local promotion occur. `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `&` on rvalues legal, and `*mut self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -707,10 +707,10 @@ let ordered = Vec2(1, 0) < Vec2(2, 0)
 
 Builtin subscript rules:
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `ptr T`, and `ptr mut T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `*raw T`, and `*raw mut T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
-- `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `ref` / `ref mut` contexts.
-- `ptr T` supports reads only. `ptr mut T` supports both reads and writes.
+- `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `*` / `*mut` contexts.
+- `*raw T` supports reads only. `*raw mut T` supports both reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
@@ -766,7 +766,7 @@ It must be used inside a function whose return kind matches the propagated value
 
 Operator precedence from high to low:
 
-1. Postfix: calls `()`, subscripts `[]`, member access `.`, storage modifiers `.ref/.ptr/.val`, qualified/generic method suffixes
+1. Postfix: calls `()`, subscripts `[]`, member access `.`, storage modifiers `&/*raw/*`, qualified/generic method suffixes
 2. Prefix: unary `-`, `~`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
@@ -1202,10 +1202,10 @@ Trait methods can use named parameters. Implementations must match the trait dec
 
 ```koral
 trait Drawable {
-    draw(self ref, at_x: Int, at_y: Int) Void
+    draw(*self, at_x: Int, at_y: Int) Void
 }
 given MyType as Drawable {
-    draw(self ref, at_x: Int, at_y: Int) Void = todo()  // must match
+    draw(*self, at_x: Int, at_y: Int) Void = todo()  // must match
 }
 ```
 
@@ -1469,7 +1469,7 @@ A Trait defines a set of method signatures that any implementing type must provi
 
 ```koral
 trait Printable {
-    to_string(self ref) String
+    to_string(*self) String
 }
 ```
 
@@ -1553,7 +1553,7 @@ Constrained tool block example:
 
 ```koral
 trait Iterator[T Any] {
-    next(self ref mut) Option[T]
+    next(*mut self) Option[T]
 }
 
 given[T Ord] Iterator[T] {
@@ -1630,8 +1630,8 @@ The most commonly used core traits are:
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
-- `Iterator[T]`: iteration protocol (`next(self ref mut) Option[T]`).
-- `Error`: error message interface (`message(self ref) String`).
+- `Iterator[T]`: iteration protocol (`next(*mut self) Option[T]`).
+- `Error`: error message interface (`message(*self) String`).
 - `Drop`: destructor hook (`drop(source ptr mut Self) Void`).
 
 Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
@@ -1641,48 +1641,48 @@ Arithmetic and comparison operators are lowered to trait methods internally (for
 ### Method Receiver Forms
 
 - self: managed value receiver (equivalent to self Self).
-- self ref / self ref mut: borrowed receivers; auto-ref allowed on call sites.
-- self ref Self / self ref mut Self: explicit managed receivers; no auto-ref or auto-deref.
-- self ref <lifetime> Self / self ref <lifetime> mut Self: explicit borrowed receivers with a named lifetime.
-- Auto-ref and auto-deref apply only to self and self ref forms; explicit managed/borrowed forms require the caller to provide the exact binding.
+- *self / *mut self: borrowed receivers; auto-ref allowed on call sites.
+- *self Self / *mut self Self: explicit managed receivers; no auto-ref or auto-deref.
+- *self <lifetime> Self / *self <lifetime> mut Self: explicit borrowed receivers with a named lifetime.
+- Auto-ref and auto-deref apply only to self and *self forms; explicit managed/borrowed forms require the caller to provide the exact binding.
 
 ### Trait Objects
 
-Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `ref TraitName` or `ref mut TraitName` syntax, you can erase any type that implements a Trait into a uniform reference type.
+Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `*TraitName` or `*mut TraitName` syntax, you can erase any type that implements a Trait into a uniform reference type.
 
 #### Basic Syntax
 
 Trait-object construction follows these rules:
 
-- The target type is written as `ref TraitName` or `ref mut TraitName`.
+- The target type is written as `*TraitName` or `*mut TraitName`.
 - The source value must implement the trait and be converted in a context expecting that trait-object type.
 - `box(...)` is the standard way to provide an owned value for this conversion.
 
 ```koral
 trait Drawable {
-    draw(self ref) String
-    reset(self ref mut) Void
+    draw(*self) String
+    reset(*mut self) Void
 }
 
 type Circle(mut radius Int)
 type Square(mut side Int)
 
 given Circle as Drawable {
-    public draw(self ref) String = "Drawing circle"
-    public reset(self ref mut) Void = {
+    public draw(*self) String = "Drawing circle"
+    public reset(*mut self) Void = {
         self.radius = 0
     }
 }
 given Square as Drawable {
-    public draw(self ref) String = "Drawing square"
-    public reset(self ref mut) Void = {
+    public draw(*self) String = "Drawing square"
+    public reset(*mut self) Void = {
         self.side = 0
     }
 }
 
 // Create trait objects
 let shape ref Drawable = box(Circle(10))
-let mutable_shape ref mut Drawable = box(Square(4))
+let mutable_shape *mut Drawable = box(Square(4))
 
 // Call methods through the trait object (dynamic dispatch)
 shape.draw()  // "Drawing circle"
@@ -1692,22 +1692,22 @@ mutable_shape.draw()
 
 Dispatch through trait objects respects reference mutability:
 
-- `ref TraitName` can call only requirements declared with `self ref`.
-- `ref mut TraitName` can call both `self ref mut` and `self ref` requirements.
-- `ref TraitName` cannot call `self ref mut` requirements.
+- `*TraitName` can call only requirements declared with `*self`.
+- `*mut TraitName` can call both `*mut self` and `*self` requirements.
+- `*TraitName` cannot call `*mut self` requirements.
 
 #### Object Safety
 
 Only Traits that satisfy the following conditions can be used as trait objects:
 
 - Methods must not have generic parameters
-- The receiver, if present, must be `self ref` or `self ref mut`
+- The receiver, if present, must be `*self` or `*mut self`
 - `Self` must not appear in method parameters or return types (except within that receiver)
 
 ```koral
 // Object-safe — can be used as a trait object
 trait Error {
-    message(self ref) String
+    message(*self) String
 }
 
 // Not object-safe — cannot be used as a trait object
@@ -1720,7 +1720,7 @@ trait Resettable {
 }
 ```
 
-Trait objects (`ref TraitName`, `ref mut TraitName`) do not support direct `.val`; use trait methods through dynamic dispatch.
+Trait objects (`*TraitName`, `*mut TraitName`) do not support direct dereference; use trait methods through dynamic dispatch.
 
 ## Generics
 
@@ -2022,5 +2022,5 @@ The `intrinsic` keyword declares types and functions built into the compiler:
 
 ```koral
 public intrinsic type Int
-public intrinsic let is_unique_mutable[T Any](r ref T) Bool
+public intrinsic let is_unique_mutable[T Any](r *T) Bool
 ```

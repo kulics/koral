@@ -3,55 +3,36 @@
 
 /// Extension containing all declaration parsing methods
 extension Parser {
-  private func filterLifetimeTypeParameters(_ parameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
-    parameters.filter { !$0.name.hasPrefix("'") }
-  }
 
   private func parseSelfReceiverType() throws -> TypeNode {
+    if currentToken === .multiply {
+      try match(.multiply)
+      let sawMut = currentToken === .mutKeyword
+      if sawMut {
+        try match(.mutKeyword)
+      }
+      guard currentToken === .selfKeyword else {
+        throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+      }
+      try match(.selfKeyword)
+      if currentToken === .colon {
+        throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
+      }
+      if currentToken !== .comma && currentToken !== .rightParen {
+        throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
+      }
+      return .reference(.inferredSelf, mutable: sawMut)
+    }
+
     try match(.selfKeyword)
     if currentToken === .colon {
       throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
     }
 
-    var selfType: TypeNode = .inferredSelf
-    if currentToken === .refKeyword {
-      try match(.refKeyword)
-      let explicitLifetime: String?
-      if case .lifetimeIdentifier(let lifetimeName) = currentToken {
-        explicitLifetime = lifetimeName
-        try match(.lifetimeIdentifier(lifetimeName))
-      } else {
-        explicitLifetime = nil
-      }
-
-      let sawMut = currentToken === .mutKeyword
-      if sawMut {
-        try match(.mutKeyword)
-      }
-
-      if let lifetime = explicitLifetime {
-        if currentToken === .selfTypeKeyword {
-          try match(.selfTypeKeyword)
-        }
-        selfType = .borrowedReference(selfType, lifetime: lifetime, mutable: sawMut)
-      } else if currentToken === .comma || currentToken === .rightParen {
-        selfType = .borrowedReference(selfType, lifetime: "'_", mutable: sawMut)
-      } else {
-        let explicitInner: TypeNode
-        if currentToken === .selfTypeKeyword {
-          try match(.selfTypeKeyword)
-          explicitInner = .inferredSelf
-        } else {
-          explicitInner = try parseType()
-        }
-        selfType = .reference(explicitInner, mutable: sawMut)
-      }
-    }
-
     if currentToken !== .comma && currentToken !== .rightParen {
       throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
     }
-    return selfType
+    return .inferredSelf
   }
   
   // MARK: - Global Declaration Parsing
@@ -97,7 +78,7 @@ extension Parser {
 
       try match(.identifier(name))
 
-      let typePrams = filterLifetimeTypeParameters(try parseTypeParameters())
+      let typePrams = try parseTypeParameters()
 
       if isForeign && !typePrams.isEmpty {
         throw ParserError.foreignFunctionNoGenerics(span: currentSpan)
@@ -157,7 +138,7 @@ extension Parser {
 
       try match(.identifier(name))
 
-      let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+      let typeParams = try parseTypeParameters()
 
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
@@ -219,7 +200,7 @@ extension Parser {
     try match(.identifier(name))
 
     // Parse optional postfix type parameters for generic traits: Iterator[T Any]
-    let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+    let typeParams = try parseTypeParameters()
 
     // Optional inheritance list: trait Child ParentA and ParentB { ... }
     var superTraits: [TypeNode] = []
@@ -248,12 +229,12 @@ extension Parser {
       }
       try match(.identifier(methodName))
 
-      let methodTypeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+      let methodTypeParams = try parseTypeParameters()
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
-      if currentToken === .selfKeyword {
+      if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
         parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
@@ -323,7 +304,7 @@ extension Parser {
   
   private func parseIntrinsicGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
     try match(.givenKeyword)
-    let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+    let typeParams = try parseTypeParameters()
     let type = try parseType()
     try match(.leftBrace)
 
@@ -342,12 +323,12 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      let methodTypeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+      let methodTypeParams = try parseTypeParameters()
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
-      if currentToken === .selfKeyword {
+      if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
         parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
@@ -410,7 +391,7 @@ extension Parser {
 
   private func parseGivenDeclaration(span: SourceSpan) throws -> GlobalNode {
     try match(.givenKeyword)
-    let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+    let typeParams = try parseTypeParameters()
     let type = try parseType()
     if currentToken === .notKeyword {
       try match(.notKeyword)
@@ -439,12 +420,12 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      let typeParams = filterLifetimeTypeParameters(try parseTypeParameters())
+      let typeParams = try parseTypeParameters()
 
       try match(.leftParen)
       var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
 
-      if currentToken === .selfKeyword {
+      if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
         parameters.append((name: "self", mutable: false, type: selfType, named: false))
         if currentToken === .comma {
@@ -571,15 +552,15 @@ extension Parser {
       try match(.leftBracket)
       while currentToken !== .rightBracket {
         let paramName: String
-        let isLifetime: Bool
         switch currentToken {
         case .identifier(let name):
           paramName = name
           try match(.identifier(name))
-        case .lifetimeIdentifier(_):
+        case .rune:
           throw ParserError.unexpectedToken(
             span: currentSpan,
-            got: "Lifetime parameters are not supported in generic parameter lists. Use '_ (anonymous lifetime) directly in ref types instead."
+            got: currentToken.description,
+            expected: "Lifetime parameters are not supported in generic parameter lists."
           )
         default:
           throw ParserError.expectedIdentifier(

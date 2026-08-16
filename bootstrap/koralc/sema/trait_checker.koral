@@ -39,7 +39,7 @@ given TraitRegistry {
         )
     }
 
-    public register(self ref mut, info TraitInfo) Void = {
+    public register(*mut self, info TraitInfo) Void = {
         self.traits.insert(info.name, info)
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new()
         self.object_safety_cache = Dict[String, Bool].new()
@@ -51,7 +51,7 @@ given TraitRegistry {
 
     // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
     // 同名方法以最近定义的 Trait 为准
-    public flatten_methods(self ref mut, trait_name String) Result[Dict[String, TypedTraitMember]] = {
+    public flatten_methods(*mut self, trait_name String) Result[Dict[String, TypedTraitMember]] = {
         // 检查缓存
         if self.flattened_cache.get(trait_name) is .Some(cached) then {
             return Result[Dict[String, TypedTraitMember]].Ok(cached)
@@ -92,7 +92,7 @@ given TraitRegistry {
 
     // 检查 Trait 是否对象安全
     // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
-    public check_object_safety(self ref mut, trait_name String) Result[Bool] = {
+    public check_object_safety(*mut self, trait_name String) Result[Bool] = {
         if self.object_safety_cache.get(trait_name) is .Some(cached) then {
             return Result[Bool].Ok(cached)
         }
@@ -130,8 +130,10 @@ given TraitRegistry {
     private is_object_safe_receiver_type(self, t Type) Bool = {
         let _ = self
         return when t in {
-            .BorrowedReferenceType(inner, _) then inner.val is .GenericParameter("Self"),
-            .MutableBorrowedReferenceType(inner, _) then inner.val is .GenericParameter("Self"),
+            .ReferenceType(inner) then *inner is .GenericParameter("Self"),
+            .MutableReferenceType(inner) then *inner is .GenericParameter("Self"),
+            .BorrowedReferenceType(inner) then *inner is .GenericParameter("Self"),
+            .MutableBorrowedReferenceType(inner) then *inner is .GenericParameter("Self"),
             _ then false,
         }
     }
@@ -139,16 +141,16 @@ given TraitRegistry {
     private type_uses_self(self, t Type) Bool = {
         return when t in {
             .GenericParameter(name) then name == "Self",
-            .ReferenceType(inner) then self.type_uses_self(inner.val),
-            .MutableReferenceType(inner) then self.type_uses_self(inner.val),
-            .BorrowedReferenceType(inner, _) then self.type_uses_self(inner.val),
-            .MutableBorrowedReferenceType(inner, _) then self.type_uses_self(inner.val),
-            .PointerType(inner) then self.type_uses_self(inner.val),
-            .WeakReferenceType(inner) then self.type_uses_self(inner.val),
-            .MutableWeakReferenceType(inner) then self.type_uses_self(inner.val),
+            .ReferenceType(inner) then self.type_uses_self(*inner),
+            .MutableReferenceType(inner) then self.type_uses_self(*inner),
+            .BorrowedReferenceType(inner) then self.type_uses_self(*inner),
+            .MutableBorrowedReferenceType(inner) then self.type_uses_self(*inner),
+            .PointerType(inner) then self.type_uses_self(*inner),
+            .WeakReferenceType(inner) then self.type_uses_self(*inner),
+            .MutableWeakReferenceType(inner) then self.type_uses_self(*inner),
             .GenericStruct(_, args) then {
                 for arg in args then {
-                    if self.type_uses_self(arg.val) then {
+                    if self.type_uses_self(*arg) then {
                         return true
                     }
                 }
@@ -156,7 +158,7 @@ given TraitRegistry {
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
-                    if self.type_uses_self(arg.val) then {
+                    if self.type_uses_self(*arg) then {
                         return true
                     }
                 }
@@ -165,11 +167,11 @@ given TraitRegistry {
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params)
                 for param_type in param_types then {
-                    if self.type_uses_self(param_type.val) then {
+                    if self.type_uses_self(*param_type) then {
                         return true
                     }
                 }
-                break self.type_uses_self(return_type.val)
+                break self.type_uses_self(*return_type)
             },
             _ then false,
         }
@@ -193,13 +195,13 @@ given TraitRegistry {
 // ── TraitChecker ──────────────────────────────────────────────────────────────
 
 public type TraitChecker(
-    registry ref TraitRegistry,
-    method_table ref MethodTable,
+    registry * TraitRegistry,
+    method_table * MethodTable,
 )
 
 given TraitChecker {
 
-    public new(registry ref TraitRegistry, method_table ref MethodTable) TraitChecker = {
+    public new(registry * TraitRegistry, method_table * MethodTable) TraitChecker = {
         return TraitChecker(registry, method_table)
     }
 
@@ -209,7 +211,7 @@ given TraitChecker {
         self,
         target_type Type,
         trait_name String,
-        members List[ref TypedGivenMember],
+        members List[* TypedGivenMember],
         span SourceSpan,
     ) Result[Void] = {
         // 仅检查当前 trait 自身的方法 requirement。
@@ -230,7 +232,7 @@ given TraitChecker {
         // 构建已实现方法的名称集合
         let mut implemented = Dict[String, TypedGivenMember].new()
         for m_ref in members then {
-            let m = m_ref.val
+            let m = *m_ref
             implemented.insert(m.name, m)
         }
 

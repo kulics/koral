@@ -21,36 +21,36 @@ public type JsonValue {
     Bool(value Bool),
     Number(value Float64),
     String(value String),
-    Array(elements List[ref JsonValue]),
-    Object(entries Dict[String, ref JsonValue]),
+    Array(elements List[*JsonValue]),
+    Object(entries Dict[String, *JsonValue]),
 }
 ```
 
 ## Given Implementations
 ```koral
 given JsonError as Error {
-    public message(self ref) String
+    public message(*self) String
 }
 
 given JsonError as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given JsonValue {
-    public is_null(self ref) Bool
-    public is_bool(self ref) Bool
-    public is_number(self ref) Bool
-    public is_string(self ref) Bool
-    public is_array(self ref) Bool
-    public is_object(self ref) Bool
-    public as_bool(self ref) Option[Bool]
-    public as_number(self ref) Option[Float64]
-    public as_string(self ref) Option[String]
-    public as_array(self ref) Option[List[ref JsonValue]]
-    public as_object(self ref) Option[Dict[String, ref JsonValue]]
-    public get_field(self ref, key String) Option[ref JsonValue]
-    public get_element(self ref, index UInt) Option[ref JsonValue]
-    public to_string_pretty(self ref) String
+    public is_null(*self) Bool
+    public is_bool(*self) Bool
+    public is_number(*self) Bool
+    public is_string(*self) Bool
+    public is_array(*self) Bool
+    public is_object(*self) Bool
+    public as_bool(*self) Option[Bool]
+    public as_number(*self) Option[Float64]
+    public as_string(*self) Option[String]
+    public as_array(*self) Option[List[*JsonValue]]
+    public as_object(*self) Option[Dict[String, *JsonValue]]
+    public get_field(*self, key String) Option[*JsonValue]
+    public get_element(*self, index UInt) Option[*JsonValue]
+    public to_string_pretty(*self) String
 }
 
 given JsonValue as Eq {
@@ -62,6 +62,6 @@ given JsonValue as Parseable {
 }
 
 given JsonValue as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 ```

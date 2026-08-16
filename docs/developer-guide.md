@@ -180,44 +180,44 @@ Notes:
 
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
 - Type aliases must start with an uppercase letter.
-- `[]` is builtin syntax only for `String`, `List`, `Deque`, `ptr`, and `ptr mut`; custom traits do not define subscript behavior.
+- `[]` is builtin syntax only for `String`, `List`, `Deque`, `*raw`, and `*raw mut`; custom traits do not define subscript behavior.
 - `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
 
-## Reference Creation Semantics (`.ref` / `box`)
+## Reference Creation Semantics (`&` / `box`)
 
-Koral distinguishes managed references (`ref T`, `ref mut T`) from borrowed references (`ref '_ T`, `ref '_ mut T`), and read-only pointers (`ptr T`) from mutable pointers (`ptr mut T`):
+Koral distinguishes managed references (`*T`, `*mut T`) from borrowed references (`*_ T`, `*_ mut T`), and read-only pointers (`*raw T`) from mutable pointers (`*raw mut T`):
 
 - Managed references may escape; borrowed references must not escape. Both share the same runtime layout and retain/release behavior.
-- `x.ref` uses "borrow-first" semantics: without an explicit managed expected type, `.ref` defaults to producing a borrowed reference. When the local context requires managed, the compiler promotes within the current function.
-- `.ref` result mutability depends on the source's mutability:
-    - `let mut` binding → `ref mut T`
-    - `let` (immutable) binding → `ref T`
-    - Mutable path (e.g. `ref mut`'s `mut` field) → `ref mut T`
-- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
-- `.ref` on rvalues is rejected.
-- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref` explicitly. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `self ref` method can be called on a value (auto-ref); a `self` method can be called on `ref T` (auto-deref, following Go's pointer receiver behavior).
-- `ref T` supports `.val` read only. `ref mut T` supports `.val` read and `.val = expr` assignment.
-- `ptr T` supports `.val` read only. `ptr mut T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
-- `box(expr)` returns `ref mut T` — an escaping managed reference from temporaries/literals.
-- `box` should be understood as binding its parameter locally and returning `v.ref`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
+- `&x` uses "borrow-first" semantics: without an explicit managed expected type, `&` defaults to producing a borrowed reference. When the local context requires managed, the compiler promotes within the current function.
+- `&` result mutability depends on the source's mutability:
+    - `let mut` binding → `*mut T`
+    - `let` (immutable) binding → `*T`
+    - Mutable path (e.g. `*mut`'s `mut` field) → `*mut T`
+- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
+- `&` on rvalues is rejected.
+- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must pass `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mut T` (auto-deref, following Go's pointer receiver behavior).
+- `*T` supports `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
+- `*raw T` supports `*expr` dereference read only. `*raw mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- `box(expr)` returns `*mut T` — an escaping managed reference from temporaries/literals.
+- `box` should be understood as binding its parameter locally and returning `*mut T`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
 - Ordinary parameter `mut` is local binding mutability only. It is not part of the function signature, function type, or trait/given conformance comparison.
 
 ```koral
 let mut x = 10
-let rx ref mut Int = x.ref    // managed expected type triggers local promotion
+let rx *mut Int = &mut x    // managed expected type triggers local promotion
 
 let y = 10
-let ry ref '_ Int = y.ref     // defaults to borrowed reference
+let ry *_ Int = &y     // defaults to borrowed reference
 
-let owned ref mut Int = box(42)   // box() returns ref mut T
+let owned *mut Int = box(42)   // box() returns *mut T
 
-// let rz = 42.ref            // error: rvalue cannot be borrowed
+// let rz = &42            // error: rvalue cannot be borrowed
 ```
 
 ## Drop Semantics
 
-- `Drop` uses `drop(source ptr mut Self) Void`.
+- `Drop` uses `drop(source *raw mut Self) Void`.
 - Treat `Drop.drop` as a compiler-reserved destructor entry, not a normal user-callable method.
 - The parameter is raw owned storage, so `Drop` should not rely on ref-style escape distinctions such as borrow-vs-owned checks.
 - Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
@@ -228,23 +228,23 @@ When designing standard-library APIs, choose method receivers by ownership seman
 
 Primary rule:
 
-- Use `self ref` for observation and derivation.
-- Use `self ref mut` for in-place mutation.
+- Use `*self` for observation and derivation.
+- Use `*mut self` for in-place mutation.
 - Use `self` only when the method semantically consumes the receiver.
 
 This is a semantic default, not a mechanical rule. For small immutable value types that behave like scalars in the API, using `self` for observation can still be reasonable when it keeps the whole type family consistent and avoids borrow-heavy signatures.
 
 This rule matters because receiver adjustment has asymmetric call behavior:
 
-- `self ref` accepts both lvalue and rvalue receivers. Rvalue calls may materialize a temporary.
-- `self ref mut` requires a writable lvalue receiver.
+- `*self` accepts both lvalue and rvalue receivers. Rvalue calls may materialize a temporary.
+- `*mut self` requires a writable lvalue receiver.
 - `self` transfers ownership and should therefore communicate real consumption, not just implementation preference.
 
 ### Default Receiver Choices
 
-Use `self ref` when the call should leave the original value logically usable by the caller.
+Use `*self` when the call should leave the original value logically usable by the caller.
 
-Common `self ref` cases:
+Common `*self` cases:
 
 - predicates such as `is_empty`, `contains`, `starts_with`
 - accessors and getters such as `count`, `name`, `pattern`
@@ -252,9 +252,9 @@ Common `self ref` cases:
 - pure derived values such as `dir_name`, `base_name`, `components`
 - view-producing methods that do not consume the source
 
-Use `self ref mut` when the method mutates the receiver in place.
+Use `*mut self` when the method mutates the receiver in place.
 
-Common `self ref mut` cases:
+Common `*mut self` cases:
 
 - container updates such as `push`, `insert`, `remove`, `clear`
 - stateful cursor updates on direct value types
@@ -273,7 +273,7 @@ Common `self` cases:
 Builder-style APIs need one extra distinction:
 
 - keep `self` when the builder is intentionally modeled as a linear fluent pipeline whose chained calls conceptually move from one configuration stage to the next
-- prefer `self ref` when the API is really a reusable handle with derived helper methods or repeatable configuration/query operations, even if the implementation stores state behind a ref
+- prefer `*self` when the API is really a reusable handle with derived helper methods or repeatable configuration/query operations, even if the implementation stores state behind a ref
 
 In other words, "internally ref-backed" does not automatically make a builder-style API borrowed. Use `self` only when the chaining behavior is part of the public contract, not merely because returning `self` is convenient.
 
@@ -281,7 +281,7 @@ In other words, "internally ref-backed" does not automatically make a builder-st
 
 Returning a new value is not, by itself, a reason to use `self`.
 
-Prefer `self ref` when the method computes a new value but the caller should still think of the original receiver as available. Examples include path manipulation, string trimming, and structural projections.
+Prefer `*self` when the method computes a new value but the caller should still think of the original receiver as available. Examples include path manipulation, string trimming, and structural projections.
 
 Prefer `self` only when the API is intentionally framed as consuming or forwarding ownership.
 
@@ -306,46 +306,46 @@ For such types, it is acceptable to keep observation and pure derivation methods
 - the family already uses value receivers consistently
 - borrowing would add signature noise without unlocking important mutation or aliasing guarantees
 
-Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where `self ref` materially improves reuse expectations for callers.
+Do not apply this exception to heap-owning value types such as `String`, `Path`, containers, or other APIs where `*self` materially improves reuse expectations for callers.
 
 This exception can also cover "sum-of-small-values" enums and tiny wrappers whose payloads are still plain value data rather than handles or heap ownership. Network address values and regex flag bitmasks fit this category; JSON values, strings, paths, and collections generally do not.
 
 ### Handle Types and Interior Mutation
 
-Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by internal `ref mut` storage or OS resources.
+Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by internal `*mut` storage or OS resources.
 
-For such handle types, methods may use `self ref` even when the underlying state changes. In these cases the API models shared access to a handle, not direct value mutation of the outer type.
+For such handle types, methods may use `*self` even when the underlying state changes. In these cases the API models shared access to a handle, not direct value mutation of the outer type.
 
-Use this exception deliberately. Do not generalize handle-style `self ref` mutation to ordinary value types such as containers, strings, or path values.
+Use this exception deliberately. Do not generalize handle-style `*self` mutation to ordinary value types such as containers, strings, or path values.
 
 ### Borrowed Methods Implemented via Iteration
 
 Do not let an iterator implementation detail force a public receiver to become `self`.
 
-If a method is semantically observational or purely derived, it should usually remain `self ref` even when the easiest implementation strategy is to iterate.
+If a method is semantically observational or purely derived, it should usually remain `*self` even when the easiest implementation strategy is to iterate.
 
 Prefer the following order:
 
 1. Implement the method directly with borrowed traversal over storage or fields.
-2. If the type can cheaply create an iterator snapshot without semantically consuming the value, keep the public method on `self ref` and construct that iterator internally.
+2. If the type can cheaply create an iterator snapshot without semantically consuming the value, keep the public method on `*self` and construct that iterator internally.
 3. Only keep the public receiver as `self` when iteration truly consumes unique state as part of the API contract.
 
 This distinction matters because many iterators are consuming in the iterator sense while their source container is not consuming in the API sense.
 
 Examples:
 
-- a `List` or `String` method may stay `self ref` even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
+- a `List` or `String` method may stay `*self` even if it creates an owned iterator object internally, because the iterator only snapshots shared storage plus cursor state
 - a stream, generator, or one-shot parser should not expose borrowed observation methods that secretly consume its progression state
 
 ### Iterable as a Borrowed Protocol
 
-`Iterator` itself is inherently consuming and should stay `next(self ref mut)`.
+`Iterator` itself is inherently consuming and should stay `next(*mut self)`.
 
 `Iterable`, however, is usually better modeled as a borrowed-producing protocol: creating an iterator is typically an observation of the source, not ownership transfer of the source.
 
 When evaluating `iterator(...)`, use this rule:
 
-- prefer `iterator(self ref)` when the iterator is just a snapshot of shared storage plus cursor state
+- prefer `iterator(*self)` when the iterator is just a snapshot of shared storage plus cursor state
 - keep `iterator(self)` only when creating the iterator must semantically consume unique progression state from the source itself
 
 Typical borrowed `Iterable` cases include:
@@ -355,7 +355,7 @@ Typical borrowed `Iterable` cases include:
 
 Typical consuming `Iterable`-like cases would be one-shot sources such as generators, streams, or parsers whose progression state lives in the source value itself.
 
-In current `std/`, `Iterable.iterator` now uses `self ref`, which matches the snapshot-style behavior of the existing container and range implementations. Treat that as the default model for reusable sources rather than as a special-case optimization.
+In current `std/`, `Iterable.iterator` now uses `*self`, which matches the snapshot-style behavior of the existing container and range implementations. Treat that as the default model for reusable sources rather than as a special-case optimization.
 
 This is also why observational methods such as set algebra should not be forced onto `self` merely because they happen to call `iterator()`. If the source collection remains reusable, the public API should still be designed as borrowed.
 
@@ -373,21 +373,21 @@ Use this distinction:
 Apply that rule to API design as follows:
 
 - for small pure value types such as `Duration`, `Date`, `ClockTime`, and `MonoTime`, arithmetic-style methods and nearby derived operations may stay on `self`
-- for heavier values or handle-adjacent types such as `DateTime`, use `self ref` when the method is observational or derived and not semantically consuming
-- for heap-owning containers, set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` should usually use `self ref` even though they are mathematically operator-like
+- for heavier values or handle-adjacent types such as `DateTime`, use `*self` when the method is observational or derived and not semantically consuming
+- for heap-owning containers, set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` should usually use `*self` even though they are mathematically operator-like
 
 `duration_to` should be classified by type semantics, not by name alone:
 
 - on scalar-like time values, `duration_to(self, other)` can remain value-style
-- on heavier timestamp-like types, `duration_to(self ref, other)` is often the better expression of caller expectations
+- on heavier timestamp-like types, `duration_to(*self, other)` is often the better expression of caller expectations
 
 Likewise, predicates such as `is_subset_of` and `is_superset_of` are observational set queries, not arithmetic consumption. They should follow the normal borrowed rule for containers.
 
 For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so changing container-like operands from value parameters to `ref` parameters often degrades call-site ergonomics more than it improves ownership clarity. In the current language design, `borrowed receiver + value operand` is often the right balance for APIs like set algebra and random generation helpers.
 
-If implementing a `self ref` method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the public receiver should be `self`.
+If implementing a `*self` method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the public receiver should be `self`.
 
-When migrating an existing method from `self` to `self ref`, recheck two common implementation leftovers:
+When migrating an existing method from `self` to `*self`, recheck two common implementation leftovers:
 
 - branches that still `return self` even though the method returns an owned value
 - helper or iterator constructors that still receive `self` even though they expect an owned source value
@@ -406,11 +406,11 @@ Avoid exposing `.val`-style dereference-copy patterns in public API design discu
 
 For new traits, prefer the narrowest receiver that matches the semantic contract:
 
-- observation traits should usually use `self ref`
-- mutation traits should use `self ref mut`
+- observation traits should usually use `*self`
+- mutation traits should use `*mut self`
 - consuming traits should use `self`
-- traits intended for trait objects should keep requirement receivers on `self ref` / `self ref mut` only
-- `ref Trait` can call only `self ref` requirements, while `ref mut Trait` can call both `self ref mut` and `self ref`
+- traits intended for trait objects should keep requirement receivers on `*self` / `*mut self` only
+- `*Trait` can call only `*self` requirements, while `*mut Trait` can call both `*mut self` and `*self`
 
 Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
 
@@ -432,9 +432,9 @@ Before adding or changing a method in `std/`, ask:
 2. Is any mutation directly observable on the receiver itself, or only through an underlying shared handle?
 3. Is the method a terminal operation, extraction, or ownership conversion?
 4. Does the method name match the ownership behavior implied by the receiver?
-5. Would switching from `self` to `self ref` silently broaden call sites by allowing rvalue temporary materialization, and is that desirable for this API?
+5. Would switching from `self` to `*self` silently broaden call sites by allowing rvalue temporary materialization, and is that desirable for this API?
 
-If the answer to (1) is yes, default to `self ref`. If the answer to (3) is yes, `self` is usually the right choice. If the answer to (2) is direct mutation, use `self ref mut`.
+If the answer to (1) is yes, default to `*self`. If the answer to (3) is yes, `self` is usually the right choice. If the answer to (2) is direct mutation, use `*mut self`.
 
 ## Adding a New Type
 

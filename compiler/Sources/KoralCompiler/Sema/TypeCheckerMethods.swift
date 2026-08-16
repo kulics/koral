@@ -21,7 +21,7 @@ extension TypeChecker {
       // If not found on Ref, continue auto-deref to inner type
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
-    case .borrowedReference(let inner, _):
+    case .borrowedReference(let inner):
       if let extensions = genericExtensionMethods["Ref"],
          let ext = extensions.first(where: { $0.method.name == name })
       {
@@ -57,7 +57,7 @@ extension TypeChecker {
       }
       return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
 
-    case .mutableBorrowedReference(let inner, _):
+    case .mutableBorrowedReference(let inner):
       if let extensions = genericExtensionMethods["MutRef"],
          let ext = extensions.first(where: { $0.method.name == name })
       {
@@ -340,39 +340,11 @@ extension TypeChecker {
       inferred[name] = actual
       return true
 
-    case .reference(let pInner):
-      switch actual {
-      case .reference(let aInner), .mutableReference(let aInner),
-           .borrowedReference(let aInner, _), .mutableBorrowedReference(let aInner, _):
-        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
-      default:
+    case .reference(let pInner), .borrowedReference(let pInner), .mutableReference(let pInner), .mutableBorrowedReference(let pInner):
+      guard let (_, actualInner) = pattern.compatibleIndirectionInners(with: actual) else {
         return false
       }
-
-    case .mutableReference(let pInner):
-      switch actual {
-      case .mutableReference(let aInner), .mutableBorrowedReference(let aInner, _):
-        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
-      default:
-        return false
-      }
-
-    case .borrowedReference(let pInner, _):
-      switch actual {
-      case .reference(let aInner), .mutableReference(let aInner),
-           .borrowedReference(let aInner, _), .mutableBorrowedReference(let aInner, _):
-        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
-      default:
-        return false
-      }
-
-    case .mutableBorrowedReference(let pInner, _):
-      switch actual {
-      case .mutableReference(let aInner), .mutableBorrowedReference(let aInner, _):
-        return unifyGenericTypePattern(pattern: pInner, actual: aInner, typeParamNames: typeParamNames, inferred: &inferred)
-      default:
-        return false
-      }
+      return unifyGenericTypePattern(pattern: pInner, actual: actualInner, typeParamNames: typeParamNames, inferred: &inferred)
 
     case .weakReference(let pInner):
       switch actual {
@@ -1007,7 +979,7 @@ extension TypeChecker {
   private func builtinSubscriptBaseType(_ type: Type) -> Type {
     switch type {
     case .reference(let inner), .mutableReference(let inner),
-         .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _):
+         .borrowedReference(let inner), .mutableBorrowedReference(let inner):
       return inner
     default:
       return type
@@ -1356,7 +1328,7 @@ extension TypeChecker {
       case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
         elementType = resolvedElement
       default:
-        throw SemanticError(.generic("cannot use .val on non-pointer type"))
+        throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
       var val = try inferTypedExpression(arguments[1])
       val = try coerceLiteral(val, to: elementType)
@@ -1372,7 +1344,7 @@ extension TypeChecker {
       }
       let ptr = try inferTypedExpression(arguments[0])
       guard case .mutablePointer = ptr.type else {
-        throw SemanticError(.generic("cannot use .val on non-pointer type"))
+        throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
       return .intrinsicCall(.deinitMemory(ptr: ptr))
 
@@ -1382,9 +1354,9 @@ extension TypeChecker {
       }
       let ptr = try inferTypedExpression(arguments[0])
       guard case .mutablePointer(let elementType) = ptr.type else {
-        throw SemanticError(.generic("cannot use .val on non-pointer type"))
+        throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "ptr mut")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*raw mut")
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
     case "spawn_thread":
@@ -1397,10 +1369,10 @@ extension TypeChecker {
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
       guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be UInt8 ptr ptr mut"))
+        throw SemanticError(.generic("spawn_thread: first argument must be *raw mut *raw UInt8"))
       }
       guard case .mutablePointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be UInt64 ptr mut"))
+        throw SemanticError(.generic("spawn_thread: second argument must be *raw mut UInt64"))
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

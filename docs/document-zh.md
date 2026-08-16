@@ -178,61 +178,61 @@ let (_, g) = (1, 2)                   // 丢弃第一个元素
 
 编译器会直接从 Pair 值中移动字段到目标变量，避免不必要的拷贝和析构开销。
 
-#### 引用创建规则（`.ref` / `box`）
+#### 引用创建规则（`&` / `box`）
 
 Koral 区分托管引用和借用引用两种引用类型：
 
-- `ref T` / `ref mut T` 是托管引用。
+- `*T` / `*mut T` 是托管引用。
   - 允许逃逸，可以返回、存字段、存容器、存枚举 payload。
-- `ref '_ T` / `ref '_ mut T` 是借用引用（匿名生命周期）。
+- `*_ T` / `*_ mut T` 是借用引用（匿名生命周期）。
   - 不允许逃逸，不允许返回、存字段、存枚举 payload、全局或闭包环境。
   - 仅允许出现在函数参数和 receiver 位置。
 - 两种引用在运行时布局相同，retain / release 行为也相同；区别只在前端静态语义。
-- `ref mut T` 可隐式转换为 `ref T`，`ref '_ mut T` 可隐式转换为 `ref '_ T`。反向不允许。
+- `*mut T` 可隐式转换为 `*T`，`*_ mut T` 可隐式转换为 `*_ T`。反向不允许。
 
-`.ref` 采用"借用优先"的语义：
+`&` 采用"借用优先"的语义：
 
-- 只允许从值路径构造，例如 `x.ref`、`self.field.ref`。
-- 不允许对右值直接写 `.ref`（例如 `make_value().ref` 会报错）。
-- 没有显式托管期望类型时，`.ref` 默认构造借用引用。
-- 如果当前局部上下文已经明确要求托管 `ref` / `ref mut`，编译器会在当前函数内把这次 `.ref` 局部提升成托管引用。
-- `box(expr)` 是显式托管构造，返回 `ref mut T`。
+- 只允许从值路径构造，例如 `&x`、`&self.field`。
+- 不允许对右值直接写 `&`（例如 `&make_value()` 会报错）。
+- 没有显式托管期望类型时，`&` 默认构造借用引用。
+- 如果当前局部上下文已经明确要求托管 `*` / `*mut`，编译器会在当前函数内把这次 `&` 局部提升成托管引用。
+- `box(expr)` 是显式托管构造，返回 `*mut T`。
 
 隐式转换规则：
 
-- **函数参数和方法参数均不允许隐式 ref 提升或 auto-deref。** 如果函数期望 `ref T`，调用方必须用 `a.ref` 显式传入。如果函数期望 `T`，传入 `ref T` 需要显式用 `.val` 解引用。此规则适用于所有参数，包括方法参数。
-- **auto-ref 和 auto-deref 仅对 method receiver（`self`）生效。** `self ref` 方法可接受值（auto-ref）；`self` 方法可接受 `ref T`（auto-deref，跟随 Go 的 pointer receiver 设计）。
+- **函数参数和方法参数均不允许隐式托管引用提升或 auto-deref。** 如果函数期望 `*T` 或 `*mut T`，调用方必须用 `&x` 或 `&mut x` 显式传入。如果函数期望 `T`，从托管引用出发时需要显式用 `*r` 解引用。此规则适用于所有参数，包括方法参数。
+- **auto-ref 和 auto-deref 仅对 method receiver（`self`）生效。** `*self` 方法可接受值（auto-ref）；`self` 方法可接受 `*T` / `*mut T`（auto-deref，跟随 Go 的 pointer receiver 设计）。
 
 接收者调整规则：
 
-- `self ref` 是借用 receiver，可接受左值和右值接收者；对右值接收者，编译器会物化稳定的临时值。
-- `self ref mut` 是借用可变 receiver，仍然要求可写左值接收者；右值会被拒绝。
-- `self ref` 在右值上可能引入临时值物化，此类调用可能带来隐藏的 retain/分配开销。
+- `*self` 是托管 receiver，可接受左值和右值接收者；对右值接收者，编译器会物化稳定的临时值。
+- `*mut self` 是可变托管 receiver，仍然要求可写左值接收者；右值会被拒绝。
+- `*self` 在右值上可能引入临时值物化，此类调用可能带来隐藏的 retain/分配开销。
 
 ```koral
 let mut x = 10
-let rx ref mut Int = x.ref   // 托管期望类型触发局部提升
+let rx *mut Int = &mut x   // 托管期望类型触发局部提升
 
 let y = 10
-let ry ref '_ Int = y.ref    // 默认得到借用引用
+let ry *_ Int = &y    // 默认得到借用引用
 
-let owned ref mut Int = box(42) // box() 返回 ref mut T
+let owned *mut Int = box(42) // box() 返回 *mut T
 
-// let rz = 42.ref           // 错误：右值不能借用
+// let rz = &42           // 错误：右值不能借用
 
-// 函数参数不允许隐式 ref 提升：
-let takes_ref(r ref Int) Int = r.val
+// 函数参数不允许隐式托管引用提升：
+let takes_ref(r * Int) Int = *r
 let v = 42
-// takes_ref(v)              // 错误：期望 ref Int，得到 Int
-takes_ref(v.ref)             // OK：显式 .ref
+// takes_ref(v)              // 错误：期望 *Int，得到 Int
+takes_ref(&v)                // OK：显式 &
 
 // auto-deref 仅对 receiver 生效：
 type Counter(mut value Int)
 given Counter {
-    public get(self ref) Int = self.value
+    public get(*self) Int = self.value
 }
 let c = Counter(10)
-c.get()                      // OK：self ref 接受值（auto-ref）
+c.get()                      // OK：*self 接受值（auto-ref）
 ```
 
 ### 赋值
@@ -517,53 +517,53 @@ let empty List[Int] = []             // 空字面量必须有类型上下文
 
 引用类型用于引用另一个值，而不是持有它。这在需要共享数据或避免复制时非常有用。Koral 区分托管引用和借用引用：
 
-- `ref T` — 托管只读引用。支持 `.val` 读取，但不支持 `.val = expr` 赋值。
-- `ref mut T` — 托管可变引用。支持 `.val` 读取和 `.val = expr` 赋值。
-- `ref '_ T` — 借用只读引用。运行时布局与 `ref T` 相同，但前端禁止逃逸。
-- `ref '_ mut T` — 借用可变引用。运行时布局与 `ref mut T` 相同，但前端禁止逃逸。
-- `ref mut T` 可隐式转换为 `ref T`，`ref '_ mut T` 可隐式转换为 `ref '_ T`。反向不允许。
+- `*T` — 托管只读引用。支持 `*expr` 解引用读取，但不支持 `*expr = value` 赋值。
+- `*mut T` — 托管可变引用。支持 `*expr` 解引用读取和 `*expr = value` 赋值。
+- `*_ T` — 借用只读引用。运行时布局与 `*T` 相同，但前端禁止逃逸。
+- `*_ mut T` — 借用可变引用。运行时布局与 `*mut T` 相同，但前端禁止逃逸。
+- `*mut T` 可隐式转换为 `*T`，`*_ mut T` 可隐式转换为 `*_ T`。反向不允许。
 
-使用 `.ref` 后缀表达式创建引用。结果类型取决于源的可变性：
+使用 `&` 前缀表达式创建引用。结果类型取决于源的可变性：
 
 ```koral
 let mut n = 42
-let a ref '_ mut Int = n.ref
-let b = a.val            // 解引用，得到 42
-a.val = 100              // 解引用赋值（ref mut 支持 .val = expr）
+let a *_ mut Int = &mut n
+let b = *a            // 解引用，得到 42
+*a = 100              // 解引用赋值（*mut 支持 *expr = value）
 
 let m = 42
-let c ref '_ Int = m.ref
-let d = c.val            // 解引用读取，得到 42
-// c.val = 100           // 错误：ref 不支持 .val 赋值
+let c *_ Int = &m
+let d = *c            // 解引用读取，得到 42
+// *c = 100           // 错误：* 不支持解引用赋值
 
-let owned ref mut Int = n.ref // 托管期望类型触发局部提升
+let owned *mut Int = &mut n // 托管期望类型触发局部提升
 ```
 
-`ref` / `ref mut` 与 `ref '_` / `ref '_ mut` 在运行时都复用同一套 ABI、内存布局与 retain / release 行为。区别只在前端语义：借用引用不能逃逸，托管引用可以长期持有。`.ref` 默认先构造成借用引用；只有当前局部上下文已经明确要求托管引用时，编译器才会在当前函数内把这次构造提升为托管引用。`box(expr)` 则始终显式构造托管 `ref mut T`。
+`*` / `*mut` 与 `*_` / `*_ mut` 在运行时都复用同一套 ABI、内存布局与 retain / release 行为。区别只在前端语义：借用引用不能逃逸，托管引用可以长期持有。`&` 默认先构造成借用引用；只有当前局部上下文已经明确要求托管引用时，编译器才会在当前函数内把这次构造提升为托管引用。`box(expr)` 则始终显式构造托管 `*mut T`。
 
 指针类型同样区分只读和可变：
 
-- `ptr T` — 只读指针。支持 `.val` 读取，但不支持 `.val` 赋值和 `p[i]` 赋值。
-- `ptr mut T` — 可变指针。支持 `.val` 读取、`.val = expr` 赋值、`p[i]` 读取和 `p[i] = expr` 赋值。
-- `ptr mut T` 可隐式转换为 `ptr T`。反向转换不允许。
+- `*raw T` — 只读指针。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值和 `p[i]` 赋值。
+- `*raw mut T` — 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
+- `*raw mut T` 可隐式转换为 `*raw T`。反向转换不允许。
 
 #### 弱引用
 
-弱引用不会增加引用计数，用于打破循环引用。与 `ref`/`ref mut` 一样，弱引用也区分可变性：`weakref T`（只读）和 `weakref mut T`（可变）。
+弱引用不会增加引用计数，用于打破循环引用。与 `*`/`*mut` 一样，弱引用也区分可变性：`?*T`（只读）和 `?*mut T`（可变）。
 
-使用 `.weakref` 后缀表达式从 ref 类型创建弱引用，使用 `.to_ref()` 方法尝试将弱引用升级回强引用（返回 `Option` 类型）。
+使用 `downgrade(*T)` 创建 `?*T`（或 `downgrade_mut(*mut T)` 创建 `?*mut T`），使用 `upgrade(?*T)` 尝试升级回 `Option[*T]`（或 `upgrade_mut(?*mut T)` 返回 `Option[*mut T]`）。
 
 ```koral
-let strong ref mut Int = box(42)
+let strong *mut Int = box(42)
 
-// 可变路径：ref mut → weakref mut → Option[ref mut T]
-let weak = strong.weakref              // ref mut T → weakref mut T
-let upgraded = weak.to_ref()           // weakref mut T → Option[ref mut T]
+// 可变路径：*mut → ?*mut → Option[*mut T]
+let weak = downgrade(strong)         // *mut T → ?*mut T
+let upgraded = upgrade(weak)         // ?*mut T → Option[*mut T]
 
-// 只读路径：ref → weakref → Option[ref T]
-let ro ref Int = strong                // 隐式宽化
-let ro_weak = ro.weakref               // ref T → weakref T
-let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
+// 只读路径：* → ?* → Option[*T]
+let ro *Int = strong                // 隐式宽化
+let ro_weak = downgrade(ro)         // *T → ?*T
+let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 ```
 
 ### 内存管理
@@ -571,7 +571,7 @@ let ro_upgraded = ro_weak.to_ref()     // weakref T → Option[ref T]
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`ref` / `ref mut` 是可逃逸的托管引用，`ref '_` / `ref '_ mut` 是不可逃逸的借用引用。两者运行时布局相同，retain / release 行为也相同，差异只体现在前端静态语义。`.ref` 默认构造借用引用；只有当前局部上下文已经明确要求托管引用时，才会发生局部提升。`box(expr)` 是显式托管构造。函数参数不允许隐式 ref 提升——调用方必须用 `.ref` 显式传入。普通参数不允许 auto-deref——传入 `ref T` 给期望 `T` 的参数需要显式用 `.val`。隐式转换仅对 method receiver（`self`）生效。Koral 使用所有权分析和逃逸分析来决定栈安全借用还是堆支持的引用计数，防止悬垂指针和内存泄漏。
+- **引用（Reference）**：`*` / `*mut` 是可逃逸的托管引用，`*_` / `*_ mut` 是不可逃逸的借用引用。两者运行时布局相同，retain / release 行为也相同，差异只体现在前端静态语义。`&` 默认构造借用引用；只有当前局部上下文已经明确要求托管引用时，才会发生局部提升。`box(expr)` 是显式托管构造。函数参数不允许隐式 ref 提升——调用方必须用 `&` 显式传入。普通参数不允许 auto-deref——传入 `*T` 给期望 `T` 的参数需要显式用 `*expr`。隐式转换仅对 method receiver（`self`）生效。Koral 使用所有权分析和逃逸分析来决定栈安全借用还是堆支持的引用计数，防止悬垂指针和内存泄漏。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -751,10 +751,10 @@ let first = p[0]
 dealloc_memory(p)
 ```
 
-- `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`ptr T`、`ptr mut T`。
+- `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`*raw T`、`*raw mut T`。
 - `String[key]` 返回 `UInt8` 字节值，只读且不可取地址。
-- `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `ref` / `ref mut` 上下文。
-- `ptr T` 只支持读取；`ptr mut T` 同时支持读取和写入。
+- `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `*` / `*mut` 上下文。
+- `*raw T` 只支持读取；`*raw mut T` 同时支持读取和写入。
 - 用户自定义类型不能通过 Trait 获得 `[]` 能力，泛型约束也不能为类型添加下标能力。
 
 ### 值合并与可选链
@@ -796,7 +796,7 @@ let load_port(path String) Result[Int] = {
 
 操作符优先级从高到低如下：
 
-1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 存储修饰 `.ref/.ptr/.val`, 限定/泛型方法后缀
+1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 存储修饰 `&/*raw/*`, 限定/泛型方法后缀
 2. 前缀: 一元 `-`, `~`
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
@@ -1240,10 +1240,10 @@ Trait 方法可以使用命名参数。实现时必须与 trait 声明完全一�
 
 ```koral
 trait Drawable {
-    draw(self ref, at_x: Int, at_y: Int) Void
+    draw(*self, at_x: Int, at_y: Int) Void
 }
 given MyType as Drawable {
-    draw(self ref, at_x: Int, at_y: Int) Void = todo()  // 必须匹配
+    draw(*self, at_x: Int, at_y: Int) Void = todo()  // 必须匹配
 }
 ```
 
@@ -1507,7 +1507,7 @@ Trait 定义了一组方法签名，任何实现了该 Trait 的类型都必须�
 
 ```koral
 trait Printable {
-    to_string(self ref) String
+    to_string(*self) String
 }
 ```
 
@@ -1591,7 +1591,7 @@ println(a.not_equals(b))
 
 ```koral
 trait Iterator[T Any] {
-    next(self ref mut) Option[T]
+    next(*mut self) Option[T]
 }
 
 given[T Ord] Iterator[T] {
@@ -1667,8 +1667,8 @@ let p = Point.origin()
 - `Eq` / `Ord`：相等性与排序比较。
 - `Hash`：Dict/Set 键的哈希支持。
 - `ToString`：字符串转换。
-- `Iterator[T]`：迭代协议（`next(self ref mut) Option[T]`）。
-- `Error`：错误消息接口（`message(self ref) String`）。
+- `Iterator[T]`：迭代协议（`next(*mut self) Option[T]`）。
+- `Error`：错误消息接口（`message(*self) String`）。
 - `Drop`：析构钩子（`drop(source ptr mut Self) Void`）。
 
 算术和比较操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`）。下标访问由编译器内建规则处理，不属于公开 trait 系统。
@@ -1678,41 +1678,41 @@ let p = Point.origin()
 ### 方法接收器形式
 
 - `​self`：托管值接收器（等价于 `self Self`）。
-- `self ref` / `self ref mut`：借用接收器，调用端允许 auto-ref。
-- `self ref Self` / `self ref mut Self`：显式托管接收器，不允许 auto-ref/auto-deref。
-- `self ref <lifetime> Self` / `self ref <lifetime> mut Self`：显式具名生命周期借用接收器。
-- Auto-ref 和 auto-deref 仅适用于 `self` 和 `self ref` 形式；显式托管/借用形式要求调用方提供确切的绑定。
+- `*self` / `*mut self`：托管接收器，调用端允许 auto-ref。
+- `*self Self` / `*mut self Self`：显式托管接收器，不允许 auto-ref/auto-deref。
+- `*self <lifetime> Self` / `*self <lifetime> mut Self`：显式具名生命周期借用接收器。
+- Auto-ref 和 auto-deref 仅适用于 `self` 和 `*self` 形式；显式托管/借用形式要求调用方提供确切的绑定。
 
 ### Trait Object
 
-Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `ref TraitName` 或 `ref mut TraitName` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
+Trait Object 是 Koral 中实现运行时多态（动态派发）的机制。通过 `*TraitName` 或 `*mut TraitName` 语法，可以将实现了某个 Trait 的任意类型擦除为统一的引用类型。
 
 #### 基本语法
 
 Trait object 构造遵循以下规则：
 
-- 目标类型写作 `ref TraitName` 或 `ref mut TraitName`。
+- 目标类型写作 `*TraitName` 或 `*mut TraitName`。
 - 源值必须实现该 Trait，并在期望该 trait object 类型的上下文中发生转换。
 - `box(...)` 是提供拥有值并完成此类转换的标准方式。
 
 ```koral
 trait Drawable {
-    draw(self ref) String
-    reset(self ref mut) Void
+    draw(*self) String
+    reset(*mut self) Void
 }
 
 type Circle(mut radius Int)
 type Square(mut side Int)
 
 given Circle as Drawable {
-    public draw(self ref) String = "Drawing circle"
-    public reset(self ref mut) Void = {
+    public draw(*self) String = "Drawing circle"
+    public reset(*mut self) Void = {
         self.radius = 0
     }
 }
 given Square as Drawable {
-    public draw(self ref) String = "Drawing square"
-    public reset(self ref mut) Void = {
+    public draw(*self) String = "Drawing square"
+    public reset(*mut self) Void = {
         self.side = 0
     }
 }
@@ -1729,22 +1729,22 @@ mutable_shape.draw()
 
 通过 trait object 调用时，接收者可变性规则与普通引用一致：
 
-- `ref TraitName` 只能调用声明为 `self ref` 的 requirement。
-- `ref mut TraitName` 可以调用 `self ref mut` 和 `self ref` 的 requirement。
-- `ref TraitName` 不能调用 `self ref mut` 的 requirement。
+- `*TraitName` 只能调用声明为 `*self` 的 requirement。
+- `*mut TraitName` 可以调用 `*mut self` 和 `*self` 的 requirement。
+- `*TraitName` 不能调用 `*mut self` 的 requirement。
 
 #### 对象安全性
 
 只有满足以下条件的 Trait 才能用作 trait object：
 
 - 方法不能有泛型参数
-- 若存在接收者，则接收者必须是 `self ref` 或 `self ref mut`
+- 若存在接收者，则接收者必须是 `*self` 或 `*mut self`
 - 方法的参数和返回值中不能出现 `Self` 类型（仅接收者中的该用法例外）
 
 ```koral
 // 对象安全 — 可以用作 trait object
 trait Error {
-    message(self ref) String
+    message(*self) String
 }
 
 // 不是对象安全 — 不能用作 trait object
@@ -1757,7 +1757,7 @@ trait Resettable {
 }
 ```
 
-Trait object（`ref TraitName`、`ref mut TraitName`）不支持直接 `.val`，应通过动态派发调用 trait 方法。
+Trait object（`*TraitName`、`*mut TraitName`）不支持直接解引用，应通过动态派发调用 trait 方法。
 
 ## 泛型
 

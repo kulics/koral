@@ -9,14 +9,14 @@ using std { .. }
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let __koral_thread_join(handle ptr UInt8) Int32
-foreign let __koral_thread_detach(handle ptr UInt8) Void
+foreign let __koral_thread_join(handle *raw UInt8) Int32
+foreign let __koral_thread_detach(handle *raw UInt8) Void
 
 // ============================================================================
 // ThreadStorage (internal)
 // ============================================================================
 type ThreadStorage(
-    handle ptr UInt8,
+    handle *raw UInt8,
     thread_id UInt64,
     thread_name Option[String],
     mut waited Bool,
@@ -25,7 +25,7 @@ type ThreadStorage(
 
 given ThreadStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         if not source.waited and not source.detached then {
             __koral_thread_detach(source.handle)
         }
@@ -39,13 +39,13 @@ given ThreadStorage as Drop {
 /// OS thread handle. Manages thread lifetime (wait/detach).
 /// Created by Task.spawn() or run_task(), not constructed directly.
 /// Auto-detaches on drop if not waited/detached.
-public type Thread(protected storage ref mut ThreadStorage)
+public type Thread(protected storage *mut ThreadStorage)
 
 given Thread {
 
     /// Block until the thread finishes.
     /// Returns Error if already waited or detached.
-    public wait(self ref) Result[Void] = {
+    public wait(*self) Result[Void] = {
         if self.storage.waited then {
             return Result[Void].Error(box("thread already waited"))
         }
@@ -61,7 +61,7 @@ given Thread {
     }
 
     /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
-    public detach(self ref) Void = {
+    public detach(*self) Void = {
         if self.storage.waited or self.storage.detached then {
             return
         }
@@ -70,8 +70,8 @@ given Thread {
     }
 
     /// Get the thread ID.
-    public id(self ref) UInt64 = self.storage.thread_id
+    public id(*self) UInt64 = self.storage.thread_id
 
     /// Get the thread name.
-    public name(self ref) Option[String] = self.storage.thread_name
+    public name(*self) Option[String] = self.storage.thread_name
 }

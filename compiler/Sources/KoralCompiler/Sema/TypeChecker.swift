@@ -105,7 +105,7 @@ public class TypeChecker {
   let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   var extensionMethods: [String: [String: Symbol]] = [:]
-  // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `self ref`.
+  // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `*self` / `*mut self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
   var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
@@ -460,7 +460,7 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .mutableReference(inner: conformanceTypeKey(inner, mode: nextMode))
-    case .borrowedReference(let inner, let lifetime):
+    case .borrowedReference(let inner):
       let nextMode: ConformanceKeyMode
       switch mode {
       case .wildcardReceiver:
@@ -470,9 +470,8 @@ public class TypeChecker {
       case .exact:
         nextMode = .exact
       }
-      _ = lifetime
       return .reference(inner: conformanceTypeKey(inner, mode: nextMode))
-    case .mutableBorrowedReference(let inner, let lifetime):
+    case .mutableBorrowedReference(let inner):
       let nextMode: ConformanceKeyMode
       switch mode {
       case .wildcardReceiver:
@@ -482,7 +481,6 @@ public class TypeChecker {
       case .exact:
         nextMode = .exact
       }
-      _ = lifetime
       return .mutableReference(inner: conformanceTypeKey(inner, mode: nextMode))
     case .weakReference(let inner):
       let nextMode: ConformanceKeyMode
@@ -703,9 +701,9 @@ public class TypeChecker {
     case .`enum`:
       return "Koral enum types cannot be used in foreign functions"
     case .reference:
-      return "Reference types (ref) cannot be used in foreign functions"
+      return "Managed reference types (* / *mut) cannot be used in foreign functions"
     case .borrowedReference, .mutableBorrowedReference:
-      return "Borrowed reference types cannot be used in foreign functions"
+      return "Borrowed `ref` / `ref mut` types cannot be used in foreign functions"
     case .function:
       return "Function types cannot be used in foreign functions"
     case .genericParameter, .genericStruct, .genericEnum:
@@ -1117,7 +1115,7 @@ public class TypeChecker {
   }
 
   /// 为方法调用创建临时物化
-  /// 当 base 是右值且方法期望 `self ref` 时，生成 makeLetBlock 包装临时变量和方法调用
+  /// 当 base 是右值且方法期望 `*self` 时，生成 makeLetBlock 包装临时变量和方法调用
   /// 
   /// 例如：`"hello".count_byte()` 转换为：
   /// ```
@@ -1168,7 +1166,7 @@ public class TypeChecker {
     _ body: ExpressionNode
   ) throws -> (TypedExpressionNode, Type) {
     if returnType.containsBorrowedReference {
-      throw SemanticError(.generic("function return type cannot contain borrowed reference type '\(returnType)'"), span: currentSpan)
+      throw SemanticError(.generic("function return type cannot contain borrowed `ref` / `ref mut` types: '\(returnType)'"), span: currentSpan)
     }
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType
@@ -1341,29 +1339,10 @@ public class TypeChecker {
       }
       return unifyTypes(expectedReturn, actualReturn, bindings: &bindings)
       
-    case (.reference(let expectedInner), .reference(let actualInner)),
-         (.reference(let expectedInner), .mutableReference(let actualInner)),
-         (.reference(let expectedInner), .borrowedReference(let actualInner, _)),
-         (.reference(let expectedInner), .mutableBorrowedReference(let actualInner, _)),
-         (.mutableReference(let expectedInner), .mutableReference(let actualInner)),
-         (.mutableReference(let expectedInner), .mutableBorrowedReference(let actualInner, _)),
-         (.borrowedReference(let expectedInner, _), .reference(let actualInner)),
-         (.borrowedReference(let expectedInner, _), .mutableReference(let actualInner)),
-         (.borrowedReference(let expectedInner, _), .borrowedReference(let actualInner, _)),
-         (.borrowedReference(let expectedInner, _), .mutableBorrowedReference(let actualInner, _)),
-         (.mutableBorrowedReference(let expectedInner, _), .mutableReference(let actualInner)),
-         (.mutableBorrowedReference(let expectedInner, _), .mutableBorrowedReference(let actualInner, _)):
+    case _ where expected.compatibleIndirectionInners(with: actual) != nil:
+      let (expectedInner, actualInner) = expected.compatibleIndirectionInners(with: actual)!
       return unifyTypes(expectedInner, actualInner, bindings: &bindings)
-      
-    case (.pointer(let expectedElem), .pointer(let actualElem)),
-         (.pointer(let expectedElem), .mutablePointer(let actualElem)),
-         (.mutablePointer(let expectedElem), .mutablePointer(let actualElem)):
-      return unifyTypes(expectedElem, actualElem, bindings: &bindings)
-    case (.weakReference(let expectedInner), .weakReference(let actualInner)),
-         (.weakReference(let expectedInner), .mutableWeakReference(let actualInner)),
-         (.mutableWeakReference(let expectedInner), .mutableWeakReference(let actualInner)):
-      return unifyTypes(expectedInner, actualInner, bindings: &bindings)
-      
+
     case (.genericStruct(let expectedName, let expectedArgs), .genericStruct(let actualName, let actualArgs)):
       guard expectedName == actualName && expectedArgs.count == actualArgs.count else { return false }
       for (ea, aa) in zip(expectedArgs, actualArgs) {
@@ -1413,9 +1392,9 @@ public class TypeChecker {
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .mutableReference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
-    case .borrowedReference(let inner, _):
+    case .borrowedReference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
-    case .mutableBorrowedReference(let inner, _):
+    case .mutableBorrowedReference(let inner):
       extractGenericParameterNamesHelper(from: inner, names: &names, seen: &seen)
     case .pointer(let element):
       extractGenericParameterNamesHelper(from: element, names: &names, seen: &seen)

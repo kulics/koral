@@ -9,7 +9,7 @@ using std { .. }
 
 private type BufWriterStorage[W Writer](inner W, mut buf List[UInt8], cap UInt)
 
-public type BufWriter[W Writer](private storage ref mut BufWriterStorage[W])
+public type BufWriter[W Writer](private storage *mut BufWriterStorage[W])
 
 given[W Writer] BufWriter[W] {
 
@@ -27,7 +27,7 @@ given[W Writer] BufWriter[W] {
 
     // --- Instance methods ---
 
-    public write_byte(self ref, b UInt8) Result[Void] = {
+    public write_byte(*self, b UInt8) Result[Void] = {
         if self.storage.buf.count() >= self.storage.cap then {
             let flush_result = self.flush()
             when flush_result in {
@@ -41,7 +41,7 @@ given[W Writer] BufWriter[W] {
         return Result[Void].Ok({})
     }
 
-    public write_string(self ref, s String) Result[Void] = {
+    public write_string(*self, s String) Result[Void] = {
         let bytes = s.to_bytes()
         let result = self.write(from: bytes, ..)
         when result in {
@@ -54,7 +54,7 @@ given[W Writer] BufWriter[W] {
         }
     }
 
-    public write_line(self ref, s String) Result[Void] = {
+    public write_line(*self, s String) Result[Void] = {
         let result = self.write_string(s)
         when result in {
             .Ok(_) then {
@@ -66,7 +66,7 @@ given[W Writer] BufWriter[W] {
         }
     }
 
-    public write_rune(self ref, r Rune) Result[Void] = {
+    public write_rune(*self, r Rune) Result[Void] = {
         let cp = r.to_uint32()
         // 1-byte ASCII
         if cp < 128 then {
@@ -162,7 +162,7 @@ given[W Writer] BufWriter[W] {
 given[W Writer] BufWriter[W] as Writer {
 
     // Writes data from src[range] into internal buffer. Auto-flushes when full.
-    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt] = {
+    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt] = {
         let span = from.slice_spec(range)
         let start = span.start()
         let end = span.end()
@@ -204,7 +204,7 @@ given[W Writer] BufWriter[W] as Writer {
     }
 
     // Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
-    public flush(self ref) Result[Void] = {
+    public flush(*self) Result[Void] = {
         let total = self.storage.buf.count()
         if total == 0 then {
             return Result[Void].Ok({})
@@ -237,7 +237,7 @@ given[W Writer] BufWriter[W] as Writer {
 
 given[W Writer and Seeker] BufWriter[W] as Seeker {
 
-    public seek(self ref, pos SeekOrigin) Result[UInt64] = {
+    public seek(*self, pos SeekOrigin) Result[UInt64] = {
         when self.flush() in {
             .Ok(_) then {},
             .Error(e) then {

@@ -95,13 +95,13 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_given_members(self, subst TypeSubstitution, members List[ref TypedGivenMember]) List[ref TypedGivenMember] = {
-        let mut out = List[ref TypedGivenMember].new()
+    protected apply_subst_to_given_members(self, subst TypeSubstitution, members List[* TypedGivenMember]) List[* TypedGivenMember] = {
+        let mut out = List[* TypedGivenMember].new()
         for m_ref in members then {
-            let m = m_ref.val
+            let m = *m_ref
             let new_body = when m.body in {
-                .Some(b) then Option[ref TypedExpr].Some(self.apply_subst_to_expr(subst, b)),
-                .None() then Option[ref TypedExpr].None(),
+                .Some(b) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, b)),
+                .None() then Option[* TypedExpr].None(),
             }
             let new_params = self.apply_subst_to_params(subst, m.params)
             let new_return_type = subst.apply(m.return_type)
@@ -110,23 +110,23 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_symbol(self, subst TypeSubstitution, symbol ref Symbol) Symbol = {
+    protected apply_subst_to_symbol(self, subst TypeSubstitution, symbol * Symbol) Symbol = {
         return Symbol(symbol.def_id, subst.apply(symbol.symbol_type), symbol.kind)
     }
 
-    protected apply_subst_to_statement(self, subst TypeSubstitution, stmt ref TypedStatement) TypedStatement = {
+    protected apply_subst_to_statement(self, subst TypeSubstitution, stmt * TypedStatement) TypedStatement = {
         return when stmt in {
             .LetStmt(symbol, value, span) then {
                 break TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), self.apply_subst_to_expr(subst, value), span)
             },
             .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
                 let new_first_symbol = when first_symbol in {
-                    .Some(symbol) then Option[ref Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
-                    .None() then Option[ref Symbol].None(),
+                    .Some(symbol) then Option[* Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
+                    .None() then Option[* Symbol].None(),
                 }
                 let new_second_symbol = when second_symbol in {
-                    .Some(symbol) then Option[ref Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
-                    .None() then Option[ref Symbol].None(),
+                    .Some(symbol) then Option[* Symbol].Some(box(self.apply_subst_to_symbol(subst, symbol))),
+                    .None() then Option[* Symbol].None(),
                 }
                 break TypedStatement.PairLetStmt(subst.apply(pair_type), new_first_symbol, new_second_symbol, self.apply_subst_to_expr(subst, value), span)
             },
@@ -138,8 +138,8 @@ given TypeChecker {
             },
             .IfStmt(condition, then_branch, else_branch, span) then {
                 let new_else = when else_branch in {
-                    .Some(expr) then Option[ref TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
-                    .None() then Option[ref TypedExpr].None(),
+                    .Some(expr) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
+                    .None() then Option[* TypedExpr].None(),
                 }
                 break TypedStatement.IfStmt(
                     self.apply_subst_to_expr(subst, condition),
@@ -164,8 +164,8 @@ given TypeChecker {
             },
             .ReturnStmt(value, span) then {
                 let new_value = when value in {
-                    .Some(expr) then Option[ref TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
-                    .None() then Option[ref TypedExpr].None(),
+                    .Some(expr) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, expr)),
+                    .None() then Option[* TypedExpr].None(),
                 }
                 break TypedStatement.ReturnStmt(new_value, span)
             },
@@ -180,9 +180,9 @@ given TypeChecker {
         }
     }
 
-    protected bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) Option[ref Symbol] = {
+    protected bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) Option[* Symbol] = {
         if binding.is_discard then {
-            return Option[ref Symbol].None()
+            return Option[* Symbol].None()
         }
 
         if binding.name <> "_" and scope.lookup_local(binding.name) is .Some(_) then {
@@ -218,7 +218,7 @@ given TypeChecker {
         context.set_span(def_id, binding.span)
         let sym = Symbol(def_id, binding_type, kind)
         scope.define(self.context(), sym)
-        return Option[ref Symbol].Some(box(sym))
+        return Option[* Symbol].Some(box(sym))
     }
 
     protected get_pair_binding_type(self, pair_type Type, field_name String) Option[Type] = {
@@ -242,7 +242,7 @@ given TypeChecker {
         }
     }
 
-    protected infer_pair_literal_binding_type(self, value ref Expr, binding PairBindingElement, index UInt, scope Scope) Option[Type] = {
+    protected infer_pair_literal_binding_type(self, value * Expr, binding PairBindingElement, index UInt, scope Scope) Option[Type] = {
         return when value in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then {
@@ -251,7 +251,7 @@ given TypeChecker {
                         .None() then Option[Type].None(),
                     }
                     break if name <> "Pair" or args.count() <= index then Option[Type].None() else {
-                        let arg_expr = args[index].val
+                        let arg_expr = (*args[index])
                         let typed_arg = self.check_expr_scoped_ref(box(arg_expr), expected_type, scope)
                         break Option[Type].Some(self.concretize_default_literal_type(typed_arg.expr_type))
                     }
@@ -262,7 +262,7 @@ given TypeChecker {
         }
     }
 
-    protected concretize_pair_constructor_binding_type(self, binding_type Type, value ref Expr, scope Scope) Type = {
+    protected concretize_pair_constructor_binding_type(self, binding_type Type, value * Expr, scope Scope) Type = {
         let needs_pair_args = when binding_type in {
             .StructureType(def_id) then (self.context().get_name(def_id) or else "") == "Pair",
             .GenericStruct(template_name, args) then {
@@ -271,7 +271,7 @@ given TypeChecker {
                 }
                 let mut unresolved = false
                 for arg in args then {
-                    if self.is_unresolved_expr_type(arg.val) or arg.val is .GenericParameter(_) then {
+                    if self.is_unresolved_expr_type(*arg) or *arg is .GenericParameter(_) then {
                         unresolved = true
                     }
                 }
@@ -288,11 +288,11 @@ given TypeChecker {
                     if name <> "Pair" or args.count() <> 2(UInt) then {
                         break binding_type
                     }
-                    let first_arg = args[0(UInt)].val
-                    let second_arg = args[1(UInt)].val
+                    let first_arg = (*args[0(UInt)])
+                    let second_arg = (*args[1(UInt)])
                     let first_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(box(first_arg), .None(), scope).expr_type)
                     let second_type = self.concretize_default_literal_type(self.check_expr_scoped_ref(box(second_arg), .None(), scope).expr_type)
-                    let mut pair_args = List[ref Type].new()
+                    let mut pair_args = List[* Type].new()
                     pair_args.push(box(first_type))
                     pair_args.push(box(second_type))
                     break Type.GenericStruct("Pair", pair_args)
@@ -303,8 +303,8 @@ given TypeChecker {
         }
     }
 
-    protected apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[ref TypedWhenArm]) List[ref TypedWhenArm] = {
-        let mut out = List[ref TypedWhenArm].new()
+    protected apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[* TypedWhenArm]) List[* TypedWhenArm] = {
+        let mut out = List[* TypedWhenArm].new()
         for arm in arms then {
             let new_body = self.apply_subst_to_expr(subst, arm.body)
             let new_arm_type = new_body.expr_type
@@ -313,18 +313,18 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_expr_list(self, subst TypeSubstitution, exprs List[ref TypedExpr]) List[ref TypedExpr] = {
-        let mut out = List[ref TypedExpr].new()
+    protected apply_subst_to_expr_list(self, subst TypeSubstitution, exprs List[* TypedExpr]) List[* TypedExpr] = {
+        let mut out = List[* TypedExpr].new()
         for expr in exprs then {
             out.push(self.apply_subst_to_expr(subst, expr))
         }
         return out
     }
 
-    protected apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries List[Pair[ref TypedExpr, ref TypedExpr]]) List[Pair[ref TypedExpr, ref TypedExpr]] = {
-        let mut out = List[Pair[ref TypedExpr, ref TypedExpr]].new()
+    protected apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries List[Pair[* TypedExpr, * TypedExpr]]) List[Pair[* TypedExpr, * TypedExpr]] = {
+        let mut out = List[Pair[* TypedExpr, * TypedExpr]].new()
         for entry in entries then {
-            out.push(Pair[ref TypedExpr, ref TypedExpr](
+            out.push(Pair[* TypedExpr, * TypedExpr](
                 self.apply_subst_to_expr(subst, entry.first),
                 self.apply_subst_to_expr(subst, entry.second)
             ))
@@ -332,14 +332,14 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_optional_expr(self, subst TypeSubstitution, expr Option[ref TypedExpr]) Option[ref TypedExpr] = {
+    protected apply_subst_to_optional_expr(self, subst TypeSubstitution, expr Option[* TypedExpr]) Option[* TypedExpr] = {
         return when expr in {
-            .Some(e) then Option[ref TypedExpr].Some(self.apply_subst_to_expr(subst, e)),
-            .None() then Option[ref TypedExpr].None(),
+            .Some(e) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, e)),
+            .None() then Option[* TypedExpr].None(),
         }
     }
 
-    protected apply_subst_to_expr_kind(self, subst TypeSubstitution, kind ref TypedExprKind) ref TypedExprKind = {
+    protected apply_subst_to_expr_kind(self, subst TypeSubstitution, kind * TypedExprKind) * TypedExprKind = {
         return when kind in {
             .Variable(symbol) then box(TypedExprKind.Variable(box(self.apply_subst_to_symbol(subst, symbol)))),
             .IntegerLiteral(value) then box(TypedExprKind.IntegerLiteral(value)),
@@ -408,7 +408,7 @@ given TypeChecker {
                 ))
             },
             .Block(statements) then {
-                let mut new_statements = List[ref TypedStatement].new()
+                let mut new_statements = List[* TypedStatement].new()
                 for stmt in statements then {
                     new_statements.push(box(self.apply_subst_to_statement(subst, stmt)))
                 }
@@ -473,7 +473,7 @@ given TypeChecker {
     }
 
     // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
-    protected apply_subst_to_expr(self, subst TypeSubstitution, expr ref TypedExpr) ref TypedExpr = {
+    protected apply_subst_to_expr(self, subst TypeSubstitution, expr * TypedExpr) * TypedExpr = {
         if subst.mapping.is_empty() then {
             return expr
         }

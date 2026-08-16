@@ -130,97 +130,97 @@ public type Path
 ## Given Implementations
 ```koral
 given DirEntry {
-    public name(self ref) String
-    public path(self ref) Path
-    public file_type(self ref) FileType
-    public is_file(self ref) Bool
-    public is_dir(self ref) Bool
-    public is_symlink(self ref) Bool
-    public info(self ref) Result[FileInfo]
+    public name(*self) String
+    public path(*self) Path
+    public file_type(*self) FileType
+    public is_file(*self) Bool
+    public is_dir(*self) Bool
+    public is_symlink(*self) Bool
+    public info(*self) Result[FileInfo]
 }
 
 given DirEntry as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given DirIterator as Iterator[DirEntry] {
-    public next(self ref mut) Option[DirEntry]
+    public next(*mut self) Option[DirEntry]
 }
 
 given WalkDirIterator as Iterator[DirEntry] {
-    public next(self ref mut) Option[DirEntry]
+    public next(*mut self) Option[DirEntry]
 }
 
 given File {
-    public fd(self ref) Int
-    public path(self ref) Path
-    public info(self ref) Result[FileInfo]
-    public sync(self ref) Result[Void]
-    public lock(self ref) Result[Void]
-    public lock_shared(self ref) Result[Void]
-    public try_lock(self ref) Result[Bool]
-    public try_lock_shared(self ref) Result[Bool]
-    public unlock(self ref) Result[Void]
+    public fd(*self) Int
+    public path(*self) Path
+    public info(*self) Result[FileInfo]
+    public sync(*self) Result[Void]
+    public lock(*self) Result[Void]
+    public lock_shared(*self) Result[Void]
+    public try_lock(*self) Result[Bool]
+    public try_lock_shared(*self) Result[Bool]
+    public unlock(*self) Result[Void]
 }
 
 given File as Reader {
-    public read(self ref, into: ref mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given File as Writer {
-    public write(self ref, from: List[UInt8], range Range[UInt]) Result[UInt]
-    public flush(self ref) Result[Void]
+    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public flush(*self) Result[Void]
 }
 
 given File as Seeker {
-    public seek(self ref, pos SeekOrigin) Result[UInt64]
+    public seek(*self, pos SeekOrigin) Result[UInt64]
 }
 
 given FileType {
-    public is_file(self ref) Bool
-    public is_dir(self ref) Bool
-    public is_symlink(self ref) Bool
+    public is_file(*self) Bool
+    public is_dir(*self) Bool
+    public is_symlink(*self) Bool
 }
 
 given FileType as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Permission {
     public from_mode(mode UInt32) Permission
-    public mode(self ref) UInt32
-    public has_owner_read(self ref) Bool
-    public has_owner_write(self ref) Bool
-    public has_owner_exec(self ref) Bool
-    public has_group_read(self ref) Bool
-    public has_group_write(self ref) Bool
-    public has_group_exec(self ref) Bool
-    public has_other_read(self ref) Bool
-    public has_other_write(self ref) Bool
-    public has_other_exec(self ref) Bool
+    public mode(*self) UInt32
+    public has_owner_read(*self) Bool
+    public has_owner_write(*self) Bool
+    public has_owner_exec(*self) Bool
+    public has_group_read(*self) Bool
+    public has_group_write(*self) Bool
+    public has_group_exec(*self) Bool
+    public has_other_read(*self) Bool
+    public has_other_write(*self) Bool
+    public has_other_exec(*self) Bool
     public readonly() Permission
     public read_write() Permission
     public executable() Permission
 }
 
 given Permission as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given FileInfo {
-    public file_size(self ref) UInt64
-    public file_type(self ref) FileType
-    public permissions(self ref) Permission
-    public modified_time(self ref) DateTime
-    public accessed_time(self ref) DateTime
-    public created_time(self ref) DateTime
-    public is_file(self ref) Bool
-    public is_dir(self ref) Bool
-    public is_symlink(self ref) Bool
+    public file_size(*self) UInt64
+    public file_type(*self) FileType
+    public permissions(*self) Permission
+    public modified_time(*self) DateTime
+    public accessed_time(*self) DateTime
+    public created_time(*self) DateTime
+    public is_file(*self) Bool
+    public is_dir(*self) Bool
+    public is_symlink(*self) Bool
 }
 
 given FileInfo as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Permission as Eq {
@@ -236,20 +236,20 @@ given Path as IntoPath {
 }
 
 given Path {
-    public is_empty(self ref) Bool
-    public is_absolute(self ref) Bool
-    public join[T IntoPath](self ref, path T) Path
-    public dir_name(self ref) Path
-    public base_name(self ref) String
-    public ext_name(self ref) String
-    public stem_name(self ref) String
-    public with_ext_name(self ref, ext String) Path
-    public with_base_name(self ref, name String) Path
-    public normalize(self ref) Path
-    public components(self ref) List[String]
-    public starts_with(self ref, prefix Path) Bool
-    public ends_with(self ref, suffix Path) Bool
-    public relative_to[T IntoPath](self ref, base T) Result[Path]
+    public is_empty(*self) Bool
+    public is_absolute(*self) Bool
+    public join[T IntoPath](*self, path T) Path
+    public dir_name(*self) Path
+    public base_name(*self) String
+    public ext_name(*self) String
+    public stem_name(*self) String
+    public with_ext_name(*self, ext String) Path
+    public with_base_name(*self, name String) Path
+    public normalize(*self) Path
+    public components(*self) List[String]
+    public starts_with(*self, prefix Path) Bool
+    public ends_with(*self, suffix Path) Bool
+    public relative_to[T IntoPath](*self, base T) Result[Path]
 }
 
 given Path as Eq {
@@ -261,6 +261,6 @@ given Path as Hash {
 }
 
 given Path as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 ```

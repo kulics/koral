@@ -8,7 +8,7 @@
 // Dict Storage and Type Definition
 // ============================================================================
 // DictBucket uses a struct+tag layout (not enum) so that key/value fields are
-// directly addressable by pointer — enabling ref/ptr subscript helpers.
+// directly addressable by pointer — enabling */*raw subscript helpers.
 // Only Occupied buckets have initialized key/value. Empty and Deleted buckets
 // have raw (uninitialized) key/value memory; only the tag is valid.
 protected type DictBucket[K Hash, V Any](
@@ -20,14 +20,14 @@ protected type DictBucket[K Hash, V Any](
 // Bucket tag constants (inlined as 0(UInt), 1(UInt), 2(UInt))
 
 protected type DictStorage[K Hash, V Any](
-    mut buckets ptr mut DictBucket[K, V],
+    mut buckets *raw mut DictBucket[K, V],
     mut count UInt,
     mut capacity UInt,
 )
 
 given[K Hash, V Any] DictStorage[K, V] as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         for i in 0..<source.capacity then {
             if (source.buckets + i).tag == 1(UInt) then {
                 deinit_memory(source.buckets + i)
@@ -37,9 +37,9 @@ given[K Hash, V Any] DictStorage[K, V] as Drop {
     }
 }
 
-public type Dict[K Hash, V Any](protected mut storage ref mut DictStorage[K, V])
+public type Dict[K Hash, V Any](protected mut storage *mut DictStorage[K, V])
 
-public type DictIterator[K Hash, V Any](protected storage ref mut DictStorage[K, V], protected mut index UInt)
+public type DictIterator[K Hash, V Any](protected storage *mut DictStorage[K, V], protected mut index UInt)
 
 // ============================================================================
 // Dict Methods
@@ -67,12 +67,12 @@ given[K Hash, V Any] Dict[K, V] {
         return Dict[K, V](storage)
     }
 
-    public count(self ref) UInt = self.storage.count
+    public count(*self) UInt = self.storage.count
 
-    public borrow_ptr(self ref) ptr DictBucket[K, V] = self.storage.buckets
+    public borrow_ptr(*self) *raw DictBucket[K, V] = self.storage.buckets
 
-    private ensure_unique(self ref mut) Void = {
-        if not is_unique_mutable(self.storage.ptr) then {
+    private ensure_unique(*mut self) Void = {
+        if not is_unique_mutable(&raw self.storage) then {
             let old = self.storage
             let new_buckets = alloc_memory[DictBucket[K, V]](old.capacity)
             for i in 0..<old.capacity then {
@@ -89,7 +89,7 @@ given[K Hash, V Any] Dict[K, V] {
     }
 
     // Using when for bucket handling
-    private find_slot(self ref, key K) Option[UInt] = {
+    private find_slot(*self, key K) Option[UInt] = {
         let h = key.hash()
         let mut idx = h % self.storage.capacity
         let mut first_deleted = Option[UInt].None()
@@ -124,7 +124,7 @@ given[K Hash, V Any] Dict[K, V] {
         return first_deleted
     }
 
-    private rehash(self ref mut) Void = {
+    private rehash(*mut self) Void = {
         let old_cap = self.storage.capacity
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2(UInt)
@@ -149,7 +149,7 @@ given[K Hash, V Any] Dict[K, V] {
     }
 
     // Internal insert used by rehash - doesn't return old value
-    private insert_internal(self ref mut, key K, value V) Void = {
+    private insert_internal(*mut self, key K, value V) Void = {
         when self.find_slot(key) in {
             .None then {
                 panic("Dict insert failed");
@@ -168,7 +168,7 @@ given[K Hash, V Any] Dict[K, V] {
         }
     }
 
-    public insert(self ref mut, key K, value V) Void = {
+    public insert(*mut self, key K, value V) Void = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then {
             self.rehash();
@@ -191,7 +191,7 @@ given[K Hash, V Any] Dict[K, V] {
         }
     }
 
-    public try_insert(self ref mut, key K, value V) Bool = {
+    public try_insert(*mut self, key K, value V) Bool = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then {
             self.rehash();
@@ -213,13 +213,13 @@ given[K Hash, V Any] Dict[K, V] {
         }
     }
 
-    public insert_dict(self ref mut, other Dict[K, V]) Void = {
+    public insert_dict(*mut self, other Dict[K, V]) Void = {
         for entry in other then {
             self.insert(entry.first, entry.second)
         }
     }
 
-    public get(self ref, key K) Option[V] = {
+    public get(*self, key K) Option[V] = {
         when self.find_slot(key) in {
             .None then {
                 return Option[V].None()
@@ -235,7 +235,7 @@ given[K Hash, V Any] Dict[K, V] {
         }
     }
 
-    public get_or_insert(self ref mut, key K, value V) V = {
+    public get_or_insert(*mut self, key K, value V) V = {
         when self.get(key) in {
             .Some(v) then {
                 return v
@@ -247,21 +247,21 @@ given[K Hash, V Any] Dict[K, V] {
         }
     }
 
-    public contains_key(self ref, key K) Bool = when self.get(key) in {
+    public contains_key(*self, key K) Bool = when self.get(key) in {
         .Some(_) then true,
         .None then false,
     }
 
-    public remove(self ref mut, key K) Void = {
+    public remove(*mut self, key K) Void = {
         let _ = self.take(key)
     }
 
-    public try_remove(self ref mut, key K) Bool = when self.take(key) in {
+    public try_remove(*mut self, key K) Bool = when self.take(key) in {
         .Some(_) then true,
         .None then false,
     }
 
-    public take(self ref mut, key K) Option[V] = {
+    public take(*mut self, key K) Option[V] = {
         self.ensure_unique()
         when self.find_slot(key) in {
             .None then {
@@ -282,9 +282,9 @@ given[K Hash, V Any] Dict[K, V] {
         }
     }
 
-    public is_empty(self ref) Bool = self.storage.count == 0
+    public is_empty(*self) Bool = self.storage.count == 0
 
-    public clear(self ref mut) Void = {
+    public clear(*mut self) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.capacity then {
             let bucket_ptr = self.storage.buckets + i
@@ -297,7 +297,7 @@ given[K Hash, V Any] Dict[K, V] {
     }
 
     // Retains only entries satisfying the predicate. O(n).
-    public retain(self ref mut, predicate Func[K, V, Bool]) Void = {
+    public retain(*mut self, predicate Func[K, V, Bool]) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.capacity then {
             let bucket_ptr = self.storage.buckets + i
@@ -312,14 +312,14 @@ given[K Hash, V Any] Dict[K, V] {
     }
 
     // Builtin subscript helpers for d[key] syntax
-    private __index_get(self ref, key K) V = {
+    private __index_get(*self, key K) V = {
         when self.get(key) in {
             .Some(v) then { return v },
             .None then { panic("Dict key not found") },
         }
     }
 
-    private __index_set(self ref mut, key K, value V) Void = {
+    private __index_set(*mut self, key K, value V) Void = {
         when self.get(key) in {
             .None then { panic("Dict key not found") },
             .Some(_) then {},
@@ -334,18 +334,17 @@ given[K Hash, V Any] Dict[K, V] {
         init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value))
     }
 
-    private __index_ptr(self ref, key K) ptr V = {
+    private __index_ptr(*self, key K) *raw V = {
         let idx = when self.find_slot(key) in {
             .None then { panic("Dict key not found") },
             .Some(i) then i,
         }
-        // self.storage.buckets is ptr mut DictBucket; +idx gives ptr to bucket[idx]
+        // self.storage.buckets is *raw mut DictBucket; +idx gives *raw to bucket[idx]
         let bucket_ptr = self.storage.buckets + idx
-        // .val dereferences to the DictBucket, .value accesses the field, .ptr takes address
-        return bucket_ptr.val.value.ptr
+        return &raw (*bucket_ptr).value
     }
 
-    private __index_mut_ptr(self ref mut, key K) ptr mut V = {
+    private __index_mut_ptr(*mut self, key K) *raw mut V = {
         let idx = when self.find_slot(key) in {
             .None then { panic("Dict key not found") },
             .Some(i) then i,
@@ -356,19 +355,19 @@ given[K Hash, V Any] Dict[K, V] {
             .Some(i) then i,
         }
         let bucket_ptr = self.storage.buckets + final_idx
-        return bucket_ptr.val.value.ptr
+        return &raw (*bucket_ptr).value
     }
 
-    private __index_ref(self ref, key K) ref V = {
+    private __index_ref(*self, key K) * V = {
         let idx = when self.find_slot(key) in {
             .None then { panic("Dict key not found") },
             .Some(i) then i,
         }
         let bucket_ptr = self.storage.buckets + idx
-        return make_ref[V, DictStorage[K, V]](bucket_ptr.val.value.ptr, self.storage)
+        return make_ref[V, DictStorage[K, V]](&raw (*bucket_ptr).value, self.storage)
     }
 
-    private __index_mut_ref(self ref mut, key K) ref mut V = {
+    private __index_mut_ref(*mut self, key K) *mut V = {
         let idx = when self.find_slot(key) in {
             .None then { panic("Dict key not found") },
             .Some(i) then i,
@@ -379,7 +378,7 @@ given[K Hash, V Any] Dict[K, V] {
             .Some(i) then i,
         }
         let bucket_ptr = self.storage.buckets + final_idx
-        return make_mut_ref[V, DictStorage[K, V]](bucket_ptr.val.value.ptr, self.storage)
+        return make_mut_ref[V, DictStorage[K, V]](&raw (*bucket_ptr).value, self.storage)
     }
 }
 
@@ -388,7 +387,7 @@ given[K Hash, V Any] Dict[K, V] {
 // ============================================================================
 given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
 
-    public next(self ref mut) Option[Pair[K, V]] = {
+    public next(*mut self) Option[Pair[K, V]] = {
         while self.index < self.storage.capacity then {
             let bucket_ptr = self.storage.buckets + self.index
             self.index = self.index + 1
@@ -406,13 +405,13 @@ given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
 
 // DictKeysIterator - iterates over keys only
 public type DictKeysIterator[K Hash, V Any](
-    protected storage ref DictStorage[K, V],
+    protected storage * DictStorage[K, V],
     protected mut index UInt,
 )
 
 given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
 
-    public next(self ref mut) Option[K] = {
+    public next(*mut self) Option[K] = {
         while self.index < self.storage.capacity then {
             let bucket_ptr = self.storage.buckets + self.index
             self.index = self.index + 1
@@ -426,13 +425,13 @@ given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
 
 // DictValuesIterator - iterates over values only
 public type DictValuesIterator[K Hash, V Any](
-    protected storage ref DictStorage[K, V],
+    protected storage * DictStorage[K, V],
     protected mut index UInt,
 )
 
 given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
 
-    public next(self ref mut) Option[V] = {
+    public next(*mut self) Option[V] = {
         while self.index < self.storage.capacity then {
             let bucket_ptr = self.storage.buckets + self.index
             self.index = self.index + 1
@@ -447,18 +446,18 @@ given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
 // Add keys() and values() methods to Dict
 given[K Hash, V Any] Dict[K, V] {
 
-    public keys(self ref) DictKeysIterator[K, V] = DictKeysIterator[K, V](self.storage, 0)
-    public values(self ref) DictValuesIterator[K, V] = DictValuesIterator[K, V](self.storage, 0)
+    public keys(*self) DictKeysIterator[K, V] = DictKeysIterator[K, V](self.storage, 0)
+    public values(*self) DictValuesIterator[K, V] = DictValuesIterator[K, V](self.storage, 0)
 }
 
 given[K Hash, V Any] Dict[K, V] as Iterable[Pair[K, V], DictIterator[K, V]] {
 
-    public iterator(self ref) DictIterator[K, V] = DictIterator[K, V](self.storage, 0)
+    public iterator(*self) DictIterator[K, V] = DictIterator[K, V](self.storage, 0)
 }
 
 given[T Deref] List[T] {
 
-    public group_by[K Hash](self ref, key Func[T, K]) Dict[K, List[T]] = {
+    public group_by[K Hash](*self, key Func[T, K]) Dict[K, List[T]] = {
         let mut groups = Dict[K, List[T]].new()
         for i in 0..<self.count() then {
             let value = self[i]

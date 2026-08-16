@@ -65,7 +65,8 @@ final class MIRLowerer {
       context: context,
       staticMethodLookup: program.staticMethodLookup,
       traits: program.traits,
-      receiverMethodDispatch: program.receiverMethodDispatch
+      receiverMethodDispatch: program.receiverMethodDispatch,
+      escapeSummaries: [:]
     )
     return MIRReferenceAllocationPromoter(program: loweredProgram).promote()
   }
@@ -129,7 +130,7 @@ final class MIRLowerer {
       return false
     }
     switch firstParam.type {
-    case .reference, .borrowedReference:
+    case .reference:
       return false
     default:
       break
@@ -155,13 +156,6 @@ final class MIRLowerer {
         return nil
       }
       return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
-    case .borrowedReference(let inner, let lifetime, let mutable):
-      guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
-        return nil
-      }
-      return mutable
-        ? .mutableBorrowedReference(inner: resolved, lifetime: lifetime)
-        : .borrowedReference(inner: resolved, lifetime: lifetime)
     case .weakReference(let inner, let mutable):
       guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
         return nil
@@ -1060,6 +1054,13 @@ private final class MIRFunctionBuilder {
       return
     }
 
+    if case .referenceExpression(let inner, let type) = expression,
+       let place = lowerPlace(inner) {
+      let refValue = MIRValue.ref(place, kind: referenceKind(for: type), allocation: .heapOwned)
+      append(.assign(.local(resultLocal.id), refValue))
+      return
+    }
+
     if expression.containsBranchBreak {
       guard let result = lowerExpression(expression), !currentBlockIsTerminated else {
         return
@@ -1599,17 +1600,24 @@ private final class MIRFunctionBuilder {
   }
 
   private func patternMatchPlace(place: MIRPlace, type: Type) -> (place: MIRPlace, type: Type) {
-    switch type {
-    case .reference(let inner),
-         .mutableReference(let inner),
-         .borrowedReference(let inner, _),
-         .mutableBorrowedReference(let inner, _),
-         .weakReference(let inner),
-         .mutableWeakReference(let inner):
+    if let inner = type.indirectionCompatibilityInfo?.inner {
       return (.deref(base: .placeRead(place, ownership: .borrow), pointee: inner), inner)
-    default:
-      return (place, type)
     }
+    return (place, type)
+  }
+
+  private func resolveWrappedPatternType(
+    inner: TypeNode,
+    substitution: [String: Type],
+    wrap: (Type) -> Type
+  ) -> Type? {
+    if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
+      return wrap(traitInner)
+    }
+    guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+      return nil
+    }
+    return wrap(resolved)
   }
 
   private func resolveConcretePatternNominalType(_ type: Type) -> Type {
@@ -1672,33 +1680,13 @@ private final class MIRFunctionBuilder {
       }
       return nil
     case .reference(let inner, let mutable):
-      if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
-        return mutable ? .mutableReference(inner: traitInner) : .reference(inner: traitInner)
+      return resolveWrappedPatternType(inner: inner, substitution: substitution) {
+        mutable ? .mutableReference(inner: $0) : .reference(inner: $0)
       }
-      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
-        return nil
-      }
-      return mutable ? .mutableReference(inner: resolved) : .reference(inner: resolved)
-    case .borrowedReference(let inner, let lifetime, let mutable):
-      if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
-        return mutable
-          ? .mutableBorrowedReference(inner: traitInner, lifetime: lifetime)
-          : .borrowedReference(inner: traitInner, lifetime: lifetime)
-      }
-      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
-        return nil
-      }
-      return mutable
-        ? .mutableBorrowedReference(inner: resolved, lifetime: lifetime)
-        : .borrowedReference(inner: resolved, lifetime: lifetime)
     case .weakReference(let inner, let mutable):
-      if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
-        return mutable ? .mutableWeakReference(inner: traitInner) : .weakReference(inner: traitInner)
+      return resolveWrappedPatternType(inner: inner, substitution: substitution) {
+        mutable ? .mutableWeakReference(inner: $0) : .weakReference(inner: $0)
       }
-      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
-        return nil
-      }
-      return mutable ? .mutableWeakReference(inner: resolved) : .weakReference(inner: resolved)
     case .pointer(let inner, let mutable):
       guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
         return nil
@@ -1986,8 +1974,8 @@ private final class MIRFunctionBuilder {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
-         .borrowedReference(let inner, _),
-         .mutableBorrowedReference(let inner, _),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner),
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return (.placeRead(.deref(base: value, pointee: inner), ownership: .borrow), inner)
@@ -2000,8 +1988,8 @@ private final class MIRFunctionBuilder {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
-         .borrowedReference(let inner, _),
-         .mutableBorrowedReference(let inner, _),
+         .borrowedReference(let inner),
+         .mutableBorrowedReference(let inner),
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return resolveConcretePatternNominalType(inner)
@@ -2515,7 +2503,7 @@ private final class MIRFunctionBuilder {
     let subjectType: Type
     switch subject.type {
     case .reference(let inner), .mutableReference(let inner),
-         .borrowedReference(let inner, _), .mutableBorrowedReference(let inner, _),
+         .borrowedReference(let inner), .mutableBorrowedReference(let inner),
          .weakReference(let inner), .mutableWeakReference(let inner):
       subjectType = inner
     default:
@@ -2937,6 +2925,11 @@ private final class MIRFunctionBuilder {
 
   private func lowerBorrowedReferenceArgument(_ argument: TypedExpressionNode, expectedType: Type?) -> MIRValue? {
     guard let expectedType else { return nil }
+
+    func expectedRefInfo(_ type: Type) -> (family: Type.IndirectionFamily, inner: Type, mutable: Bool)? {
+      type.indirectionCompatibilityInfo
+    }
+
     switch expectedType {
     case .reference(let inner):
       // Managed ref T: only pass through existing compatible refs, no implicit T → ref T
@@ -2948,18 +2941,27 @@ private final class MIRFunctionBuilder {
       if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: true) {
         return lowerBorrowedSourceValue(argument)
       }
-    case .borrowedReference(let inner, _):
+    case .borrowedReference(let inner):
       if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .shared, allocation: .stackBorrow)
       }
-      if argument.type == expectedType || argument.type == .reference(inner: inner) || context.containsGenericParameter(inner) {
+      if let info = expectedRefInfo(expectedType),
+         let actualInfo = argument.type.indirectionCompatibilityInfo,
+         info.family == actualInfo.family,
+         !info.mutable,
+         (actualInfo.inner == inner || context.containsGenericParameter(inner)) {
         return lowerBorrowedSourceValue(argument)
       }
-    case .mutableBorrowedReference(let inner, _):
+    case .mutableBorrowedReference(let inner):
       if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
         return .ref(place, kind: .mutable, allocation: .stackBorrow)
       }
-      if argument.type == expectedType || argument.type == .mutableReference(inner: inner) || context.containsGenericParameter(inner) {
+      if let info = expectedRefInfo(expectedType),
+         let actualInfo = argument.type.indirectionCompatibilityInfo,
+         info.family == actualInfo.family,
+         info.mutable,
+         actualInfo.mutable,
+         (actualInfo.inner == inner || context.containsGenericParameter(inner)) {
         return lowerBorrowedSourceValue(argument)
       }
     case .weakReference(let inner):
@@ -2983,18 +2985,11 @@ private final class MIRFunctionBuilder {
   }
 
   private func isCompatibleManagedReferenceArgument(_ actualType: Type, expectedInner: Type, mutable: Bool) -> Bool {
-    switch (mutable, actualType) {
-    case (false, .reference(let inner)),
-         (false, .mutableReference(let inner)),
-         (false, .borrowedReference(let inner, _)),
-         (false, .mutableBorrowedReference(let inner, _)):
-      return inner == expectedInner || context.containsGenericParameter(expectedInner)
-    case (true, .mutableReference(let inner)),
-         (true, .mutableBorrowedReference(let inner, _)):
-      return inner == expectedInner || context.containsGenericParameter(expectedInner)
-    default:
+    let expectedType: Type = mutable ? .mutableReference(inner: expectedInner) : .reference(inner: expectedInner)
+    guard let (_, actualInner) = expectedType.compatibleIndirectionInners(with: actualType) else {
       return false
     }
+    return actualInner == expectedInner || context.containsGenericParameter(expectedInner)
   }
 
   private func functionParameterTypes(for callee: MIROperand) -> [Type] {
@@ -3329,8 +3324,8 @@ private final class MIRFunctionBuilder {
       switch source.type {
       case .reference(let inner),
            .mutableReference(let inner),
-           .borrowedReference(let inner, _),
-           .mutableBorrowedReference(let inner, _),
+           .borrowedReference(let inner),
+           .mutableBorrowedReference(let inner),
            .weakReference(let inner),
            .mutableWeakReference(let inner),
            .pointer(let inner),

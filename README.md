@@ -29,10 +29,10 @@ let local_point = Point(1, 2)
 // box(...) creates an owned escaping mutable reference.
 let heap_point = box(Point(3, 4))
 
-// The 'ref' keyword borrows from an existing lvalue.
-// Result mutability depends on the source: let mut → ref mut, let → ref.
+// The '&' operator borrows from an existing lvalue.
+// Result mutability depends on the source: let mut → &mut, let → &.
 let mut local_point2 = Point(3, 4)
-let heap_point_ref = local_point2.ref  // ref mut (from let mut)
+let heap_point_ref = &mut local_point2  // &mut (from let mut)
 
 // Bumping the refcount, no deep copy
 let shared_point = heap_point 
@@ -134,16 +134,16 @@ let max[T Ord](a T, b T) T = if a > b then a else b
 
 ```koral
 trait Greet {
-    greet(self ref) String
+    greet(*self) String
 }
 
 type Bot(name String)
 
 given Bot as Greet {
-    greet(self ref) String = "beep boop, I'm " + self.name
+    greet(*self) String = "beep boop, I'm " + self.name
 }
 
-let g ref Greet = box(Bot("K-9"))  // trait object
+let g *Greet = box(Bot("K-9"))  // trait object
 ```
 
 ### Algebraic data types with implicit member syntax
@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
-- Reference types: `ref` (managed read-only), `ref mut` (managed mutable), `ref '_` (borrowed read-only), `ref '_ mut` (borrowed mutable), `ptr` (read-only), `ptr mut` (mutable), `weakref` (read-only weak), `weakref mut` (mutable weak)
+- Reference types: `*` (managed read-only), `*mut` (managed mutable), `*_` (borrowed read-only), `*_ mut` (borrowed mutable), `*raw` (read-only), `*raw mut` (mutable), `?*` (read-only weak), `?*mut` (mutable weak)
 
 ### Control Flow
 
@@ -207,7 +207,7 @@ let result = list.iterator()
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
 - Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
-- Trait objects for runtime polymorphism: `ref Greet`, `ref mut Greet`
+- Trait objects for runtime polymorphism: `*Greet`, `*mut Greet`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Neg`, `Mul`, `Div`, `Rem`, `Eq`, `Ord`)
 
 ### Functions and Lambdas
@@ -232,38 +232,38 @@ let result = list.iterator()
 
 - Automatic reference counting with copy-on-write semantics
 - Escape analysis for stack vs. heap allocation decisions
-- Weak references (`weakref` / `weakref mut`) for breaking reference cycles
+- Weak references (`?*` / `?*mut`) for breaking reference cycles
 - `defer` for deterministic resource cleanup
 
 Reference creation rules:
-- Koral distinguishes managed references (`ref T`, `ref mut T`) from borrowed references (`ref '_ T`, `ref '_ mut T`). Both share the same runtime layout; the difference is frontend static semantics only — borrowed references cannot escape.
-- `.ref` uses "borrow-first" semantics: without an explicit managed expected type, `.ref` defaults to producing a borrowed reference. When the local context explicitly requires a managed `ref` / `ref mut`, the compiler promotes that `.ref` to a managed reference within the current function.
-- `.ref` result mutability depends on the source: `let mut` binding → `ref mut T`, `let` binding → `ref T`, mutable path → `ref mut T`.
-- `ref mut T` implicitly converts to `ref T`; `ref '_ mut T` implicitly converts to `ref '_ T`. The reverse is not allowed.
-- `.ref` on rvalues is rejected by the compiler.
-- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `ref T`, the caller must use `a.ref`. If it expects `T`, the caller must use `a.val`. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** `self ref` methods accept values via auto-ref; `self` methods accept `ref T` via auto-deref (following Go's pointer receiver behavior).
-- Calling a `self ref` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
-- Trait objects follow the same mutability split as ordinary refs: `ref Trait` can call only `self ref` requirements, while `ref mut Trait` can call both `self ref mut` and `self ref` requirements.
-- Method receiver forms: `self` (managed value), `self ref` / `self ref mut` (borrowed receivers, auto-ref allowed), and explicit managed forms `self ref Self` / `self ref mut Self` (no auto-ref/auto-deref). Auto-ref and auto-deref apply only to `self` and `self ref` forms.
-- `ref T` is read-only: `.val` read only. `ref mut T` supports `.val` read and `.val = expr` assignment.
-- `ptr T` is read-only: `.val` read only. `ptr mut T` supports `.val` read, `.val = expr`, and `p[i] = expr`.
-- Use `box(expr)` for owned escaping references from literals/temporaries — returns `ref mut T`.
+- Koral distinguishes managed references (`*T`, `*mut T`) from borrowed references (`*_ T`, `*_ mut T`). Both share the same runtime layout; the difference is frontend static semantics only — borrowed references cannot escape.
+- `&` uses "borrow-first" semantics: without an explicit managed expected type, `&` defaults to producing a borrowed reference. When the local context explicitly requires a managed `*` / `*mut`, the compiler promotes that `&` to a managed reference within the current function.
+- `&` result mutability depends on the source: `let mut` binding → `*mut T`, `let` binding → `*T`, mutable path → `*mut T`.
+- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
+- `&` on rvalues is rejected by the compiler.
+- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must use `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** `*self` methods accept values via auto-ref; `self` methods accept `*T` via auto-deref (following Go's pointer receiver behavior).
+- Calling a `*self` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
+- Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mut Trait` can call both `*mut self` and `*self` requirements.
+- Method receiver forms: `self` (managed value), `*self` / `*mut self` (borrowed receivers, auto-ref allowed), and explicit managed forms `*self Self` / `*mut self Self` (no auto-ref/auto-deref). Auto-ref and auto-deref apply only to `self` and `*self` forms.
+- `*T` is read-only: `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
+- `*raw T` is read-only: `*expr` dereference read only. `*raw mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mut T`.
 - `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
 - Ordinary parameter `mut` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
-- `Drop` uses `drop(source ptr mut Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
+- `Drop` uses `drop(source *raw mut Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
 
 Weak reference rules:
-- `.weakref` on a `ref T` produces `weakref T`; on a `ref mut T` produces `weakref mut T`. It is only valid on ref types.
-- `.to_ref()` on a `weakref T` returns `Option[ref T]`; on a `weakref mut T` returns `Option[ref mut T]`.
-- `weakref mut T` implicitly converts to `weakref T` (widening).
+- `downgrade(*T)` produces `?*T`; `downgrade_mut(*mut T)` produces `?*mut T`.
+- `upgrade(?*T)` returns `Option[*T]`; `upgrade_mut(?*mut T)` returns `Option[*mut T]`.
+- `?*mut T` implicitly converts to `?*T` (widening).
 
 ```koral
-let strong ref mut Int = box(42)
-let weak weakref mut Int = strong.weakref   // ref mut → weakref mut
+let strong *mut Int = box(42)
+let weak ?*mut Int = downgrade_mut(strong)   // *mut → ?*mut
 
-when weak.to_ref() in {
-    .Some(r) then println(r.val),
+when upgrade_mut(weak) in {
+    .Some(r) then println(*r),
     .None    then println("expired"),
 }
 ```

@@ -11,7 +11,7 @@ public let make_bytes(count UInt) List[UInt8]
 
 public let make_uninitialized_bytes(count UInt) List[UInt8]
 
-public let box[T Any](mut v T) ref mut T
+public let box[T Any](mut v T) *mut T
 
 public let max[T Ord](a T, b T) T
 
@@ -88,11 +88,11 @@ public trait Bounded Ord {
 }
 
 public trait Iterator[T Any] {
-    next(self ref mut) Option[T]
+    next(*mut self) Option[T]
 }
 
 public trait Iterable[T Any, R Iterator[T]] {
-    iterator(self ref) R
+    iterator(*self) R
 }
 
 public trait Step Bounded {
@@ -101,7 +101,7 @@ public trait Step Bounded {
 }
 
 public trait ToString {
-    to_string(self ref) String
+    to_string(*self) String
 }
 
 public trait Hash Eq {
@@ -109,11 +109,11 @@ public trait Hash Eq {
 }
 
 public trait Error {
-    message(self ref) String
+    message(*self) String
 }
 
 public trait Drop {
-    drop(source ptr mut Self) Void
+    drop(source *raw mut Self) Void
 }
 ```
 
@@ -188,7 +188,7 @@ public type RangeIterator[T Step]
 
 public type Result[T Any] {
     Ok(value T),
-    Error(error ref Error),
+    Error(error *Error),
 }
 
 public type Rune
@@ -877,74 +877,74 @@ given Float64 as Bounded {
 given[T Deref] Deque[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
-    public count(self ref) UInt
-    public reserve(self ref mut, additional UInt) Void
-    public is_empty(self ref) Bool
-    public push_back(self ref mut, value T) Void
-    public push_front(self ref mut, value T) Void
-    public pop_front(self ref mut) Option[T]
-    public pop_back(self ref mut) Option[T]
-    public first(self ref) Option[T]
-    public last(self ref) Option[T]
-    public get(self ref, index UInt) Option[T]
-    public clear(self ref mut) Void
-    public reverse(self ref mut) Void
-    public retain(self ref mut, predicate Func[T, Bool]) Void
+    public count(*self) UInt
+    public reserve(*mut self, additional UInt) Void
+    public is_empty(*self) Bool
+    public push_back(*mut self, value T) Void
+    public push_front(*mut self, value T) Void
+    public pop_front(*mut self) Option[T]
+    public pop_back(*mut self) Option[T]
+    public first(*self) Option[T]
+    public last(*self) Option[T]
+    public get(*self, index UInt) Option[T]
+    public clear(*mut self) Void
+    public reverse(*mut self) Void
+    public retain(*mut self, predicate Func[T, Bool]) Void
 }
 
 given[T Eq and Deref] Deque[T] {
-    public contains(self ref, value T) Bool
+    public contains(*self, value T) Bool
 }
 
 given[T Deref] Deque[T] as Iterable[T, DequeIterator[T]] {
-    public iterator(self ref) DequeIterator[T]
+    public iterator(*self) DequeIterator[T]
 }
 
 given[T Deref] DequeIterator[T] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[K Hash, V Any] Dict[K, V] {
     public new() Self
     public with_capacity(capacity UInt) Self
-    public count(self ref) UInt
-    public insert(self ref mut, key K, value V) Void
-    public try_insert(self ref mut, key K, value V) Bool
-    public insert_dict(self ref mut, other Dict[K, V]) Void
-    public get(self ref, key K) Option[V]
-    public get_or_insert(self ref mut, key K, value V) V
-    public contains_key(self ref, key K) Bool
-    public remove(self ref mut, key K) Void
-    public try_remove(self ref mut, key K) Bool
-    public take(self ref mut, key K) Option[V]
-    public is_empty(self ref) Bool
-    public clear(self ref mut) Void
-    public retain(self ref mut, predicate Func[K, V, Bool]) Void
+    public count(*self) UInt
+    public insert(*mut self, key K, value V) Void
+    public try_insert(*mut self, key K, value V) Bool
+    public insert_dict(*mut self, other Dict[K, V]) Void
+    public get(*self, key K) Option[V]
+    public get_or_insert(*mut self, key K, value V) V
+    public contains_key(*self, key K) Bool
+    public remove(*mut self, key K) Void
+    public try_remove(*mut self, key K) Bool
+    public take(*mut self, key K) Option[V]
+    public is_empty(*self) Bool
+    public clear(*mut self) Void
+    public retain(*mut self, predicate Func[K, V, Bool]) Void
 }
 
 given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
-    public next(self ref mut) Option[Pair[K, V]]
+    public next(*mut self) Option[Pair[K, V]]
 }
 
 given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
-    public next(self ref mut) Option[K]
+    public next(*mut self) Option[K]
 }
 
 given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
-    public next(self ref mut) Option[V]
+    public next(*mut self) Option[V]
 }
 
 given[K Hash, V Any] Dict[K, V] {
-    public keys(self ref) DictKeysIterator[K, V]
-    public values(self ref) DictValuesIterator[K, V]
+    public keys(*self) DictKeysIterator[K, V]
+    public values(*self) DictValuesIterator[K, V]
 }
 
 given[K Hash, V Any] Dict[K, V] as Iterable[Pair[K, V], DictIterator[K, V]] {
-    public iterator(self ref) DictIterator[K, V]
+    public iterator(*self) DictIterator[K, V]
 }
 
 given[T Deref] List[T] {
-    public group_by[K Hash](self ref, key Func[T, K]) Dict[K, List[T]]
+    public group_by[K Hash](*self, key Func[T, K]) Dict[K, List[T]]
 }
 
 given Duration {
@@ -967,59 +967,59 @@ given Duration as Ord {
 }
 
 given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
-    public next(self ref mut) Option[U]
+    public next(*mut self) Option[U]
 }
 
 given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
-    public next(self ref mut) Option[U]
+    public next(*mut self) Option[U]
 }
 
 given[T Any, R Iterator[T]] TakeIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R Iterator[T]] SkipIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R Iterator[T]] StepIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R Iterator[T]] EnumerateIterator[T, R] as Iterator[Pair[UInt, T]] {
-    public next(self ref mut) Option[Pair[UInt, T]]
+    public next(*mut self) Option[Pair[UInt, T]]
 }
 
 given[T Any, R Iterator[T]] InspectIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R Iterator[T]] TakeWhileIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R Iterator[T]] SkipWhileIterator[T, R] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Any, R1 Iterator[T], R2 Iterator[T]] ChainIterator[T, R1, R2] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as Iterator[Pair[A, B]] {
-    public next(self ref mut) Option[Pair[A, B]]
+    public next(*mut self) Option[Pair[A, B]]
 }
 
 given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, InnerR] as Iterator[U] {
-    public next(self ref mut) Option[U]
+    public next(*mut self) Option[U]
 }
 
 given[T Any] Iterator[T] {
@@ -1086,33 +1086,33 @@ given[T Add[T] and Div[T] and Zero and One] Iterator[T] {
 given[T Deref] List[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
-    public count(self ref) UInt
-    public reserve(self ref mut, additional UInt) Void
-    public push(self ref mut, value T) Void
-    public push_list(self ref mut, other List[T]) Void
-    public push_sublist(self ref mut, other List[T], range Range[UInt]) Void
-    public pop(self ref mut) Option[T]
-    public insert_list_at(self ref mut, index UInt, other List[T]) Void
-    public insert_sublist_at(self ref mut, index UInt, other List[T], range Range[UInt]) Void
-    public insert_at(self ref mut, index UInt, value T) Void
-    public remove_at(self ref mut, index UInt) Void
-    public take_at(self ref mut, index UInt) T
-    public get(self ref, index UInt) Option[T]
-    public first(self ref) Option[T]
-    public last(self ref) Option[T]
-    public is_empty(self ref) Bool
-    public clear(self ref mut) Void
-    public fill(self ref mut, value T) Void
-    public map[U Deref](self ref, fn Func[T, U]) List[U]
-    public reverse(self ref mut) Void
-    public borrow_ptr(self ref) ptr T
-    public borrow_mut_ptr(self ref mut) ptr mut T
-    public slice_spec(self ref, range Range[UInt]) SliceSpec
-    public sublist(self ref, range Range[UInt]) List[T]
-    public enumerate(self ref) EnumerateIterator[T, ListIterator[T]]
-    public retain(self ref mut, predicate Func[T, Bool]) Void
-    public sort_by[K Ord](self ref mut, key Func[T, K]) Void
-    public binary_search_by[K Ord](self ref, key Func[T, K], target K) Pair[UInt, Bool]
+    public count(*self) UInt
+    public reserve(*mut self, additional UInt) Void
+    public push(*mut self, value T) Void
+    public push_list(*mut self, other List[T]) Void
+    public push_sublist(*mut self, other List[T], range Range[UInt]) Void
+    public pop(*mut self) Option[T]
+    public insert_list_at(*mut self, index UInt, other List[T]) Void
+    public insert_sublist_at(*mut self, index UInt, other List[T], range Range[UInt]) Void
+    public insert_at(*mut self, index UInt, value T) Void
+    public remove_at(*mut self, index UInt) Void
+    public take_at(*mut self, index UInt) T
+    public get(*self, index UInt) Option[T]
+    public first(*self) Option[T]
+    public last(*self) Option[T]
+    public is_empty(*self) Bool
+    public clear(*mut self) Void
+    public fill(*mut self, value T) Void
+    public map[U Deref](*self, fn Func[T, U]) List[U]
+    public reverse(*mut self) Void
+    public borrow_ptr(*self) *raw T
+    public borrow_mut_ptr(*mut self) *raw mut T
+    public slice_spec(*self, range Range[UInt]) SliceSpec
+    public sublist(*self, range Range[UInt]) List[T]
+    public enumerate(*self) EnumerateIterator[T, ListIterator[T]]
+    public retain(*mut self, predicate Func[T, Bool]) Void
+    public sort_by[K Ord](*mut self, key Func[T, K]) Void
+    public binary_search_by[K Ord](*self, key Func[T, K], target K) Pair[UInt, Bool]
 }
 
 given[T Eq and Deref] List[T] as Eq {
@@ -1120,26 +1120,26 @@ given[T Eq and Deref] List[T] as Eq {
 }
 
 given[T Eq and Deref] List[T] {
-    public contains(self ref, value T) Bool
-    public dedup(self ref mut) Void
+    public contains(*self, value T) Bool
+    public dedup(*mut self) Void
 }
 
 given[T Deref] ListIterator[T] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Deref] List[T] as Iterable[T, ListIterator[T]] {
-    public iterator(self ref) ListIterator[T]
+    public iterator(*self) ListIterator[T]
 }
 
 given[T Ord and Deref] List[T] {
-    public binary_search(self ref, target T) Pair[UInt, Bool]
-    public sort(self ref mut) Void
+    public binary_search(*self, target T) Pair[UInt, Bool]
+    public sort(*mut self) Void
 }
 
 given[T Any] Option[T] {
-    public is_some(self ref) Bool
-    public is_none(self ref) Bool
+    public is_some(*self) Bool
+    public is_none(*self) Bool
     public unwrap(self) T
     public expect(self, message String) T
     public unwrap_or(self, default T) T
@@ -1151,12 +1151,12 @@ given[T Eq] Option[T] as Eq {
     public equals(self, other Option[T]) Bool
 }
 
-intrinsic given[T Any] weakref T {
-    public to_ref(self) Option[ref T]
+intrinsic given[T Any] ?*T {
+    public upgrade(self) Option[*T]
 }
 
-intrinsic given[T Any] weakref mut T {
-    public to_ref(self) Option[ref mut T]
+intrinsic given[T Any] ?*mut T {
+    public upgrade(self) Option[*mut T]
 }
 
 given Float32 {
@@ -1360,8 +1360,8 @@ given SliceSpec {
 }
 
 given[T Ord] Range[T] {
-    public contains(self ref, value T) Bool
-    public is_empty(self ref) Bool
+    public contains(*self, value T) Bool
+    public is_empty(*self) Bool
 }
 
 given Int as Step {
@@ -1415,19 +1415,19 @@ given UInt64 as Step {
 }
 
 given[T Step] RangeIterator[T] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given[T Step] Range[T] as Iterable[T, RangeIterator[T]] {
-    public iterator(self ref) RangeIterator[T]
+    public iterator(*self) RangeIterator[T]
 }
 
 given[T Any] Result[T] {
-    public is_ok(self ref) Bool
-    public is_error(self ref) Bool
+    public is_ok(*self) Bool
+    public is_error(*self) Bool
     public unwrap(self) T
     public expect(self, message String) T
-    public unwrap_error(self) ref Error
+    public unwrap_error(self) *Error
     public unwrap_or(self, default T) T
     public map[U Any](self, f Func[T, U]) Result[U]
 }
@@ -1464,90 +1464,90 @@ given Rune as Ord {
 }
 
 given Rune as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given[T Hash] Set[T] {
     public new() Self
     public with_capacity(capacity UInt) Self
-    public count(self ref) UInt
-    public insert(self ref mut, value T) Void
-    public try_insert(self ref mut, value T) Bool
-    public insert_set(self ref mut, other Set[T]) Void
-    public contains(self ref, value T) Bool
-    public remove(self ref mut, value T) Void
-    public try_remove(self ref mut, value T) Bool
-    public is_empty(self ref) Bool
-    public is_subset_of(self ref, other Set[T]) Bool
-    public is_superset_of(self ref, other Set[T]) Bool
-    public clear(self ref mut) Void
-    public retain(self ref mut, predicate Func[T, Bool]) Void
-    public union(self ref, other Set[T]) Set[T]
-    public intersection(self ref, other Set[T]) Set[T]
-    public difference(self ref, other Set[T]) Set[T]
-    public symmetric_difference(self ref, other Set[T]) Set[T]
+    public count(*self) UInt
+    public insert(*mut self, value T) Void
+    public try_insert(*mut self, value T) Bool
+    public insert_set(*mut self, other Set[T]) Void
+    public contains(*self, value T) Bool
+    public remove(*mut self, value T) Void
+    public try_remove(*mut self, value T) Bool
+    public is_empty(*self) Bool
+    public is_subset_of(*self, other Set[T]) Bool
+    public is_superset_of(*self, other Set[T]) Bool
+    public clear(*mut self) Void
+    public retain(*mut self, predicate Func[T, Bool]) Void
+    public union(*self, other Set[T]) Set[T]
+    public intersection(*self, other Set[T]) Set[T]
+    public difference(*self, other Set[T]) Set[T]
+    public symmetric_difference(*self, other Set[T]) Set[T]
 }
 
 given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
-    public iterator(self ref) SetIterator[T]
+    public iterator(*self) SetIterator[T]
 }
 
 given[T Hash] SetIterator[T] as Iterator[T] {
-    public next(self ref mut) Option[T]
+    public next(*mut self) Option[T]
 }
 
 given String {
-    public from_utf8_ptr_unchecked(bytes ptr UInt8, len UInt) String
-    public from_utf8_ptr(bytes ptr UInt8, len UInt) Result[String]
+    public from_utf8_ptr_unchecked(bytes *raw UInt8, len UInt) String
+    public from_utf8_ptr(bytes *raw UInt8, len UInt) Result[String]
     public from_bytes(bytes List[UInt8]) Result[String]
     public from_bytes_unchecked(bytes List[UInt8]) String
-    public from_cstring(cstr ptr UInt8) Result[String]
-    public from_cstring_unchecked(cstr ptr UInt8) String
+    public from_cstring(cstr *raw UInt8) Result[String]
+    public from_cstring_unchecked(cstr *raw UInt8) String
     public with_capacity(capacity UInt) String
     public new() String
-    public count(self ref) UInt
-    public is_empty(self ref) Bool
-    public capacity(self ref) UInt
-    public borrow_ptr(self ref) ptr UInt8
-    public to_bytes(self ref) List[UInt8]
-    public get(self ref, index UInt) Option[UInt8]
-    public push_byte(self ref mut, value UInt8) Void
-    public push_string(self ref mut, other String) Void
-    public push_substring(self ref mut, other String, range Range[UInt]) Void
-    public reserve(self ref mut, capacity UInt) Void
-    public starts_with(self ref, prefix String) Bool
-    public ends_with(self ref, suffix String) Bool
-    public find(self ref, pat String) Option[UInt]
-    public find_last(self ref, pat String) Option[UInt]
-    public is_rune_boundary(self ref, byte_index UInt) Bool
-    public slice_spec(self ref, range Range[UInt]) SliceSpec
-    public substring(self ref, range Range[UInt]) String
-    public trim_ascii_start(self ref) String
-    public trim_ascii_end(self ref) String
-    public trim_ascii(self ref) String
-    public is_ascii(self ref) Bool
-    public is_ascii_whitespace(self ref) Bool
-    public to_ascii_lowercase(self ref) String
-    public to_ascii_uppercase(self ref) String
-    public to_ascii_titlecase(self ref) String
-    public find_from(self ref, start UInt, pat String) Option[UInt]
-    public contains(self ref, pat String) Bool
-    public repeat(self ref, times UInt) String
-    public replace_n(self ref, pat String, n UInt, with: String) String
-    public split_once(self ref, sep String) Option[Pair[String, String]]
-    public split_last_once(self ref, sep String) Option[Pair[String, String]]
-    public replace_all(self ref, pat String, with: String) String
-    public split_ascii_whitespace(self ref) StringSplitAsciiWhitespaceIterator
-    public split(self ref, sep String) StringSplitIterator
-    public lines(self ref) StringLinesIterator
-    public trim_prefix(self ref, prefix String) String
-    public trim_suffix(self ref, suffix String) String
-    public strip_prefix(self ref, prefix String) Option[String]
-    public strip_suffix(self ref, suffix String) Option[String]
-    public bytes(self ref) StringBytesIterator
-    public runes(self ref) StringRunesIterator
-    public to_runes(self ref) List[Rune]
-    public push_rune(self ref mut, rune Rune) Void
+    public count(*self) UInt
+    public is_empty(*self) Bool
+    public capacity(*self) UInt
+    public borrow_ptr(*self) *raw UInt8
+    public to_bytes(*self) List[UInt8]
+    public get(*self, index UInt) Option[UInt8]
+    public push_byte(*mut self, value UInt8) Void
+    public push_string(*mut self, other String) Void
+    public push_substring(*mut self, other String, range Range[UInt]) Void
+    public reserve(*mut self, capacity UInt) Void
+    public starts_with(*self, prefix String) Bool
+    public ends_with(*self, suffix String) Bool
+    public find(*self, pat String) Option[UInt]
+    public find_last(*self, pat String) Option[UInt]
+    public is_rune_boundary(*self, byte_index UInt) Bool
+    public slice_spec(*self, range Range[UInt]) SliceSpec
+    public substring(*self, range Range[UInt]) String
+    public trim_ascii_start(*self) String
+    public trim_ascii_end(*self) String
+    public trim_ascii(*self) String
+    public is_ascii(*self) Bool
+    public is_ascii_whitespace(*self) Bool
+    public to_ascii_lowercase(*self) String
+    public to_ascii_uppercase(*self) String
+    public to_ascii_titlecase(*self) String
+    public find_from(*self, start UInt, pat String) Option[UInt]
+    public contains(*self, pat String) Bool
+    public repeat(*self, times UInt) String
+    public replace_n(*self, pat String, n UInt, with: String) String
+    public split_once(*self, sep String) Option[Pair[String, String]]
+    public split_last_once(*self, sep String) Option[Pair[String, String]]
+    public replace_all(*self, pat String, with: String) String
+    public split_ascii_whitespace(*self) StringSplitAsciiWhitespaceIterator
+    public split(*self, sep String) StringSplitIterator
+    public lines(*self) StringLinesIterator
+    public trim_prefix(*self, prefix String) String
+    public trim_suffix(*self, suffix String) String
+    public strip_prefix(*self, prefix String) Option[String]
+    public strip_suffix(*self, suffix String) Option[String]
+    public bytes(*self) StringBytesIterator
+    public runes(*self) StringRunesIterator
+    public to_runes(*self) List[Rune]
+    public push_rune(*mut self, rune Rune) Void
 }
 
 given String as Eq {
@@ -1563,91 +1563,91 @@ given String as Hash {
 }
 
 given StringSplitAsciiWhitespaceIterator as Iterator[String] {
-    public next(self ref mut) Option[String]
+    public next(*mut self) Option[String]
 }
 
 given StringSplitIterator as Iterator[String] {
-    public next(self ref mut) Option[String]
+    public next(*mut self) Option[String]
 }
 
 given StringLinesIterator as Iterator[String] {
-    public next(self ref mut) Option[String]
+    public next(*mut self) Option[String]
 }
 
 given StringRunesIterator as Iterator[Rune] {
-    public next(self ref mut) Option[Rune]
+    public next(*mut self) Option[Rune]
 }
 
 given StringBytesIterator as Iterator[UInt8] {
-    public next(self ref mut) Option[UInt8]
+    public next(*mut self) Option[UInt8]
 }
 
 given String as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Bool as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Int as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Int8 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Int16 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Int32 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Int64 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given UInt as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given UInt8 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given UInt16 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given UInt32 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given UInt64 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Float32 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Float64 as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given[T ToString, U ToString] Pair[T, U] as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given[T ToString] Option[T] as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given[T ToString and Deref] List[T] as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given[T ToString] Iterator[T] {
@@ -1659,15 +1659,15 @@ given[T ToString and Deref] List[T] {
 }
 
 given[K ToString and Hash, V ToString] Dict[K, V] as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given[T ToString and Hash] Set[T] as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Duration as ToString {
-    public to_string(self ref) String
+    public to_string(*self) String
 }
 
 given Hash {
@@ -1675,7 +1675,7 @@ given Hash {
 }
 
 given String as Error {
-    public message(self ref) String
+    public message(*self) String
 }
 
 given Bool as Hash {
@@ -1722,52 +1722,52 @@ given Int64 as Hash {
     public hash(self) UInt
 }
 
-given[T Any] ptr T as Eq {
-    public equals(self, other ptr T) Bool
+given[T Any] *raw T as Eq {
+    public equals(self, other *raw T) Bool
 }
 
-given[T Any] ptr T as Hash {
+given[T Any] *raw T as Hash {
     public hash(self) UInt
 }
 
-given[T Any] ptr mut T as Eq {
-    public equals(self, other ptr mut T) Bool
+given[T Any] *raw mut T as Eq {
+    public equals(self, other *raw mut T) Bool
 }
 
-given[T Any] ptr mut T as Hash {
+given[T Any] *raw mut T as Hash {
     public hash(self) UInt
 }
 
-given[T Eq and Deref] ref T as Eq {
-    public equals(self, other ref T) Bool
+given[T Eq and Deref] *T as Eq {
+    public equals(self, other *T) Bool
 }
 
-given[T Eq and Deref] ref mut T as Eq {
-    public equals(self, other ref mut T) Bool
+given[T Eq and Deref] *mut T as Eq {
+    public equals(self, other *mut T) Bool
 }
 
-given[T Hash and Deref] ref T as Hash {
+given[T Hash and Deref] *T as Hash {
     public hash(self) UInt
 }
 
-given[T Hash and Deref] ref mut T as Hash {
+given[T Hash and Deref] *mut T as Hash {
     public hash(self) UInt
 }
 
-given[T Ord and Deref] ref T as Ord {
-    public compare(self, other ref T) Int
+given[T Ord and Deref] *T as Ord {
+    public compare(self, other *T) Int
 }
 
-given[T Ord and Deref] ref mut T as Ord {
-    public compare(self, other ref mut T) Int
+given[T Ord and Deref] *mut T as Ord {
+    public compare(self, other *mut T) Int
 }
 
-given[T ToString and Deref] ref T as ToString {
-    public to_string(self ref) String
+given[T ToString and Deref] *T as ToString {
+    public to_string(*self) String
 }
 
-given[T ToString and Deref] ref mut T as ToString {
-    public to_string(self ref) String
+given[T ToString and Deref] *mut T as ToString {
+    public to_string(*self) String
 }
 
 given[T Eq, U Eq] Pair[T, U] as Eq {

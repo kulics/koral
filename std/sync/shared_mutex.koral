@@ -26,24 +26,24 @@ using std { .. }
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-foreign let __koral_shared_mutex_create() ptr UInt8
-foreign let __koral_shared_mutex_destroy(shared_mutex ptr UInt8) Void
-foreign let __koral_shared_mutex_read_lock(shared_mutex ptr UInt8) Void
-foreign let __koral_shared_mutex_read_unlock(shared_mutex ptr UInt8) Void
-foreign let __koral_shared_mutex_write_lock(shared_mutex ptr UInt8) Void
-foreign let __koral_shared_mutex_write_unlock(shared_mutex ptr UInt8) Void
-foreign let __koral_shared_mutex_try_read_lock(shared_mutex ptr UInt8) Int32
-foreign let __koral_shared_mutex_try_write_lock(shared_mutex ptr UInt8) Int32
-foreign let __koral_condvar_wait_shared_mutex(cv ptr UInt8, shared_mutex ptr UInt8) Void
+foreign let __koral_shared_mutex_create() *raw UInt8
+foreign let __koral_shared_mutex_destroy(shared_mutex *raw UInt8) Void
+foreign let __koral_shared_mutex_read_lock(shared_mutex *raw UInt8) Void
+foreign let __koral_shared_mutex_read_unlock(shared_mutex *raw UInt8) Void
+foreign let __koral_shared_mutex_write_lock(shared_mutex *raw UInt8) Void
+foreign let __koral_shared_mutex_write_unlock(shared_mutex *raw UInt8) Void
+foreign let __koral_shared_mutex_try_read_lock(shared_mutex *raw UInt8) Int32
+foreign let __koral_shared_mutex_try_write_lock(shared_mutex *raw UInt8) Int32
+foreign let __koral_condvar_wait_shared_mutex(cv *raw UInt8, shared_mutex *raw UInt8) Void
 
 // ============================================================================
 // SharedMutex Internal Storage
 // ============================================================================
-private type SharedMutexStorage(handle ptr UInt8)
+private type SharedMutexStorage(handle *raw UInt8)
 
 given SharedMutexStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         __koral_shared_mutex_destroy(source.handle)
     }
 }
@@ -55,7 +55,7 @@ given SharedMutexStorage as Drop {
 /// 共享互斥锁（裸锁）
 /// 支持独占模式（lock/unlock）和共享模式（lock_shared/unlock_shared）
 /// 独占模式与 Mutex 接口一致，共享模式允许多个线程同时持有
-public type SharedMutex(private storage ref SharedMutexStorage)
+public type SharedMutex(private storage * SharedMutexStorage)
 
 given SharedMutex {
 
@@ -66,42 +66,42 @@ given SharedMutex {
     // ---- 独占锁（与 Mutex 接口一致）----
 
     /// 获取独占锁（阻塞直到所有共享锁和独占锁都释放）
-    public lock(self ref) Void = {
+    public lock(*self) Void = {
         __koral_shared_mutex_write_lock(self.storage.handle)
     }
 
     /// 释放独占锁
-    public unlock(self ref) Void = {
+    public unlock(*self) Void = {
         __koral_shared_mutex_write_unlock(self.storage.handle)
     }
 
     /// 尝试获取独占锁（非阻塞），成功返回 true
-    public try_lock(self ref) Bool =
+    public try_lock(*self) Bool =
         __koral_shared_mutex_try_write_lock(self.storage.handle) == 1
 
     // ---- 共享锁 ----
 
     /// 获取共享锁（阻塞直到成功，多个线程可并发持有共享锁）
-    public lock_shared(self ref) Void = {
+    public lock_shared(*self) Void = {
         __koral_shared_mutex_read_lock(self.storage.handle)
     }
 
     /// 释放共享锁
-    public unlock_shared(self ref) Void = {
+    public unlock_shared(*self) Void = {
         __koral_shared_mutex_read_unlock(self.storage.handle)
     }
 
     /// 尝试获取共享锁（非阻塞），成功返回 true
-    public try_lock_shared(self ref) Bool =
+    public try_lock_shared(*self) Bool =
         __koral_shared_mutex_try_read_lock(self.storage.handle) == 1
 
     // ---- 条件变量（配合独占锁使用）----
 
     /// 创建绑定到此共享互斥锁独占模式的条件变量
-    public condvar(self ref) SharedMutexCondvar =
+    public condvar(*self) SharedMutexCondvar =
         SharedMutexCondvar(box(SharedMutexCondvarStorage(
             __koral_condvar_create(),
-            self.val
+            *self
         )))
 }
 
@@ -110,37 +110,37 @@ given SharedMutex {
 // ============================================================================
 
 private type SharedMutexCondvarStorage(
-    handle ptr UInt8,
+    handle *raw UInt8,
     shared_mutex SharedMutex,
 )
 
 given SharedMutexCondvarStorage as Drop {
 
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         __koral_condvar_destroy(source.handle)
     }
 }
 
 /// 绑定到 SharedMutex 独占锁的条件变量
 /// 由 SharedMutex.condvar() 创建，wait() 自动释放独占锁并等待，被唤醒后重新获取独占锁
-public type SharedMutexCondvar(private storage ref SharedMutexCondvarStorage)
+public type SharedMutexCondvar(private storage * SharedMutexCondvarStorage)
 
 given SharedMutexCondvar {
 
     /// 释放绑定的独占锁并等待通知，被唤醒后重新获取独占锁
     /// 调用前必须持有绑定的独占锁，否则行为未定义
     /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
-    public wait(self ref) Void = {
+    public wait(*self) Void = {
         __koral_condvar_wait_shared_mutex(self.storage.handle, self.storage.shared_mutex.storage.handle)
     }
 
     /// 唤醒一个等待中的线程
-    public notify(self ref) Void = {
+    public notify(*self) Void = {
         __koral_condvar_signal(self.storage.handle)
     }
 
     /// 唤醒所有等待中的线程
-    public notify_all(self ref) Void = {
+    public notify_all(*self) Void = {
         __koral_condvar_broadcast(self.storage.handle)
     }
 }

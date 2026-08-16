@@ -1,5 +1,5 @@
 given TypeChecker {
-    protected pattern_binding_symbol(self, name String, mutable Bool, subject_type Type, scope Scope, span SourceSpan) ref Symbol = {
+    protected pattern_binding_symbol(self, name String, mutable Bool, subject_type Type, scope Scope, span SourceSpan) * Symbol = {
         if name == "_" then {
             let kind = if mutable
                 then SymbolKind.Variable(VariableKind.MutableValue())
@@ -26,12 +26,12 @@ given TypeChecker {
     protected get_enum_case_tag_index(self, subject_type Type, case_name String) UInt = {
         let zero UInt = 0
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
         return when inner_type in {
@@ -47,12 +47,12 @@ given TypeChecker {
     protected pattern_match_subject_type(self, subject_type Type) Type = {
         let _ = self
         return when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
     }
@@ -95,7 +95,7 @@ given TypeChecker {
         return TypedPattern.IntegerLiteral("0")
     }
 
-    protected lower_typed_pattern(self, pattern ref PatternNode, subject_type Type, scope Scope) TypedPattern = {
+    protected lower_typed_pattern(self, pattern * PatternNode, subject_type Type, scope Scope) TypedPattern = {
         return when pattern in {
             .Wildcard(_) then TypedPattern.Wildcard(),
             .Variable(name, mutable, span) then {
@@ -129,7 +129,7 @@ given TypeChecker {
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
                 let case_field_types = self.get_enum_case_field_types(subject_type, case_name)
                 let tag_index = self.get_enum_case_tag_index(subject_type, case_name)
-                let mut typed_elements = List[ref TypedPatternElement].new()
+                let mut typed_elements = List[* TypedPatternElement].new()
                 let mut i UInt = 0
                 for elem in ordered_elements then {
                     let field_type = when case_field_types.get(i) in {
@@ -149,7 +149,7 @@ given TypeChecker {
                 self.validate_named_pattern_arguments(elements, param_specs)
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name)
-                let mut typed_elements = List[ref TypedPatternElement].new()
+                let mut typed_elements = List[* TypedPatternElement].new()
                 let mut i UInt = 0
                 for elem in ordered_elements then {
                     let field_type = when field_types.get(i) in {
@@ -167,7 +167,7 @@ given TypeChecker {
         }
     }
 
-    protected bind_pattern_vars(self, pattern ref PatternNode, subject_type Type, scope Scope) Void = {
+    protected bind_pattern_vars(self, pattern * PatternNode, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, mutable, span) then {
                 if not (name == "_") then {
@@ -223,7 +223,7 @@ given TypeChecker {
         }
     }
 
-    protected ensure_pattern_bindings_present(self, pattern ref PatternNode, subject_type Type, scope Scope) Void = {
+    protected ensure_pattern_bindings_present(self, pattern * PatternNode, subject_type Type, scope Scope) Void = {
         when pattern in {
             .Variable(name, mutable, span) then {
                 if not (name == "_") then {
@@ -414,12 +414,12 @@ given TypeChecker {
 
     protected get_enum_case_field_types(self, subject_type Type, case_name String) List[Type] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
         let raw_case_params = when inner_type in {
@@ -440,7 +440,7 @@ given TypeChecker {
                     let n = if param_count < arg_count then param_count else arg_count
                     while i < n then {
                         let tp = enum_template.type_parameters[i]
-                        bindings.insert(tp.name, args[i].val)
+                        bindings.insert(tp.name, (*args[i]))
                         i += 1
                     }
                 }
@@ -457,12 +457,12 @@ given TypeChecker {
 
     protected get_enum_case_param_specs(self, subject_type Type, case_name String) List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
         return when inner_type in {
@@ -477,12 +477,12 @@ given TypeChecker {
 
     protected get_struct_pattern_field_types(self, subject_type Type, type_name String) List[Type] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
 
@@ -550,7 +550,7 @@ given TypeChecker {
                                 let n = if param_count < arg_count then param_count else arg_count
                                 while i < n then {
                                     let tp = struct_template.type_parameters[i]
-                                    bindings.insert(tp.name, args[i].val)
+                                    bindings.insert(tp.name, (*args[i]))
                                     i += 1
                                 }
                                 for field in fields then {
@@ -570,12 +570,12 @@ given TypeChecker {
 
     protected get_struct_pattern_owner_def_id(self, subject_type Type, type_name String) Option[DefId] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
 
@@ -633,12 +633,12 @@ given TypeChecker {
 
     protected get_struct_pattern_param_specs(self, subject_type Type, type_name String) List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then subject_type,
         }
 
@@ -681,12 +681,12 @@ given TypeChecker {
 
     protected infer_for_pattern_item_type(self, iter_type Type) Type = {
         let inner_iter_type = when iter_type in {
-            .ReferenceType(inner) then inner.val,
-            .MutableReferenceType(inner) then inner.val,
-            .BorrowedReferenceType(inner, _) then inner.val,
-            .MutableBorrowedReferenceType(inner, _) then inner.val,
-            .WeakReferenceType(inner) then inner.val,
-            .MutableWeakReferenceType(inner) then inner.val,
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            .BorrowedReferenceType(inner) then *inner,
+            .MutableBorrowedReferenceType(inner) then *inner,
+            .WeakReferenceType(inner) then *inner,
+            .MutableWeakReferenceType(inner) then *inner,
             _ then iter_type,
         }
 

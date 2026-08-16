@@ -7,7 +7,7 @@ using std { .. }
 // ============================================================================
 // Design: Pure Koral implementation using Mutex + MutexCondvar + List.
 // Bounded channel only — forces users to think about capacity (backpressure).
-// Multi-producer multi-consumer via ref counting on SendChannelStorage/RecvChannelStorage.
+// Multi-producer multi-consumer via * counting on SendChannelStorage/RecvChannelStorage.
 // ============================================================================
 
 // ============================================================================
@@ -29,10 +29,10 @@ private type ChannelStorage[T Any](
 // SendChannelStorage / RecvChannelStorage (tracks last-holder close semantics)
 // ============================================================================
 
-private type SendChannelStorage[T Any](channel ref mut ChannelStorage[T])
+private type SendChannelStorage[T Any](channel *mut ChannelStorage[T])
 
 given[T Any] SendChannelStorage[T] as Drop {
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         source.channel.mutex.lock()
         defer source.channel.mutex.unlock()
         source.channel.sender_closed = true
@@ -40,10 +40,10 @@ given[T Any] SendChannelStorage[T] as Drop {
     }
 }
 
-private type RecvChannelStorage[T Any](channel ref mut ChannelStorage[T])
+private type RecvChannelStorage[T Any](channel *mut ChannelStorage[T])
 
 given[T Any] RecvChannelStorage[T] as Drop {
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         source.channel.mutex.lock()
         defer source.channel.mutex.unlock()
         source.channel.receiver_closed = true
@@ -55,11 +55,11 @@ given[T Any] RecvChannelStorage[T] as Drop {
 // SendChannel Type
 // ============================================================================
 
-public type SendChannel[T Any](private storage ref mut SendChannelStorage[T])
+public type SendChannel[T Any](private storage *mut SendChannelStorage[T])
 
 given[T Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
-    public send(self ref, value T) Result[Void] = {
+    public send(*self, value T) Result[Void] = {
         self.storage.channel.mutex.lock()
         defer self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.count() >= self.storage.channel.capacity
@@ -75,7 +75,7 @@ given[T Any] SendChannel[T] {
     }
 
     /// 非阻塞发送
-    public try_send(self ref, value T) Result[Bool] = {
+    public try_send(*self, value T) Result[Bool] = {
         self.storage.channel.mutex.lock()
         defer self.storage.channel.mutex.unlock()
         if self.storage.channel.receiver_closed then {
@@ -94,11 +94,11 @@ given[T Any] SendChannel[T] {
 // RecvChannel Type
 // ============================================================================
 
-public type RecvChannel[T Any](private storage ref mut RecvChannelStorage[T])
+public type RecvChannel[T Any](private storage *mut RecvChannelStorage[T])
 
 given[T Any] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）
-    public recv(self ref) Result[T] = {
+    public recv(*self) Result[T] = {
         self.storage.channel.mutex.lock()
         defer self.storage.channel.mutex.unlock()
         while self.storage.channel.queue.is_empty() and not self.storage.channel.sender_closed then {
@@ -113,7 +113,7 @@ given[T Any] RecvChannel[T] {
     }
 
     /// 非阻塞接收
-    public try_recv(self ref) Result[Option[T]] = {
+    public try_recv(*self) Result[Option[T]] = {
         self.storage.channel.mutex.lock()
         defer self.storage.channel.mutex.unlock()
         if not self.storage.channel.queue.is_empty() then {

@@ -3,15 +3,15 @@
 // 避免使用 String 的 COW 语义作为主输出缓冲，防止在大规模 append
 // 时反复整段克隆累计输出。
 
-protected type CodegenBufferStorage(mut data ptr mut UInt8, mut len UInt, mut cap UInt)
+protected type CodegenBufferStorage(mut data *raw mut UInt8, mut len UInt, mut cap UInt)
 
 given CodegenBufferStorage as Drop {
-    drop(source ptr mut Self) Void = {
+    drop(source *raw mut Self) Void = {
         dealloc_memory(source.data)
     }
 }
 
-public type CodegenBuffer(protected mut storage ref mut CodegenBufferStorage)
+public type CodegenBuffer(protected mut storage *mut CodegenBufferStorage)
 
 given CodegenBuffer {
     public new() CodegenBuffer = {
@@ -26,7 +26,7 @@ given CodegenBuffer {
         return CodegenBuffer(storage)
     }
 
-    protected ensure_capacity(self ref, min_cap UInt) Void = {
+    protected ensure_capacity(*self, min_cap UInt) Void = {
         if self.storage.cap >= min_cap then {
             return
         }
@@ -43,16 +43,16 @@ given CodegenBuffer {
         self.storage.cap = new_cap
     }
 
-    public count(self ref) UInt = self.storage.len
+    public count(*self) UInt = self.storage.len
 
-    public push_byte(self ref, value UInt8) Void = {
+    public push_byte(*self, value UInt8) Void = {
         self.ensure_capacity(self.storage.len + 2)
         self.storage.data[self.storage.len] = value
         self.storage.len += 1
         self.storage.data[self.storage.len] = 0
     }
 
-    public push_string(self ref, other String) Void = {
+    public push_string(*self, other String) Void = {
         let other_len = other.count()
         if other_len == 0 then {
             return
@@ -64,7 +64,7 @@ given CodegenBuffer {
         self.storage.data[self.storage.len] = 0
     }
 
-    public push_buffer(self ref, other ref CodegenBuffer) Void = {
+    public push_buffer(*self, other * CodegenBuffer) Void = {
         let other_len = other.count()
         if other_len == 0 then {
             return
@@ -76,15 +76,15 @@ given CodegenBuffer {
         self.storage.data[self.storage.len] = 0
     }
 
-    public push_rune(self ref, rune Rune) Void = {
+    public push_rune(*self, rune Rune) Void = {
         self.push_string(rune.to_string())
     }
 
-    public to_string(self ref) String = {
+    public to_string(*self) String = {
         return String.from_utf8_ptr_unchecked(self.storage.data, self.storage.len)
     }
 
-    public into_string(self ref mut) String = {
+    public into_string(*mut self) String = {
         let data = self.storage.data
         let len = self.storage.len
         let cap = self.storage.cap

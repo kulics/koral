@@ -27,7 +27,6 @@ public enum Token: CustomStringConvertible {
   case float(String)  // Float literal as string, e.g.: "3.14"
   case string(String)  // String literal, e.g.: "hello"
   case rune(String)    // Rune literal, e.g.: 'A', '\n'
-  case lifetimeIdentifier(String)  // Lifetime identifier, e.g.: 'a
   case interpolatedString(parts: [InterpolatedStringPart])  // Interpolated string literal
   case plus  // Plus operator '+'
   case minus  // Minus operator '-'
@@ -52,6 +51,7 @@ public enum Token: CustomStringConvertible {
   case rightBrace  // Right brace '}'
   case leftBracket  // Left bracket '['
   case rightBracket  // Right bracket ']'
+  case questionMark  // Question mark '?'
   case bool(Bool)  // Boolean literal, e.g.: true, false
   case ifKeyword  // 'if' keyword
   case thenKeyword  // 'then' keyword
@@ -67,8 +67,6 @@ public enum Token: CustomStringConvertible {
   case isKeyword  // 'is' keyword
   case inKeyword  // 'in' keyword
   case asKeyword  // 'as' keyword
-  case refKeyword  // 'ref' keyword
-  case ptrKeyword  // 'ptr' keyword
   case givenKeyword  // 'given' keyword
   case traitKeyword  // 'trait' keyword
   case whenKeyword  // 'when' keyword
@@ -78,7 +76,6 @@ public enum Token: CustomStringConvertible {
   case pipe  // '|' - bitwise OR
   case caret  // '^' - bitwise XOR
   case tilde  // '~' - bitwise NOT
-  case valKeyword   // 'val' keyword
   case privateKeyword // 'private' keyword
   case protectedKeyword // 'protected' keyword
   case publicKeyword  // 'public' keyword
@@ -106,7 +103,7 @@ public enum Token: CustomStringConvertible {
   case continueKeyword // 'continue' keyword
   case forKeyword // 'for' keyword
   case usingKeyword // 'using' keyword
-  case weakrefKeyword // 'weakref' keyword
+  case rawKeyword // 'raw' keyword
   case deferKeyword // 'defer' keyword
   case itKeyword // 'it' keyword
 
@@ -153,8 +150,6 @@ public enum Token: CustomStringConvertible {
       return true
     case (.rune(_), .rune(_)):
       return true
-    case (.lifetimeIdentifier(_), .lifetimeIdentifier(_)):
-      return true
     case (.interpolatedString(_), .interpolatedString(_)):
       return true
     case (.bool(_), .bool(_)):
@@ -175,23 +170,19 @@ public enum Token: CustomStringConvertible {
       return true
     case (.leftBrace, .leftBrace), (.rightBrace, .rightBrace):
       return true
-    case (.leftBracket, .leftBracket), (.rightBracket, .rightBracket):
+    case (.leftBracket, .leftBracket), (.rightBracket, .rightBracket), (.questionMark, .questionMark):
       return true
     case (.ifKeyword, .ifKeyword), (.thenKeyword, .thenKeyword), (.elseKeyword, .elseKeyword), (.whileKeyword, .whileKeyword):
       return true
     case (.andKeyword, .andKeyword), (.orKeyword, .orKeyword), (.notKeyword, .notKeyword):
       return true
-    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.inKeyword, .inKeyword), (.asKeyword, .asKeyword), (.refKeyword, .refKeyword):
-      return true
-    case (.ptrKeyword, .ptrKeyword):
+    case (.typeKeyword, .typeKeyword), (.isKeyword, .isKeyword), (.inKeyword, .inKeyword), (.asKeyword, .asKeyword):
       return true
     case (.givenKeyword, .givenKeyword), (.traitKeyword, .traitKeyword), (.whenKeyword, .whenKeyword), (.intrinsicKeyword, .intrinsicKeyword), (.foreignKeyword, .foreignKeyword):
       return true
     case (.ampersand, .ampersand), (.pipe, .pipe), (.caret, .caret), (.tilde, .tilde):
       return true
     case (.leftShift, .leftShift), (.rightShift, .rightShift):
-      return true
-    case (.valKeyword, .valKeyword):
       return true
     case (.privateKeyword, .privateKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
       return true
@@ -211,7 +202,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.usingKeyword, .usingKeyword):
       return true
-    case (.weakrefKeyword, .weakrefKeyword):
+    case (.rawKeyword, .rawKeyword):
       return true
     case (.deferKeyword, .deferKeyword):
       return true
@@ -240,8 +231,6 @@ public enum Token: CustomStringConvertible {
       return "String(\(value))"
     case .rune(let value):
       return "Rune('\(value)')"
-    case .lifetimeIdentifier(let value):
-      return "Lifetime(\(value))"
     case .interpolatedString(let parts):
       return "InterpolatedString(\(parts))"
     case .plus:
@@ -286,6 +275,8 @@ public enum Token: CustomStringConvertible {
       return "{"
     case .rightBrace:
       return "}"
+    case .questionMark:
+      return "?"
     case .leftBracket:
       return "["
     case .rightBracket:
@@ -331,10 +322,6 @@ public enum Token: CustomStringConvertible {
       return "in"
     case .asKeyword:
       return "as"
-    case .refKeyword:
-      return "ref"
-    case .ptrKeyword:
-      return "ptr"
     case .givenKeyword:
       return "given"
     case .traitKeyword:
@@ -353,8 +340,6 @@ public enum Token: CustomStringConvertible {
       return "^"
     case .tilde:
       return "~"
-    case .valKeyword:
-      return "val"
     case .privateKeyword:
       return "private"
     case .protectedKeyword:
@@ -395,8 +380,8 @@ public enum Token: CustomStringConvertible {
       return "<.."
     case .lessRangeLess:
       return "<..<"
-    case .weakrefKeyword:
-      return "weakref"
+    case .rawKeyword:
+      return "raw"
     case .deferKeyword:
       return "defer"
     case .itKeyword:
@@ -1217,13 +1202,13 @@ public class Lexer {
 
   private func readQuoteToken() throws -> Token {
     // The opening ' has already been consumed by the main dispatch.
-    // Read the next character to decide: lifetime identifier or rune literal?
+    // Read the next character to decide: rune literal or escape sequence?
     guard let next = getNextChar() else {
-      throw LexerError.invalidString(span: tokenSpan, "unterminated lifetime or rune literal")
+      throw LexerError.invalidString(span: tokenSpan, "unterminated rune literal")
     }
 
     if next.isLetter || next == "_" {
-      // Could be a lifetime identifier ('a, '_ ) or a rune literal ('a')
+      // Rune literal: 'a' or '\\n'
       var name = String(next)
       while let c = getNextChar() {
         if c.isLetter || c.isNumber || c == "_" {
@@ -1233,16 +1218,14 @@ public class Lexer {
           break
         }
       }
-      // If followed by a closing quote, it's a rune literal: 'a'
-      if let close = getNextChar() {
-        if close == "'" {
-          return .rune(name)
-        }
-        // Not a closing quote → lifetime identifier; unread the char
-        unreadChar(close)
+      // Must be followed by a closing quote for rune literal
+      guard let close = getNextChar() else {
+        throw LexerError.invalidString(span: tokenSpan, "unterminated rune literal")
       }
-      // Otherwise it's a lifetime identifier: 'a
-      return .lifetimeIdentifier("'" + name)
+      guard close == "'" else {
+        throw LexerError.invalidString(span: tokenSpan, "expected closing quote for rune literal")
+      }
+      return .rune(name)
     }
 
     // Not a letter/underscore → must be a rune literal
@@ -1401,6 +1384,8 @@ public class Lexer {
         unreadChar(nextChar)
       }
       return .remainder
+    case "?":
+      return .questionMark
     case "^":
       if let nextChar = getNextChar() {
         if nextChar == "=" { return .caretEqual }
@@ -1553,14 +1538,11 @@ public class Lexer {
       case "is": .isKeyword
       case "in": .inKeyword
       case "as": .asKeyword
-      case "ref": .refKeyword
-      case "ptr": .ptrKeyword
       case "given": .givenKeyword
       case "trait": .traitKeyword
       case "when": .whenKeyword
       case "intrinsic": .intrinsicKeyword
       case "foreign": .foreignKeyword
-      case "val": .valKeyword
       case "private": .privateKeyword
       case "protected": .protectedKeyword
       case "public": .publicKeyword
@@ -1571,7 +1553,7 @@ public class Lexer {
       case "break": .breakKeyword
       case "continue": .continueKeyword
       case "for": .forKeyword
-      case "weakref": .weakrefKeyword
+      case "raw": .rawKeyword
       case "defer": .deferKeyword
       case "it": .itKeyword
       default: .identifier(id)

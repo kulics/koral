@@ -74,7 +74,6 @@ public typealias TypeParameterDecl = (name: String, constraints: [TypeNode])
 public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String)
   case reference(TypeNode, mutable: Bool)
-  case borrowedReference(TypeNode, lifetime: String, mutable: Bool)
   case pointer(TypeNode, mutable: Bool)
   case weakReference(TypeNode, mutable: Bool)
   case generic(base: String, args: [TypeNode])
@@ -88,13 +87,11 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .identifier(let name):
       return name
     case .reference(let inner, let mutable):
-      return mutable ? "ref mut \(inner)" : "ref \(inner)"
-    case .borrowedReference(let inner, let lifetime, let mutable):
-      return mutable ? "ref \(lifetime) mut \(inner)" : "ref \(lifetime) \(inner)"
+      return mutable ? "*mut \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable):
-      return mutable ? "ptr mut \(inner)" : "ptr \(inner)"
+      return mutable ? "*raw mut \(inner)" : "*raw \(inner)"
     case .weakReference(let inner, let mutable):
-      return mutable ? "weakref mut \(inner)" : "weakref \(inner)"
+      return mutable ? "?*mut \(inner)" : "?*\(inner)"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(base)[\(argsStr)]"
@@ -464,9 +461,8 @@ public indirect enum ExpressionNode {
   case unaryMinusExpression(ExpressionNode)
   case notExpression(ExpressionNode)
   case bitwiseNotExpression(ExpressionNode)
+  case addressOfExpression(ExpressionNode, mutable: Bool)
   case derefExpression(ExpressionNode)
-  case refExpression(ExpressionNode)
-  case weakrefExpression(ExpressionNode)
   case ptrExpression(ExpressionNode)
   case identifier(String)
   case blockExpression(statements: [StatementNode])

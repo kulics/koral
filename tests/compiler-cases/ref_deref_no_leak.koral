@@ -1,12 +1,12 @@
 // Regression test: DerefExpr must not eagerly copy the dereferenced value.
 //
-// When accessing fields through a `ref` type (e.g. `self.storage.field`),
+// When accessing fields through a `*` type (e.g. `self.storage.field`),
 // the codegen must produce a plain C struct assignment for the deref and
 // let the downstream consumer decide copy-vs-move semantics.  An eager
 // copy that is never dropped leaks one retain per deref, causing OOM
 // during bootstrap self-compilation.
 //
-// The test creates a ref-backed counter, exercises it in a tight loop
+// The test creates a *-backed counter, exercises it in a tight loop
 // (which would accumulate leaked retains with the old codegen), and
 // verifies the final values are correct.
 //
@@ -14,7 +14,7 @@
 
 type CounterStorage(mut value Int, mut items List[String])
 
-type Counter(mut storage ref mut CounterStorage)
+type Counter(mut storage *mut CounterStorage)
 
 given Counter {
 
@@ -27,16 +27,16 @@ given Counter {
 
     public items_count(self) UInt = self.storage.items.count()
 
-    public increment(self ref mut) Void = {
+    public increment(*mut self) Void = {
         self.storage.value += 1
     }
 
-    public add_item(self ref mut, item String) Void = {
+    public add_item(*mut self, item String) Void = {
         self.storage.items.push(item)
     }
 }
 
-let run_loop(counter ref mut Counter, iterations Int) Void = {
+let run_loop(counter *mut Counter, iterations Int) Void = {
     let mut i = 0
     while i < iterations then {
         let v = counter.get()
@@ -49,7 +49,7 @@ let run_loop(counter ref mut Counter, iterations Int) Void = {
 
 public let main() Int = {
     let mut c = Counter.new()
-    run_loop(c.ref, 1000)
+    run_loop(&mut c, 1000)
 
     if c.get() <> 1000 then {
         eprintln("FAIL: expected value 1000, got \(c.get())")
