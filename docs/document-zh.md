@@ -1718,8 +1718,8 @@ given Square as Drawable {
 }
 
 // 创建 trait object
-let shape ref Drawable = box(Circle(10))
-let mutable_shape ref mut Drawable = box(Square(4))
+let shape *Drawable = box(Circle(10))
+let mutable_shape *mut Drawable = box(Square(4))
 
 // 通过 trait object 调用方法（动态派发）
 shape.draw()  // "Drawing circle"

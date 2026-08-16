@@ -1681,7 +1681,7 @@ given Square as Drawable {
 }
 
 // Create trait objects
-let shape ref Drawable = box(Circle(10))
+let shape *Drawable = box(Circle(10))
 let mutable_shape *mut Drawable = box(Square(4))
 
 // Call methods through the trait object (dynamic dispatch)

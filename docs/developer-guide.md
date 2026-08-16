@@ -392,7 +392,7 @@ When migrating an existing method from `self` to `*self`, recheck two common imp
 - branches that still `return self` even though the method returns an owned value
 - helper or iterator constructors that still receive `self` even though they expect an owned source value
 
-In both cases, the fix is often to pass or return `self.val` explicitly. This is a migration detail, not a reason to change the public receiver back to `self`.
+In both cases, the fix is often to pass or return `*self` explicitly. This is a migration detail, not a reason to change the public receiver back to `self`.
 
 If the implementation would require copying a large value or heap-owning structure solely to satisfy a consuming iterator API, prefer one of these instead:
 
@@ -400,7 +400,7 @@ If the implementation would require copying a large value or heap-owning structu
 - add a dedicated borrowed-view iterator type or borrowed-producing helper
 - keep the method on `self` only if the operation is genuinely consumption-oriented
 
-Avoid exposing `.val`-style dereference-copy patterns in public API design discussions. The public rule should be driven by ownership semantics at the call site, not by the current convenience of a specific iterator implementation.
+Avoid exposing `*`-style dereference-copy patterns in public API design discussions. The public rule should be driven by ownership semantics at the call site, not by the current convenience of a specific iterator implementation.
 
 ### Trait Design Guidance
 
