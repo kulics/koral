@@ -211,7 +211,7 @@ let ry *Int = &y     // read-only reference
 
 let owned *mut Int = box(42)   // box() returns *mut T
 
-// let rz = &42            // error: rvalue cannot be borrowed
+// let rz = &42            // error: cannot take reference of rvalue
 ```
 
 ## Drop Semantics

@@ -551,8 +551,8 @@ let owned *mut Int = &mut n // 托管期望类型触发局部提升
 let strong *mut Int = box(42)
 
 // 可变路径：*mut → ?*mut → Option[*mut T]
-let weak = downgrade(strong)         // *mut T → ?*mut T
-let upgraded = upgrade(weak)         // ?*mut T → Option[*mut T]
+let weak = downgrade_mut(strong)     // *mut T → ?*mut T
+let upgraded = upgrade_mut(weak)     // ?*mut T → Option[*mut T]
 
 // 只读路径：* → ?* → Option[*T]
 let ro *Int = strong                // 隐式宽化
