@@ -8,52 +8,52 @@ public type Parser(
 given Parser {
     public new(tokens List[Token]) Parser = Parser(tokens, 0)
 
-    private peek(self ref) Token = {
+    private peek(*self) Token = {
         if self.pos >= self.tokens.count() then {
             return Token.EOF()
         }
         return self.tokens[self.pos]
     }
 
-    private peek_next(self ref) Token = {
+    private peek_next(*self) Token = {
         if self.pos + 1 >= self.tokens.count() then {
             return Token.EOF()
         }
         return self.tokens[self.pos + 1]
     }
 
-    private advance(self ref mut) Token = {
+    private advance(*mut self) Token = {
         let token = self.peek()
         self.pos += 1
         return token
     }
 
-    private check_plus(self ref) Bool = self.peek() is .Plus
-    private check_minus(self ref) Bool = self.peek() is .Minus
-    private check_star(self ref) Bool = self.peek() is .Star
-    private check_slash(self ref) Bool = self.peek() is .Slash
-    private check_percent(self ref) Bool = self.peek() is .Percent
-    private check_power(self ref) Bool = self.peek() is .Power
-    private check_left_paren(self ref) Bool = self.peek() is .LeftParen
-    private check_right_paren(self ref) Bool = self.peek() is .RightParen
-    private check_comma(self ref) Bool = self.peek() is .Comma
-    private check_eof(self ref) Bool = self.peek() is .EOF
+    private check_plus(*self) Bool = self.peek() is .Plus
+    private check_minus(*self) Bool = self.peek() is .Minus
+    private check_star(*self) Bool = self.peek() is .Star
+    private check_slash(*self) Bool = self.peek() is .Slash
+    private check_percent(*self) Bool = self.peek() is .Percent
+    private check_power(*self) Bool = self.peek() is .Power
+    private check_left_paren(*self) Bool = self.peek() is .LeftParen
+    private check_right_paren(*self) Bool = self.peek() is .RightParen
+    private check_comma(*self) Bool = self.peek() is .Comma
+    private check_eof(*self) Bool = self.peek() is .EOF
 
-    private expect_right_paren(self ref mut) Result[Void] =
+    private expect_right_paren(*mut self) Result[Void] =
         if self.check_right_paren() then {
             self.advance()
             break .Ok({})
         } else .Error(box("Parse error: expected ')', found \(self.peek().to_string())"))
 
-    public parse(self ref mut) Result[ref Expr] = {
+    public parse(*mut self) Result[* Expr] = {
         let expr = self.parse_expression() or return
         return if self.check_eof() then .Ok(expr)
                else .Error(box("Parse error: unexpected token \(self.peek().to_string())"))
     }
 
-    private parse_expression(self ref mut) Result[ref Expr] = self.parse_assignment()
+    private parse_expression(*mut self) Result[* Expr] = self.parse_assignment()
 
-    private parse_assignment(self ref mut) Result[ref Expr] = {
+    private parse_assignment(*mut self) Result[* Expr] = {
         if self.peek() is .Identifier(name) and self.peek_next() is .Equals then {
             self.advance()
             self.advance()
@@ -63,7 +63,7 @@ given Parser {
         return self.parse_additive()
     }
 
-    private parse_additive(self ref mut) Result[ref Expr] = {
+    private parse_additive(*mut self) Result[* Expr] = {
         let mut left = self.parse_multiplicative() or return
         while self.check_plus() or self.check_minus() then {
             let op = if self.check_plus() then BinaryOperator.Add() else BinaryOperator.Sub()
@@ -74,7 +74,7 @@ given Parser {
         return .Ok(left)
     }
 
-    private parse_multiplicative(self ref mut) Result[ref Expr] = {
+    private parse_multiplicative(*mut self) Result[* Expr] = {
         let mut left = self.parse_power() or return
         while self.check_star() or self.check_slash() or self.check_percent() then {
             let op = if self.check_star() then BinaryOperator.Mul()
@@ -88,7 +88,7 @@ given Parser {
     }
     
 
-    private parse_power(self ref mut) Result[ref Expr] = {
+    private parse_power(*mut self) Result[* Expr] = {
         let left = self.parse_unary() or return
         if self.check_power() then {
             self.advance()
@@ -98,7 +98,7 @@ given Parser {
         return .Ok(left)
     }
 
-    private parse_unary(self ref mut) Result[ref Expr] = {
+    private parse_unary(*mut self) Result[* Expr] = {
         if self.check_minus() then {
             self.advance()
             let operand = self.parse_unary() or return
@@ -107,9 +107,9 @@ given Parser {
         return self.parse_call()
     }
 
-    private parse_call(self ref mut) Result[ref Expr] = {
+    private parse_call(*mut self) Result[* Expr] = {
         let primary = self.parse_primary() or return
-        if primary.val is .Variable(name) and self.check_left_paren() then {
+        if *primary is .Variable(name) and self.check_left_paren() then {
             self.advance()
             let args = self.parse_arguments() or return
             let _ = self.expect_right_paren() or return
@@ -118,8 +118,8 @@ given Parser {
         return .Ok(primary)
     }
 
-    private parse_arguments(self ref mut) Result[List[ref Expr]] = {
-        let mut args = List[ref Expr].new()
+    private parse_arguments(*mut self) Result[List[* Expr]] = {
+        let mut args = List[* Expr].new()
         
         if self.check_right_paren() then {
             return .Ok(args)
@@ -135,7 +135,7 @@ given Parser {
         return .Ok(args)
     }
 
-    private parse_primary(self ref mut) Result[ref Expr] =
+    private parse_primary(*mut self) Result[* Expr] =
         when self.peek() in {
             .IntLiteral(v) then {
                 self.advance()

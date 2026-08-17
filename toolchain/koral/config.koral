@@ -64,8 +64,8 @@ private let is_valid_module_full_name(name String) Bool = {
     return true
 }
 
-private let json_string_array(values List[String]) ref JsonValue = {
-    let mut arr = List[ref JsonValue].new()
+private let json_string_array(values List[String]) * JsonValue = {
+    let mut arr = List[* JsonValue].new()
     for value in values then {
         arr.push(box(JsonValue.String(value)))
     }
@@ -73,17 +73,17 @@ private let json_string_array(values List[String]) ref JsonValue = {
 }
 
 private let load_string_array_field(
-    value ref JsonValue,
+    value * JsonValue,
     field_name String,
     context String,
 ) Result[List[String]] = {
-    let arr = value.val.as_array() or else {
+    let arr = value.as_array() or else {
         return .Error(box("error: '\(field_name)' in \(context) must be an array"))
     }
 
     let mut out = List[String].new()
     for i in 0..<arr.count() then {
-        let item = arr[i].val.as_string() or else {
+        let item = (*arr[i]).as_string() or else {
             return .Error(box("error: '\(field_name)[\(i)]' in \(context) must be a string"))
         }
         out.push(item)
@@ -92,18 +92,18 @@ private let load_string_array_field(
 }
 
 private let load_string_dict_field(
-    value ref JsonValue,
+    value * JsonValue,
     field_name String,
     context String,
 ) Result[Dict[String, String]] = {
-    let obj = value.val.as_object() or else {
+    let obj = value.as_object() or else {
         return .Error(box("error: '\(field_name)' in \(context) must be an object"))
     }
 
     let mut out = Dict[String, String].new()
     let mut iter = obj.iterator()
     while iter.next() is .Some(entry) then {
-        let str_value = entry.second.val.as_string() or else {
+        let str_value = (*entry.second).as_string() or else {
             return .Error(box("error: '\(field_name).\(entry.first)' in \(context) must be a string"))
         }
         out.insert(entry.first, str_value)
@@ -112,7 +112,7 @@ private let load_string_dict_field(
 }
 
 private let load_optional_string_array_field(
-    json ref JsonValue,
+    json * JsonValue,
     field_name String,
     context String,
 ) Result[List[String]] = when json.get_field(field_name) in {
@@ -121,7 +121,7 @@ private let load_optional_string_array_field(
 }
 
 private let load_optional_string_dict_field(
-    json ref JsonValue,
+    json * JsonValue,
     field_name String,
     context String,
 ) Result[Dict[String, String]] = when json.get_field(field_name) in {
@@ -178,7 +178,7 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
     let name_ref = json.get_field("name") or else {
         return .Error(box("error: missing required field 'name' in koral.json"))
     }
-    let name = name_ref.val.as_string() or else {
+    let name = name_ref.as_string() or else {
         return .Error(box("error: 'name' must be a string in koral.json"))
     }
     if not is_valid_module_name(name) then {
@@ -188,13 +188,13 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
     let version_ref = json.get_field("version") or else {
         return .Error(box("error: missing required field 'version' in koral.json"))
     }
-    let version = version_ref.val.as_string() or else {
+    let version = version_ref.as_string() or else {
         return .Error(box("error: 'version' must be a string in koral.json"))
     }
 
     let entry = when json.get_field("entry") in {
         .Some(entry_ref) then {
-            let value = entry_ref.val.as_string() or else {
+            let value = entry_ref.as_string() or else {
                 return .Error(box("error: 'entry' must be a string in koral.json"))
             }
             break value
@@ -205,12 +205,12 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
         return .Error(box("error: 'entry' must be a module full name such as 'app' or 'app::main'"))
     }
 
-    let links = load_optional_string_array_field(json.ref, "links", "koral.json") or return
+    let links = load_optional_string_array_field(&json, "links", "koral.json") or return
 
     let modules_ref = json.get_field("modules") or else {
         return .Error(box("error: missing required field 'modules' in koral.json"))
     }
-    let modules_obj = modules_ref.val.as_object() or else {
+    let modules_obj = modules_ref.as_object() or else {
         return .Error(box("error: 'modules' must be an object in koral.json"))
     }
 
@@ -222,41 +222,41 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             return .Error(box("error: invalid module name '\(module_name)'; use lower_snake segments joined by '::'"))
         }
 
-        if module_entry.second.val.as_object() is .None then {
+        if module_entry.second.as_object() is .None then {
             return .Error(box("error: module '\(module_name)' must be an object"))
         }
-        let module_json = module_entry.second.val
+        let module_json = *module_entry.second
 
         let entry_ref = module_json.get_field("entry") or else {
             return .Error(box("error: module '\(module_name)' is missing required field 'entry'"))
         }
-        let module_entry_path = entry_ref.val.as_string() or else {
+        let module_entry_path = entry_ref.as_string() or else {
             return .Error(box("error: module '\(module_name)' field 'entry' must be a string"))
         }
         if not module_entry_path.ends_with(".koral") then {
             return .Error(box("error: module '\(module_name)' entry must end with .koral"))
         }
 
-        let deps = load_optional_string_array_field(module_json.ref, "deps", "module '\(module_name)'") or return
-        let links = load_optional_string_array_field(module_json.ref, "links", "module '\(module_name)'") or return
+        let deps = load_optional_string_array_field(&module_json, "deps", "module '\(module_name)'") or return
+        let links = load_optional_string_array_field(&module_json, "links", "module '\(module_name)'") or return
 
         modules.insert(module_name, ModuleConfig(module_entry_path, deps, links))
     }
 
     let mut dependencies = Dict[String, DepConfig].new()
     if json.get_field("dependencies") is .Some(deps_ref) then {
-        let deps_obj = deps_ref.val.as_object() or else {
+        let deps_obj = deps_ref.as_object() or else {
             return .Error(box("error: 'dependencies' must be an object in koral.json"))
         }
         let mut iter = deps_obj.iterator()
         while iter.next() is .Some(dep_entry) then {
             let dep_key = dep_entry.first
-            let dep_json = dep_entry.second.val
+            let dep_json = *dep_entry.second
 
             let dep_name_ref = dep_json.get_field("name") or else {
                 return .Error(box("error: dependency '\(dep_key)' missing 'name' field"))
             }
-            let dep_name = dep_name_ref.val.as_string() or else {
+            let dep_name = dep_name_ref.as_string() or else {
                 return .Error(box("error: dependency '\(dep_key)' 'name' must be a string"))
             }
             if not is_valid_module_name(dep_name) then {
@@ -266,18 +266,18 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             let dep_git_ref = dep_json.get_field("git") or else {
                 return .Error(box("error: dependency '\(dep_key)' missing 'git' field"))
             }
-            let dep_git = dep_git_ref.val.as_string() or else {
+            let dep_git = dep_git_ref.as_string() or else {
                 return .Error(box("error: dependency '\(dep_key)' 'git' must be a string"))
             }
 
             let dep_version_ref = dep_json.get_field("version") or else {
                 return .Error(box("error: dependency '\(dep_key)' missing 'version' field"))
             }
-            let dep_version = dep_version_ref.val.as_string() or else {
+            let dep_version = dep_version_ref.as_string() or else {
                 return .Error(box("error: dependency '\(dep_key)' 'version' must be a string"))
             }
 
-            let module_aliases = load_optional_string_dict_field(dep_json.ref, "module_aliases", "dependency '\(dep_key)'") or return
+            let module_aliases = load_optional_string_dict_field(&dep_json, "module_aliases", "dependency '\(dep_key)'") or return
 
             dependencies.insert(dep_key, DepConfig(dep_name, dep_git, dep_version, module_aliases))
         }
@@ -291,17 +291,17 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
 }
 
 public let save_config(project_dir String, config ProjectConfig) Result[Void] = {
-    let mut obj = Dict[String, ref JsonValue].new()
+    let mut obj = Dict[String, * JsonValue].new()
     obj.insert("name", box(JsonValue.String(config.name)))
     obj.insert("version", box(JsonValue.String(config.version)))
     obj.insert("entry", box(JsonValue.String(config.entry)))
     obj.insert("links", json_string_array(config.links))
 
-    let mut modules_obj = Dict[String, ref JsonValue].new()
+    let mut modules_obj = Dict[String, * JsonValue].new()
     let mut module_iter = config.modules.iterator()
     while module_iter.next() is .Some(module_entry) then {
         let module = module_entry.second
-        let mut module_json = Dict[String, ref JsonValue].new()
+        let mut module_json = Dict[String, * JsonValue].new()
         module_json.insert("entry", box(JsonValue.String(module.entry)))
         module_json.insert("deps", json_string_array(module.deps))
         module_json.insert("links", json_string_array(module.links))
@@ -309,16 +309,16 @@ public let save_config(project_dir String, config ProjectConfig) Result[Void] = 
     }
     obj.insert("modules", box(JsonValue.Object(modules_obj)))
 
-    let mut deps_obj = Dict[String, ref JsonValue].new()
+    let mut deps_obj = Dict[String, * JsonValue].new()
     let mut dep_iter = config.dependencies.iterator()
     while dep_iter.next() is .Some(dep_entry) then {
         let dep = dep_entry.second
-        let mut dep_json = Dict[String, ref JsonValue].new()
+        let mut dep_json = Dict[String, * JsonValue].new()
         dep_json.insert("name", box(JsonValue.String(dep.name)))
         dep_json.insert("git", box(JsonValue.String(dep.git)))
         dep_json.insert("version", box(JsonValue.String(dep.version)))
 
-        let mut aliases_obj = Dict[String, ref JsonValue].new()
+        let mut aliases_obj = Dict[String, * JsonValue].new()
         let mut alias_iter = dep.module_aliases.iterator()
         while alias_iter.next() is .Some(alias_entry) then {
             aliases_obj.insert(alias_entry.first, box(JsonValue.String(alias_entry.second)))

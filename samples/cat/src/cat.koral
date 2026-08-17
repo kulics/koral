@@ -63,7 +63,7 @@ private let show_version() Void = {
 // Argument Parsing
 // ============================================================================
 
-private let apply_flag(config ref mut Config, arg String) Result[Void] = {
+private let apply_flag(config *mut Config, arg String) Result[Void] = {
     when arg in {
         "-n" then {
             config.format_options.number_lines = true
@@ -134,7 +134,7 @@ private let parse_args(args List[String]) Result[Config] = {
     )
     
     for i in 1..<args.count() then {
-        let _ = apply_flag(config.ref, args[i]) or return
+        let _ = apply_flag(&mut config, args[i]) or return
     }
     
     if config.format_options.number_nonblank then {
@@ -159,20 +159,20 @@ given Formatter {
         return Formatter(options, 1, false)
     }
 
-    private should_render_special_chars(self ref) Bool =
+    private should_render_special_chars(*self) Bool =
         self.options.show_nonprinting or self.options.show_tabs or self.options.show_ends
 
-    private should_number_line(self ref, is_blank Bool) Bool =
+    private should_number_line(*self, is_blank Bool) Bool =
         self.options.number_lines or (self.options.number_nonblank and not is_blank)
 
-    private line_prefix(self ref mut) String = {
+    private line_prefix(*mut self) String = {
         let num_str = self.line_number.to_string()
         let padding = if num_str.count() >= 6 then "" else " ".repeat(6 - num_str.count())
         self.line_number += 1
         return "\(padding)\(num_str)\t"
     }
     
-    public format_line(self ref mut, line String) Option[String] = {
+    public format_line(*mut self, line String) Option[String] = {
         let is_blank = self.is_blank_line(line)
         if self.options.squeeze_blank and is_blank and self.last_was_blank then {
             self.last_was_blank = is_blank
@@ -194,12 +194,12 @@ given Formatter {
         return Option[String].Some(result)
     }
 
-    private is_blank_line(self ref, line String) Bool = {
+    private is_blank_line(*self, line String) Bool = {
         return line.is_empty() or line == "\n" or line == "\r\n"
     }
     
     // Apply special character transformations
-    private apply_special_chars(self ref, line String) String = {
+    private apply_special_chars(*self, line String) String = {
         let mut result = String.new()
         
         for i in 0..<line.count() then {
@@ -235,14 +235,14 @@ given Formatter {
 // File Processing
 // ============================================================================
 
-private let emit_formatted_line(formatter ref mut Formatter, line String) Void = {
+private let emit_formatted_line(formatter *mut Formatter, line String) Void = {
     when formatter.format_line(line) in {
         .Some(formatted) then print(formatted),
         .None() then {},
     }
 }
 
-private let process_file(file_path String, formatter ref mut Formatter) Bool = {
+private let process_file(file_path String, formatter *mut Formatter) Bool = {
     let file = open_file(file_path.into_path(), OpenMode.Read()) or else {
         eprintln("cat: \(file_path): \(it.message())")
         return true
@@ -263,7 +263,7 @@ private let process_file(file_path String, formatter ref mut Formatter) Bool = {
     return false
 }
 
-private let process_stdin(formatter ref mut Formatter) Bool = {
+private let process_stdin(formatter *mut Formatter) Bool = {
     while true then {
         let line = scanln() or else { return false }
         emit_formatted_line(formatter, line + "\n")
@@ -272,7 +272,7 @@ private let process_stdin(formatter ref mut Formatter) Bool = {
     return false
 }
 
-private let process_all_inputs(sources List[InputSource], formatter ref mut Formatter) Int = {
+private let process_all_inputs(sources List[InputSource], formatter *mut Formatter) Int = {
     let mut had_error = false
     
     for source in sources then {
@@ -324,5 +324,5 @@ public let main() Int = {
     }
 
     let mut formatter = Formatter.new(config.format_options)
-    return process_all_inputs(sources, formatter.ref)
+    return process_all_inputs(sources, &mut formatter)
 }
