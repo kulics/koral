@@ -53,6 +53,19 @@ given TypeChecker {
         }
     }
 
+    protected report_weak_member_access_issue_if_needed(self, resolved Type, has_method Bool, base_type Type, member String) Void = {
+        if resolved is not .Unknown() or has_method then {
+            return
+        }
+        self.storage.diagnostics.push(
+            make_diagnostic(
+                DiagnosticStage.Semantic(),
+                self.storage.file_path,
+                "Invalid operation member access between types \(self.display_type_name(base_type)) and "
+            )
+        )
+    }
+
     protected expr_contains_or_return(self, expr * Expr) Bool = {
         let _ = self
         return when expr in {
@@ -553,8 +566,18 @@ given TypeChecker {
             .ReferenceType(inner) then self.resolve_member_type(*inner, member),
             .MutableBorrowedReferenceType(inner) then self.resolve_member_type(*inner, member),
             .BorrowedReferenceType(inner) then self.resolve_member_type(*inner, member),
-            .WeakReferenceType(inner) then self.resolve_member_type(*inner, member),
-            .MutableWeakReferenceType(inner) then self.resolve_member_type(*inner, member),
+            .WeakReferenceType(inner) then {
+                let resolved = self.resolve_member_type(*inner, member)
+                let has_method = raw_method is .Some(_) or visible_method is .Some(_)
+                self.report_weak_member_access_issue_if_needed(resolved, has_method, typed_base.expr_type, member)
+                break resolved
+            },
+            .MutableWeakReferenceType(inner) then {
+                let resolved = self.resolve_member_type(*inner, member)
+                let has_method = raw_method is .Some(_) or visible_method is .Some(_)
+                self.report_weak_member_access_issue_if_needed(resolved, has_method, typed_base.expr_type, member)
+                break resolved
+            },
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
                     let mut found = Type.Unknown()
