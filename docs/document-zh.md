@@ -1680,7 +1680,6 @@ let p = Point.origin()
 - `​self`：托管值接收器（等价于 `self Self`）。
 - `*self` / `*mut self`：托管接收器，调用端允许 auto-ref。
 - `*self Self` / `*mut self Self`：显式托管接收器，不允许 auto-ref/auto-deref。
-- `*self <lifetime> Self` / `*self <lifetime> mut Self`：显式具名生命周期借用接收器。
 - Auto-ref 和 auto-deref 仅适用于 `self` 和 `*self` 形式；显式托管/借用形式要求调用方提供确切的绑定。
 
 ### Trait Object

@@ -174,7 +174,7 @@ Koral distinguishes between managed references and borrowed references:
 
 - `*T` / `*mut T` are managed references.
   - May escape; can be returned, stored in fields, containers, or enum payloads.
-- `*_ T` / `*_ mut T` are borrowed references (anonymous lifetime).
+- `*_ T` / `*_ mut T` are borrowed references (non-escaping).
   - Must not escape; cannot be returned, stored in fields, enum payloads, globals, or closure environments.
   - Only allowed in function parameter and receiver positions.
 - Both share the same runtime layout and retain/release behavior; the difference is frontend static semantics only.
@@ -1643,7 +1643,6 @@ Arithmetic and comparison operators are lowered to trait methods internally (for
 - self: managed value receiver (equivalent to self Self).
 - *self / *mut self: borrowed receivers; auto-ref allowed on call sites.
 - *self Self / *mut self Self: explicit managed receivers; no auto-ref or auto-deref.
-- *self <lifetime> Self / *self <lifetime> mut Self: explicit borrowed receivers with a named lifetime.
 - Auto-ref and auto-deref apply only to self and *self forms; explicit managed/borrowed forms require the caller to provide the exact binding.
 
 ### Trait Objects
