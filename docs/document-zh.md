@@ -745,7 +745,7 @@ list[1] = 99
 let text = "abc"
 let b UInt8 = text[1]
 
-let p ptr mut Int = alloc_memory[Int](2)
+let p *raw mut Int = alloc_memory[Int](2)
 p[0] = list[0]
 let first = p[0]
 dealloc_memory(p)
@@ -1669,11 +1669,11 @@ let p = Point.origin()
 - `ToString`：字符串转换。
 - `Iterator[T]`：迭代协议（`next(*mut self) Option[T]`）。
 - `Error`：错误消息接口（`message(*self) String`）。
-- `Drop`：析构钩子（`drop(source ptr mut Self) Void`）。
+- `Drop`：析构钩子（`drop(source *raw mut Self) Void`）。
 
 算术和比较操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`）。下标访问由编译器内建规则处理，不属于公开 trait 系统。
 
-`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source ptr mut Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
+`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source *raw mut Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
 
 ### 方法接收器形式
 

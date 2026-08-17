@@ -721,7 +721,7 @@ list[1] = 99
 let text = "abc"
 let b UInt8 = text[1]
 
-let p ptr mut Int = alloc_memory[Int](2)
+let p *raw mut Int = alloc_memory[Int](2)
 p[0] = list[0]
 let first = p[0]
 dealloc_memory(p)
@@ -1632,11 +1632,11 @@ The most commonly used core traits are:
 - `ToString`: conversion to string.
 - `Iterator[T]`: iteration protocol (`next(*mut self) Option[T]`).
 - `Error`: error message interface (`message(*self) String`).
-- `Drop`: destructor hook (`drop(source ptr mut Self) Void`).
+- `Drop`: destructor hook (`drop(source *raw mut Self) Void`).
 
 Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
-`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source ptr mut Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
+`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source *raw mut Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
 
 ### Method Receiver Forms
 
