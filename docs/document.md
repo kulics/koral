@@ -170,22 +170,17 @@ The compiler moves fields directly from the Pair value into the target variables
 
 #### Reference Creation Rules (`&` / `box`)
 
-Koral distinguishes between managed references and borrowed references:
+Koral uses reference types to refer to another value rather than holding it:
 
 - `*T` / `*mut T` are managed references.
   - May escape; can be returned, stored in fields, containers, or enum payloads.
-- `*_ T` / `*_ mut T` are borrowed references (non-escaping).
-  - Must not escape; cannot be returned, stored in fields, enum payloads, globals, or closure environments.
-  - Only allowed in function parameter and receiver positions.
-- Both share the same runtime layout and retain/release behavior; the difference is frontend static semantics only.
-- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
+- `*mut T` implicitly converts to `*T`. The reverse is not allowed.
 
-`&` uses "borrow-first" semantics:
+`&` is the reference-of operator:
 
 - Only allowed on value paths, e.g. `&x`, `&self.field`.
 - `&` on rvalues is rejected (e.g. `&make_value()` is an error).
-- Without an explicit managed expected type, `&` defaults to producing a borrowed reference.
-- When the local context explicitly requires a managed `*` / `*mut`, the compiler promotes that `&` to a managed reference within the current function.
+- `&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
 - `box(expr)` is explicit managed construction, returning `*mut T`.
 
 Implicit conversion rules:
@@ -204,11 +199,11 @@ let mut x = 10
 let rx *mut Int = &mut x   // managed expected type triggers local promotion
 
 let y = 10
-let ry *_ Int = &y    // defaults to borrowed reference
+let ry *Int = &y       // read-only reference
 
 let owned *mut Int = box(42) // box() returns *mut T
 
-// let rz = &42           // error: rvalue cannot be borrowed
+// let rz = &42           // error: rvalue cannot be referenced
 
 // No implicit managed-ref promotion for function arguments:
 let takes_ref(r * Int) Int = *r
@@ -491,31 +486,28 @@ Rules:
 
 ### Reference Types
 
-Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying. Koral distinguishes between managed references and borrowed references:
+Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying:
 
 - `*T` — managed read-only reference. Supports `*expr` dereference read but NOT `*expr = value` assignment.
 - `*mut T` — managed mutable reference. Supports both `*expr` dereference read and `*expr = value` assignment.
-- `*_ T` — borrowed read-only reference. Same runtime layout as `*T`, but frontend forbids escaping.
-- `*_ mut T` — borrowed mutable reference. Same runtime layout as `*mut T`, but frontend forbids escaping.
-- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
 
 Use the `&` prefix expression to create a reference. The result depends on the source's mutability:
 
 ```koral
 let mut n = 42
-let a *_ mut Int = &mut n
+let a *mut Int = &mut n
 let b = *a            // Dereference, gets 42
 *a = 100              // Deref assignment (*mut supports *expr = value)
 
 let m = 42
-let c *_ Int = &m
+let c *Int = &m
 let d = *c            // Dereference read, gets 42
 // *c = 100           // Error: * does not support deref assignment
 
 let owned *mut Int = &mut n // managed expected type triggers local promotion
 ```
 
-`*` / `*mut` and `*_` / `*_ mut` share the same ABI, memory layout, and retain/release behavior at runtime. The difference is only frontend semantics: borrowed references cannot escape, while managed references can be held long-term. `&` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does the compiler promote the construction to managed within the current function. `box(expr)` always explicitly constructs a managed `*mut T`.
+`&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide whether the reference can be stack-allocated or must be heap-allocated. `box(expr)` always explicitly constructs a managed `*mut T`.
 
 Pointer types follow the same read-only / mutable distinction:
 
@@ -547,7 +539,7 @@ let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `*` / `*mut` are escaping managed references; `*_` / `*_ mut` are non-escaping borrowed references. Both share the same runtime layout and retain/release behavior; the difference is only frontend static semantics. `&` defaults to producing a borrowed reference; only when the local context explicitly requires a managed reference does local promotion occur. `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `&` on rvalues legal, and `*mut self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `*` / `*mut` are managed references. `&` produces a `*T` (or `*mut T` with `&mut`); the compiler uses escape analysis to decide stack vs heap allocation. `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `&` on rvalues legal, and `*mut self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -1641,7 +1633,7 @@ Arithmetic and comparison operators are lowered to trait methods internally (for
 ### Method Receiver Forms
 
 - self: managed value receiver (equivalent to self Self).
-- *self / *mut self: borrowed receivers; auto-ref allowed on call sites.
+- *self / *mut self: managed receivers; auto-ref allowed on call sites.
 - *self Self / *mut self Self: explicit managed receivers; no auto-ref or auto-deref.
 - Auto-ref and auto-deref apply only to self and *self forms; explicit managed/borrowed forms require the caller to provide the exact binding.
 

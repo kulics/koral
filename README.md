@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
-- Reference types: `*` (managed read-only), `*mut` (managed mutable), `*_` (borrowed read-only), `*_ mut` (borrowed mutable), `*raw` (read-only), `*raw mut` (mutable), `?*` (read-only weak), `?*mut` (mutable weak)
+- Reference types: `*` (managed read-only), `*mut` (managed mutable), `*raw` (read-only), `*raw mut` (mutable), `?*` (read-only weak), `?*mut` (mutable weak)
 
 ### Control Flow
 
@@ -236,16 +236,14 @@ let result = list.iterator()
 - `defer` for deterministic resource cleanup
 
 Reference creation rules:
-- Koral distinguishes managed references (`*T`, `*mut T`) from borrowed references (`*_ T`, `*_ mut T`). Both share the same runtime layout; the difference is frontend static semantics only — borrowed references cannot escape.
-- `&` uses "borrow-first" semantics: without an explicit managed expected type, `&` defaults to producing a borrowed reference. When the local context explicitly requires a managed `*` / `*mut`, the compiler promotes that `&` to a managed reference within the current function.
+- `&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
 - `&` result mutability depends on the source: `let mut` binding → `*mut T`, `let` binding → `*T`, mutable path → `*mut T`.
-- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
 - `&` on rvalues is rejected by the compiler.
 - **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must use `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** `*self` methods accept values via auto-ref; `self` methods accept `*T` via auto-deref (following Go's pointer receiver behavior).
 - Calling a `*self` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
 - Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mut Trait` can call both `*mut self` and `*self` requirements.
-- Method receiver forms: `self` (managed value), `*self` / `*mut self` (borrowed receivers, auto-ref allowed), and explicit managed forms `*self Self` / `*mut self Self` (no auto-ref/auto-deref). Auto-ref and auto-deref apply only to `self` and `*self` forms.
+- Method receiver forms: `self` (managed value), `*self` / `*mut self` (managed receivers, auto-ref allowed), and explicit managed forms `*self Self` / `*mut self Self` (no auto-ref/auto-deref). Auto-ref and auto-deref apply only to `self` and `*self` forms.
 - `*T` is read-only: `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
 - `*raw T` is read-only: `*expr` dereference read only. `*raw mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
 - Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mut T`.

@@ -185,15 +185,14 @@ Notes:
 
 ## Reference Creation Semantics (`&` / `box`)
 
-Koral distinguishes managed references (`*T`, `*mut T`) from borrowed references (`*_ T`, `*_ mut T`), and read-only pointers (`*raw T`) from mutable pointers (`*raw mut T`):
+Koral distinguishes managed references (`*T`, `*mut T`) from raw pointers (`*raw T`, `*raw mut T`):
 
-- Managed references may escape; borrowed references must not escape. Both share the same runtime layout and retain/release behavior.
-- `&x` uses "borrow-first" semantics: without an explicit managed expected type, `&` defaults to producing a borrowed reference. When the local context requires managed, the compiler promotes within the current function.
+- Managed references may escape and are reference-counted. The compiler uses escape analysis to decide stack vs heap allocation.
+- `&x` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
 - `&` result mutability depends on the source's mutability:
     - `let mut` binding → `*mut T`
     - `let` (immutable) binding → `*T`
     - Mutable path (e.g. `*mut`'s `mut` field) → `*mut T`
-- `*mut T` implicitly converts to `*T`; `*_ mut T` implicitly converts to `*_ T`. The reverse is not allowed.
 - `&` on rvalues is rejected.
 - **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must pass `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mut T` (auto-deref, following Go's pointer receiver behavior).
@@ -208,7 +207,7 @@ let mut x = 10
 let rx *mut Int = &mut x    // managed expected type triggers local promotion
 
 let y = 10
-let ry *_ Int = &y     // defaults to borrowed reference
+let ry *Int = &y     // read-only reference
 
 let owned *mut Int = box(42)   // box() returns *mut T
 
@@ -363,7 +362,7 @@ This is also why observational methods such as set algebra should not be forced 
 
 Do not equate "returns a new value" or "looks like an operator" with consuming ownership.
 
-Core arithmetic traits such as `Add`, `Sub`, `Mul`, `Div`, `Rem`, and `Neg` are value-style protocols today and should generally stay that way. They primarily model scalar algebra over small immutable values, and changing them to borrowed receivers would impose broad signature churn across numeric APIs for little semantic gain.
+Core arithmetic traits such as `Add`, `Sub`, `Mul`, `Div`, `Rem`, and `Neg` are value-style protocols today and should generally stay that way. They primarily model scalar algebra over small immutable values, and changing them to managed receivers would impose broad signature churn across numeric APIs for little semantic gain.
 
 Use this distinction:
 
@@ -383,7 +382,7 @@ Apply that rule to API design as follows:
 
 Likewise, predicates such as `is_subset_of` and `is_superset_of` are observational set queries, not arithmetic consumption. They should follow the normal borrowed rule for containers.
 
-For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so changing container-like operands from value parameters to `ref` parameters often degrades call-site ergonomics more than it improves ownership clarity. In the current language design, `borrowed receiver + value operand` is often the right balance for APIs like set algebra and random generation helpers.
+For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so changing container-like operands from value parameters to `ref` parameters often degrades call-site ergonomics more than it improves ownership clarity. In the current language design, `managed receiver + value operand` is often the right balance for APIs like set algebra and random generation helpers.
 
 If implementing a `*self` method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the public receiver should be `self`.
 
