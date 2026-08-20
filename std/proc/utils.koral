@@ -21,6 +21,10 @@ private foreign let __koral_send_signal(pid UInt32, signal Int32) Int32
 /// Check if a process is alive. Returns 1 if alive, 0 if not.
 private foreign let __koral_is_alive(pid UInt32) Int32
 
+/// Get the working set size (resident memory) of a process in bytes. Returns -1 on error.
+private foreign let __koral_process_working_set_bytes(pid UInt32) Int64
+private foreign let __koral_process_tree_working_set_bytes(pid UInt32) Int64
+
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
 
@@ -50,6 +54,21 @@ public let kill_process(pid UInt32) Result[Void] = send_process_signal(9, to: pi
 
 /// Check whether the process with the given PID is still alive.
 public let is_process_alive(pid UInt32) Bool = __koral_is_alive(pid) <> 0
+
+/// Get the working set size (resident memory) of a process in bytes.
+/// Returns 0 if the process is not found or an error occurs.
+public let process_working_set_bytes(pid UInt32) UInt64 = {
+    let result = __koral_process_working_set_bytes(pid)
+    return if result < 0 then 0(UInt64) else result(UInt64)
+}
+
+/// Get the total working set size of a process and all its child processes.
+/// This tracks the entire process tree, not just the root process.
+/// Returns 0 if the process is not found or an error occurs.
+public let process_tree_working_set_bytes(pid UInt32) UInt64 = {
+    let result = __koral_process_tree_working_set_bytes(pid)
+    return if result < 0 then 0(UInt64) else result(UInt64)
+}
 
 /// Convenience: synchronously execute a command and return only the exit status.
 /// Internally uses Command.new(program).args(args).run().

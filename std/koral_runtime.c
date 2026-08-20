@@ -230,6 +230,8 @@ struct KoralTimespec {
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <psapi.h>
+#include <tlhelp32.h>
 #include <direct.h>
 #include <io.h>
 #include <fcntl.h>
@@ -2227,6 +2229,94 @@ int32_t __koral_is_alive(uint32_t pid) {
 #endif
 }
 
+// --- __koral_process_working_set_bytes ---
+// Returns the working set size (resident memory) of a process in bytes.
+// Returns -1 on error (process not found, access denied, etc).
+
+int64_t __koral_process_working_set_bytes(uint32_t pid) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, (DWORD)pid);
+    if (h == NULL) return -1;
+    PROCESS_MEMORY_COUNTERS pmc;
+    BOOL ok = GetProcessMemoryInfo(h, &pmc, sizeof(pmc));
+    CloseHandle(h);
+    if (!ok) return -1;
+    return (int64_t)pmc.WorkingSetSize;
+#else
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%u/status", pid);
+    FILE* f = fopen(path, "r");
+    if (!f) return -1;
+    char line[256];
+    int64_t rss_kb = -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            rss_kb = strtoll(line + 6, NULL, 10);
+            break;
+        }
+    }
+    fclose(f);
+    return rss_kb > 0 ? rss_kb * 1024 : -1;
+#endif
+}
+
+
+// --- __koral_process_tree_working_set_bytes ---
+// Returns the total working set size of a process and all its descendants.
+// This is needed because the test runner monitors the compiler process,
+// but the compiler spawns child processes (like clang) that may consume
+// significant memory independently.
+int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
+#if defined(_WIN32) || defined(_WIN64)
+    // First, get memory for the root process
+    int64_t total = __koral_process_working_set_bytes(root_pid);
+    if (total < 0) total = 0;
+
+    // Build a map of parent PID -> child PIDs using Toolhelp32
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return total;
+
+    // Collect all processes
+    typedef struct { DWORD pid; DWORD ppid; } ProcEntry;
+    ProcEntry procs[4096];
+    int count = 0;
+
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(pe);
+    if (Process32First(snapshot, &pe)) {
+        do {
+            if (count < 4096) {
+                procs[count].pid = pe.th32ProcessID;
+                procs[count].ppid = pe.th32ParentProcessID;
+                count++;
+            }
+        } while (Process32Next(snapshot, &pe));
+    }
+    CloseHandle(snapshot);
+
+    // BFS to find all descendants of root_pid
+    uint32_t queue[4096];
+    int qhead = 0, qtail = 0;
+    queue[qtail++] = root_pid;
+
+    while (qhead < qtail) {
+        uint32_t current = queue[qhead++];
+        for (int i = 0; i < count; i++) {
+            if (procs[i].ppid == current) {
+                int64_t child_mem = __koral_process_working_set_bytes(procs[i].pid);
+                if (child_mem > 0) total += child_mem;
+                if (qtail < 4096) queue[qtail++] = procs[i].pid;
+            }
+        }
+    }
+
+    return total;
+#else
+    // On Linux/Unix, use /proc/<pid>/task/*/children or just sum RSS
+    // For simplicity, use the same approach as single process for now
+    return __koral_process_working_set_bytes(root_pid);
+#endif
+}
 
 // --- Wait operations ---
 

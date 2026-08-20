@@ -10,10 +10,10 @@ private type CaseWorkerEvent {
     Finished(result CaseResult),
 }
 
-private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UInt, infra_failed UInt, start MonoTime) RunSummary = {
+private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UInt, memory_exceeded UInt, infra_failed UInt, start MonoTime) RunSummary = {
     let duration_ms = start.elapsed().as_milliseconds()
     let exit_code = if failed == 0 then 0 else 1
-    return RunSummary(total, passed, failed, timed_out, infra_failed, duration_ms, exit_code)
+    return RunSummary(total, passed, failed, timed_out, memory_exceeded, infra_failed, duration_ms, exit_code)
 }
 
 private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
@@ -22,6 +22,7 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
     let mut passed UInt = 0
     let mut failed UInt = 0
     let mut timed_out UInt = 0
+    let mut memory_exceeded UInt = 0
     let mut infra_failed UInt = 0
 
     for i in 0..<total then {
@@ -35,13 +36,16 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
             if result.failure_type == "timeout" then {
                 timed_out += 1
             }
+            if result.failure_type == "memory_exceeded" then {
+                memory_exceeded += 1
+            }
             if result.failure_type == "infrastructure_error" then {
                 infra_failed += 1
             }
         }
     }
 
-    return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
+    return finalize_summary(total, passed, failed, timed_out, memory_exceeded, infra_failed, start)
 }
 
 private let run_case_and_emit_events(config RunnerConfig, info CaseInfo, sender SendChannel[CaseWorkerEvent]) Void = {
@@ -82,7 +86,7 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
     let start = MonoTime.now()
     let total = cases.count()
     if total == 0 then {
-        return finalize_summary(0, 0, 0, 0, 0, start)
+        return finalize_summary(0, 0, 0, 0, 0, 0, start)
     }
 
     let worker_count = min(config.jobs, total)
@@ -102,6 +106,7 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
     let mut passed UInt = 0
     let mut failed UInt = 0
     let mut timed_out UInt = 0
+    let mut memory_exceeded UInt = 0
     let mut infra_failed UInt = 0
 
     for _ in 0..<worker_count then {
@@ -143,6 +148,9 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
                             if result.failure_type == "timeout" then {
                                 timed_out += 1
                             }
+                            if result.failure_type == "memory_exceeded" then {
+                                memory_exceeded += 1
+                            }
                             if result.failure_type == "infrastructure_error" then {
                                 infra_failed += 1
                             }
@@ -157,13 +165,13 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
         }
     }
 
-    return finalize_summary(total, passed, failed, timed_out, infra_failed, start)
+    return finalize_summary(total, passed, failed, timed_out, memory_exceeded, infra_failed, start)
 }
 
 public let run_cases(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
     if cases.is_empty() then {
         report_error_line(config, "No test cases matched current filter")
-        return RunSummary(0, 0, 1, 0, 0, 0, 1)
+        return RunSummary(0, 0, 1, 0, 0, 0, 0, 1)
     }
 
     report_line(config, "Running " + cases.count().to_string() + " case(s) with jobs=" + config.jobs.to_string())

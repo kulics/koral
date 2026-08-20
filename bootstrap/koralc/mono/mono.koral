@@ -538,51 +538,8 @@ private let is_source_given_decl(decl * TypedDecl) Bool = {
     }
 }
 
-private let mono_debug_phase_enabled() Bool =
-    when env("KORAL_DEBUG_PHASE") in {
-        .Some(value) then value == "1" or value == "true" or value == "TRUE",
-        .None() then false,
-    }
-
-private let mono_parse_uint(text String) Option[UInt] = {
-    if text.is_empty() then { return Option[UInt].None() }
-    let mut value UInt = 0(UInt)
-    let mut has_digit = false
-    for ch in text.to_runes() then {
-        let digit = when ch in {
-            '0' then Option[UInt].Some(0(UInt)),
-            '1' then Option[UInt].Some(1(UInt)),
-            '2' then Option[UInt].Some(2(UInt)),
-            '3' then Option[UInt].Some(3(UInt)),
-            '4' then Option[UInt].Some(4(UInt)),
-            '5' then Option[UInt].Some(5(UInt)),
-            '6' then Option[UInt].Some(6(UInt)),
-            '7' then Option[UInt].Some(7(UInt)),
-            '8' then Option[UInt].Some(8(UInt)),
-            '9' then Option[UInt].Some(9(UInt)),
-            _ then Option[UInt].None(),
-        }
-        when digit in {
-            .Some(d) then {
-                has_digit = true
-                value = value * 10(UInt) + d
-            },
-            .None() then {
-                return Option[UInt].None()
-            },
-        }
-    }
-    return if has_digit then Option[UInt].Some(value) else Option[UInt].None()
-}
-
-private let mono_env_uint(name String, fallback UInt) UInt = {
-    return when env(name) in {
-        .Some(raw_val) then when mono_parse_uint(raw_val) in {
-            .Some(parsed) then parsed,
-            .None() then fallback,
-        },
-        .None() then fallback,
-    }
+private let mono_env_uint(_name String, fallback UInt) UInt = {
+    return fallback
 }
 
 private let instantiation_kind_profile_name(kind InstantiationKind) String = {
@@ -1063,30 +1020,28 @@ given Monomorphizer {
     //   5. Assemble and return MonomorphizedProgram
     //
     public monomorphize(*self) MonomorphizedProgram = {
-        eprintln("[mono-phase] start")
+        // removed noisy phase logging
         // Seed forced Drop-method instantiation for already-materialized
         // concrete generic nominal types tracked only in CompilerContext.
-        eprintln("[mono-phase] seed-forced-drop begin")
+        // removed noisy phase logging
         let mut seed_def_id UInt = 1
         while seed_def_id < self.storage.context.next_def_id() then {
             self.enqueue_forced_drop_request_for_type_def(DefId(seed_def_id))
             seed_def_id += 1
         }
-        eprintln("[mono-phase] seed-forced-drop done pending=\(self.storage.pending_requests.count())")
-
-        // ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
+        // removed noisy phase logging
+// ── Seed extension_method_def_ids from GivenDecl nodes ────────────────
         // Register method DefIds from non-generic GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
         // so that resolve_static_method_call_to_call can find them.
-        eprintln("[mono-phase] seed-given-method-defids begin")
+        // removed noisy phase logging
         for node_ref in self.storage.generated_nodes then {
             self.seed_given_method_def_ids(node_ref)
         }
-        eprintln("[mono-phase] seed-given-method-defids done")
+        // removed noisy phase logging
 
         let mut processed_iterations = 0
-        eprintln("[mono-phase] queue-loop begin pending=\(self.storage.pending_requests.count())")
-
-        // ── Work-queue loop ───────────────────────────────────────────────────
+        // removed noisy phase logging
+// ── Work-queue loop ───────────────────────────────────────────────────
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
                 panic("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
@@ -1094,7 +1049,7 @@ given Monomorphizer {
 
             processed_iterations += 1
             if processed_iterations % 100(UInt) == 0(UInt) then {
-                eprintln("[mono-progress] iter=\(processed_iterations) pending=\(self.storage.pending_requests.count()) processed=\(self.storage.processed_request_keys.count())")
+                // removed noisy progress logging
             }
             if processed_iterations > 200000 then {
                 panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
@@ -1110,9 +1065,7 @@ given Monomorphizer {
                 panic("Monomorphization pending queue unexpectedly empty")
             }
             let key = req.deduplication_key()
-            if processed_iterations <= 200(UInt) then {
-                eprintln("[mono-phase] queue-loop pop iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_after_pop=\(self.storage.pending_requests.count()) generated_nodes=\(self.storage.generated_nodes.count())")
-            }
+            // removed noisy phase logging
 
             // Deduplication check
             if self.storage.processed_request_keys.contains(key) then {
@@ -1122,9 +1075,7 @@ given Monomorphizer {
 
             // Increment recursion depth before dispatching
             self.storage.current_recursion_depth += 1
-            if processed_iterations <= 200(UInt) then {
-                eprintln("[mono-phase] queue-loop dispatch-begin iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) depth=\(self.storage.current_recursion_depth)")
-            }
+            // removed noisy phase logging
 
             // Dispatch by kind
             when req.kind in {
@@ -1148,9 +1099,7 @@ given Monomorphizer {
                 },
             }
 
-            if processed_iterations <= 200(UInt) then {
-                eprintln("[mono-phase] queue-loop dispatch-end iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_now=\(self.storage.pending_requests.count()) generated_nodes=\(self.storage.generated_nodes.count())")
-            }
+            // removed noisy phase logging
 
             // Decrement recursion depth after dispatching
             self.storage.current_recursion_depth -= 1
@@ -1184,10 +1133,9 @@ given Monomorphizer {
         }
         if dedup_removed > 0(UInt) then {
             self.storage.generated_nodes = deduped_nodes
-            eprintln("[mono-phase] resolve-generated-nodes dedup removed=\(dedup_removed) remaining=\(self.storage.generated_nodes.count())")
         }
-        eprintln("[mono-phase] resolve-generated-nodes dedup-removed=\(dedup_removed)")
-
+        // removed noisy phase logging
+        // removed noisy phase logging
         let mut unique_def_ids = Set[UInt].new()
         let mut duplicate_def_nodes = 0(UInt)
         for node_ref in self.storage.generated_nodes then {
@@ -1204,8 +1152,7 @@ given Monomorphizer {
         }
         self.storage.expression_resolve_total_steps = 0(UInt)
         self.storage.expression_resolve_total_limited = false
-        eprintln("[mono-phase] resolve-generated-nodes begin count=\(self.storage.generated_nodes.count()) unique_def_ids=\(unique_def_ids.count()) duplicate_def_nodes=\(duplicate_def_nodes)")
-
+        // removed noisy phase logging
         // Process by index — resolve_parameterized_type may push new nodes into
         // generated_nodes; keep resolving until all appended nodes are processed.
         let mut resolved_nodes = List[* TypedDecl].new()
@@ -1213,18 +1160,13 @@ given Monomorphizer {
         while ri < self.storage.generated_nodes.count() then {
             let node = self.storage.generated_nodes[ri]
             let node_kind = mono_decl_kind_name(node)
-            if ri < 200(UInt) then {
-                eprintln("[mono-phase] resolve-node begin index=\(ri) total=\(self.storage.generated_nodes.count()) kind=\(node_kind)")
-            }
+            // removed noisy phase logging
             resolved_nodes.push(box(resolve_types_in_global_node(self, node)))
-            if ri < 200(UInt) then {
-                eprintln("[mono-phase] resolve-node end index=\(ri) resolved_count=\(resolved_nodes.count())")
-            }
+            // removed noisy phase logging
             ri += 1(UInt)
         }
         self.storage.generated_nodes = resolved_nodes
-        eprintln("[mono-phase] resolve-generated-nodes done count=\(self.storage.generated_nodes.count())")
-
+        // removed noisy phase logging
         // ── Final trait-placeholder resolution loop ───────────────────────────
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
@@ -1233,7 +1175,7 @@ given Monomorphizer {
 
             processed_iterations += 1
             if processed_iterations % 100(UInt) == 0(UInt) then {
-                eprintln("[mono-progress] iter=\(processed_iterations) pending=\(self.storage.pending_requests.count()) processed=\(self.storage.processed_request_keys.count())")
+                // removed noisy progress logging
             }
             if processed_iterations > 200000 then {
                 panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
@@ -1243,9 +1185,7 @@ given Monomorphizer {
                 panic("Monomorphization pending queue unexpectedly empty")
             }
             let key = req.deduplication_key()
-            if processed_iterations <= 20(UInt) then {
-                eprintln("[mono-phase] final-loop pop iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_after_pop=\(self.storage.pending_requests.count())")
-            }
+            // removed noisy phase logging
             if self.storage.processed_request_keys.contains(key) then {
                 continue
             }
@@ -1268,9 +1208,7 @@ given Monomorphizer {
                     self.instantiate_trait_placeholder_method_impl(base_type, method_name, method_type_args)
                 },
             }
-            if processed_iterations <= 20(UInt) then {
-                eprintln("[mono-phase] final-loop dispatch-end iter=\(processed_iterations) kind=\(instantiation_kind_profile_name(req.kind)) pending_now=\(self.storage.pending_requests.count())")
-            }
+            // removed noisy phase logging
         }
 
         // ── Build static method lookup ────────────────────────────────────────

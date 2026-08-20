@@ -32,12 +32,7 @@ public let run_driver() Int = {
     let mut command = "build"
     let mut index UInt = 1
 
-    if first == "--emit-ast" or
-       first == "--emit-typed-ast" or
-       first == "--resolve-module" or
-       first == "--emit-c" or
-       first == "check" or
-       first == "build" then {
+    if first == "check" or first == "build" or first == "emit-c" or first == "run" then {
         command = first
         index = 2
     } else if not first.starts_with("-") then {
@@ -87,10 +82,10 @@ public let run_driver() Int = {
                 return 1
             }
             std_config_path = Option[String].Some(argv[i])
-        } else if arg == "-o" then {
+        } else if arg == "-o" or arg == "--output" then {
             i += 1
             if i >= argv.count() then {
-                eprintln("missing value for -o")
+                eprintln("missing value for -o/--output")
                 return 1
             }
             out_dir = Option[String].Some(argv[i])
@@ -131,29 +126,28 @@ public let run_driver() Int = {
     }
 
     return when command in {
-        "--emit-ast" then {
-            eprintln("--emit-ast is no longer supported by the manifest-driven bootstrap driver")
-            break 1
-        },
-        "--emit-typed-ast" then run_emit_typed_ast(options),
-        "--resolve-module" then run_resolve_module(options),
-        "--emit-c" then run_emit_c(options),
+        "emit-c" then run_emit_c(options),
         "check" then run_check(options),
         "build" then run_build(options),
+        "run" then run_run(options),
         _ then 1,
     }
 }
 
 private let print_usage() Void = {
-    eprintln("bootstrap-koralc")
-    eprintln("usage: bootstrap-koralc [build|check|--emit-c|--emit-typed-ast|--resolve-module] [--package-config <koral.json> | <file.koral>] [--target-module <module>] [options]")
-    eprintln("options:")
-    eprintln("  -o <dir>                    output directory")
-    eprintln("  --no-std                    disable std loading")
-    eprintln("  --package-config <path>     package manifest path")
-    eprintln("  --target-module <name>      target module full name, e.g. app::main")
-    eprintln("  --deps-root <path>          dependency root directory")
-    eprintln("  --std-config <path>         explicit std manifest path")
+    println("Usage: koralc [command] [--package-config <koral.json> | <file.koral>] [--target-module <module>] [options]")
+    println("Commands:")
+    println("  build   Compile to executable (default)")
+    println("  check   Type-check only (no code generation)")
+    println("  run     Compile and run")
+    println("  emit-c  Generate C code only")
+    println("Options:")
+    println("  -o, --output <path>       Output directory for generated files")
+    println("  --package-config <path>   Package manifest path for manifest-driven builds")
+    println("  --target-module <name>    Target module full name, e.g. app::main")
+    println("  --deps-root <path>        Dependency root directory (default unresolved)")
+    println("  --std-config <path>       Standard library manifest path")
+    println("  --no-std                  Compile without standard library")
 }
 
 // Shared: lex + parse source text.
@@ -179,12 +173,6 @@ private let read_source(file_path String) Option[String] = {
         return Option[String].None()
     }
     return Option[String].Some(source)
-}
-
-private let debug_phase(message String) Void = {
-    if env("KORAL_DEBUG_PHASE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
-        eprintln("[phase] \(message)")
-    }
 }
 
 private let normalize_path_for_match(path String) String =
@@ -624,7 +612,7 @@ private let prepare_compilation(options InvocationOptions) Result[PreparedCompil
 }
 
 private let run_check(options InvocationOptions) Int = {
-    debug_phase("check: type check")
+
     let prepared = prepare_compilation(options) or else {
         eprintln(it.message())
         return 1
@@ -632,17 +620,16 @@ private let run_check(options InvocationOptions) Int = {
     let result = check_resolved_graph(prepared.graph, prepared.display_name)
 
     if result.diagnostics.has_errors() then {
-        debug_phase("check: render diagnostics")
+
         print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
         return 1
     }
 
-    debug_phase("check: done")
     return 0
 }
 
 private let run_emit_typed_ast(options InvocationOptions) Int = {
-    debug_phase("emit-typed-ast: type check")
+
     let prepared = prepare_compilation(options) or else {
         eprintln(it.message())
         return 1
@@ -650,18 +637,17 @@ private let run_emit_typed_ast(options InvocationOptions) Int = {
     let result = type_check_resolved_graph(prepared.graph, prepared.display_name)
 
     if result.diagnostics.has_errors() then {
-        debug_phase("emit-typed-ast: render diagnostics")
+
         print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
         return 1
     }
 
-    debug_phase("emit-typed-ast: print typed program")
     if result.typed_program is .Some(typed_program) then {
         print_typed_program(typed_program)
     } else {
         return 1
     }
-    debug_phase("emit-typed-ast: done")
+
     return 0
 }
 
@@ -745,6 +731,9 @@ private let run_clang(c_file String, exe_file String, linked_libraries List[Stri
         if not seen_libs.contains("ws2_32") then {
             clang_args.push("-lws2_32")
         }
+        if not seen_libs.contains("psapi") then {
+            clang_args.push("-lpsapi")
+        }
     }
 
     // Use Inherit stdio so clang output goes directly to terminal (no pipe deadlock)
@@ -773,7 +762,6 @@ private let build_c_output_path(artifact_base_name String, default_output_dir Pa
 private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program * TypedProgram, phase_prefix String) Pair[* MIRProgram, CompilerContext] = {
     let mut context = result.context
 
-    debug_phase("\(phase_prefix): monomorphize")
     let mut mono = Monomorphizer.new_with_inputs(
         *typed_program,
         result.instantiation_requests,
@@ -787,13 +775,13 @@ private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program 
     )
     let mut mono_program = (&mut mono).monomorphize()
 
-    debug_phase("\(phase_prefix): mir lower")
     let mut lowerer = MIRLowerer.new(&mut mono_program, &mut context)
     let mir_program = lowerer.lower()
 
     // MIR lowering has consumed the concrete body caches; release them
     // before codegen to reduce peak RSS from retained typecheck artifacts.
     context.drop_concrete_bodies()
+    context.drop_codegen_unused_metadata()
 
     return Pair[* MIRProgram, CompilerContext](mir_program, context)
 }
@@ -806,16 +794,22 @@ type EmitCGenerationInput(
 )
 
 private let prepare_emit_c_generation_input(options InvocationOptions, phase_prefix String) Option[EmitCGenerationInput] = {
-    debug_phase("\(phase_prefix): type check")
     let prepared = prepare_compilation(options) or else {
         eprintln(it.message())
         return Option[EmitCGenerationInput].None()
     }
-    let mut result = type_check_resolved_graph(prepared.graph, prepared.display_name)
+
+    // Extract what we need from prepared before releasing the graph
+    let artifact_base_name = prepared.artifact_base_name
+    let default_output_dir = prepared.default_output_dir
+    let linked_libraries = prepared.linked_libraries
+    let display_name = prepared.display_name
+
+    let mut result = type_check_resolved_graph(prepared.graph, display_name)
+    // prepared.graph (parsed AST) is now eligible for GC
 
     if result.diagnostics.has_errors() then {
-        debug_phase("\(phase_prefix): render diagnostics")
-        print_user_focused_diagnostic_records(result.diagnostics, prepared.display_name)
+        print_user_focused_diagnostic_records(result.diagnostics, display_name)
         return Option[EmitCGenerationInput].None()
     }
 
@@ -824,7 +818,7 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
         return Option[EmitCGenerationInput].None()
     }
 
-    let output_path = build_c_output_path(prepared.artifact_base_name, prepared.default_output_dir, options.out_dir)
+    let output_path = build_c_output_path(artifact_base_name, default_output_dir, options.out_dir)
 
     create_dir_all(output_path.dir_name()) or else {
         eprintln("failed to create output directory: \(output_path.dir_name().to_string()): \(it.message())")
@@ -834,7 +828,7 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
     let lowered = lower_mir_after_typecheck(&result, &typed_program, phase_prefix)
     return Option[EmitCGenerationInput].Some(EmitCGenerationInput(
         output_path,
-        prepared.linked_libraries,
+        linked_libraries,
         lowered.first,
         lowered.second,
     ))
@@ -843,7 +837,6 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
 private let generate_c_from_mir(mir_program * MIRProgram, context CompilerContext, phase_prefix String) String = {
     let mut concrete_mir_program = mir_program
 
-    debug_phase("\(phase_prefix): codegen")
     let mut cg = CodeGen.new(concrete_mir_program, context)
     (&mut cg).validate_inputs_for_generate()
     (&mut cg).generate_prelude_into_buffer()
@@ -866,7 +859,6 @@ private let emit_c(options InvocationOptions, phase_prefix String) Option[Pair[P
         return Option[Pair[Path, List[String]]].None()
     }
 
-    debug_phase("\(phase_prefix): done")
     return Option[Pair[Path, List[String]]].Some(Pair[Path, List[String]](generation_input.output_path, generation_input.linked_libraries))
 }
 
@@ -884,13 +876,35 @@ private let run_build(options InvocationOptions) Int = {
 
     let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
-    debug_phase("build: clang")
+
     if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries) then {
         eprintln("clang compilation failed")
         return 1
     }
 
-    debug_phase("build: done")
     println("Build successful: \(exe_path.to_string())")
     return 0
+}
+
+private let run_run(options InvocationOptions) Int = {
+    let output = emit_c(options, "run") or else { return 1 }
+    let output_path = output.first
+    let linked_libraries = output.second
+
+    let is_windows = if env("OS") is .Some(os) then os.contains("Windows") else false
+    let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "")
+
+    if not run_clang(output_path.to_string(), exe_path.to_string(), linked_libraries) then {
+        eprintln("clang compilation failed")
+        return 1
+    }
+
+    let result = Command.new(exe_path.to_string())
+        .set_stdout(IoRedirect.Inherit())
+        .set_stderr(IoRedirect.Inherit())
+        .run() or else {
+        eprintln("failed to run: \(it.message())")
+        return 1
+    }
+    return if result.is_success() then 0 else (result.code() or else 1)
 }

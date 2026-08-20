@@ -1,4 +1,4 @@
-public type MIRLowerer(
+﻿public type MIRLowerer(
     program *mut MonomorphizedProgram,
     context * CompilerContext,
     mut pending_work_items List[* MIRFunctionWorkItem],
@@ -554,8 +554,474 @@ type MIRReferenceAllocationFunctionPromoter(
     concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
     local_types_by_id Dict[UInt, Type],
     local_storages_by_id Dict[UInt, MIRStorage],
-    owned_reference_locals Dict[UInt, Bool],
+    escaping_locals Set[UInt],
+    temporary_local_ids Set[UInt],
+    temporary_value_sources_by_id Dict[UInt, MIRValue],
+    escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
 )
+
+type MIREscapeSummary(
+    returning_parameter_indices Set[UInt],
+    direct_reference_escaping_parameter_indices Set[UInt],
+)
+
+private let mark_local_escape(value MIRValue, escaping *mut Set[UInt]) Void = {
+    when value in {
+        .Operand(.Local(local_id)) then { escaping.insert(local_id.raw_value) },
+        .PlaceRead(.Local(local_id), _) then { escaping.insert(local_id.raw_value) },
+        .Ref(.Local(local_id), _, _) then { escaping.insert(local_id.raw_value) },
+        _ then {},
+    }
+}
+
+private let visit_local_escape_value(
+    value MIRValue,
+    summaries Dict[UInt, MIREscapeSummary],
+    escaping *mut Set[UInt]
+) Void = {
+    when value in {
+        .Call(call) then {
+            when call.callee in {
+                .Function(callee_sym) then {
+                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
+                    let mut ai = 0(UInt)
+                    for arg in call.arguments then {
+                        if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
+                            mark_local_escape(*arg, escaping)
+                        }
+                        ai += 1
+                    }
+                },
+                _ then {
+                    for arg in call.arguments then {
+                        mark_local_escape(*arg, escaping)
+                    }
+                },
+            }
+            for arg in call.arguments then {
+                visit_local_escape_value(*arg, summaries, escaping)
+            }
+        },
+        .TraitMethodCall(call) then {
+            mark_local_escape(*call.receiver, escaping)
+            visit_local_escape_value(*call.receiver, summaries, escaping)
+            for arg in call.arguments then {
+                mark_local_escape(*arg, escaping)
+                visit_local_escape_value(*arg, summaries, escaping)
+            }
+        },
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                mark_local_escape(*field, escaping)
+                visit_local_escape_value(*field, summaries, escaping)
+            }
+        },
+        .EnumCase(construction) then {
+            for arg in construction.arguments then {
+                mark_local_escape(*arg, escaping)
+                visit_local_escape_value(*arg, summaries, escaping)
+            }
+        },
+        .TraitObjectConversion(conversion) then {
+            mark_local_escape(*conversion.inner, escaping)
+            visit_local_escape_value(*conversion.inner, summaries, escaping)
+        },
+        .EnumTag(tag) then visit_local_escape_value(*tag.subject, summaries, escaping),
+        .Intrinsic(node) then {
+            when node in {
+                .MakeRef(_, owner, _) then { mark_local_escape(*owner, escaping) visit_local_escape_value(*owner, summaries, escaping) },
+                .MakeMutRef(_, owner, _) then { mark_local_escape(*owner, escaping) visit_local_escape_value(*owner, summaries, escaping) },
+                .DowngradeRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
+                .DowngradeMutRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
+                .UpgradeRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
+                .UpgradeMutRef(v, _) then visit_local_escape_value(*v, summaries, escaping),
+                .IsUniqueMutable(v) then visit_local_escape_value(*v, summaries, escaping),
+                .RefCount(v) then visit_local_escape_value(*v, summaries, escaping),
+                .CopyMemory(d, s, c) then { visit_local_escape_value(*d, summaries, escaping) visit_local_escape_value(*s, summaries, escaping) visit_local_escape_value(*c, summaries, escaping) },
+                .MoveMemory(d, s, c) then { visit_local_escape_value(*d, summaries, escaping) visit_local_escape_value(*s, summaries, escaping) visit_local_escape_value(*c, summaries, escaping) },
+                .InitMemory(p, v) then { visit_local_escape_value(*p, summaries, escaping) mark_local_escape(*v, escaping) visit_local_escape_value(*v, summaries, escaping) },
+                .DeallocMemory(p) then visit_local_escape_value(*p, summaries, escaping),
+                .DeinitMemory(p) then visit_local_escape_value(*p, summaries, escaping),
+                .TakeMemory(p, _) then visit_local_escape_value(*p, summaries, escaping),
+                .SpawnThread(h, t, c, s) then { visit_local_escape_value(*h, summaries, escaping) visit_local_escape_value(*t, summaries, escaping) mark_local_escape(*c, escaping) visit_local_escape_value(*c, summaries, escaping) visit_local_escape_value(*s, summaries, escaping) },
+                _ then {},
+            }
+        },
+        .Lambda(lambda) then {
+            for source in lambda.capture_sources then {
+                when source in {
+                    .Local(local_id) then { escaping.insert(local_id.raw_value) },
+                    _ then {},
+                }
+            }
+        },
+        _ then {},
+    }
+}
+
+private let compute_escaping_locals_for_function(function * MIRFunction, summaries Dict[UInt, MIREscapeSummary]) Set[UInt] = {
+    let mut escaping = Set[UInt].new()
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Assign(_, value) then visit_local_escape_value(value, summaries, &mut escaping),
+                .CompoundAssign(assignment) then visit_local_escape_value(assignment.value, summaries, &mut escaping),
+                .Evaluate(value) then visit_local_escape_value(value, summaries, &mut escaping),
+                .Retain(value) then visit_local_escape_value(value, summaries, &mut escaping),
+                .Release(value) then visit_local_escape_value(value, summaries, &mut escaping),
+                _ then {},
+            }
+        }
+        when block.terminator in {
+            .ReturnValue(.Some(.Local(local_id))) then { escaping.insert(local_id.raw_value) },
+            _ then {},
+        }
+    }
+    let mut changed = true
+    while changed then {
+        changed = false
+        for block in function.blocks then {
+            for statement in block.statements then {
+                when statement in {
+                    .Assign(dest, value) then {
+                        when dest in {
+                            .Local(dest_id) then {
+                                if escaping.contains(dest_id.raw_value) then {
+                                    when value in {
+                                        .Operand(.Local(src_id)) then {
+                                            if not escaping.contains(src_id.raw_value) then {
+                                                escaping.insert(src_id.raw_value)
+                                                changed = true
+                                            }
+                                        },
+                                        .PlaceRead(.Local(src_id), _) then {
+                                            if not escaping.contains(src_id.raw_value) then {
+                                                escaping.insert(src_id.raw_value)
+                                                changed = true
+                                            }
+                                        },
+                                        _ then {},
+                                    }
+                                }
+                            },
+                            _ then {},
+                        }
+                    },
+                    _ then {},
+                }
+            }
+        }
+    }
+    return escaping
+}
+
+private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
+    let mut temps = Set[UInt].new()
+    for local in function.locals then {
+        if local.storage is .Temporary() then {
+            temps.insert(local.id.raw_value)
+        }
+    }
+    return temps
+}
+
+private let build_temporary_value_sources(function * MIRFunction, temporary_local_ids Set[UInt]) Dict[UInt, MIRValue] = {
+    let mut sources = Dict[UInt, MIRValue].new()
+    let mut ambiguous = Set[UInt].new()
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Assign(place, value) then {
+                    when place in {
+                        .Local(local_id) then {
+                            if not temporary_local_ids.contains(local_id.raw_value) then {
+                                continue
+                            }
+                            if ambiguous.contains(local_id.raw_value) then {
+                                continue
+                            }
+                            when sources.get(local_id.raw_value) in {
+                                .Some(_) then {
+                                    let _ = sources.remove(local_id.raw_value)
+                                    ambiguous.insert(local_id.raw_value)
+                                },
+                                .None() then {
+                                    sources.insert(local_id.raw_value, value)
+                                },
+                            }
+                        },
+                        _ then {},
+                    }
+                },
+                _ then {},
+            }
+        }
+    }
+    return sources
+}
+
+private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
+    let mut param_local_ids = List[UInt].new()
+    for local in function.locals then {
+        if local.storage is .Parameter() then {
+            param_local_ids.push(local.id.raw_value)
+        }
+    }
+    let mut local_to_param = Dict[UInt, UInt].new()
+    let mut idx = 0(UInt)
+    while idx < param_local_ids.count() and idx < function.params.count() then {
+        local_to_param.insert(param_local_ids[idx], idx)
+        idx += 1
+    }
+    return local_to_param
+}
+
+private let escape_mark(value MIRValue, param_map Dict[UInt, UInt], local_sources Dict[UInt, Set[UInt]], escaping *mut Set[UInt]) Void = {
+    collect_parameter_sources(value, param_map, local_sources, escaping)
+}
+
+private let collect_parameter_sources(
+    value MIRValue,
+    param_map Dict[UInt, UInt],
+    local_sources Dict[UInt, Set[UInt]],
+    out *mut Set[UInt]
+) Void = {
+    when value in {
+        .Operand(.Local(local_id)) then {
+            when param_map.get(local_id.raw_value) in {
+                .Some(pi) then { out.insert(pi) },
+                .None() then {
+                    let local_params = local_sources.get(local_id.raw_value) or else Set[UInt].new()
+                    for pi in local_params then { out.insert(pi) }
+                },
+            }
+        },
+        .PlaceRead(.Local(local_id), _) then {
+            when param_map.get(local_id.raw_value) in {
+                .Some(pi) then { out.insert(pi) },
+                .None() then {
+                    let local_params = local_sources.get(local_id.raw_value) or else Set[UInt].new()
+                    for pi in local_params then { out.insert(pi) }
+                },
+            }
+        },
+        .Ref(.Local(local_id), _, _) then {
+            when param_map.get(local_id.raw_value) in {
+                .Some(pi) then { out.insert(pi) },
+                .None() then {
+                    let local_params = local_sources.get(local_id.raw_value) or else Set[UInt].new()
+                    for pi in local_params then { out.insert(pi) }
+                },
+            }
+        },
+        _ then {},
+    }
+}
+
+private let merge_value_parameter_sources(
+    target_local UInt,
+    value MIRValue,
+    param_map Dict[UInt, UInt],
+    local_sources *mut Dict[UInt, Set[UInt]]
+) Bool = {
+    let mut collected = Set[UInt].new()
+    collect_parameter_sources(value, param_map, *local_sources, &mut collected)
+    let mut merged = local_sources.get(target_local) or else Set[UInt].new()
+    let mut changed = false
+    for pi in collected then {
+        if not merged.contains(pi) then {
+            merged.insert(pi)
+            changed = true
+        }
+    }
+    if changed then {
+        local_sources.insert(target_local, merged)
+    }
+    return changed
+}
+
+private let mark_returning_from_value(
+    value MIRValue,
+    param_map Dict[UInt, UInt],
+    local_sources Dict[UInt, Set[UInt]],
+    returning *mut Set[UInt]
+) Void = {
+    collect_parameter_sources(value, param_map, local_sources, returning)
+}
+
+private let visit_escape_value(
+    value MIRValue,
+    param_map Dict[UInt, UInt],
+    local_sources Dict[UInt, Set[UInt]],
+    summaries Dict[UInt, MIREscapeSummary],
+    returning *mut Set[UInt],
+    direct_escaping *mut Set[UInt]
+) Void = {
+    when value in {
+        .Call(call) then {
+            when call.callee in {
+                .Function(callee_sym) then {
+                    let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
+                    let mut ai = 0(UInt)
+                    for arg in call.arguments then {
+                        if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
+                            escape_mark(*arg, param_map, local_sources, direct_escaping)
+                        }
+                        if callee_summary.returning_parameter_indices.contains(ai) then {
+                            mark_returning_from_value(*arg, param_map, local_sources, returning)
+                        }
+                        ai += 1
+                    }
+                },
+                _ then {
+                    for arg in call.arguments then {
+                        escape_mark(*arg, param_map, local_sources, direct_escaping)
+                    }
+                },
+            }
+            for arg in call.arguments then {
+                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping)
+            }
+        },
+        .TraitMethodCall(call) then {
+            visit_escape_value(*call.receiver, param_map, local_sources, summaries, returning, direct_escaping)
+            for arg in call.arguments then {
+                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping)
+            }
+            escape_mark(*call.receiver, param_map, local_sources, direct_escaping)
+            for arg in call.arguments then {
+                escape_mark(*arg, param_map, local_sources, direct_escaping)
+            }
+        },
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                escape_mark(*field, param_map, local_sources, direct_escaping)
+                visit_escape_value(*field, param_map, local_sources, summaries, returning, direct_escaping)
+            }
+        },
+        .EnumCase(construction) then {
+            for arg in construction.arguments then {
+                escape_mark(*arg, param_map, local_sources, direct_escaping)
+                visit_escape_value(*arg, param_map, local_sources, summaries, returning, direct_escaping)
+            }
+        },
+        .TraitObjectConversion(conversion) then {
+            escape_mark(*conversion.inner, param_map, local_sources, direct_escaping)
+            visit_escape_value(*conversion.inner, param_map, local_sources, summaries, returning, direct_escaping)
+        },
+        .EnumTag(tag) then {
+            visit_escape_value(*tag.subject, param_map, local_sources, summaries, returning, direct_escaping)
+        },
+        .Intrinsic(node) then {
+            when node in {
+                .MakeRef(_, owner, _) then { escape_mark(*owner, param_map, local_sources, direct_escaping) visit_escape_value(*owner, param_map, local_sources, summaries, returning, direct_escaping) },
+                .MakeMutRef(_, owner, _) then { escape_mark(*owner, param_map, local_sources, direct_escaping) visit_escape_value(*owner, param_map, local_sources, summaries, returning, direct_escaping) },
+                .DowngradeRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
+                .DowngradeMutRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
+                .UpgradeRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
+                .UpgradeMutRef(v, _) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
+                .IsUniqueMutable(v) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
+                .RefCount(v) then visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping),
+                .CopyMemory(d, s, c) then { visit_escape_value(*d, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping) },
+                .MoveMemory(d, s, c) then { visit_escape_value(*d, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping) },
+                .InitMemory(p, v) then { visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*v, param_map, local_sources, summaries, returning, direct_escaping) },
+                .DeallocMemory(p) then visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping),
+                .DeinitMemory(p) then visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping),
+                .TakeMemory(p, _) then visit_escape_value(*p, param_map, local_sources, summaries, returning, direct_escaping),
+                .SpawnThread(h, t, c, s) then { visit_escape_value(*h, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*t, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*c, param_map, local_sources, summaries, returning, direct_escaping) visit_escape_value(*s, param_map, local_sources, summaries, returning, direct_escaping) },
+                _ then {},
+            }
+        },
+        .Lambda(lambda) then {
+            for source in lambda.capture_sources then {
+                when source in {
+                    .Local(local_id) then {
+                        when param_map.get(local_id.raw_value) in { .Some(pi) then { direct_escaping.insert(pi) }, .None() then {} }
+                    },
+                    _ then {},
+                }
+            }
+        },
+        _ then {},
+    }
+}
+
+private let visit_escape_statement(
+    value MIRValue,
+    param_map Dict[UInt, UInt],
+    local_sources Dict[UInt, Set[UInt]],
+    summaries Dict[UInt, MIREscapeSummary],
+    returning *mut Set[UInt],
+    direct_escaping *mut Set[UInt]
+) Void = {
+    visit_escape_value(value, param_map, local_sources, summaries, returning, direct_escaping)
+}
+
+private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeSummary] = {
+    let mut param_maps = Dict[UInt, Dict[UInt, UInt]].new()
+    for function_ref in program.functions then {
+        param_maps.insert(function_ref.identifier.def_id.id, build_param_local_map(function_ref))
+    }
+    let mut summaries = Dict[UInt, MIREscapeSummary].new()
+    for function_ref in program.functions then {
+        summaries.insert(function_ref.identifier.def_id.id, MIREscapeSummary(Set[UInt].new(), Set[UInt].new()))
+    }
+    let mut changed = true
+    while changed then {
+        changed = false
+        for function_ref in program.functions then {
+            let func_id = function_ref.identifier.def_id.id
+            let param_map = param_maps.get(func_id) or else Dict[UInt, UInt].new()
+            let mut returning = Set[UInt].new()
+            let mut direct_escaping = Set[UInt].new()
+            let mut local_sources = Dict[UInt, Set[UInt]].new()
+            for block in function_ref.blocks then {
+                for statement in block.statements then {
+                    when statement in {
+                        .Assign(place, value) then {
+                            visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping)
+                            when place in {
+                                .Local(local_id) then { let _ = merge_value_parameter_sources(local_id.raw_value, value, param_map, &mut local_sources) },
+                                _ then {},
+                            }
+                        },
+                        .CompoundAssign(assignment) then visit_escape_statement(assignment.value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
+                        .Evaluate(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
+                        .Retain(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
+                        .Release(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
+                        _ then {},
+                    }
+                }
+                when block.terminator in {
+                    .ReturnValue(.Some(.Local(local_id))) then {
+                        let mut returned_params = Set[UInt].new()
+                        collect_parameter_sources(MIRValue.Operand(MIROperand.Local(local_id)), param_map, local_sources, &mut returned_params)
+                        for pi in returned_params then { returning.insert(pi) }
+                    },
+                    _ then {},
+                }
+            }
+            let next = MIREscapeSummary(returning, direct_escaping)
+            let current = summaries.get(func_id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
+            if not (sets_equal(current.returning_parameter_indices, next.returning_parameter_indices) and sets_equal(current.direct_reference_escaping_parameter_indices, next.direct_reference_escaping_parameter_indices)) then {
+                summaries.insert(func_id, next)
+                changed = true
+            }
+        }
+    }
+    return summaries
+}
+
+private let sets_equal(a Set[UInt], b Set[UInt]) Bool = {
+    for item in a then {
+        if not b.contains(item) then { return false }
+    }
+    for item in b then {
+        if not a.contains(item) then { return false }
+    }
+    return true
+}
+
 
 private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
     return when value in {
@@ -606,26 +1072,23 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
     }
 }
 
+private let is_member_path_place(place MIRPlace) Bool = {
+    return when place in {
+        .Local(_) then false,
+        .Global(_) then false,
+        .Field(_, _) then true,
+        .EnumPayload(_, _, _, _, _) then true,
+        .Deref(_, _) then true,
+        .PointerElement(_, _) then true,
+    }
+}
+
 private let mir_statement_needs_reference_allocation_promotion(statement MIRStatement) Bool = {
     return when statement in {
         .Assign(_, value) then mir_value_contains_stack_borrow_ref(value),
         .CompoundAssign(assignment) then mir_value_contains_stack_borrow_ref(assignment.value),
         .Evaluate(value) then mir_value_contains_stack_borrow_ref(value),
         _ then false,
-    }
-}
-
-private let mir_local_source_for_owned_reference_storage(value MIRValue) Option[MIRLocalID] = {
-    return when value in {
-        .Operand(operand) then when operand in {
-            .Local(local) then Option[MIRLocalID].Some(local),
-            _ then Option[MIRLocalID].None(),
-        },
-        .PlaceRead(place, _) then when place in {
-            .Local(local) then Option[MIRLocalID].Some(local),
-            _ then Option[MIRLocalID].None(),
-        },
-        _ then Option[MIRLocalID].None(),
     }
 }
 
@@ -659,9 +1122,12 @@ given MIRReferenceAllocationPromoter {
 
         let parameter_types_by_def_id = self.build_parameter_types_by_def_id()
         let parameter_types_by_name = self.build_parameter_types_by_name()
+        let escape_summaries = compute_escape_summaries(self.program)
 
         let mut functions = List[* MIRFunction].new()
         for function_ref in self.program.functions then {
+            let escaping_locals = compute_escaping_locals_for_function(function_ref, escape_summaries)
+            let temporary_ids = compute_temporary_local_ids(function_ref)
             let mut promoter = MIRReferenceAllocationFunctionPromoter.new(
                 function_ref,
                 parameter_types_by_def_id,
@@ -669,6 +1135,9 @@ given MIRReferenceAllocationPromoter {
                 &self.program.context,
                 self.program.receiver_method_dispatch,
                 self.program.concrete_callables_by_def_id,
+                escaping_locals,
+                temporary_ids,
+                escape_summaries,
             )
             functions.push(promoter.promote())
         }
@@ -766,6 +1235,9 @@ given MIRReferenceAllocationFunctionPromoter {
         context * CompilerContext,
         receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
         concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
+        escaping_locals Set[UInt],
+        temporary_local_ids Set[UInt],
+        escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
     ) MIRReferenceAllocationFunctionPromoter = {
         let mut local_types_by_id = Dict[UInt, Type].new()
         let mut local_storages_by_id = Dict[UInt, MIRStorage].new()
@@ -773,35 +1245,7 @@ given MIRReferenceAllocationFunctionPromoter {
             local_types_by_id.insert(local.id.raw_value, local.local_type)
             local_storages_by_id.insert(local.id.raw_value, local.storage)
         }
-        let mut owned_reference_locals = Dict[UInt, Bool].new()
-        for block in function.blocks then {
-            for statement in block.statements then {
-                when statement in {
-                    .Evaluate(value) then when value in {
-                        .Intrinsic(node) then when node in {
-                            .InitMemory(_, stored_value) then when mir_local_source_for_owned_reference_storage(*stored_value) in {
-                                .Some(local_id) then {
-                                    if local_storages_by_id.get(local_id.raw_value) is .Some(storage) and storage is .Local() then {
-                                        when local_types_by_id.get(local_id.raw_value) in {
-                                            .Some(local_type) then {
-                                                if MIRReferenceAllocationFunctionPromoter(function, parameter_types_by_def_id, parameter_types_by_name, context, receiver_method_dispatch, concrete_callables_by_def_id, local_types_by_id, local_storages_by_id, Dict[UInt, Bool].new()).type_requires_owned_reference_storage(local_type) then {
-                                                    owned_reference_locals.insert(local_id.raw_value, true)
-                                                }
-                                            },
-                                            .None() then {},
-                                        }
-                                    }
-                                },
-                                .None() then {},
-                            },
-                            _ then {},
-                        },
-                        _ then {},
-                    },
-                    _ then {},
-                }
-            }
-        }
+        let temporary_value_sources_by_id = build_temporary_value_sources(function, temporary_local_ids)
         return MIRReferenceAllocationFunctionPromoter(
             function,
             parameter_types_by_def_id,
@@ -811,10 +1255,12 @@ given MIRReferenceAllocationFunctionPromoter {
             concrete_callables_by_def_id,
             local_types_by_id,
             local_storages_by_id,
-            owned_reference_locals,
+            escaping_locals,
+            temporary_local_ids,
+            temporary_value_sources_by_id,
+            escape_summaries_by_def_id,
         )
     }
-
     public promote(*mut self) * MIRFunction = {
         if not mir_function_needs_reference_allocation_promotion(self.function) then {
             return self.function
@@ -843,29 +1289,22 @@ given MIRReferenceAllocationFunctionPromoter {
         return when statement in {
             .Assign(place, value) then {
                 let destination_type = self.destination_type_for_place(place)
-                break MIRStatement.Assign(place, self.promote_value(value, destination_type))
+                break MIRStatement.Assign(place, self.promote_value_with_place(value, destination_type, Option[MIRPlace].Some(place)))
             },
             .CompoundAssign(assignment) then {
                 let destination_type = self.destination_type_for_place(assignment.target)
                 break MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, self.promote_value(assignment.value, destination_type)))
             },
             .Evaluate(value) then MIRStatement.Evaluate(self.promote_value(value, Option[Type].None())),
-            .Retain(value) then MIRStatement.Retain(value),
-            .Release(value) then MIRStatement.Release(value),
+            .Retain(value) then MIRStatement.Retain(self.promote_value(value, Option[Type].None())),
+            .Release(value) then MIRStatement.Release(self.promote_value(value, Option[Type].None())),
             _ then statement,
         }
     }
 
     protected destination_type_for_place(*self, place MIRPlace) Option[Type] = {
         return when place in {
-            .Local(local) then when self.local_storage(local) in {
-                .Local() then if self.owned_reference_locals.get(local.raw_value) is .Some(_)
-                    then Option[Type].Some(self.local_type(local))
-                    else Option[Type].None(),
-                .Temporary() then Option[Type].Some(self.local_type(local)),
-                .Parameter() then Option[Type].Some(self.local_type(local)),
-                .Capture() then Option[Type].Some(self.local_type(local)),
-            },
+            .Local(local) then Option[Type].Some(self.local_type(local)),
             .Global(def_id) then self.context.get_symbol_type(def_id),
             .Field(_, field) then Option[Type].Some(field.symbol_type),
             .EnumPayload(_, _, _, _, field_type) then Option[Type].Some(field_type),
@@ -874,6 +1313,10 @@ given MIRReferenceAllocationFunctionPromoter {
     }
 
     protected promote_value(*mut self, value MIRValue, destination_type Option[Type]) MIRValue = {
+        return self.promote_value_with_place(value, destination_type, Option[MIRPlace].None())
+    }
+
+    protected promote_value_with_place(*mut self, value MIRValue, destination_type Option[Type], destination_place Option[MIRPlace]) MIRValue = {
         let promoted = when value in {
             .Call(call) then MIRValue.Call(MIRCall(
                 call.callee,
@@ -905,10 +1348,37 @@ given MIRReferenceAllocationFunctionPromoter {
                 break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(*(tag.subject), Option[Type].None())), tag.enum_type)),
+            .Ref(place, kind, .StackBorrow()) then {
+                if is_member_path_place(place) then {
+                    return value
+                }
+                let keep_stack_borrow = when destination_place in {
+                    .Some(dp) then when dp in {
+                        .Local(local_id) then not self.escaping_locals.contains(local_id.raw_value),
+                        _ then false,
+                    },
+                    _ then false,
+                }
+                if keep_stack_borrow then {
+                    return value
+                }
+                break value
+            },
             _ then value,
         }
         if destination_type is .Some(dt) then {
             if self.type_requires_owned_reference_storage(dt) then {
+                when destination_place in {
+                    .Some(dp) then when dp in {
+                        .Local(local_id) then {
+                            if not self.escaping_locals.contains(local_id.raw_value) then {
+                                return promoted
+                            }
+                        },
+                        _ then {},
+                    },
+                    _ then {},
+                }
                 return self.promote_direct_references(promoted)
             }
         }
@@ -923,17 +1393,53 @@ given MIRReferenceAllocationFunctionPromoter {
         if params.is_empty() then {
             return arguments
         }
+        let direct_ref_escaping = when callee in {
+            .Function(symbol) then {
+                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
+                break summary.direct_reference_escaping_parameter_indices
+            },
+            _ then {
+                let mut all_indices = Set[UInt].new()
+                let mut i = 0(UInt)
+                while i < arguments.count() then {
+                    all_indices.insert(i)
+                    i += 1
+                }
+                break all_indices
+            },
+        }
         let mut promoted = List[* MIRValue].new()
         let mut index = 0(UInt)
         while index < arguments.count() then {
             let argument = (*arguments[index])
-            let param_type = if index < params.count() and params[index].pass_kind is .ByValue()
-                then Option[Type].Some(params[index].param_type)
+            let param_type = if index < params.count()
+                then Option[Type].Some(self.promotion_destination_type_for_param(*params[index]))
                 else Option[Type].None()
-            promoted.push(box(self.promote_value(argument, param_type)))
+            let mut arg_promoted = self.promote_value(argument, param_type)
+            if direct_ref_escaping.contains(index) then {
+                arg_promoted = self.promote_direct_references(arg_promoted)
+            }
+            promoted.push(box(arg_promoted))
             index += 1
         }
         return promoted
+    }
+
+    protected promotion_destination_type_for_param(*self, param FunctionParamEntry) Type = {
+        let _ = self
+        return when param.pass_kind in {
+            .ByReference() then when param.param_type in {
+                .ReferenceType(inner) then Type.BorrowedReferenceType(inner),
+                .BorrowedReferenceType(_) then param.param_type,
+                _ then Type.BorrowedReferenceType(box(param.param_type)),
+            },
+            .ByMutableReference() then when param.param_type in {
+                .MutableReferenceType(inner) then Type.MutableBorrowedReferenceType(inner),
+                .MutableBorrowedReferenceType(_) then param.param_type,
+                _ then Type.MutableBorrowedReferenceType(box(param.param_type)),
+            },
+            .ByValue() then param.param_type,
+        }
     }
 
     protected parameters_for_call(*self, symbol * Symbol) List[* FunctionParamEntry] = {
@@ -967,9 +1473,23 @@ given MIRReferenceAllocationFunctionPromoter {
 
     protected promote_intrinsic(*mut self, node MIRIntrinsic) MIRIntrinsic = {
         return when node in {
-            .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(pointer, box(self.promote_direct_references(*value))),
-            .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(out_handle, out_tid, box(self.promote_direct_references(*closure)), stack_size),
-            _ then node,
+            .AllocMemory(count, result_type) then MIRIntrinsic.AllocMemory(box(self.promote_value(*count, Option[Type].None())), result_type),
+            .DeallocMemory(pointer) then MIRIntrinsic.DeallocMemory(box(self.promote_value(*pointer, Option[Type].None()))),
+            .CopyMemory(dest, source, count) then MIRIntrinsic.CopyMemory(box(self.promote_value(*dest, Option[Type].None())), box(self.promote_value(*source, Option[Type].None())), box(self.promote_value(*count, Option[Type].None()))),
+            .MoveMemory(dest, source, count) then MIRIntrinsic.MoveMemory(box(self.promote_value(*dest, Option[Type].None())), box(self.promote_value(*source, Option[Type].None())), box(self.promote_value(*count, Option[Type].None()))),
+            .IsUniqueMutable(value) then MIRIntrinsic.IsUniqueMutable(box(self.promote_value(*value, Option[Type].None()))),
+            .RefCount(value) then MIRIntrinsic.RefCount(box(self.promote_value(*value, Option[Type].None()))),
+            .MakeRef(pointer, owner, result_type) then MIRIntrinsic.MakeRef(box(self.promote_value(*pointer, Option[Type].None())), box(self.promote_value(*owner, Option[Type].Some(result_type))), result_type),
+            .MakeMutRef(pointer, owner, result_type) then MIRIntrinsic.MakeMutRef(box(self.promote_value(*pointer, Option[Type].None())), box(self.promote_value(*owner, Option[Type].Some(result_type))), result_type),
+            .DowngradeRef(value, result_type) then MIRIntrinsic.DowngradeRef(box(self.promote_value(*value, Option[Type].None())), result_type),
+            .DowngradeMutRef(value, result_type) then MIRIntrinsic.DowngradeMutRef(box(self.promote_value(*value, Option[Type].None())), result_type),
+            .UpgradeRef(value, result_type) then MIRIntrinsic.UpgradeRef(box(self.promote_value(*value, Option[Type].None())), result_type),
+            .UpgradeMutRef(value, result_type) then MIRIntrinsic.UpgradeMutRef(box(self.promote_value(*value, Option[Type].None())), result_type),
+            .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(box(self.promote_value(*pointer, Option[Type].None())), box(self.promote_value(*value, Option[Type].Some(self.type_of_value(*value))))),
+            .DeinitMemory(pointer) then MIRIntrinsic.DeinitMemory(box(self.promote_value(*pointer, Option[Type].None()))),
+            .TakeMemory(pointer, result_type) then MIRIntrinsic.TakeMemory(box(self.promote_value(*pointer, Option[Type].None())), result_type),
+            .NullPtr(result_type) then MIRIntrinsic.NullPtr(result_type),
+            .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(box(self.promote_value(*out_handle, Option[Type].None())), box(self.promote_value(*out_tid, Option[Type].None())), box(self.promote_value(*closure, Option[Type].Some(self.type_of_value(*closure)))), box(self.promote_value(*stack_size, Option[Type].None()))),
         }
     }
 
@@ -1019,11 +1539,44 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_direct_references(*mut self, value MIRValue) MIRValue = {
+    protected resolve_temporary_ref_source(*self, value MIRValue) MIRValue = {
+        let mut seen = Set[UInt].new()
+        return self.resolve_temporary_ref_source_with_seen(value, &mut seen)
+    }
+
+    protected resolve_temporary_ref_local(*self, local_id UInt, original MIRValue, seen *mut Set[UInt]) MIRValue = {
+        if seen.contains(local_id) then {
+            return original
+        }
+        when self.temporary_value_sources_by_id.get(local_id) in {
+            .Some(source) then {
+                seen.insert(local_id)
+                let resolved = self.resolve_temporary_ref_source_with_seen(source, seen)
+                let _ = seen.remove(local_id)
+                return when resolved in {
+                    .Ref(_, _, _) then resolved,
+                    _ then original,
+                }
+            },
+            .None() then { return original },
+        }
+    }
+
+    protected resolve_temporary_ref_source_with_seen(*self, value MIRValue, seen *mut Set[UInt]) MIRValue = {
         return when value in {
+            .Ref(_, _, _) then value,
+            .Operand(.Local(local_id)) then self.resolve_temporary_ref_local(local_id.raw_value, value, seen),
+            .PlaceRead(.Local(local_id), _) then self.resolve_temporary_ref_local(local_id.raw_value, value, seen),
+            _ then value,
+        }
+    }
+
+    protected promote_direct_references(*mut self, value MIRValue) MIRValue = {
+        let resolved = self.resolve_temporary_ref_source(value)
+        return when resolved in {
             .Ref(place, kind, allocation) then when allocation in {
                 .StackBorrow() then MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned()),
-                .HeapOwned() then value,
+                .HeapOwned() then resolved,
             },
             .Aggregate(aggregate) then {
                 let mut fields = List[* MIRValue].new()
@@ -1048,7 +1601,7 @@ given MIRReferenceAllocationFunctionPromoter {
                 break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(*(call.receiver))), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_direct_references(*(tag.subject))), tag.enum_type)),
-            _ then value,
+            _ then resolved,
         }
     }
 
@@ -1169,3 +1722,4 @@ given MIRReferenceAllocationFunctionPromoter {
     }
 
 }
+

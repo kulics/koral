@@ -1,4 +1,4 @@
-type MIRBranchBreakTargetContext(
+﻿type MIRBranchBreakTargetContext(
     result_local Option[MIRLocalID],
     join_block MIRBlockID,
     base_scope_depth UInt,
@@ -982,6 +982,17 @@ given MIRFunctionBuilder {
     private lower_branch_body(*mut self, expression * TypedExpr, result_local Option[MIRLocalID]) Void = {
         when result_local in {
             .Some(local_id) then {
+                when expression.expr_kind in {
+                    .RefExpr(inner) then when self.lower_place(inner) in {
+                        .Some(place) then {
+                            let kind = self.reference_kind(expression.expr_type)
+                            self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), MIRValue.Ref(place, kind, MIRReferenceAllocation.HeapOwned())))
+                            return
+                        },
+                        .None() then {},
+                    },
+                    _ then {},
+                }
                 let result_type = self.type_of_local(local_id)
                 let operand = self.lower_operand_for_expected_type(expression, result_type)
                 self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), MIRValue.Operand(operand)))
@@ -3179,16 +3190,18 @@ given MIRFunctionBuilder {
     }
 
     private lower_value(*mut self, expression * TypedExpr) MIRValue = {
-        when expression.expr_kind in {
-            .RefExpr(inner) then when self.lower_place(inner) in {
-                .Some(place) then { return MIRValue.Ref(place, self.reference_kind(expression.expr_type), MIRReferenceAllocation.StackBorrow()) },
-                .None() then {},
-            },
-            .PtrExpr(inner) then when self.lower_place(inner) in {
-                .Some(place) then { return MIRValue.Pointer(place) },
-                .None() then {},
-            },
-            _ then {},
+        if self.context.contains_generic_parameter(expression.expr_type) then {
+            when expression.expr_kind in {
+                .RefExpr(inner) then when self.lower_place(inner) in {
+                    .Some(place) then { return MIRValue.Ref(place, self.reference_kind(expression.expr_type), MIRReferenceAllocation.StackBorrow()) },
+                    .None() then {},
+                },
+                .PtrExpr(inner) then when self.lower_place(inner) in {
+                    .Some(place) then { return MIRValue.Pointer(place) },
+                    .None() then {},
+                },
+                _ then {},
+            }
         }
         return when self.lower_expression(expression) in {
             .Some(result) then when result.operand in {

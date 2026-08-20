@@ -50,6 +50,7 @@ public let print_usage() Void =
           --filter <substring>         run only matching case name/path
           -j <N> | -j=<N>              parallel workers (default: 1)
           --timeout <sec>              per-case timeout seconds (default: 120)
+          --memory-limit <MB>          per-case memory limit in MB (default: 1024)
           --compiler-bin <path>        compiler executable path when --compiler custom
           --bootstrap-koralc <path>    bootstrap compiler executable path
           --swift-koralc <path>        swift compiler executable path
@@ -68,6 +69,7 @@ public let parse_runner_config() Result[RunnerConfig] = {
     let mut filter = Option[String].None()
     let mut jobs UInt = 1
     let mut timeout_secs Int = 120
+    let mut memory_limit_mb UInt = 1024
     let mut compiler_kind = "bootstrap"
     let mut compiler_bin_opt = Option[Path].None()
     let mut bootstrap_koralc = default_bootstrap_koralc_path()
@@ -133,6 +135,21 @@ public let parse_runner_config() Result[RunnerConfig] = {
             }
             if timeout_secs <= 0 then {
                 return Result[RunnerConfig].Error(box("--timeout must be > 0"))
+            }
+            i += 1
+            continue
+        }
+
+        if arg == "--memory-limit" then {
+            i += 1
+            if i >= argv.count() then {
+                return Result[RunnerConfig].Error(box("missing value for --memory-limit"))
+            }
+            memory_limit_mb = parse_uint(argv[i], "--memory-limit") or else {
+                return Result[RunnerConfig].Error(it)
+            }
+            if memory_limit_mb == 0 then {
+                return Result[RunnerConfig].Error(box("--memory-limit must be > 0"))
             }
             i += 1
             continue
@@ -239,6 +256,7 @@ public let parse_runner_config() Result[RunnerConfig] = {
         filter,
         jobs,
         timeout_secs,
+        memory_limit_mb,
         compiler_kind,
         compiler_bin,
         abs_bootstrap_koralc,

@@ -760,6 +760,9 @@ public class Driver {
     if !linkedLibraries.contains("ws2_32") {
       clangArgs.append("-lws2_32")
     }
+    if !linkedLibraries.contains("psapi") {
+      clangArgs.append("-lpsapi")
+    }
     #endif
 
     #if os(macOS)

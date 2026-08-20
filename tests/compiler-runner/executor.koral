@@ -56,6 +56,7 @@ private let is_windows_host() Bool =
 private type CommandExecution {
     Finished(output CommandOutput),
     TimedOut(exit_code Int),
+    MemoryExceeded(exit_code Int, peak_bytes UInt),
     InfrastructureError(message String),
 }
 
@@ -299,12 +300,29 @@ private let execute_command_with_timeout(
     let timed_out = AtomicBool.new(false)
     let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap()
 
+    let memory_exceeded = AtomicBool.new(false)
+    let peak_memory = AtomicUInt.new(0(UInt))
+    let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt)
+
     let watchdog = run_task(() -> {
         while not finished.load() then {
             if start.elapsed().as_seconds() >= timeout_secs then {
                 timed_out.store(true)
                 let _ = kill_process(pid)
                 break
+            }
+            let current_mem_raw = process_tree_working_set_bytes(pid)
+            let current_mem = current_mem_raw(UInt)
+            if current_mem > 0(UInt) then {
+                let prev = peak_memory.load()
+                if current_mem > prev then {
+                    peak_memory.store(current_mem)
+                }
+                if memory_limit_bytes > 0(UInt) and current_mem > memory_limit_bytes then {
+                    memory_exceeded.store(true)
+                    let _ = kill_process(pid)
+                    break
+                }
             }
             sleep(poll_sleep)
         }
@@ -318,12 +336,16 @@ private let execute_command_with_timeout(
     let stderr_content = read_text_file_or_empty(stderr_path)
 
     let execution CommandExecution = when wait_result in {
-        .Ok(status) then if timed_out.load() then {
+        .Ok(status) then if memory_exceeded.load() then {
+            break .MemoryExceeded(infer_exit_code(status), peak_memory.load())
+        } else if timed_out.load() then {
             break .TimedOut(infer_exit_code(status))
         } else {
             break .Finished(CommandOutput(status, stdout_content, stderr_content))
         },
-        .Error(message) then if timed_out.load() then {
+        .Error(message) then if memory_exceeded.load() then {
+            break .MemoryExceeded(-1, peak_memory.load())
+        } else if timed_out.load() then {
             break .TimedOut(-1)
         } else {
             break .InfrastructureError("failed to wait process: " + message.message())
@@ -514,6 +536,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 duration_ms,
             )
         },
+        .MemoryExceeded(exit_code, peak_bytes) then {
+            let duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "memory_exceeded",
+                "memory_exceeded",
+                "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
+                exit_code,
+                duration_ms,
+            )
+        },
         .InfrastructureError(message) then {
             let duration_ms = start.elapsed().as_milliseconds()
             return failure_result(
@@ -576,6 +609,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                     "timed_out",
                     "timeout",
                     "case timed out after \(config.timeout_secs) seconds",
+                    exit_code,
+                    current_duration_ms,
+                )
+            },
+            .MemoryExceeded(exit_code, peak_bytes) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "memory_exceeded",
+                    "memory_exceeded",
+                    "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
                     exit_code,
                     current_duration_ms,
                 )
@@ -646,6 +690,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                     current_duration_ms,
                 )
             },
+            .MemoryExceeded(exit_code, peak_bytes) then {
+                let current_duration_ms = start.elapsed().as_milliseconds()
+                return failure_result(
+                    info,
+                    "memory_exceeded",
+                    "memory_exceeded",
+                    "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
+                    exit_code,
+                    current_duration_ms,
+                )
+            },
             .InfrastructureError(message) then {
                 break when execute_built_executable_with_retry(
                     config,
@@ -663,6 +718,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                             "timed_out",
                             "timeout",
                             "case timed out after \(config.timeout_secs) seconds",
+                            exit_code,
+                            current_duration_ms,
+                        )
+                    },
+                    .MemoryExceeded(exit_code, peak_bytes) then {
+                        let current_duration_ms = start.elapsed().as_milliseconds()
+                        return failure_result(
+                            info,
+                            "memory_exceeded",
+                            "memory_exceeded",
+                            "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
                             exit_code,
                             current_duration_ms,
                         )
@@ -761,6 +827,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 current_duration_ms,
             )
         },
+        .MemoryExceeded(exit_code, peak_bytes) then {
+            let current_duration_ms = start.elapsed().as_milliseconds()
+            return failure_result(
+                info,
+                "memory_exceeded",
+                "memory_exceeded",
+                "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
+                exit_code,
+                current_duration_ms,
+            )
+        },
         .InfrastructureError(message) then {
             break when execute_built_executable_with_retry(
                 config,
@@ -778,6 +855,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                         "timed_out",
                         "timeout",
                         "case timed out after \(config.timeout_secs) seconds",
+                        exit_code,
+                        current_duration_ms,
+                    )
+                },
+                .MemoryExceeded(exit_code, peak_bytes) then {
+                    let current_duration_ms = start.elapsed().as_milliseconds()
+                    return failure_result(
+                        info,
+                        "memory_exceeded",
+                        "memory_exceeded",
+                        "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
                         exit_code,
                         current_duration_ms,
                     )
