@@ -65,8 +65,12 @@ public class Driver {
     }
 
     let commandStr = args[1]
+    if commandStr == "help" || commandStr == "-h" || commandStr == "--help" {
+      printUsage()
+      return
+    }
     let command = DriverCommand(rawValue: commandStr)
-    let mode: DriverCommand
+    var mode: DriverCommand
     var remainingArgs: [String] = []
 
     if let cmd = command {
@@ -78,9 +82,8 @@ public class Driver {
       mode = .build
       remainingArgs = Array(args[1...])
     } else {
-      writeStderr("Unknown command or file: \(commandStr)")
-      printUsage()
-      return
+      mode = .build
+      remainingArgs = Array(args[1...])
     }
 
     // Parse options
@@ -88,7 +91,10 @@ public class Driver {
     var i = 0
     while i < remainingArgs.count {
       let arg = remainingArgs[i]
-      if arg == "-o" || arg == "--output" {
+      if arg == "-h" || arg == "--help" {
+        printUsage()
+        return
+      } else if arg == "-o" || arg == "--output" {
         if i + 1 < remainingArgs.count {
           options.outputDir = remainingArgs[i + 1]
           i += 2
@@ -132,7 +138,9 @@ public class Driver {
         options.noStd = true
         i += 1
       } else if arg.hasPrefix("-") {
-        i += 1
+        writeStderr("Error: Unknown argument: \(arg)")
+        printUsage()
+        exit(1)
       } else {
         if options.entryFilePath == nil && options.packageConfigPath == nil {
           options.entryFilePath = arg
@@ -140,7 +148,7 @@ public class Driver {
         } else {
           writeStderr("Unknown positional argument: \(arg)")
           printUsage()
-          return
+          exit(1)
         }
       }
     }
@@ -148,12 +156,12 @@ public class Driver {
     if options.packageConfigPath == nil && options.entryFilePath == nil {
       writeStderr("Error: Missing input file or --package-config")
       printUsage()
-      return
+      exit(1)
     }
     if options.packageConfigPath != nil && options.entryFilePath != nil {
       writeStderr("Error: Cannot combine direct file input with --package-config")
       printUsage()
-      return
+      exit(1)
     }
 
     do {
@@ -967,12 +975,14 @@ public class Driver {
       Usage: koralc [command] [--package-config <koral.json> | <file.koral>] [--target-module <module>] [options]
 
       Commands:
+        help    Show this help text
         build   Compile to executable (default)
         check   Type-check only (no code generation)
         run     Compile and run
         emit-c  Generate C code only
 
       Options:
+        -h, --help                Show this help text
         -o, --output <path>       Output directory for generated files
         --package-config <path>   Package manifest path for manifest-driven builds
         --target-module <name>    Target module full name, e.g. app::main

@@ -282,76 +282,94 @@ private let execute_command_with_timeout(
     args List[String],
     capture_root Path,
     capture_prefix String,
-    start MonoTime,
     timeout_secs Int64,
     spawn_error_prefix String,
 ) CommandExecution = {
     let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
     let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
     let cmd = build_captured_command(config, program, args, capture_root, capture_prefix) or else {
-            return .InfrastructureError(spawn_error_prefix + ": " + it.message())
+            return CommandExecution.InfrastructureError(spawn_error_prefix + ": " + it.message())
         }
     let proc = cmd.spawn() or else {
-            return .InfrastructureError(spawn_error_prefix + ": " + it.message())
+            return CommandExecution.InfrastructureError(spawn_error_prefix + ": " + it.message())
         }
 
     let pid = proc.pid()
-    let finished = AtomicBool.new(false)
-    let timed_out = AtomicBool.new(false)
+    let command_start = MonoTime.now()
     let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap()
 
-    let memory_exceeded = AtomicBool.new(false)
-    let peak_memory = AtomicUInt.new(0(UInt))
+    let mut timed_out = false
+    let mut memory_exceeded = false
+    let mut peak_memory UInt = 0
     let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt)
+    let mut exit_status = Option[ExitStatus].None()
 
-    let watchdog = run_task(() -> {
-        while not finished.load() then {
-            if start.elapsed().as_seconds() >= timeout_secs then {
-                timed_out.store(true)
-                let _ = kill_process(pid)
-                break
-            }
-            let current_mem_raw = process_tree_working_set_bytes(pid)
-            let current_mem = current_mem_raw(UInt)
-            if current_mem > 0(UInt) then {
-                let prev = peak_memory.load()
-                if current_mem > prev then {
-                    peak_memory.store(current_mem)
+    while exit_status is .None() then {
+        when proc.try_wait() in {
+            .Ok(status_opt) then when status_opt in {
+                .Some(status) then {
+                    exit_status = Option[ExitStatus].Some(status)
+                },
+                .None() then {},
+            },
+            .Error(message) then {
+                if memory_exceeded then {
+                    return CommandExecution.MemoryExceeded(-1, peak_memory)
                 }
-                if memory_limit_bytes > 0(UInt) and current_mem > memory_limit_bytes then {
-                    memory_exceeded.store(true)
-                    let _ = kill_process(pid)
-                    break
+                if timed_out then {
+                    return CommandExecution.TimedOut(-1)
                 }
-            }
-            sleep(poll_sleep)
+                return CommandExecution.InfrastructureError("failed to wait process: " + message.message())
+            },
         }
-    })
 
-    let wait_result = proc.wait()
-    finished.store(true)
-    let _ = watchdog.wait()
+        if exit_status is .Some(_) then {
+            break
+        }
+
+        if not timed_out and command_start.elapsed().as_seconds() >= timeout_secs then {
+            timed_out = true
+            let _ = kill_process(pid)
+        }
+
+        let current_mem_raw = process_tree_working_set_bytes(pid)
+        let current_mem = current_mem_raw(UInt)
+        if current_mem > 0(UInt) then {
+            if current_mem > peak_memory then {
+                peak_memory = current_mem
+            }
+            if not memory_exceeded and memory_limit_bytes > 0(UInt) and current_mem > memory_limit_bytes then {
+                memory_exceeded = true
+                let _ = kill_process(pid)
+            }
+        }
+
+        sleep(poll_sleep)
+    }
 
     let stdout_content = read_text_file_or_empty(stdout_path)
     let stderr_content = read_text_file_or_empty(stderr_path)
 
-    let execution CommandExecution = when wait_result in {
-        .Ok(status) then if memory_exceeded.load() then {
-            break .MemoryExceeded(infer_exit_code(status), peak_memory.load())
-        } else if timed_out.load() then {
-            break .TimedOut(infer_exit_code(status))
-        } else {
-            break .Finished(CommandOutput(status, stdout_content, stderr_content))
+    when exit_status in {
+        .Some(status) then {
+            if memory_exceeded then {
+                return CommandExecution.MemoryExceeded(infer_exit_code(status), peak_memory)
+            }
+            if timed_out then {
+                return CommandExecution.TimedOut(infer_exit_code(status))
+            }
+            return CommandExecution.Finished(CommandOutput(status, stdout_content, stderr_content))
         },
-        .Error(message) then if memory_exceeded.load() then {
-            break .MemoryExceeded(-1, peak_memory.load())
-        } else if timed_out.load() then {
-            break .TimedOut(-1)
-        } else {
-            break .InfrastructureError("failed to wait process: " + message.message())
+        .None() then {
+            if memory_exceeded then {
+                return CommandExecution.MemoryExceeded(-1, peak_memory)
+            }
+            if timed_out then {
+                return CommandExecution.TimedOut(-1)
+            }
+            return CommandExecution.InfrastructureError("failed to wait process: no exit status")
         },
     }
-    return execution
 }
 
 private let execute_built_executable_with_retry(
@@ -359,11 +377,10 @@ private let execute_built_executable_with_retry(
     info CaseInfo,
     output_dir Path,
     capture_root Path,
-    start MonoTime,
     timeout_secs Int64,
 ) CommandExecution = {
     let first_program = prepared_run_executable_path(info, output_dir, 0(UInt)) or else {
-        return .InfrastructureError("failed to prepare built executable: " + it.message())
+        return CommandExecution.InfrastructureError("failed to prepare built executable: " + it.message())
     }
     let first = execute_command_with_timeout(
         config,
@@ -371,7 +388,6 @@ private let execute_built_executable_with_retry(
         run_command_args_for_case(),
         capture_root,
         "run",
-        start,
         timeout_secs,
         "failed to spawn built executable",
     )
@@ -387,7 +403,6 @@ private let execute_built_executable_with_retry(
                 run_command_args_for_case(),
                 capture_root,
                 "run",
-                start,
                 timeout_secs,
                 "failed to spawn built executable",
             )
@@ -403,7 +418,6 @@ private let execute_built_executable_with_retry(
                         run_command_args_for_case(),
                         capture_root,
                         "run",
-                        start,
                         timeout_secs,
                         "failed to spawn built executable",
                     )
@@ -520,7 +534,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         build_args,
         active_output_dir,
         compile_command_name,
-        start,
         timeout_secs,
         "failed to spawn compiler",
     ) in {
@@ -597,7 +610,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             build_args,
             active_output_dir,
             compile_command_name,
-            start,
             timeout_secs,
             "failed to spawn compiler",
         ) in {
@@ -675,7 +687,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             info,
             active_output_dir,
             active_output_dir,
-            start,
             timeout_secs,
         ) in {
             .Finished(output) then output,
@@ -707,7 +718,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                     info,
                     active_output_dir,
                     active_output_dir,
-                    start,
                     timeout_secs,
                 ) in {
                     .Finished(output) then output,
@@ -812,7 +822,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         info,
         active_output_dir,
         active_output_dir,
-        start,
         timeout_secs,
     ) in {
         .Finished(output) then output,
@@ -844,7 +853,6 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 info,
                 active_output_dir,
                 active_output_dir,
-                start,
                 timeout_secs,
             ) in {
                 .Finished(output) then output,

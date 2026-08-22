@@ -2,14 +2,26 @@
 
 ## Summary
 
-- Current validated bootstrap full-suite baseline: `488/504` passed.
-- Full-suite command: `./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8 --timeout 120 --memory-limit 2048`
-- Latest validated full-suite summary: `passed=488 failed=16 timed_out=0 memory_exceeded=0 infra_failed=0 duration_ms=1785090`.
-- The largest functional win in this snapshot is that the earlier `memory_exceeded` class is gone in the validated full run.
+- Current validated bootstrap full-suite baseline: `504/504` passed.
+- Full-suite command in the current macOS workspace: `./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc -j=8 --timeout 120 --report-file tests/compiler-cases_output/_reports/bootstrap-final-rerun-after-timeout-fix.log`
+- Latest validated full-suite summary: `passed=504 failed=0 timed_out=0 infra_failed=0 duration_ms=437507`.
+- The earlier `488/504` snapshot in this document has now been superseded by a fully green rerun in the current workspace.
+
+## Continuation Revalidation
+
+This continuation rechecked the previously documented unstable/failing area before the full rerun.
+
+- Individually re-ran and passed: `random_xoshiro_test`, `result_void_test`, `regex_basic_test`, `datetime_basic`, `slice_spec_test`
+- Individually re-ran and passed: `is_unique_mutable_matrix`, `deptr_assignment_unique_mutable_semantics`, `escape_analysis_coverage`, `inter_procedural_escape`, `inter_procedural_escape_recursive_ref_regression`, `escape_summary_return_only_identity_ref`
+- Full bootstrap suite rerun then passed cleanly: `504/504`
+- A later rerun briefly regressed to `496/504` due to false parallel timeouts in the shared runner, not compiler-case failures.
+- `tests/compiler-runner/executor.koral` was then fixed to use per-command `MonoTime.now()` plus current-thread `proc.try_wait()` polling instead of a background watchdog tied to case-level start time.
+- Rebuilt runner validation passed on the exact former timeout slice (`sync_channel_test`, `if_while_is_or_chain_regression`, `diagnostic_type_mismatch_line_1`, `or_return_basic`, `ref_deref_counter_loop`, `cast_numeric`, `string_methods`, `private_field_constructor_same_file`) at `8/8` with `-j=8`.
+- After that runner fix, the full bootstrap suite returned to `504/504` with `timed_out=0`.
 
 ## Key Validated Regressions
 
-These were re-run against the freshly rebuilt `bin/bootstrap/koralc.exe` and passed in the current snapshot:
+These were re-run against `./bin/bootstrap/koralc` and passed in the current snapshot:
 
 - `is_unique_mutable_matrix`
 - `deptr_assignment_unique_mutable_semantics`
@@ -49,13 +61,11 @@ The working tree also contains tracked effective changes outside the core bootst
 
 ## Remaining Known State
 
-- There are still `16` failing cases in the last validated full bootstrap suite.
-- The saved full-run log excerpt explicitly captured these remaining failures:
-  - `random_xoshiro_test.koral`
-  - `result_void_test.koral`
-  - `regex_basic_test.koral`
-  - `datetime_basic.koral`
-- During intermediate investigation on this branch, there was also a separate unstable failure cluster involving corrupted generated C in some cases such as `slice_spec_test`, `stack_test`, and `checked_shift_invalid`. Those experiments were not kept as part of this stable snapshot and should be rechecked from this commit before further fixes.
+- No currently reproduced failures remain in the active `504`-case bootstrap compiler suite.
+- The previously listed failures (`random_xoshiro_test.koral`, `result_void_test.koral`, `regex_basic_test.koral`, `datetime_basic.koral`) were re-run individually in this continuation and now pass.
+- The earlier unstable generated-C probe `slice_spec_test.koral` was also re-run and now passes in the current workspace.
+- The transient `496/504` run was traced to runner timeout accounting rather than compiler miscompilation; the current rebuilt runner and compiler pair revalidate at `504/504`.
+- The historical notes below about effective MIR/escape-analysis changes remain relevant as context for why this branch recovered.
 
 ## Working Tree Scope Captured By This Snapshot
 
@@ -77,18 +87,18 @@ The following local artifacts should stay out of version control and are intenti
 
 ## Recommended Restart Point
 
-If work resumes from this commit, start by re-running the validated key regressions first:
+If work resumes from this workspace state, start with the currently valid runner commands below:
 
 ```bash
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter "is_unique_mutable_matrix" -j=1 --timeout 120 --memory-limit 4096 --verbose
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter "deptr_assignment_unique_mutable_semantics" -j=1 --timeout 120 --memory-limit 4096 --verbose
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter "escape_analysis_coverage" -j=1 --timeout 120 --memory-limit 4096 --verbose
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter "inter_procedural_escape" -j=1 --timeout 120 --memory-limit 4096 --verbose
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe --filter "escape_summary_return_only_identity_ref" -j=1 --timeout 120 --memory-limit 4096 --verbose
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc --filter "is_unique_mutable_matrix" -j=1 --timeout 120 --verbose
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc --filter "deptr_assignment_unique_mutable_semantics" -j=1 --timeout 120 --verbose
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc --filter "escape_analysis_coverage" -j=1 --timeout 120 --verbose
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc --filter "inter_procedural_escape" -j=1 --timeout 120 --verbose
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc --filter "escape_summary_return_only_identity_ref" -j=1 --timeout 120 --verbose
 ```
 
 Then re-run the full suite:
 
 ```bash
-./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8 --timeout 120 --memory-limit 2048
+./bin/compiler-test-runner/compiler_runner --compiler bootstrap --bootstrap-koralc ./bin/bootstrap/koralc -j=8 --timeout 120 --report-file tests/compiler-cases_output/_reports/bootstrap-final-rerun-after-timeout-fix.log
 ```
