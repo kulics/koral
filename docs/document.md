@@ -178,8 +178,9 @@ Koral uses reference types to refer to another value rather than holding it:
 
 `&` is the reference-of operator:
 
-- Only allowed on value paths, e.g. `&x`, `&self.field`.
-- `&` on rvalues is rejected (e.g. `&make_value()` is an error).
+- Plain `&` may take either an lvalue or an rvalue. Rvalues are materialized into managed storage as needed.
+- `&mut` requires a writable lvalue.
+- `&raw` / `&raw mut` require addressable storage, so literals and temporary values are rejected.
 - `&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
 - `box(expr)` is explicit managed construction, returning `*mut T`.
 
@@ -193,17 +194,20 @@ Receiver adjustment rules:
 - `*self` is a managed receiver; it accepts both lvalue and rvalue receiver expressions. For rvalue receivers, the compiler materializes a stable temporary for the duration of the call.
 - `*mut self` is a mutable managed receiver; it still requires a writable lvalue receiver; rvalues are rejected.
 - `*self` on rvalues may introduce hidden retain/allocation cost due to temporary materialization.
+- Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
 
 ```koral
 let mut x = 10
-let rx *mut Int = &mut x   // managed expected type triggers local promotion
+let rx *mut Int = &mut x
 
 let y = 10
 let ry *Int = &y       // read-only reference
 
 let owned *mut Int = box(42) // box() returns *mut T
+let temp *Int = &42          // OK: managed & may materialize rvalues
 
-// let rz = &42           // error: rvalue cannot be referenced
+// let bad = &mut 42      // error: &mut still requires a writable lvalue
+// let raw_bad = &raw 42  // error: raw address-of needs addressable storage
 
 // No implicit managed-ref promotion for function arguments:
 let takes_ref(r * Int) Int = *r
@@ -491,7 +495,7 @@ Reference types are used to refer to another value rather than holding it. This 
 - `*T` — managed read-only reference. Supports `*expr` dereference read but NOT `*expr = value` assignment.
 - `*mut T` — managed mutable reference. Supports both `*expr` dereference read and `*expr = value` assignment.
 
-Use the `&` prefix expression to create a reference. The result depends on the source's mutability:
+Use the `&` prefix expression to create a managed reference. Plain `&` produces `*T`; `&mut` produces `*mut T`.
 
 ```koral
 let mut n = 42
@@ -504,7 +508,7 @@ let c *Int = &m
 let d = *c            // Dereference read, gets 42
 // *c = 100           // Error: * does not support deref assignment
 
-let owned *mut Int = &mut n // managed expected type triggers local promotion
+let owned *mut Int = &mut n
 ```
 
 `&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide whether the reference can be stack-allocated or must be heap-allocated. `box(expr)` always explicitly constructs a managed `*mut T`.
@@ -539,7 +543,7 @@ let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `*` / `*mut` are managed references. `&` produces a `*T` (or `*mut T` with `&mut`); the compiler uses escape analysis to decide stack vs heap allocation. `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call; this receiver-only exception does not make `&` on rvalues legal, and `*mut self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `*` / `*mut` are managed references. Plain `&` may form managed references from lvalues or rvalues; `&mut` still requires a writable lvalue. `&raw` / `&raw mut` form raw pointers only from addressable storage. The compiler uses escape analysis to decide stack vs heap allocation for managed references, and `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call, while `*mut self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -758,8 +762,8 @@ It must be used inside a function whose return kind matches the propagated value
 
 Operator precedence from high to low:
 
-1. Postfix: calls `()`, subscripts `[]`, member access `.`, storage modifiers `&/*raw/*`, qualified/generic method suffixes
-2. Prefix: unary `-`, `~`
+1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified/generic method suffixes
+2. Prefix: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mut`, `&raw`, `&raw mut`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`

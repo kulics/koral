@@ -188,30 +188,33 @@ Notes:
 Koral distinguishes managed references (`*T`, `*mut T`) from raw pointers (`*raw T`, `*raw mut T`):
 
 - Managed references may escape and are reference-counted. The compiler uses escape analysis to decide stack vs heap allocation.
-- `&x` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
-- `&` result mutability depends on the source's mutability:
-    - `let mut` binding → `*mut T`
-    - `let` (immutable) binding → `*T`
-    - Mutable path (e.g. `*mut`'s `mut` field) → `*mut T`
-- `&` on rvalues is rejected.
+- `&expr` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
+- Plain `&` produces `*T`.
+- `&mut` produces `*mut T`.
+- Plain `&` may take an rvalue (for example `&42`) and materializes managed storage as needed.
+- `&mut` still requires a writable lvalue.
+- `&raw` / `&raw mut` require addressable storage and therefore reject literals and temporary values.
 - **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must pass `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mut T` (auto-deref, following Go's pointer receiver behavior).
 - `*T` supports `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
 - `*raw T` supports `*expr` dereference read only. `*raw mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
 - `box(expr)` returns `*mut T` — an escaping managed reference from temporaries/literals.
 - `box` should be understood as binding its parameter locally and returning `*mut T`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
 - Ordinary parameter `mut` is local binding mutability only. It is not part of the function signature, function type, or trait/given conformance comparison.
 
 ```koral
 let mut x = 10
-let rx *mut Int = &mut x    // managed expected type triggers local promotion
+let rx *mut Int = &mut x
 
 let y = 10
 let ry *Int = &y     // read-only reference
 
 let owned *mut Int = box(42)   // box() returns *mut T
+let temp *Int = &42            // OK: managed & may materialize rvalues
 
-// let rz = &42            // error: cannot take reference of rvalue
+// let bad = &mut 42       // error: &mut still requires a writable lvalue
+// let raw_bad = &raw 42   // error: raw address-of needs addressable storage
 ```
 
 ## Drop Semantics

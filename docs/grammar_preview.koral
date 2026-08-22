@@ -560,12 +560,13 @@ type Table[T Any](mut data T)
 
 let type_modifiers() Void = {
     // *：只读受管理引用
-    // - 可通过不可变左值上的 & 形成（产出 *T）
+    // - 可通过普通 & 形成（左值或右值均可；右值会物化托管存储，产出 *T）
     // - 也可通过 box() 创建（返回 *mut T，可隐式宽化为 *T）
     // - 成员访问自动解引用（对结构体/枚举类型）
     // - *expr 读取值，但不支持 *expr 赋值（* 是只读引用）
     let local Int = 7
     let borrowed *Int = &local    // let 绑定 → *T
+    let temp_ref *Int = &42       // 右值也可形成托管 *T
     let a *Int = box(42)             // box() 返回 *mut T，可隐式宽化为 *T
     println(*a)          // 显式解引用读取
     let point_ref *Point = box(Point(10, 20))
@@ -574,6 +575,7 @@ let type_modifiers() Void = {
 
     // *mut：可变受管理引用
     // - 可通过可变左值上的 &mut 形成（产出 *mut T）
+    // - &mut 仍然要求可写左值；不能直接对右值使用
     // - box() 返回 *mut T
     // - 支持 *expr 读取和 *expr = value 赋值
     // - *mut T 可隐式转换为 *T（丢弃写权限），反向不允许
@@ -584,9 +586,11 @@ let type_modifiers() Void = {
     *owned = 99          // *expr 赋值（*mut 支持）
 
     // *raw：只读原始指针
+    // - 通过 &raw 在可取地址存储上形成
     // - 支持 *expr 读取，但不支持 *expr 赋值
     // - 支持下标读取 p[i]，但不支持下标赋值
     // - 支持指针算术（+ / -）
+    // - 支持直接字段访问 p.field，但不做隐式 pointee 方法查找
     let b *raw Int = &raw a
     let value = *b       // *expr 读取
     // *b = 99           // 错误：*raw 不支持 *expr 赋值
@@ -594,6 +598,7 @@ let type_modifiers() Void = {
     // b[1] = 200           // 错误：*raw 不支持下标赋值
 
     // *raw mut：可变原始指针
+    // - 可通过 &raw mut 在可取地址存储上形成
     // - 支持 *expr 读取和 *expr = value 赋值
     // - 支持下标读取和下标赋值（指针偏移语义）
     // - 支持指针算术（+ / -）
