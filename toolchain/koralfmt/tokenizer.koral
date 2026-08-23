@@ -14,8 +14,8 @@ public type Token {
     KwSelf(), KwSelfType(),
     KwReturn(), KwBreak(), KwContinue(),
     KwDefer(),
-    KwRef(), KwPtr(), KwDeptr(), KwVal(), KwWeakref(),
-    KwPublic(), KwPrivate(), KwProtected(), KwSuper(),
+    KwRef(), KwPtr(), KwRaw(), KwDeptr(), KwVal(), KwWeakref(),
+    KwPublic(), KwPrivate(), KwProtected(), KwProtectedPublic(), KwSuper(),
 
     // Literals
     BoolTrue(), BoolFalse(),
@@ -82,9 +82,10 @@ given Token {
         .KwSelf then "self", .KwSelfType then "Self",
         .KwReturn then "return", .KwBreak then "break", .KwContinue then "continue",
         .KwDefer then "defer",
-        .KwRef then "*", .KwPtr then "*raw", .KwDeptr then "deptr",
+        .KwRef then "*", .KwPtr then "*raw", .KwRaw then "raw", .KwDeptr then "deptr",
         .KwVal then "val", .KwWeakref then "?*",
         .KwPublic then "public", .KwPrivate then "private", .KwProtected then "protected",
+        .KwProtectedPublic then "protected public",
         .KwSuper then "super",
         .BoolTrue then "true", .BoolFalse then "false",
         .IntLit(t) then t, .FloatLit(t) then t,
@@ -120,8 +121,8 @@ given Token {
         or .KwSelf or .KwSelfType
         or .KwReturn or .KwBreak or .KwContinue
         or .KwDefer
-        or .KwRef or .KwPtr or .KwDeptr or .KwVal or .KwWeakref
-        or .KwPublic or .KwPrivate or .KwProtected or .KwSuper then true,
+        or .KwRef or .KwPtr or .KwRaw or .KwDeptr or .KwVal or .KwWeakref
+        or .KwPublic or .KwPrivate or .KwProtected or .KwProtectedPublic or .KwSuper then true,
         _ then false,
     }
 
@@ -165,9 +166,9 @@ given Token {
         .KwForeign then 19, .KwIntrinsic then 20, .KwSelf then 21, .KwSelfType then 22,
         .KwReturn then 23, .KwBreak then 24, .KwContinue then 25,
         .KwDefer then 94,
-        .KwRef then 25, .KwPtr then 26, .KwDeptr then 27, .KwVal then 28,
-        .KwWeakref then 29, .KwPublic then 30, .KwPrivate then 31,
-        .KwProtected then 32, .KwSuper then 33,
+        .KwRef then 95, .KwPtr then 96, .KwRaw then 97, .KwDeptr then 98, .KwVal then 99,
+        .KwWeakref then 100, .KwPublic then 30, .KwPrivate then 31,
+        .KwProtected then 32, .KwProtectedPublic then 101, .KwSuper then 33,
         .BoolTrue then 34, .BoolFalse then 35,
         .IntLit(_) then 36, .FloatLit(_) then 37,
         .StrLit(_) then 38, .InterpStr(_) then 39,
@@ -366,6 +367,12 @@ given Tokenizer {
     // ========================================================================
 
     private scan_string(*mut self) Result[Token] = {
+        if self.peek_at(1) is .Some(q1) and Tokenizer.rune_eq(q1, '"') then {
+            if self.peek_at(2) is .Some(q2) and Tokenizer.rune_eq(q2, '"') then {
+                return self.scan_multiline_string()
+            }
+        }
+
         let mut text = String.new()
         text.push_byte('"')
         self.pos += 1 // skip opening "
@@ -424,6 +431,59 @@ given Tokenizer {
         return Result[Token].Error(box("unterminated string literal"))
     }
 
+    private scan_multiline_string(*mut self) Result[Token] = {
+        let mut text = String.new()
+        text.push_string("\"\"\"")
+        self.pos += 3
+        let mut is_interp = false
+
+        while not self.is_eof() then {
+            if self.peek() is .Some(r0) and Tokenizer.rune_eq(r0, '"') then {
+                if self.peek_at(1) is .Some(r1) and Tokenizer.rune_eq(r1, '"') then {
+                    if self.peek_at(2) is .Some(r2) and Tokenizer.rune_eq(r2, '"') then {
+                        text.push_string("\"\"\"")
+                        self.pos += 3
+                        if is_interp then {
+                            return .Ok(.InterpStr(text))
+                        }
+                        return .Ok(.StrLit(text))
+                    }
+                }
+            }
+
+            let r = self.runes[self.pos]
+            if Tokenizer.rune_eq(r, '\\') then {
+                text.push_string(r.to_string())
+                self.pos += 1
+                if not self.is_eof() then {
+                    let next = self.runes[self.pos]
+                    if Tokenizer.rune_eq(next, '(') then {
+                        is_interp = true
+                        text.push_string(next.to_string())
+                        self.pos += 1
+                        let mut depth UInt = 1
+                        while not self.is_eof() and depth > 0 then {
+                            let ir = self.runes[self.pos]
+                            if Tokenizer.rune_eq(ir, '(') then { depth += 1 }
+                            if Tokenizer.rune_eq(ir, ')') then { depth -= 1 }
+                            text.push_string(ir.to_string())
+                            self.pos += 1
+                        }
+                    } else {
+                        text.push_string(next.to_string())
+                        self.pos += 1
+                    }
+                }
+                continue
+            }
+
+            text.push_string(r.to_string())
+            self.pos += 1
+        }
+
+        return .Error(box("unterminated string literal"))
+    }
+
     // ========================================================================
     // Number literal
     // ========================================================================
@@ -466,6 +526,42 @@ given Tokenizer {
                 text.push_string(r.to_string())
                 self.pos += 1
             } else { break }
+        }
+
+        if self.peek() is .Some(r) then {
+            if Tokenizer.rune_eq(r, 'h') then {
+                text.push_string(r.to_string())
+                self.pos += 1
+                return .IntLit(text)
+            }
+            if Tokenizer.rune_eq(r, 's') then {
+                text.push_string(r.to_string())
+                self.pos += 1
+                return .IntLit(text)
+            }
+            if Tokenizer.rune_eq(r, 'm') then {
+                if self.peek_at(1) is .Some(r2) then {
+                    if Tokenizer.rune_eq(r2, 's') then {
+                        text.push_string(r.to_string())
+                        text.push_string(r2.to_string())
+                        self.pos += 2
+                        return .IntLit(text)
+                    }
+                    if Tokenizer.rune_eq(r2, 'i') and self.peek_at(2) is .Some(r3) and Tokenizer.rune_eq(r3, 'n') then {
+                        text.push_string(r.to_string())
+                        text.push_string(r2.to_string())
+                        text.push_string(r3.to_string())
+                        self.pos += 3
+                        return .IntLit(text)
+                    }
+                }
+            }
+            if (Tokenizer.rune_eq(r, 'u') or Tokenizer.rune_eq(r, 'n')) and self.peek_at(1) is .Some(r2) and Tokenizer.rune_eq(r2, 's') then {
+                text.push_string(r.to_string())
+                text.push_string(r2.to_string())
+                self.pos += 2
+                return .IntLit(text)
+            }
         }
 
         if is_float then {
@@ -516,11 +612,9 @@ given Tokenizer {
             "break" then .KwBreak(),
             "continue" then .KwContinue(),
             "defer" then .KwDefer(),
-            "*" then .KwRef(),
-            "*raw" then .KwPtr(),
+            "raw" then .KwRaw(),
             "deptr" then .KwDeptr(),
             "val" then .KwVal(),
-            "?*" then .KwWeakref(),
             "public" then .KwPublic(),
             "private" then .KwPrivate(),
             "protected" then .KwProtected(),
@@ -610,15 +704,30 @@ given Tokenizer {
             return .Some(.Minus())
         }
 
-        // * *=
+        // * *= *raw
         if cp == 42 then {
-            self.pos += 1
             if self.peek() is .Some(n) then {
+                if Tokenizer.rune_eq(n, 'r') then {
+                    if self.peek_at(2) is .Some(n2) and Tokenizer.rune_eq(n2, 'a') then {
+                        if self.peek_at(3) is .Some(n3) and Tokenizer.rune_eq(n3, 'w') then {
+                            let boundary = when self.peek_at(4) in {
+                                .Some(n4) then not n4.is_identifier_continue(),
+                                .None() then true,
+                            }
+                            if boundary then {
+                                self.pos += 4
+                                return .Some(.KwPtr())
+                            }
+                        }
+                    }
+                }
                 if Tokenizer.rune_eq(n, '=') then {
+                    self.pos += 1
                     self.pos += 1
                     return .Some(.StarEq())
                 }
             }
+            self.pos += 1
             return .Some(.Star())
         }
 
@@ -769,6 +878,16 @@ given Tokenizer {
                 }
             }
             return .Some(.Amp())
+        }
+
+        // ?*
+        if cp == 63 then {
+            if self.peek_at(1) is .Some(n) then {
+                if Tokenizer.rune_eq(n, '*') then {
+                    self.pos += 2
+                    return .Some(.KwWeakref())
+                }
+            }
         }
 
         // | |=

@@ -19,6 +19,10 @@ func TestFmtCaseValidGivenWhen(t *testing.T) {
 	runFmtCase(t, "valid_given_when")
 }
 
+func TestFmtCaseValidModernRefs(t *testing.T) {
+	runFmtCase(t, "valid_modern_refs")
+}
+
 func TestFmtCaseInvalidMissingThen(t *testing.T) {
 	runFmtCase(t, "invalid_missing_then")
 }
