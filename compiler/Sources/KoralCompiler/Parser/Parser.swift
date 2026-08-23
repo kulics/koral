@@ -2,6 +2,7 @@
 public class Parser {
   let lexer: Lexer
   var currentToken: Token
+  private var lineJoinGroupingDepth: Int = 0
 
   public init(lexer: Lexer) {
     self.lexer = lexer
@@ -30,10 +31,42 @@ public class Parser {
     }
   }
   
+  func withLineJoinGrouping<T>(_ body: () throws -> T) rethrows -> T {
+    lineJoinGroupingDepth += 1
+    defer { lineJoinGroupingDepth -= 1 }
+    return try body()
+  }
+
+  func isInsideLineJoinGrouping() -> Bool {
+    lineJoinGroupingDepth > 0
+  }
+
+  func allowsLineJoinAfterNewline(_ token: Token) -> Bool {
+    return token.isLineJoinToken
+  }
+
+  func allowsPostfixAfterNewline(_ token: Token) -> Bool {
+    token === .dot
+  }
+
+  func shouldBreakBinaryAtCurrentToken() -> Bool {
+    lexer.newlineBeforeCurrent && !(allowsLineJoinAfterNewline(currentToken) || isInsideLineJoinGrouping())
+  }
+
+  func canContinueRangeBoundAfterNewline() -> Bool {
+    !lexer.newlineBeforeCurrent || isInsideLineJoinGrouping()
+  }
+
+  func requireNoLineBreakBeforeRHS() throws {
+    if lexer.newlineBeforeCurrent && !isInsideLineJoinGrouping() {
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+    }
+  }
+
   /// Check if the current position should terminate a statement/declaration.
   /// Returns true if:
   /// 1. Current token is a semicolon
-  /// 2. There was a newline before current token AND current token is not a continuation token
+  /// 2. There was a newline before current token AND current token is not a permitted line-join token
   /// 3. Current token is EOF or right brace (end of block)
   func shouldTerminateStatement() -> Bool {
     // Explicit termination
@@ -46,7 +79,7 @@ public class Parser {
     }
     // Newline-based termination
     if lexer.newlineBeforeCurrent {
-      if !currentToken.isContinuationToken {
+      if !allowsLineJoinAfterNewline(currentToken) {
         return true
       }
     }
@@ -99,7 +132,7 @@ public class Parser {
     case .returnKeyword:
       try match(.returnKeyword)
       // return; or return <expr>;
-      // Also check for automatic statement termination (newline before non-continuation token)
+      // Also check for automatic statement termination (newline before a non-join token)
       if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
         return .return(value: nil, span: startSpan)
       }

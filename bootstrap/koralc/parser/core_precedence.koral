@@ -81,20 +81,23 @@ given Parser {
         let mut expr = self.parse_unary() or return
 
         while true then {
+            if self.should_break_binary_at_current_token() then { break }
             when self.current().kind in {
                 .Star() then {
-                    if self.current().has_newline_before then { break }
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_unary() or return
                     expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Multiply(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .Slash() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_unary() or return
                     expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Divide(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .Percent() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_unary() or return
                     expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Remainder(), box(*rhs), self.span_from_expr_start(expr)))
                 },
@@ -109,14 +112,17 @@ given Parser {
         let mut expr = self.parse_factor() or return
 
         while true then {
+            if self.should_break_binary_at_current_token() then { break }
             when self.current().kind in {
                 .Plus() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_factor() or return
                     expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Add(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .Minus() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_factor() or return
                     expr = box(Expr.ArithmeticExpr(box(*expr), ArithmeticOperator.Subtract(), box(*rhs), self.span_from_expr_start(expr)))
                 },
@@ -131,10 +137,11 @@ given Parser {
         let mut expr = self.parse_term() or return
 
         while true then {
+            if self.should_break_binary_at_current_token() then { break }
             when self.current().kind in {
                 .Range() then {
                     self.advance()
-                    if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                    if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
                         let rhs = self.parse_term() or return
                         expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
@@ -143,12 +150,13 @@ given Parser {
                 },
                 .RangeLess() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_term() or return
                     expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                 },
                 .LessRange() then {
                     self.advance()
-                    if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                    if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
                         let rhs = self.parse_term() or return
                         expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
@@ -157,6 +165,7 @@ given Parser {
                 },
                 .LessRangeLess() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_term() or return
                     expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                 },
@@ -171,14 +180,17 @@ given Parser {
         let mut expr = self.parse_range() or return
 
         while true then {
+            if self.should_break_binary_at_current_token() then { break }
             when self.current().kind in {
                 .LeftShift() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_range() or return
                     expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.LeftShift(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .RightShift() then {
                     self.advance()
+                    let _ = self.require_no_line_break_before_rhs() or return
                     let rhs = self.parse_range() or return
                     expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.RightShift(), box(*rhs), self.span_from_expr_start(expr)))
                 },
@@ -193,7 +205,9 @@ given Parser {
         let mut expr = self.parse_comparison() or return
 
         while self.current().kind is .Ampersand() then {
+            if self.should_break_binary_at_current_token() then { break }
             self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
             let rhs = self.parse_comparison() or return
             expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitAnd(), box(*rhs), self.span_from_expr_start(expr)))
         }
@@ -205,7 +219,9 @@ given Parser {
         let mut expr = self.parse_bitwise_and() or return
 
         while self.current().kind is .Caret() then {
+            if self.should_break_binary_at_current_token() then { break }
             self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
             let rhs = self.parse_bitwise_and() or return
             expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitXor(), box(*rhs), self.span_from_expr_start(expr)))
         }
@@ -217,7 +233,9 @@ given Parser {
         let mut expr = self.parse_bitwise_xor() or return
 
         while self.current().kind is .Pipe() then {
+            if self.should_break_binary_at_current_token() then { break }
             self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
             let rhs = self.parse_bitwise_xor() or return
             expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitOr(), box(*rhs), self.span_from_expr_start(expr)))
         }
@@ -229,6 +247,10 @@ given Parser {
         let start = self.current()
         let expr = self.parse_shift() or return
 
+        if self.should_break_binary_at_current_token() then {
+            return .Ok(expr)
+        }
+
         let first_kind = self.current().kind
         if not self.comparison_kind_is_ordering(first_kind) then {
             return .Ok(expr)
@@ -237,6 +259,7 @@ given Parser {
         let direction_is_ascending = self.comparison_kind_is_ascending(first_kind)
         let first_op = self.comparison_operator_from_kind(first_kind)
         self.advance()
+        let _ = self.require_no_line_break_before_rhs() or return
         let first_right = self.parse_shift() or return
 
         if not self.comparison_kind_is_ordering(self.current().kind) then {
@@ -250,12 +273,14 @@ given Parser {
         operators.push(first_op)
 
         while self.comparison_kind_is_ordering(self.current().kind) then {
+            if self.should_break_binary_at_current_token() then { break }
             let next_kind = self.current().kind
             if self.comparison_kind_is_ascending(next_kind) <> direction_is_ascending then {
                 return self.invalid_comparison_chain_error()
             }
             let next_op = self.comparison_operator_from_kind(next_kind)
             self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
             let rhs = self.parse_shift() or return
             operands.push(rhs)
             operators.push(next_op)
@@ -267,6 +292,10 @@ given Parser {
     protected parse_equality(*mut self) Result[* Expr] = {
         let expr = self.parse_bitwise_or() or return
 
+        if self.should_break_binary_at_current_token() then {
+            return .Ok(expr)
+        }
+
         if not self.comparison_kind_is_equality(self.current().kind) then {
             return .Ok(expr)
         }
@@ -276,6 +305,7 @@ given Parser {
 
         let op = self.comparison_operator_from_kind(self.current().kind)
         self.advance()
+        let _ = self.require_no_line_break_before_rhs() or return
         let rhs = self.parse_bitwise_or() or return
         if self.expr_is_ordering_comparison(rhs) then {
             return self.invalid_comparison_chain_error()
@@ -291,14 +321,21 @@ given Parser {
     protected parse_is(*mut self) Result[* Expr] = {
         let mut expr = self.parse_equality() or return
 
+        if self.should_break_binary_at_current_token() then {
+            return .Ok(expr)
+        }
+
         if self.current().kind is .KwIs() then {
             let start = self.current()
             self.advance()
             if self.current().kind is .KwNot() then {
+                let _ = self.require_no_line_break_before_rhs() or return
                 self.advance()
+                let _ = self.require_no_line_break_before_rhs() or return
                 let pattern = self.parse_single_pattern() or return
                 return .Ok(box(Expr.IsNotExpr(expr, pattern, self.span_from_expr_start(expr))))
             }
+            let _ = self.require_no_line_break_before_rhs() or return
             let pattern = self.parse_single_pattern() or return
             return .Ok(box(Expr.IsExpr(expr, pattern, self.span_from_expr_start(expr))))
         }
@@ -321,6 +358,7 @@ given Parser {
         let mut expr = self.parse_logical_not() or return
 
         while self.current().kind is .KwAnd() then {
+            if self.should_break_binary_at_current_token() then { break }
             let is_and_then = when self.peek_kind() in { .Some(.KwThen()) then true, _ then false }
             if not is_and_then then {
                 break
@@ -338,10 +376,12 @@ given Parser {
         let mut expr = self.parse_and_then() or return
 
         while self.current().kind is .KwAnd() then {
+            if self.should_break_binary_at_current_token() then { break }
             if self.peek_kind() is .Some(.KwThen()) then {
                 break
             }
             self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
             let rhs = self.parse_and_then() or return
             expr = box(Expr.AndExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
@@ -353,6 +393,7 @@ given Parser {
         let mut expr = self.parse_and() or return
 
         while self.current().kind is .KwOr() then {
+            if self.should_break_binary_at_current_token() then { break }
             let is_or_else = when self.peek_kind() in { .Some(.KwElse()) then true, _ then false }
             if not is_or_else then {
                 break
@@ -370,6 +411,7 @@ given Parser {
         let mut expr = self.parse_or_else() or return
 
         while self.current().kind is .KwOr() then {
+            if self.should_break_binary_at_current_token() then { break }
             if self.peek_kind() is .Some(.KwElse()) then {
                 break
             }
@@ -377,6 +419,7 @@ given Parser {
                 break
             }
             self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
             let rhs = self.parse_or_else() or return
             expr = box(Expr.OrExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
@@ -388,6 +431,7 @@ given Parser {
         let mut expr = self.parse_or() or return
 
         while self.current().kind is .KwOr() then {
+            if self.should_break_binary_at_current_token() then { break }
             let is_or_return = when self.peek_kind() in { .Some(.KwReturn()) then true, _ then false }
             if not is_or_return then {
                 break

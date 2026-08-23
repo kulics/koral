@@ -107,30 +107,15 @@ public enum Token: CustomStringConvertible {
   case deferKeyword // 'defer' keyword
   case itKeyword // 'it' keyword
 
-  /// Whether this token is a continuation token (triggers line continuation when at start of line)
-  /// Continuation tokens include: infix operators, dot, and arrow
-  public var isContinuationToken: Bool {
+  /// Whether this token is one of the narrow line-join tokens allowed after a newline.
+  /// These are limited to grammar join keywords and structural connectors.
+  public var isLineJoinToken: Bool {
     switch self {
-    // Arithmetic infix operators
-    case .plus, .minus, .multiply, .divide, .remainder:
+    case .andKeyword, .orKeyword, .thenKeyword, .elseKeyword:
       return true
-    // Logical infix operators
-    case .andKeyword, .orKeyword:
-      return true
-    // Bitwise infix operators (not tilde - it's a prefix operator)
-    case .ampersand, .pipe, .caret, .leftShift, .rightShift:
-      return true
-    // Comparison operators
-    case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
-      return true
-    // Dot for member access and chaining
     case .dot:
       return true
-    // Arrow for lambda expressions
     case .arrow:
-      return true
-    // Range operators
-    case .range, .rangeLess, .lessRange, .lessRangeLess:
       return true
     default:
       return false
@@ -546,11 +531,11 @@ public class Lexer {
         if let nextChar = getNextChar() {
           if nextChar == "/" {
             // Line comment
-            skipLineComment()
+            sawNewline = skipLineComment() || sawNewline
             continue
           } else if nextChar == "*" {
             // Block comment
-            try skipBlockComment()
+            sawNewline = (try skipBlockComment()) || sawNewline
             continue
           }
           unreadChar(nextChar)
@@ -567,21 +552,26 @@ public class Lexer {
   }
 
   // Skip line comments
-  private func skipLineComment() {
+  private func skipLineComment() -> Bool {
     while let char = getNextChar() {
       if char.isNewline {
-        break
+        return true
       }
     }
+    return false
   }
 
   // Skip block comments /* ... */
-  private func skipBlockComment() throws {
+  private func skipBlockComment() throws -> Bool {
+    var sawNewline = false
     while let char = getNextChar() {
+        if char.isNewline {
+            sawNewline = true
+        }
         if char == "*" {
             if let nextChar = getNextChar() {
                 if nextChar == "/" {
-                    return
+                    return sawNewline
                 }
                 unreadChar(nextChar)
             }
@@ -1360,16 +1350,16 @@ public class Lexer {
     case "/":
       if let nextChar = getNextChar() {
         if nextChar == "/" {
-          skipLineComment()
+          let commentSawNewline = skipLineComment()
           // Re-track newlines after comment
           let sawNewline = try skipWhitespaceAndComments()
-          _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || sawNewline
+          _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || commentSawNewline || sawNewline
           return try getNextToken()
         } else if nextChar == "*" {
-          try skipBlockComment()
+          let commentSawNewline = try skipBlockComment()
           // Re-track newlines after comment
           let sawNewline = try skipWhitespaceAndComments()
-          _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || sawNewline
+          _hasNewlineBeforeCurrentToken = _hasNewlineBeforeCurrentToken || commentSawNewline || sawNewline
           return try getNextToken()
         } else if nextChar == "=" {
           return .divideEqual

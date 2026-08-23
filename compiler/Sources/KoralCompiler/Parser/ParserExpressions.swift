@@ -24,20 +24,22 @@ extension Parser {
 
   private func parseCallArgumentsList() throws -> [CallArg] {
     try match(.leftParen)
-    var arguments: [CallArg] = []
-    if currentToken !== .rightParen {
-      repeat {
-        arguments.append(try parseCallArgument())
-        if currentToken === .comma {
-          try match(.comma)
-          if currentToken === .rightParen { break }
-        } else {
-          break
-        }
-      } while true
+    return try withLineJoinGrouping {
+      var arguments: [CallArg] = []
+      if currentToken !== .rightParen {
+        repeat {
+          arguments.append(try parseCallArgument())
+          if currentToken === .comma {
+            try match(.comma)
+            if currentToken === .rightParen { break }
+          } else {
+            break
+          }
+        } while true
+      }
+      try match(.rightParen)
+      return arguments
     }
-    try match(.rightParen)
-    return arguments
   }
 
   private func tryParseMethodTypeArguments() throws -> [TypeNode]? {
@@ -120,6 +122,9 @@ extension Parser {
     var left = try parseOrElseExpression()
 
     while currentToken === .orKeyword {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       if lexer.peekNextToken() === .returnKeyword {
         let startSpan = currentSpan
         try match(.orKeyword)
@@ -139,6 +144,9 @@ extension Parser {
     var left = try parseOrExpression()
 
     while currentToken === .orKeyword {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       // Peek: if next token is `else`, this is `or else` syntax
       if lexer.peekNextToken() === .elseKeyword {
         let startSpan = currentSpan
@@ -157,11 +165,15 @@ extension Parser {
     var left = try parseAndThenExpression()
 
     while currentToken === .orKeyword {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       // If next token is `else` / `return`, don't consume — handled by higher layers.
       if lexer.peekNextToken() === .elseKeyword || lexer.peekNextToken() === .returnKeyword {
         break
       }
       try match(.orKeyword)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseAndThenExpression()
       left = .orExpression(left: left, right: right)
     }
@@ -174,6 +186,9 @@ extension Parser {
     var left = try parseAndExpression()
 
     while currentToken === .andKeyword {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       // Peek: if next token is `then`, this is `and then` syntax
       if lexer.peekNextToken() === .thenKeyword {
         let startSpan = currentSpan
@@ -192,9 +207,13 @@ extension Parser {
     var left = try parseLogicalNotExpression()
 
     while currentToken === .andKeyword {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       // If next token is `then`, don't consume — let parseAndThenExpression handle it
       if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseLogicalNotExpression()
       left = .andExpression(left: left, right: right)
     }
@@ -219,6 +238,10 @@ extension Parser {
   private func parseIsExpression() throws -> ExpressionNode {
     let left = try parseBitwiseOrExpression()
 
+    if shouldBreakBinaryAtCurrentToken() {
+      return left
+    }
+
     if currentToken === .isKeyword {
       let startSpan = currentSpan
       try match(.isKeyword)
@@ -226,10 +249,12 @@ extension Parser {
       // Check for `is not`
       if currentToken === .notKeyword {
         try match(.notKeyword)
+        try requireNoLineBreakBeforeRHS()
         let pattern = try parseSinglePattern()
         return .isNotExpression(subject: left, pattern: pattern, span: startSpan)
       }
 
+      try requireNoLineBreakBeforeRHS()
       let pattern = try parseSinglePattern()
       return .isExpression(subject: left, pattern: pattern, span: startSpan)
     }
@@ -242,7 +267,11 @@ extension Parser {
   private func parseBitwiseOrExpression() throws -> ExpressionNode {
     var left = try parseBitwiseXorExpression()
     while currentToken === .pipe {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       try match(.pipe)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseBitwiseXorExpression()
       left = .bitwiseExpression(left: left, operator: .or, right: right)
     }
@@ -252,7 +281,11 @@ extension Parser {
   private func parseBitwiseXorExpression() throws -> ExpressionNode {
     var left = try parseBitwiseAndExpression()
     while currentToken === .caret {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       try match(.caret)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseBitwiseAndExpression()
       left = .bitwiseExpression(left: left, operator: .xor, right: right)
     }
@@ -262,7 +295,11 @@ extension Parser {
   private func parseBitwiseAndExpression() throws -> ExpressionNode {
     var left = try parseRangeExpression()
     while currentToken === .ampersand {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       try match(.ampersand)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseRangeExpression()
       left = .bitwiseExpression(left: left, operator: .and, right: right)
     }
@@ -276,7 +313,7 @@ extension Parser {
     // Handle prefix range operators: ..b, ..<b, ..
     if currentToken === .range {
       try match(.range)
-      if !lexer.newlineBeforeCurrent && canStartRangeBound() {
+      if canContinueRangeBoundAfterNewline() && canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .to, left: nil, right: right)
       }
@@ -284,6 +321,7 @@ extension Parser {
     }
     if currentToken === .rangeLess {
       try match(.rangeLess)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .toOpen, left: nil, right: right)
     }
@@ -293,25 +331,39 @@ extension Parser {
     // Handle infix and postfix range operators
     switch currentToken {
     case .range:  // ..
+      if shouldBreakBinaryAtCurrentToken() {
+        return left
+      }
       try match(.range)
-      if !lexer.newlineBeforeCurrent && canStartRangeBound() {
+      if canContinueRangeBoundAfterNewline() && canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .closed, left: left, right: right)
       }
       return .rangeExpression(operator: .from, left: left, right: nil)
     case .rangeLess:  // ..<
+      if shouldBreakBinaryAtCurrentToken() {
+        return left
+      }
       try match(.rangeLess)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .closedOpen, left: left, right: right)
     case .lessRange:  // <..
+      if shouldBreakBinaryAtCurrentToken() {
+        return left
+      }
       try match(.lessRange)
-      if !lexer.newlineBeforeCurrent && canStartRangeBound() {
+      if canContinueRangeBoundAfterNewline() && canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .openClosed, left: left, right: right)
       }
       return .rangeExpression(operator: .fromOpen, left: left, right: nil)
     case .lessRangeLess:  // <..<
+      if shouldBreakBinaryAtCurrentToken() {
+        return left
+      }
       try match(.lessRangeLess)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .open, left: left, right: right)
     default:
@@ -372,6 +424,10 @@ extension Parser {
     let startSpan = currentSpan
     let left = try parseShiftExpression()
 
+    if shouldBreakBinaryAtCurrentToken() {
+      return left
+    }
+
     guard isComparisonToken(currentToken) else {
       return left
     }
@@ -379,6 +435,7 @@ extension Parser {
     if isEqualityComparisonToken(currentToken) {
       let op = currentToken
       try match(op)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseShiftExpression()
       if isComparisonToken(currentToken) {
         throw comparisonChainError(at: currentSpan)
@@ -393,6 +450,7 @@ extension Parser {
     let firstToken = currentToken
     let firstDirection = comparisonChainDirection(for: firstToken)
     try match(firstToken)
+    try requireNoLineBreakBeforeRHS()
     let firstRight = try parseShiftExpression()
 
     guard let direction = firstDirection else {
@@ -407,12 +465,16 @@ extension Parser {
     var operators: [ComparisonOperator] = [tokenToComparisonOperator(firstToken)]
 
     while isComparisonToken(currentToken) {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       guard isOrderingComparisonToken(currentToken), comparisonChainDirection(for: currentToken) == direction else {
         throw comparisonChainError(at: currentSpan)
       }
 
       let op = currentToken
       try match(op)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseShiftExpression()
       operands.append(right)
       operators.append(tokenToComparisonOperator(op))
@@ -432,8 +494,12 @@ extension Parser {
   private func parseShiftExpression() throws -> ExpressionNode {
     var left = try parseAdditiveExpression()
     while currentToken === .leftShift || currentToken === .rightShift {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       let op = currentToken
       try match(op)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseAdditiveExpression()
       let bitOp: BitwiseOperator = (op === .leftShift) ? .shiftLeft : .shiftRight
       left = .bitwiseExpression(left: left, operator: bitOp, right: right)
@@ -448,8 +514,12 @@ extension Parser {
     var left = try parseMultiplicativeExpression()
 
     while currentToken === .plus || currentToken === .minus {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
       let op = currentToken
       try match(op)
+      try requireNoLineBreakBeforeRHS()
       let right = try parseMultiplicativeExpression()
       left = .arithmeticExpression(
         left: left,
@@ -465,15 +535,12 @@ extension Parser {
     var left = try parsePrefixExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .remainder {
-      // If there is a newline before a multiplicative operator, do not treat it
-      // as a binary continuation.  This allows deref-assignment (`*r = 2`) on a
-      // new line to be parsed as a new statement rather than as multiplication
-      // of the previous expression.
-      if lexer.newlineBeforeCurrent {
+      if shouldBreakBinaryAtCurrentToken() {
         break
       }
       let op = currentToken
       try match(op)
+      try requireNoLineBreakBeforeRHS()
       let right = try parsePrefixExpression()
       left = .arithmeticExpression(
         left: left,
@@ -551,13 +618,8 @@ extension Parser {
   private func parsePostfixExpression() throws -> ExpressionNode {
     var expr = try term()
     while true {
-      // Check for automatic statement termination before parsing postfix operators
-      // If there's a newline before the current token and it's not a continuation token,
-      // we should stop parsing postfix expressions
-      if lexer.newlineBeforeCurrent && !currentToken.isContinuationToken {
-        // Special case: dot is a continuation token, so we continue
-        // But [ and ( and { are not continuation tokens, so we stop
-        if currentToken === .leftBracket || currentToken === .leftParen || currentToken === .leftBrace {
+      if lexer.newlineBeforeCurrent {
+        if !allowsPostfixAfterNewline(currentToken) {
           break
         }
       }
@@ -702,18 +764,21 @@ extension Parser {
           expr = genericExpr
         } else {
           try match(.leftBracket)
-          var args: [ExpressionNode] = []
-          if currentToken !== .rightBracket {
-            repeat {
-              args.append(try expression())
-              if currentToken === .comma {
-                try match(.comma)
-              } else {
-                break
-              }
-            } while true
+          let args = try withLineJoinGrouping {
+            var args: [ExpressionNode] = []
+            if currentToken !== .rightBracket {
+              repeat {
+                args.append(try expression())
+                if currentToken === .comma {
+                  try match(.comma)
+                } else {
+                  break
+                }
+              } while true
+            }
+            try match(.rightBracket)
+            return args
           }
-          try match(.rightBracket)
           expr = .subscriptExpression(base: expr, arguments: args)
         }
       } else {
@@ -758,23 +823,25 @@ extension Parser {
   
   private func parseCall(_ callee: ExpressionNode) throws -> ExpressionNode {
     try match(.leftParen)
-    var arguments: [CallArg] = []
+    return try withLineJoinGrouping {
+      var arguments: [CallArg] = []
 
-    if currentToken !== .rightParen {
-      repeat {
-        arguments.append(try parseCallArgument())
-        if currentToken === .comma {
-          try match(.comma)
-          // Allow trailing comma.
-          if currentToken === .rightParen { break }
-        } else {
-          break
-        }
-      } while true
+      if currentToken !== .rightParen {
+        repeat {
+          arguments.append(try parseCallArgument())
+          if currentToken === .comma {
+            try match(.comma)
+            // Allow trailing comma.
+            if currentToken === .rightParen { break }
+          } else {
+            break
+          }
+        } while true
+      }
+
+      try match(.rightParen)
+      return .call(callee: callee, arguments: arguments)
     }
-
-    try match(.rightParen)
-    return .call(callee: callee, arguments: arguments)
   }
   
   // MARK: - Primary Term
@@ -836,20 +903,48 @@ extension Parser {
     let startSpan = currentSpan
     try match(.leftBracket)
 
-    if currentToken === .rightBracket {
-      try match(.rightBracket)
-      return .emptyLiteral(span: startSpan)
-    }
+    return try withLineJoinGrouping {
+      if currentToken === .rightBracket {
+        try match(.rightBracket)
+        return .emptyLiteral(span: startSpan)
+      }
 
-    let first = try expression()
+      let first = try expression()
 
-    // Dict literal: [key: value, ...]
-    if currentToken === .colon {
-      var entries: [(key: ExpressionNode, value: ExpressionNode)] = []
-      try match(.colon)
-      let firstValue = try expression()
-      entries.append((key: first, value: firstValue))
+      // Dict literal: [key: value, ...]
+      if currentToken === .colon {
+        var entries: [(key: ExpressionNode, value: ExpressionNode)] = []
+        try match(.colon)
+        let firstValue = try expression()
+        entries.append((key: first, value: firstValue))
 
+        while currentToken === .comma {
+          try match(.comma)
+
+          // Allow trailing comma.
+          if currentToken === .rightBracket {
+            break
+          }
+
+          let keyExpr = try expression()
+          guard currentToken === .colon else {
+            throw ParserError.unexpectedToken(
+              span: currentSpan,
+              got: currentToken.description,
+              expected: "':' in dict literal entry"
+            )
+          }
+          try match(.colon)
+          let valueExpr = try expression()
+          entries.append((key: keyExpr, value: valueExpr))
+        }
+
+        try match(.rightBracket)
+        return .dictLiteral(entries: entries, span: startSpan)
+      }
+
+      // Collection literal: [e1, e2, ...]
+      var elements: [ExpressionNode] = [first]
       while currentToken === .comma {
         try match(.comma)
 
@@ -858,46 +953,20 @@ extension Parser {
           break
         }
 
-        let keyExpr = try expression()
-        guard currentToken === .colon else {
+        let element = try expression()
+        if currentToken === .colon {
           throw ParserError.unexpectedToken(
             span: currentSpan,
             got: currentToken.description,
-            expected: "':' in dict literal entry"
+            expected: "no ':' in collection literal element"
           )
         }
-        try match(.colon)
-        let valueExpr = try expression()
-        entries.append((key: keyExpr, value: valueExpr))
+        elements.append(element)
       }
 
       try match(.rightBracket)
-      return .dictLiteral(entries: entries, span: startSpan)
+      return .collectionLiteral(elements: elements, span: startSpan)
     }
-
-    // Collection literal: [e1, e2, ...]
-    var elements: [ExpressionNode] = [first]
-    while currentToken === .comma {
-      try match(.comma)
-
-      // Allow trailing comma.
-      if currentToken === .rightBracket {
-        break
-      }
-
-      let element = try expression()
-      if currentToken === .colon {
-        throw ParserError.unexpectedToken(
-          span: currentSpan,
-          got: currentToken.description,
-          expected: "no ':' in collection literal element"
-        )
-      }
-      elements.append(element)
-    }
-
-    try match(.rightBracket)
-    return .collectionLiteral(elements: elements, span: startSpan)
   }
 
   /// Parse implicit member expression: .memberName(args)
@@ -923,20 +992,23 @@ extension Parser {
     
     // Parse arguments
     try match(.leftParen)
-    var arguments: [CallArg] = []
-    if currentToken !== .rightParen {
-      repeat {
-        arguments.append(try parseCallArgument())
-        if currentToken === .comma {
-          try match(.comma)
-          // Allow trailing comma.
-          if currentToken === .rightParen { break }
-        } else {
-          break
-        }
-      } while true
+    let arguments = try withLineJoinGrouping {
+      var arguments: [CallArg] = []
+      if currentToken !== .rightParen {
+        repeat {
+          arguments.append(try parseCallArgument())
+          if currentToken === .comma {
+            try match(.comma)
+            // Allow trailing comma.
+            if currentToken === .rightParen { break }
+          } else {
+            break
+          }
+        } while true
+      }
+      try match(.rightParen)
+      return arguments
     }
-    try match(.rightParen)
     
     return .implicitMemberExpression(
       memberName: memberName,
@@ -1131,15 +1203,17 @@ extension Parser {
       // Restore state and parse as parenthesized expression
       lexer.restoreState(savedState)
       currentToken = savedToken
-      let first = try expression()
-      if currentToken === .comma {
-        try match(.comma)
-        let second = try expression()
+      return try withLineJoinGrouping {
+        let first = try expression()
+        if currentToken === .comma {
+          try match(.comma)
+          let second = try expression()
+          try match(.rightParen)
+          return .call(callee: .identifier("Pair"), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)])
+        }
         try match(.rightParen)
-        return .call(callee: .identifier("Pair"), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)])
+        return first
       }
-      try match(.rightParen)
-      return first
     }
     
     // Should not reach here
@@ -1229,7 +1303,7 @@ extension Parser {
         continue
       }
 
-      // Check for automatic statement termination (newline before non-continuation token)
+      // Check for automatic statement termination (newline before non line-join token)
       if shouldTerminateStatement() {
         continue
       }

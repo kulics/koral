@@ -11,6 +11,7 @@ private type ParseDeclFlags(
 public type Parser(
     tokens List[Token],
     mut index UInt,
+    mut line_join_grouping_depth UInt,
 )
 
 given Parser {
@@ -214,7 +215,7 @@ given Parser {
     }
 
     public new(tokens List[Token]) Parser = {
-        return Parser(tokens, 0)
+        return Parser(tokens, 0, 0(UInt))
     }
 
     protected current(self) Token = {
@@ -331,42 +332,44 @@ given Parser {
         }
     }
 
-    // 判断当前 token 是否是续行 token（出现在行首时不触发自动分号）
-    protected is_continuation_token(self) Bool = {
+    protected enter_line_join_grouping(*mut self) Void = {
+        self.line_join_grouping_depth += 1(UInt)
+    }
+
+    protected leave_line_join_grouping(*mut self) Void = {
+        if self.line_join_grouping_depth > 0(UInt) then {
+            self.line_join_grouping_depth -= 1(UInt)
+        }
+    }
+
+    protected is_inside_line_join_grouping(self) Bool = self.line_join_grouping_depth > 0(UInt)
+
+    // 判断当前 token 是否属于少数允许换行接续的 join token。
+    protected is_line_join_token(self) Bool = {
         return when self.current().kind in {
-            // 算术中缀运算符
-            .Plus() then true,
-            .Minus() then true,
-            .Star() then true,
-            .Slash() then true,
-            .Percent() then true,
-            // 逻辑运算符
             .KwAnd() then true,
             .KwOr() then true,
-            // 位运算符（不含 ~ 前缀运算符）
-            .Ampersand() then true,
-            .Pipe() then true,
-            .Caret() then true,
-            .LeftShift() then true,
-            .RightShift() then true,
-            // 比较运算符
-            .EqualEqual() then true,
-            .NotEqual() then true,
-            .Greater() then true,
-            .Less() then true,
-            .GreaterEqual() then true,
-            .LessEqual() then true,
-            // 成员访问和链式调用
+            .KwThen() then true,
+            .KwElse() then true,
             .Dot() then true,
-            // lambda 箭头
             .Arrow() then true,
-            // 范围运算符
-            .Range() then true,
-            .RangeLess() then true,
-            .LessRange() then true,
-            .LessRangeLess() then true,
             _ then false,
         }
+    }
+
+    protected should_break_binary_at_current_token(self) Bool = {
+        return self.current().has_newline_before and not (self.is_line_join_token() or self.is_inside_line_join_grouping())
+    }
+
+    protected can_continue_range_bound_after_newline(self) Bool = {
+        return not self.current().has_newline_before or self.is_inside_line_join_grouping()
+    }
+
+    protected require_no_line_break_before_rhs(*mut self) Result[Void] = {
+        if self.current().has_newline_before and not self.is_inside_line_join_grouping() then {
+            return Result[Void].Error(box("Unexpected token: \(token_text(self.current()))"))
+        }
+        return Result[Void].Ok({})
     }
 
     // 判断是否应该终止当前语句（自动分号插入规则）
@@ -382,9 +385,9 @@ given Parser {
         if self.current().kind is .RBrace() then {
             return true
         }
-        // 换行规则：有换行且当前 token 不是续行 token
+        // 换行规则：有换行且当前 token 不是允许接续的 join token
         if self.current().has_newline_before then {
-            if not self.is_continuation_token() then {
+            if not self.is_line_join_token() then {
                 return true
             }
         }

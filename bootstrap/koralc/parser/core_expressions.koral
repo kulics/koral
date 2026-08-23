@@ -353,7 +353,7 @@ given Parser {
             // Prefix/full range expressions used as standalone values (e.g. as arguments)
             .Range() then {
                 self.advance()
-                if self.is_expr_start_token(self.current().kind) and not self.current().has_newline_before then {
+                if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
                     let rhs = self.parse_unary() or return
                     return .Ok(box(Expr.RangeExpr(RangeOperator.To(), Option[* Expr].None(), Option[* Expr].Some(rhs), self.span_from_start(t))))
                 }
@@ -361,6 +361,9 @@ given Parser {
             },
             .RangeLess() then {
                 self.advance()
+                if not self.can_continue_range_bound_after_newline() then {
+                    return .Error(box("Unexpected token: \(token_text(self.current()))"))
+                }
                 let rhs = self.parse_unary() or return
                 return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), Option[* Expr].None(), Option[* Expr].Some(rhs), self.span_from_start(t))))
             },
@@ -442,16 +445,25 @@ given Parser {
         }
 
         self.advance()
-        let first = self.parse_expression_checked("parenthesized expression") or return
+        self.enter_line_join_grouping()
+        let first = self.parse_expression_checked("parenthesized expression") or else {
+            self.leave_line_join_grouping()
+            return .Error(it)
+        }
         when self.current().kind in {
             .Comma() then {
                 self.advance()
-                let second = self.parse_expression_checked("pair literal second element") or return
+                let second = self.parse_expression_checked("pair literal second element") or else {
+                    self.leave_line_join_grouping()
+                    return .Error(it)
+                }
                 let has_rparen = when self.current().kind in { .RParen() then true, _ then false }
                 if not has_rparen then {
+                    self.leave_line_join_grouping()
                     return .Error(box("Expected ')'"))
                 }
                 self.advance()
+                self.leave_line_join_grouping()
                 let mut args = List[* Expr].new()
                 args.push(first)
                 args.push(second)
@@ -460,9 +472,11 @@ given Parser {
             },
             .RParen() then {
                 self.advance()
+                self.leave_line_join_grouping()
                 return .Ok(first)
             },
             _ then {
+                self.leave_line_join_grouping()
                 return .Error(box("Expected ')'"))
             },
         }
@@ -476,7 +490,6 @@ given Parser {
         }
 
         self.parse_debug("block begin")
-
         let statements = self.parse_statement_list_until_rbrace("block") or return
 
         let span = self.span_from_start(start)
@@ -530,13 +543,18 @@ given Parser {
     }
 
     protected parse_argument_list_until_rparen(*mut self, context String) Result[List[* Expr]] = {
+        self.enter_line_join_grouping()
         let mut args = List[* Expr].new()
         if self.current().kind is .RParen() then {
+            self.leave_line_join_grouping()
             return .Ok(args)
         }
 
         while true then {
-            let parsed = self.parse_call_argument(context) or return
+            let parsed = self.parse_call_argument(context) or else {
+                self.leave_line_join_grouping()
+                return .Error(it)
+            }
             args.push(parsed)
             if self.current().kind is .Comma() then {
                 self.advance()
@@ -548,6 +566,7 @@ given Parser {
             }
         }
 
+        self.leave_line_join_grouping()
         return .Ok(args)
     }
 
@@ -958,17 +977,25 @@ given Parser {
     protected parse_collection_or_dict_literal(*mut self) Result[* Expr] = {
         let start = self.current()
         self.advance()
+        self.enter_line_join_grouping()
 
         if self.current().kind is .RBracket() then {
             self.advance()
+            self.leave_line_join_grouping()
             return .Ok(box(Expr.EmptyLiteral(self.span_from_start(start))))
         }
 
-        let first = self.parse_expression() or return
+        let first = self.parse_expression() or else {
+            self.leave_line_join_grouping()
+            return .Error(it)
+        }
 
         if self.current().kind is .Colon() then {
             self.advance()
-            let first_value = self.parse_expression() or return
+            let first_value = self.parse_expression() or else {
+                self.leave_line_join_grouping()
+                return .Error(it)
+            }
             let mut entries = List[ExprPair].new()
             entries.push(ExprPair(first, first_value))
 
@@ -977,19 +1004,32 @@ given Parser {
                 if self.current().kind is .RBracket() then {
                     break
                 }
-                let key = self.parse_expression() or return
+                let key = self.parse_expression() or else {
+                    self.leave_line_join_grouping()
+                    return .Error(it)
+                }
                 when self.current().kind in {
                     .Colon() then { self.advance() },
-                    _ then { return .Error(box("Expected ':' in dict literal entry")) },
+                    _ then {
+                        self.leave_line_join_grouping()
+                        return .Error(box("Expected ':' in dict literal entry"))
+                    },
                 }
-                let value = self.parse_expression() or return
+                let value = self.parse_expression() or else {
+                    self.leave_line_join_grouping()
+                    return .Error(it)
+                }
                 entries.push(ExprPair(key, value))
             }
 
             when self.current().kind in {
                 .RBracket() then { self.advance() },
-                _ then { return .Error(box("Expected ']' after dict literal")) },
+                _ then {
+                    self.leave_line_join_grouping()
+                    return .Error(box("Expected ']' after dict literal"))
+                },
             }
+            self.leave_line_join_grouping()
             return .Ok(box(Expr.DictLiteral(entries, self.span_from_start(start))))
         }
 
@@ -1001,14 +1041,21 @@ given Parser {
             if self.current().kind is .RBracket() then {
                 break
             }
-            let next = self.parse_expression() or return
+            let next = self.parse_expression() or else {
+                self.leave_line_join_grouping()
+                return .Error(it)
+            }
             elements.push(next)
         }
 
         when self.current().kind in {
             .RBracket() then { self.advance() },
-            _ then { return .Error(box("Expected ']' after collection literal")) },
+            _ then {
+                self.leave_line_join_grouping()
+                return .Error(box("Expected ']' after collection literal"))
+            },
         }
+        self.leave_line_join_grouping()
         return .Ok(box(Expr.CollectionLiteral(elements, self.span_from_start(start))))
     }
 
@@ -1156,17 +1203,27 @@ given Parser {
 
     protected parse_subscript_suffix(*mut self, base * Expr) Result[* Expr] = {
         self.advance()
+        self.enter_line_join_grouping()
         if self.current().kind is .RBracket() then {
+            self.leave_line_join_grouping()
             return .Error(box("Subscript expression requires one index argument"))
         }
-        let index = self.parse_expression_checked("subscript index") or return
+        let index = self.parse_expression_checked("subscript index") or else {
+            self.leave_line_join_grouping()
+            return .Error(it)
+        }
         if self.current().kind is .Comma() then {
+            self.leave_line_join_grouping()
             return .Error(box("Subscript expression supports exactly one index"))
         }
         when self.current().kind in {
             .RBracket() then { self.advance() },
-            _ then { return .Error(box("Expected ']' after subscript argument")) },
+            _ then {
+                self.leave_line_join_grouping()
+                return .Error(box("Expected ']' after subscript argument"))
+            },
         }
+        self.leave_line_join_grouping()
         let mut args = List[* Expr].new()
         args.push(index)
         return .Ok(box(Expr.SubscriptExpr(base, args, self.span_from_expr_start(base))))
@@ -1283,17 +1340,16 @@ given Parser {
         let mut expr = base
 
         while true then {
-            let has_nl = self.current().has_newline_before
             when self.current().kind in {
                 .LParen() then {
-                    if has_nl then { break }
+                    if not self.should_continue_postfix_after_expression() then { break }
                     expr = when self.try_parse_postfix_cast_suffix(expr) in {
                         .Some(cast_expr) then cast_expr,
                         .None() then self.parse_call_suffix(expr) or return,
                     }
                 },
                 .LBracket() then {
-                    if has_nl then { break }
+                    if not self.should_continue_postfix_after_expression() then { break }
                     when expr in {
                         .Identifier(name, _) then {
                             if self.is_upper_first(name) then {

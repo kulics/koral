@@ -928,8 +928,12 @@ given Lexer {
         }
     }
 
-    private skip_block_comment(*mut self) Result[Void] = {
+    private skip_block_comment(*mut self) Result[Bool] = {
+        let mut saw_newline = false
         while self.peek() is .Some(ch) then {
+            if ch.is_newline() then {
+                saw_newline = true
+            }
             if ch == '*' then {
                 let next = self.peek_next() or else {
                     self.advance()
@@ -938,7 +942,7 @@ given Lexer {
                 if next == '/' then {
                     self.advance()
                     self.advance()
-                    return .Ok({})
+                    return .Ok(saw_newline)
                 }
             }
             self.advance()
@@ -1064,7 +1068,10 @@ given Lexer {
                 if next == '*' then {
                     self.advance()
                     when self.skip_block_comment() in {
-                        .Ok(_) then {
+                        .Ok(comment_had_newline) then {
+                            if comment_had_newline then {
+                                self.has_newline_before = true
+                            }
                             continue
                         },
                         .Error(e) then {
