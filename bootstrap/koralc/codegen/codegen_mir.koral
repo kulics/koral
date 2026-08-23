@@ -445,17 +445,14 @@ given MIRFunctionCodeEmitter {
     }
 
     protected emit_local_declarations(*mut self) Void = {
-        for local_id in self.lifetime_plan.hoisted_declaration_locals then {
-            when self.local_info(local_id) in {
-                .Some(local) then {
-                    let name = self.local_name(local.id)
-                    self.codegen.add_indent()
-                    self.codegen.buffer.push_string(self.codegen.c_type_name(local.local_type))
-                    self.codegen.buffer.push_string(" ")
-                    self.codegen.buffer.push_string(name)
-                    self.codegen.buffer.push_string(";\n")
-                },
-                .None() then {},
+        for local in self.function.locals then {
+            if local.storage is not .Parameter() and local.storage is not .Capture() and not self.codegen.type_is_void_or_never(local.local_type) then {
+                let name = self.local_name(local.id)
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string(self.codegen.c_type_name(local.local_type))
+                self.codegen.buffer.push_string(" ")
+                self.codegen.buffer.push_string(name)
+                self.codegen.buffer.push_string(";\n")
             }
         }
         for local in self.function.locals then {
@@ -517,22 +514,7 @@ given MIRFunctionCodeEmitter {
 
     protected emit_statement(*mut self, statement * MIRStatement) Void = {
         when statement in {
-            .Declare(local_id) then {
-        when self.lifetime_plan.block_local_declaration_locals.get(local_id.raw_value) in {
-                    .Some(_) then when self.local_info(local_id) in {
-                        .Some(local) then {
-                            let name = self.local_name(local_id)
-                            self.codegen.add_indent()
-                            self.codegen.buffer.push_string(self.codegen.c_type_name(local.local_type))
-                            self.codegen.buffer.push_string(" ")
-                            self.codegen.buffer.push_string(name)
-                            self.codegen.buffer.push_string(";\n")
-                        },
-                        .None() then {},
-                    },
-                    .None() then {},
-                }
-            },
+            .Declare(_) then {},
             .Assign(place, value) then self.emit_assign(place, value),
             .CompoundAssign(assignment) then self.emit_compound_assign(assignment),
             .Drop(place) then self.emit_drop(place),
@@ -2591,7 +2573,11 @@ given MIRFunctionCodeEmitter {
     protected switch_case_expression(*mut self, constant MIRConstant) String = self.constant_expression(constant)
 
     protected enum_case_info(*self, enum_type Type, case_name String) Pair[UInt, List[EnumCaseParam]] = {
-        let def_id = when enum_type in { .EnumType(id) then id, _ then DefId(0(UInt)) }
+        let def_id = when enum_type in {
+            .EnumType(id) then id,
+            .GenericEnum(template, _) then self.codegen.find_type_def_id_by_layout_or_template(enum_type, template) or else DefId(0(UInt)),
+            _ then DefId(0(UInt)),
+        }
         when self.codegen.context.get_enum_cases(def_id) in {
             .Some(cases) then {
                 let mut index UInt = 0

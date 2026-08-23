@@ -3432,6 +3432,30 @@ private let resolve_concrete_method_call(
         }
     }
 
+    if preferred_value_method.def_id.id > 0
+        and not declared_static_receiver_method_is_materialized(mono, preferred_value_method.def_id)
+    then {
+        when enqueue_extension_method_for_static_call(
+            mono,
+            effective_receiver_type,
+            effective_method_name,
+            template_name_for_lookup,
+            resolved_method_type_args,
+            new_args,
+            resolved_call_type,
+        ) in {
+            .Some(instantiated_method) then {
+                if instantiated_method.def_id.id > 0
+                    and declared_static_receiver_method_is_materialized(mono, instantiated_method.def_id)
+                    and method_symbol_matches_expected_return(mono, instantiated_method, resolved_call_type)
+                then {
+                    return instantiated_method
+                }
+            },
+            .None() then {},
+        }
+    }
+
     return preferred_value_method
 }
 
@@ -8059,6 +8083,7 @@ private let resolve_static_method_call_to_call(
     // currently-instantiating specialization itself.
     let rebound_static_sym = if rebound_static_method.def_id.id > 0
             and not has_generic_parameter(resolve_parameterized_type(mono, rebound_static_method.symbol_type))
+            and declared_static_receiver_method_is_materialized(mono, rebound_static_method.def_id)
             and (
                 rebound_static_method.def_id.id <> new_method.def_id.id
                 or method_def_id_matches_receiver_exactly(mono, rebound_static_method.def_id, new_receiver_type)
@@ -8486,6 +8511,69 @@ private let instantiate_trait_target_static_method(
     let method_type_arg_count = if provided_method_type_args.is_empty()
         then Option[UInt].None()
         else Option[UInt].Some(provided_method_type_args.count())
+
+    let conformance_key = resolve_static_call_template_name(mono, resolved_base_type)
+    when mono.storage.conformance_index.get(conformance_key) in {
+        .Some(conformances) then {
+            for conformance in conformances then {
+                when dispatch_trait_name_opt in {
+                    .Some(dispatch_trait_name) then {
+                        if not trait_target_static_trait_name_matches(conformance.trait_name, dispatch_trait_name) then {
+                            continue
+                        }
+                    },
+                    .None() then {},
+                }
+
+                let normalized_base_type = normalize_vtable_conformance_actual_type(mono, resolved_base_type)
+                let mut bindings = Dict[String, Type].new()
+                if not collect_vtable_conformance_bindings(conformance.target_type, normalized_base_type, &mut bindings) then {
+                    continue
+                }
+
+                let trait_templates = mono.storage.generic_templates.lookup_extension_methods(conformance.trait_name) or else {
+                    continue
+                }
+                let matched_template = select_extension_template(
+                    trait_templates,
+                    method_name,
+                    method_type_arg_count,
+                    Option[UInt].Some(conformance.trait_arg_types.count()),
+                ) or else {
+                    continue
+                }
+
+                let mut concrete_trait_args = List[* Type].new()
+                for trait_arg in conformance.trait_arg_types then {
+                    concrete_trait_args.push(box(resolve_parameterized_type(mono, substitute_type(mono, trait_arg, bindings))))
+                }
+
+                when infer_extension_method_type_args(
+                    mono,
+                    matched_template,
+                    resolved_base_type,
+                    concrete_trait_args,
+                    provided_method_type_arg_refs,
+                    args,
+                    expected_return_type,
+                ) in {
+                    .Some(resolved_method_type_args) then {
+                        let sym = mono.instantiate_extension_method_impl(
+                            resolved_base_type,
+                            conformance.trait_name,
+                            matched_template,
+                            concrete_trait_args,
+                            resolved_method_type_args,
+                        )
+                        mono.storage.trait_target_static_lookup_cache.insert(cache_key, sym)
+                        return Option[Symbol].Some(sym)
+                    },
+                    .None() then {},
+                }
+            }
+        },
+        .None() then {},
+    }
 
     for node_ref in trait_target_static_candidate_given_decls(mono, dispatch_trait_name_opt) then {
         when node_ref in {
@@ -9165,6 +9253,7 @@ private let index_declared_static_receiver_members(
         if not member_is_concrete then {
             continue
         }
+        mono.storage.materialized_function_def_ids.insert(member_ref.def_id.id)
         for target_alias in target_aliases then {
             let index_key = "\(target_alias).\(member_ref.name)"
             let mut candidates = mono.storage.declared_static_receiver_lookup_index.get(index_key) or else List[DefId].new()

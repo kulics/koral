@@ -412,7 +412,10 @@ given MIRFunctionBuilder {
             },
             .Call(callee, args) then self.lower_call(callee, &args, expression.expr_type),
             .GenericCall(function_symbol, _, args) then self.finish_call_from_typed_args(MIROperand.Function(function_symbol), &args, expression.expr_type),
-            .StaticMethodCall(receiver_type, method_name, _, _, _, _) then Option[MIRExprResult].None(),
+            .StaticMethodCall(receiver_type, method_name, method, _, _, args) then {
+                let resolved_method = self.resolve_static_method_symbol(receiver_type, method_name, method, &args, expression.expr_type)
+                break self.finish_call_from_typed_args(MIROperand.Function(box(resolved_method)), &args, expression.expr_type)
+            },
             .TypeConstruction(identifier, _, args) then self.lower_type_construction(identifier, &args, expression.expr_type),
             .EnumConstruction(enum_type, case_name, args) then self.lower_enum_construction(enum_type, case_name, &args, expression.expr_type),
             .MethodReference(base_expr, _, method, _, _, _) then {
@@ -1722,12 +1725,23 @@ given MIRFunctionBuilder {
                         // Fallback for GenericEnum types: extract element types from
                         // the TypedPattern elements, which carry correct type info
                         // from the type checker.
+                        let generic_params = when matched_type in {
+                            .GenericEnum(template_name, _) then self.context.enum_case_params_by_template_name(template_name, case_name),
+                            _ then List[EnumCaseParam].new(),
+                        }
                         let mut idx UInt = 0
                         while idx < elements.count() then {
                             let elem = elements[idx]
                             let elem_type = self.pattern_element_type(elem.pattern)
                             if elem_type is not .VoidType() then {
-                                let payload_place = MIRPlace.EnumPayload(box(matched_place), case_name, "", idx, elem_type)
+                                let field_name = if idx < generic_params.count() then {
+                                    break generic_params[idx].name
+                                } else if generic_params.count() == 1(UInt) then {
+                                    break "value"
+                                } else {
+                                    break ""
+                                }
+                                let payload_place = MIRPlace.EnumPayload(box(matched_place), case_name, field_name, idx, elem_type)
                                 let resolved_place = if self.goes_through_deref(matched_place) then {
                                     let local = self.make_temporary(elem_type, "payload")
                                     self.append_statement(MIRStatement.Declare(local.id))
@@ -2288,21 +2302,70 @@ given MIRFunctionBuilder {
         args * List[* TypedExpr],
         result_type Type,
     ) Symbol = {
-        let _ = receiver_type
-        let _ = method_name
-        return when self.context.get_function_type(method.def_id) in {
-            .Some(function_type) then Symbol(method.def_id, function_type, method.kind),
-            .None() then {
-                let mut param_types = List[* Type].new()
-                for arg in args then {
-                    param_types.push(box(arg.expr_type))
-                }
-                let concrete_type = Type.FunctionType(types_to_param_entries(param_types), box(result_type))
-                break if self.context.contains_generic_parameter(concrete_type)
-                    then Symbol(method.def_id, method.symbol_type, method.kind)
-                    else Symbol(method.def_id, concrete_type, method.kind)
-            },
+        let effective_receiver_type = self.normalized_method_lookup_receiver_type(receiver_type)
+        let mut param_types = List[* Type].new()
+        for arg in args then {
+            param_types.push(box(arg.expr_type))
         }
+        let concrete_type = Type.FunctionType(types_to_param_entries(param_types), box(result_type))
+
+        if self.context.contains_generic_parameter(concrete_type) then {
+            return when self.context.get_function_type(method.def_id) in {
+                .Some(function_type) then Symbol(method.def_id, function_type, method.kind),
+                .None() then Symbol(method.def_id, method.symbol_type, method.kind),
+            }
+        }
+
+        let direct_lookup_key = "\(self.concrete_receiver_lookup_key(effective_receiver_type)).\(method_name)"
+        when self.program.static_method_by_key.get(direct_lookup_key) in {
+            .Some(def_id) then {
+                when self.context.get_function_type(def_id) in {
+                    .Some(function_type) then {
+                        if self.static_method_signature_matches_call(function_type, concrete_type) then {
+                            return Symbol(def_id, function_type, SymbolKind.Function())
+                        }
+                    },
+                    .None() then {},
+                }
+            },
+            .None() then {},
+        }
+
+        when self.context.get_function_type(method.def_id) in {
+            .Some(function_type) then {
+                if not self.context.contains_generic_parameter(function_type)
+                    and self.static_method_signature_matches_call(function_type, concrete_type)
+                then {
+                    return Symbol(method.def_id, function_type, method.kind)
+                }
+            },
+            .None() then {},
+        }
+
+        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+            let def_id = entry.first
+            let info = entry.second
+            if info.logical_name <> method_name then {
+                continue
+            }
+            when info.owner_type in {
+                .Some(owner_type) then {
+                    when self.context.get_function_type(def_id) in {
+                        .Some(function_type) then {
+                            if self.static_method_signature_matches_call(function_type, concrete_type)
+                                and self.method_owner_matches_receiver(owner_type, effective_receiver_type)
+                            then {
+                                return Symbol(def_id, function_type, SymbolKind.Function())
+                            }
+                        },
+                        .None() then {},
+                    }
+                },
+                .None() then {},
+            }
+        }
+
+        return Symbol(method.def_id, concrete_type, method.kind)
     }
 
     private concrete_method_symbol(*self, method * Symbol, receiver_type Type, callee_type Type, args * List[* TypedExpr], result_type Type) Option[Symbol] = {
@@ -2475,6 +2538,33 @@ given MIRFunctionBuilder {
                         return false
                     }
                     let mut idx UInt = 1
+                    while idx < actual_params.count() then {
+                        let actual_param_type = (*actual_params[idx]).param_type
+                        let expected_param_type = (*expected_params[idx]).param_type
+                        if not self.call_param_types_match(actual_param_type, expected_param_type) then {
+                            return false
+                        }
+                        idx += 1
+                    }
+                    break true
+                },
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private static_method_signature_matches_call(*self, function_type Type, expected_type Type) Bool = {
+        return when function_type in {
+            .FunctionType(actual_params, actual_return) then when expected_type in {
+                .FunctionType(expected_params, expected_return) then {
+                    if actual_params.count() <> expected_params.count() then {
+                        return false
+                    }
+                    if self.concrete_layout_key_for_type(*actual_return) <> self.concrete_layout_key_for_type(*expected_return) then {
+                        return false
+                    }
+                    let mut idx UInt = 0
                     while idx < actual_params.count() then {
                         let actual_param_type = (*actual_params[idx]).param_type
                         let expected_param_type = (*expected_params[idx]).param_type
@@ -3323,6 +3413,7 @@ given MIRFunctionBuilder {
                         else {
                             let local = self.make_local(name, symbol.symbol_type, if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(), MIRStorage.Local(), Option[* Symbol].Some(symbol))
                             self.local_by_def_id.insert(symbol.def_id.id, local.id)
+                            self.append_statement(MIRStatement.Declare(local.id))
                             break Option[MIRPlace].Some(self.variable_place_for_expr(MIRPlace.Local(local.id), local.local_type, expression.expr_type))
                         },
                     _ then Option[MIRPlace].Some(self.variable_place_for_expr(MIRPlace.Global(symbol.def_id), symbol.symbol_type, expression.expr_type)),

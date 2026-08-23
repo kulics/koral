@@ -1365,20 +1365,23 @@ public let instantiate_extension_method_from_entry(
     method_type_args List[* Type],
     template * GenericExtensionMethodTemplate,
 ) Symbol = {
-    let resolved_template = if template.checked_body is .Some(_) then template else when template.conformance_trait_name in {
-            .Some(trait_name) then when mono.storage.generic_templates.lookup_extension_methods(trait_name) in {
-                .Some(tool_templates) then when select_extension_template(
-                    tool_templates,
-                    template.method.name,
-                    Option[UInt].Some(template.method.type_params.count()),
-                    Option[UInt].None(),
-                ) in {
-                    .Some(tool_template_ref) then patched_extension_template_with_body(template, tool_template_ref),
-                    .None() then template,
-                },
+    let resolved_template = if template.checked_body is .Some(_) then template else {
+        let lookup_name = when template.conformance_trait_name in {
+            .Some(trait_name) then trait_name,
+            .None() then effective_template_name,
+        }
+        break when mono.storage.generic_templates.lookup_extension_methods(lookup_name) in {
+            .Some(tool_templates) then when select_extension_template(
+                tool_templates,
+                template.method.name,
+                Option[UInt].Some(template.method.type_params.count()),
+                Option[UInt].Some(template.type_params.count()),
+            ) in {
+                .Some(tool_template_ref) then patched_extension_template_with_body(template, tool_template_ref),
                 .None() then template,
             },
             .None() then template,
+        }
     }
 
     let should_block_invalid_pair_constraint_instantiation = effective_template_name == "Pair"

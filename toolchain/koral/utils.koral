@@ -139,6 +139,50 @@ public let find_executable(name String, preferred_dirs List[String]) Option[Stri
     return .None()
 }
 
+public let find_std_config() Option[String] = {
+    when env("KORAL_HOME") in {
+        .Some(home) then {
+            let candidate = home + "/std/koral.json"
+            if path_exist(candidate.into_path()) then {
+                return .Some(candidate)
+            }
+        },
+        .None then {},
+    }
+
+    let mut cursor = current_dir() or else { return .None() }
+    let mut steps UInt = 0
+
+    while steps < 12 then {
+        let candidate = cursor.join("std").join("koral.json")
+        if path_exist(candidate) then {
+            return .Some(candidate.to_string())
+        }
+
+        let parent = cursor.dir_name()
+        if parent.to_string() == cursor.to_string() then {
+            break
+        }
+
+        cursor = parent
+        steps += 1
+    }
+
+    return .None()
+}
+
+public let compiler_std_args() List[String] = {
+    let mut args = List[String].new()
+    when find_std_config() in {
+        .Some(path) then {
+            args.push("--std-config")
+            args.push(path)
+        },
+        .None then {},
+    }
+    return args
+}
+
 // ============================================================================
 // Cargo-style output formatting
 // ============================================================================

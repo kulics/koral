@@ -616,6 +616,21 @@ given CstParser {
         let mut first UInt = 1
         while not self.check(.RParen()) and not self.is_eof() then {
             // Method-first-param support: self / *self / *self mut
+            if first == 1 and self.check(.Star()) then {
+                let ref_kw = self.eat()
+                let mut mut_kw = Option[Token].None()
+                if self.check(.KwMut()) then {
+                    mut_kw = .Some(self.eat())
+                }
+                let kw = when self.expect(.KwSelf(), "'self'") in {
+                    .Ok(t) then t,
+                    .Error(e) then { return .Error(e) },
+                }
+                let comma = self.eat_comma()
+                params.push(.SelfParam(kw, mut_kw, .Some(ref_kw), comma))
+                first = 0
+                continue
+            }
             if first == 1 and self.check(.KwSelf()) then {
                 let kw = self.eat()
                 let mut mut_kw = Option[Token].None()
@@ -2427,8 +2442,24 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         let mut params = List[CstTraitMethodParam].new()
+        let mut first UInt = 1
         while not self.check(.RParen()) and not self.is_eof() then {
             // self / *self / *self mut
+            if first == 1 and self.check(.Star()) then {
+                let ref_kw = self.eat()
+                let mut mut_kw = Option[Token].None()
+                if self.check(.KwMut()) then {
+                    mut_kw = .Some(self.eat())
+                }
+                let kw = when self.expect(.KwSelf(), "'self'") in {
+                    .Ok(t) then t,
+                    .Error(e) then { return .Error(e) },
+                }
+                let comma = self.eat_comma()
+                params.push(.SelfParam(kw, mut_kw, .Some(ref_kw), comma))
+                first = 0
+                continue
+            }
             if self.peek() is .KwSelf() then {
                 let kw = self.eat()
                 let mut mut_kw = Option[Token].None()
@@ -2441,6 +2472,7 @@ given CstParser {
                 }
                 let comma = self.eat_comma()
                 params.push(.SelfParam(kw, mut_kw, ref_kw, comma))
+                first = 0
                 continue
             }
             // name Type
@@ -2454,6 +2486,7 @@ given CstParser {
             }
             let comma = self.eat_comma()
             params.push(.NamedParam(pname, box(pt), comma))
+            first = 0
         }
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,

@@ -538,14 +538,15 @@ given Printer {
                         self.write_space()
                         self.print_expr(eb_expr)
                     } else {
-                        let total_len =
-                            (self.indent * 4) +
-                            kw.to_string().count() + 1 +
-                            self.estimate_expr_length(cond) + 1 +
-                            then_kw.to_string().count() + 1 +
-                            self.estimate_expr_length(then_body) + 1 +
-                            ek.to_string().count() + 1 +
-                            self.estimate_expr_length(eb_expr)
+                        let total_len = (
+                            (self.indent * 4)
+                            + kw.to_string().count() + 1
+                            + self.estimate_expr_length(cond) + 1
+                            + then_kw.to_string().count() + 1
+                            + self.estimate_expr_length(then_body) + 1
+                            + ek.to_string().count() + 1
+                            + self.estimate_expr_length(eb_expr)
+                        )
                         if total_len <= 90 then {
                             self.write_space()
                             self.write_token(ek)
@@ -720,13 +721,7 @@ given Printer {
             for i in 0..<params.count() then {
                 when params[i] in {
                     .SelfParam(kw, mut_kw, ref_kw, comma) then {
-                        self.write_token(kw)
-                        if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
-                        if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
-                        if comma is .Some(c) then { 
-                            self.write_token(c)
-                            self.write_space() 
-                        }
+                        self.print_self_param(kw, mut_kw, ref_kw, comma)
                     },
                     .NamedParam(pname, pt, comma) then {
                         self.write_token(pname)
@@ -882,9 +877,7 @@ given Printer {
     private print_param_multiline(*mut self, param CstParam) Void = {
         when param in {
             .SelfParam(kw, mut_kw, ref_kw, _) then {
-                self.write_token(kw)
-                if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
-                if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
+                self.print_self_param(kw, mut_kw, ref_kw, .None())
                 self.write(",")
             },
             .NamedParam(name, mut_kw, param_type, _) then {
@@ -897,13 +890,33 @@ given Printer {
         }
     }
 
+    private print_self_param(*mut self, kw Token, mut_kw Option[Token], ref_kw Option[Token], comma Option[Token]) Void = {
+        when ref_kw in {
+            .Some(rk) then when rk in {
+                .Star() then {
+                    self.write_token(rk)
+                    if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
+                    self.write_token(kw)
+                },
+                _ then {
+                    self.write_token(kw)
+                    self.write_space()
+                    self.write_token(rk)
+                    if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
+                },
+            },
+            .None() then {
+                self.write_token(kw)
+                if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
+            },
+        }
+        if comma is .Some(c) then { self.write_token(c); self.write_space() }
+    }
+
     private print_param(*mut self, param CstParam) Void = {
         when param in {
             .SelfParam(kw, mut_kw, ref_kw, comma) then {
-                self.write_token(kw)
-                if ref_kw is .Some(rk) then { self.write_space(); self.write_token(rk) }
-                if mut_kw is .Some(mk) then { self.write_space(); self.write_token(mk) }
-                if comma is .Some(c) then { self.write_token(c); self.write_space() }
+                self.print_self_param(kw, mut_kw, ref_kw, comma)
             },
             .NamedParam(name, mut_kw, param_type, comma) then {
                 if mut_kw is .Some(mk) then { self.write_token(mk); self.write_space() }
