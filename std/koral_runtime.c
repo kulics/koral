@@ -2320,12 +2320,99 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
 
 // --- Wait operations ---
 
+#if defined(_WIN32) || defined(_WIN64)
+
+#define KORAL_PROCESS_HANDLE_CAPACITY 8192
+
+typedef struct {
+    DWORD pid;
+    HANDLE handle;
+} KoralProcessHandleEntry;
+
+static SRWLOCK g_koral_process_handle_lock = SRWLOCK_INIT;
+static KoralProcessHandleEntry g_koral_process_handles[KORAL_PROCESS_HANDLE_CAPACITY];
+
+static int koral_process_handle_register(DWORD pid, HANDLE handle) {
+    if (pid == 0 || handle == NULL) return 0;
+
+    AcquireSRWLockExclusive(&g_koral_process_handle_lock);
+    int empty_slot = -1;
+    for (int i = 0; i < KORAL_PROCESS_HANDLE_CAPACITY; i++) {
+        if (g_koral_process_handles[i].pid == pid) {
+            if (g_koral_process_handles[i].handle != NULL) {
+                CloseHandle(g_koral_process_handles[i].handle);
+            }
+            g_koral_process_handles[i].handle = handle;
+            ReleaseSRWLockExclusive(&g_koral_process_handle_lock);
+            return 1;
+        }
+        if (empty_slot < 0 && g_koral_process_handles[i].pid == 0) {
+            empty_slot = i;
+        }
+    }
+
+    if (empty_slot >= 0) {
+        g_koral_process_handles[empty_slot].pid = pid;
+        g_koral_process_handles[empty_slot].handle = handle;
+        ReleaseSRWLockExclusive(&g_koral_process_handle_lock);
+        return 1;
+    }
+
+    ReleaseSRWLockExclusive(&g_koral_process_handle_lock);
+    return 0;
+}
+
+static HANDLE koral_process_handle_peek(DWORD pid) {
+    if (pid == 0) return NULL;
+
+    HANDLE result = NULL;
+    AcquireSRWLockShared(&g_koral_process_handle_lock);
+    for (int i = 0; i < KORAL_PROCESS_HANDLE_CAPACITY; i++) {
+        if (g_koral_process_handles[i].pid == pid) {
+            result = g_koral_process_handles[i].handle;
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&g_koral_process_handle_lock);
+    return result;
+}
+
+static HANDLE koral_process_handle_take(DWORD pid) {
+    if (pid == 0) return NULL;
+
+    HANDLE result = NULL;
+    AcquireSRWLockExclusive(&g_koral_process_handle_lock);
+    for (int i = 0; i < KORAL_PROCESS_HANDLE_CAPACITY; i++) {
+        if (g_koral_process_handles[i].pid == pid) {
+            result = g_koral_process_handles[i].handle;
+            g_koral_process_handles[i].pid = 0;
+            g_koral_process_handles[i].handle = NULL;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_koral_process_handle_lock);
+    return result;
+}
+
+static void koral_process_handle_close(DWORD pid) {
+    HANDLE h = koral_process_handle_take(pid);
+    if (h != NULL) {
+        CloseHandle(h);
+    }
+}
+
+#endif
+
 int32_t __koral_waitpid(uint32_t pid) {
 #if defined(_WIN32) || defined(_WIN64)
-    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    HANDLE h = koral_process_handle_take((DWORD)pid);
+    if (h == NULL) {
+        h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    }
     if (h == NULL) return -1;
-    WaitForSingleObject(h, INFINITE);
+    DWORD wait_result = WaitForSingleObject(h, INFINITE);
     CloseHandle(h);
+    if (wait_result != WAIT_OBJECT_0) return -1;
     return 0;
 #else
     int status;
@@ -2338,9 +2425,16 @@ int32_t __koral_waitpid(uint32_t pid) {
 
 int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
 #if defined(_WIN32) || defined(_WIN64)
-    HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
+    HANDLE h = koral_process_handle_take((DWORD)pid);
+    if (h == NULL) {
+        h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
+    }
     if (h == NULL) return -1;
-    WaitForSingleObject(h, INFINITE);
+    DWORD wait_result = WaitForSingleObject(h, INFINITE);
+    if (wait_result != WAIT_OBJECT_0) {
+        CloseHandle(h);
+        return -1;
+    }
     DWORD code;
     if (!GetExitCodeProcess(h, &code)) {
         CloseHandle(h);
@@ -2371,23 +2465,45 @@ int32_t __koral_waitpid_full(uint32_t pid, int32_t* exit_code, int32_t* signal_n
 
 int32_t __koral_try_waitpid(uint32_t pid, int32_t* exit_code, int32_t* signal_num) {
 #if defined(_WIN32) || defined(_WIN64)
-    HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
+    HANDLE h = koral_process_handle_peek((DWORD)pid);
+    int using_registry_handle = (h != NULL);
+    if (h == NULL) {
+        h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION, FALSE, (DWORD)pid);
+    }
     if (h == NULL) return -1;
+
     DWORD wait_result = WaitForSingleObject(h, 0);
     if (wait_result == WAIT_TIMEOUT) {
-        CloseHandle(h);
+        if (!using_registry_handle) {
+            CloseHandle(h);
+        }
         return 0;  // still running
     }
     if (wait_result != WAIT_OBJECT_0) {
-        CloseHandle(h);
+        if (using_registry_handle) {
+            koral_process_handle_close((DWORD)pid);
+        } else {
+            CloseHandle(h);
+        }
         return -1;
     }
+
     DWORD code;
     if (!GetExitCodeProcess(h, &code)) {
-        CloseHandle(h);
+        if (using_registry_handle) {
+            koral_process_handle_close((DWORD)pid);
+        } else {
+            CloseHandle(h);
+        }
         return -1;
     }
-    CloseHandle(h);
+
+    if (using_registry_handle) {
+        koral_process_handle_close((DWORD)pid);
+    } else {
+        CloseHandle(h);
+    }
+
     *exit_code = (int32_t)code;
     *signal_num = 0;
     return 1;  // exited
@@ -2554,9 +2670,11 @@ int32_t __koral_spawn(
     out->stdout_fd = (stdout_mode == 1) ? _open_osfhandle((intptr_t)stdout_read, _O_RDONLY) : -1;
     out->stderr_fd = (stderr_mode == 1) ? _open_osfhandle((intptr_t)stderr_read, _O_RDONLY) : -1;
 
-    // We need to keep the process handle for waitpid; store it... actually
-    // Windows waitpid uses OpenProcess, so we can close this handle.
-    CloseHandle(pi.hProcess);
+    // Keep child process handles keyed by pid to avoid OpenProcess(pid) races
+    // when short-lived children exit before polling observes them.
+    if (!koral_process_handle_register(pi.dwProcessId, pi.hProcess)) {
+        CloseHandle(pi.hProcess);
+    }
 
     return 0;
 
