@@ -1072,8 +1072,14 @@ extension TypeChecker {
         elseExpectedType = typedThen.type
       }
       let elseUsage: ExpressionUsage = targetId.map { .branchBody(target: $0) } ?? .statement
+      let rawElse: TypedExpressionNode
+      if elseUsage == .statement {
+        rawElse = try inferCheckedStatementBodyExpression(elseBranch)
+      } else {
+        rawElse = try inferTypedExpression(elseBranch, expectedType: elseExpectedType, usage: elseUsage)
+      }
       typedElse = try normalizeBranchExpression(
-        try inferTypedExpression(elseBranch, expectedType: elseExpectedType, usage: elseUsage),
+        rawElse,
         expectedType: elseExpectedType
       )
     } else {
@@ -1290,7 +1296,10 @@ extension TypeChecker {
         subject: subject,
         pattern: pattern,
         thenBuilder: { branchUsage in
-          try self.inferTypedExpression(thenBranch, expectedType: expectedType, usage: branchUsage)
+          if branchUsage == .statement {
+            return try self.inferCheckedStatementBodyExpression(thenBranch)
+          }
+          return try self.inferTypedExpression(thenBranch, expectedType: expectedType, usage: branchUsage)
         },
         elseBranch: elseBranch,
         expectedType: expectedType,
@@ -1303,6 +1312,9 @@ extension TypeChecker {
 
     func buildClauseChain(from index: Int) throws -> TypedExpressionNode {
       if index == clauses.count {
+        if usage == .statement {
+          return try inferCheckedStatementBodyExpression(thenBranch)
+        }
         return try inferTypedExpression(thenBranch, expectedType: expectedType, usage: usage)
       }
 
@@ -1326,7 +1338,12 @@ extension TypeChecker {
       }
       let typedThen = try buildClauseChain(from: index + 1)
       let branchExpectedType = expectedType ?? (typedThen.type == .never ? nil : typedThen.type)
-      let typedElse = try elseBranch.map { try inferTypedExpression($0, expectedType: branchExpectedType, usage: usage == .statement ? .statement : .value) }
+      let typedElse = try elseBranch.map {
+        if usage == .statement {
+          return try inferCheckedStatementBodyExpression($0)
+        }
+        return try inferTypedExpression($0, expectedType: branchExpectedType, usage: .value)
+      }
       return try buildTypedIfExpression(
         condition: typedCondition,
         thenBranch: typedThen,
@@ -1359,7 +1376,7 @@ extension TypeChecker {
         subject: subject,
         pattern: pattern,
         bodyBuilder: {
-          try self.inferTypedExpression(body, usage: .statement)
+          try self.inferCheckedStatementBodyExpression(body)
         }
       )
     }
@@ -1404,7 +1421,7 @@ extension TypeChecker {
 
           func buildGuardChain(from index: Int) throws -> TypedExpressionNode {
             if index == remainingClauses.count {
-              return try self.inferTypedExpression(body, usage: .statement)
+              return try self.inferCheckedStatementBodyExpression(body)
             }
 
             let clause = remainingClauses[index]
@@ -1782,7 +1799,7 @@ extension TypeChecker {
           expected: "Bool", got: typedCondition.type.description)
       }
       guard let elseBranch else {
-        let typedThen = try inferTypedExpression(thenBranch, usage: .statement)
+        let typedThen = try inferCheckedStatementBodyExpression(thenBranch)
         return try buildTypedIfExpression(
           condition: typedCondition,
           thenBranch: typedThen,
@@ -7764,7 +7781,7 @@ extension TypeChecker {
 
       // Type check body
       loopDepth += 1
-      let result = try inferTypedExpression(body, usage: .statement)
+      let result = try inferCheckedStatementBodyExpression(body)
       loopDepth -= 1
       return result
     }

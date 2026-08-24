@@ -111,7 +111,7 @@ public enum Token: CustomStringConvertible {
   /// These are limited to grammar join keywords and structural connectors.
   public var isLineJoinToken: Bool {
     switch self {
-    case .andKeyword, .orKeyword, .thenKeyword, .elseKeyword:
+    case .andKeyword, .orKeyword, .isKeyword, .thenKeyword, .elseKeyword:
       return true
     case .dot:
       return true

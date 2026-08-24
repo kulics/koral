@@ -5,6 +5,142 @@ import Foundation
 
 extension TypeChecker {
 
+  private func sourceOptionalExpressionIsPureStatement(_ expr: ExpressionNode?) -> Bool {
+    guard let expr else { return true }
+    return sourceExpressionIsObviouslyPureStatement(expr)
+  }
+
+  func sourceExpressionIsObviouslyPureStatement(_ expr: ExpressionNode) -> Bool {
+    switch expr {
+    case .integerLiteral,
+         .floatLiteral,
+         .stringLiteral,
+         .runeLiteral,
+         .booleanLiteral,
+         .emptyLiteral,
+         .identifier,
+         .genericInstantiation:
+      return true
+    case .interpolatedString,
+         .collectionLiteral,
+         .dictLiteral,
+         .lambdaExpression,
+         .call,
+         .staticMethodCall,
+         .genericMethodCall,
+         .qualifiedMethodCall,
+         .qualifiedGenericMethodCall,
+         .blockExpression,
+         .ifExpression,
+         .whileExpression,
+         .forExpression,
+         .whenExpression,
+         .implicitMemberExpression,
+         .orElseExpression,
+         .andThenExpression,
+         .orReturnExpression:
+      return false
+    case .castExpression(_, let inner),
+         .addressOfExpression(let inner, _),
+         .derefExpression(let inner),
+         .ptrExpression(let inner),
+         .unaryMinusExpression(let inner),
+         .notExpression(let inner),
+         .bitwiseNotExpression(let inner),
+         .isExpression(let inner, _, _),
+         .isNotExpression(let inner, _, _):
+      return sourceExpressionIsObviouslyPureStatement(inner)
+    case .arithmeticExpression(let left, _, let right),
+         .comparisonExpression(let left, _, let right),
+         .bitwiseExpression(let left, _, let right),
+         .andExpression(let left, let right),
+         .orExpression(let left, let right):
+      return sourceExpressionIsObviouslyPureStatement(left) && sourceExpressionIsObviouslyPureStatement(right)
+    case .comparisonChainExpression:
+      return true
+    case .memberPath(let base, _):
+      return sourceExpressionIsObviouslyPureStatement(base)
+    case .subscriptExpression(let base, let arguments):
+      return sourceExpressionIsObviouslyPureStatement(base)
+        && arguments.allSatisfy(sourceExpressionIsObviouslyPureStatement)
+    case .rangeExpression(_, let left, let right):
+      return sourceOptionalExpressionIsPureStatement(left)
+        && sourceOptionalExpressionIsPureStatement(right)
+    }
+  }
+
+  func typedExpressionHasObservableStatementEffect(_ expr: TypedExpressionNode) -> Bool {
+    switch expr {
+    case .call,
+         .genericCall,
+         .staticMethodCall,
+         .traitMethodCall,
+         .intrinsicCall,
+         .blockExpression,
+         .ifExpression,
+         .ifPatternExpression,
+         .whenExpression,
+         .lambdaExpression,
+         .traitObjectConversion:
+      return true
+     case .methodReference(let base, _, _, _, _),
+        .traitMethodPlaceholder(_, _, let base, _, _):
+      return typedExpressionHasObservableStatementEffect(base)
+    case .castExpression(let inner, _),
+         .notExpression(let inner, _),
+         .bitwiseNotExpression(let inner, _),
+         .derefExpression(let inner, _),
+         .referenceExpression(let inner, _),
+         .ptrExpression(let inner, _),
+         .memberPath(let inner, _),
+         .isExpression(let inner, _, _),
+         .isNotExpression(let inner, _, _):
+      if typedExpressionHasObservableStatementEffect(inner) {
+        return true
+      }
+    case .arithmeticExpression(let left, _, let right, _),
+         .wrappingArithmeticExpression(let left, _, let right, _),
+         .wrappingShiftExpression(let left, _, let right, _),
+         .comparisonExpression(let left, _, let right, _),
+         .andExpression(let left, let right, _),
+         .orExpression(let left, let right, _),
+         .bitwiseExpression(let left, _, let right, _):
+      if typedExpressionHasObservableStatementEffect(left) || typedExpressionHasObservableStatementEffect(right) {
+        return true
+      }
+    default:
+      break
+    }
+
+    if expr.type == .never {
+      return true
+    }
+    return expr.valueCategory == .rvalue && expr.type.needsDrop
+  }
+
+  func requireEffectfulStatementExpression(_ sourceExpr: ExpressionNode, typedExpr: TypedExpressionNode) throws {
+    let span = sourceExpr.span == .unknown ? currentSpan : sourceExpr.span
+    if sourceExpressionIsObviouslyPureStatement(sourceExpr) {
+      throw SemanticError(.generic("Expression statement has no effect"), span: span)
+    }
+    if !typedExpressionHasObservableStatementEffect(typedExpr) {
+      throw SemanticError(.generic("Expression statement has no effect"), span: span)
+    }
+  }
+
+  func inferCheckedStatementBodyExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
+    switch expr {
+    case .ifExpression, .whenExpression, .whileExpression, .forExpression:
+      let stmt = try inferStatementExpression(expr)
+      let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
+      return .blockExpression(statements: [stmt], type: blockType)
+    default:
+      let typedExpr = try inferTypedExpression(expr, usage: .statement)
+      try requireEffectfulStatementExpression(expr, typedExpr: typedExpr)
+      return typedExpr
+    }
+  }
+
   func statementCanFallThrough(_ stmt: TypedStatementNode) -> Bool {
     switch stmt {
     case .return, .break, .continue, .branchBreak:
@@ -46,14 +182,7 @@ extension TypeChecker {
   }
 
   private func inferStatementBodyExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {
-    switch expr {
-    case .ifExpression, .whenExpression, .whileExpression, .forExpression:
-      let stmt = try inferStatementExpression(expr)
-      let blockType: Type = statementCanFallThrough(stmt) ? .void : .never
-      return .blockExpression(statements: [stmt], type: blockType)
-    default:
-      return try inferTypedExpression(expr, usage: .statement)
-    }
+    return try inferCheckedStatementBodyExpression(expr)
   }
 
   func inferStatementExpression(_ expr: ExpressionNode) throws -> TypedStatementNode {
@@ -133,10 +262,14 @@ extension TypeChecker {
       return .whileStatement(condition: typedCondition, body: typedBody)
 
     case .forExpression:
-      return .expression(try inferTypedExpression(expr, usage: .statement))
+      let typedExpr = try inferTypedExpression(expr, usage: .statement)
+      try requireEffectfulStatementExpression(expr, typedExpr: typedExpr)
+      return .expression(typedExpr)
 
     default:
-      return .expression(try inferTypedExpression(expr, usage: .statement))
+      let typedExpr = try inferTypedExpression(expr, usage: .statement)
+      try requireEffectfulStatementExpression(expr, typedExpr: typedExpr)
+      return .expression(typedExpr)
     }
   }
 

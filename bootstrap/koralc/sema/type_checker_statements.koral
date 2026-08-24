@@ -173,6 +173,127 @@ given TypeChecker {
         return make_typed_expr_ref(expr.expr_kind, normalized_type)
     }
 
+    protected source_expr_is_obviously_pure_statement(self, expr * Expr) Bool = {
+        let _ = self
+        return when expr in {
+            .Identifier(_, _) then true,
+            .IntegerLiteral(_, _) then true,
+            .FloatLiteral(_, _) then true,
+            .StringLiteral(_, _) then true,
+            .RuneLiteral(_, _) then true,
+            .BoolLiteral(_, _) then true,
+            .EmptyLiteral(_) then true,
+            .GenericInstantiation(_, _, _) then true,
+            .WeakrefExpr(_, _) then false,
+            .InterpolatedString(_, _) then false,
+            .CollectionLiteral(_, _) then false,
+            .DictLiteral(_, _) then false,
+            .LambdaExpr(_, _, _, _) then false,
+            .Call(_, _, _) then false,
+            .GenericMethodCall(_, _, _, _, _) then false,
+            .QualifiedMethodCall(_, _, _, _, _) then false,
+            .QualifiedGenericMethodCall(_, _, _, _, _, _) then false,
+            .StaticMethodCall(_, _, _, _, _) then false,
+            .Block(_, _) then false,
+            .IfExpr(_, _, _, _) then false,
+            .WhileExpr(_, _, _) then false,
+            .ForExpr(_, _, _, _) then false,
+            .WhenExpr(_, _, _) then false,
+            .ImplicitMemberExpr(_, _, _) then false,
+            .OrElseExpr(_, _, _) then false,
+            .AndThenExpr(_, _, _) then false,
+            .OrReturnExpr(_, _) then false,
+            .CastExpr(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .Unary(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .RefExpr(inner, _, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .PtrExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .DerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .NamedArgument(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .MemberPath(base, _, _) then self.source_expr_is_obviously_pure_statement(base),
+            .SubscriptExpr(base, args, _) then {
+                if not self.source_expr_is_obviously_pure_statement(base) then { break false }
+                let mut pure = true
+                for arg in args then {
+                    if not self.source_expr_is_obviously_pure_statement(arg) then {
+                        pure = false
+                        break
+                    }
+                }
+                break pure
+            },
+            .ArithmeticExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
+            .ComparisonExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
+            .ComparisonChainExpr(_, _, _) then true,
+            .BitwiseExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
+            .AndExpr(left, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
+            .OrExpr(left, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
+            .RangeExpr(_, left, right, _) then {
+                let left_pure = when left in {
+                    .Some(left_ref) then self.source_expr_is_obviously_pure_statement(left_ref),
+                    .None() then true,
+                }
+                let right_pure = when right in {
+                    .Some(right_ref) then self.source_expr_is_obviously_pure_statement(right_ref),
+                    .None() then true,
+                }
+                break left_pure and right_pure
+            },
+            .IsExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(subject),
+            .IsNotExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(subject),
+        }
+    }
+
+    protected typed_expr_has_observable_statement_effect(self, expr * TypedExpr) Bool = {
+        let direct_effect = when expr.expr_kind in {
+            .Call(_, _) then true,
+            .GenericCall(_, _, _) then true,
+            .IntrinsicCall(_) then true,
+            .Block(_) then true,
+            .IfExpr(_, _, _) then true,
+            .WhenExpr(_, _) then true,
+            .LambdaExpr(_, _, _) then true,
+            .StaticMethodCall(_, _, _, _, _, _) then true,
+            .TraitMethodCall(_, _, _, _, _) then true,
+            .TraitObjectConversion(_, _, _) then true,
+            _ then false,
+        }
+        if direct_effect then { return true }
+
+        let nested_effect = when expr.expr_kind in {
+            .MethodReference(base, _, _, _, _, _) then self.typed_expr_has_observable_statement_effect(base),
+            .TraitMethodPlaceholder(base, _, _, _, _) then self.typed_expr_has_observable_statement_effect(base),
+            .CastExpr(_, inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .Unary(_, inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .RefExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .PtrExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .DerefExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .MemberPath(base, _) then self.typed_expr_has_observable_statement_effect(base),
+            .IsExpr(subject, _, _) then self.typed_expr_has_observable_statement_effect(subject),
+            .ArithmeticExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            .WrappingArithmeticExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            .WrappingShiftExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            .ComparisonExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            .BitwiseExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            .AndExpr(left, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            .OrExpr(left, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
+            _ then false,
+        }
+        if nested_effect then { return true }
+
+        if expr.expr_type is .NeverType() then { return true }
+        return typed_expr_value_category(expr) is .RValue() and type_needs_drop(expr.expr_type)
+    }
+
+    protected require_effectful_statement_expression(self, source_expr * Expr, typed_expr * TypedExpr, span SourceSpan) Void = {
+        if self.source_expr_is_obviously_pure_statement(source_expr) then {
+            self.push_diagnostic_at_span("Expression statement has no effect", span)
+            return
+        }
+        if not self.typed_expr_has_observable_statement_effect(typed_expr) then {
+            self.push_diagnostic_at_span("Expression statement has no effect", span)
+        }
+    }
+
     protected check_statement_body_expr(self, expr * Expr, scope Scope) TypedExpr = {
         let raw_expr = when expr in {
             .IfExpr(_, _, _, _) then self.wrap_statement_as_block_expr(self.check_if_statement_expr(expr, expr_span(expr), scope)),
@@ -188,9 +309,17 @@ given TypeChecker {
                 }
                 break self.wrap_statement_as_block_expr(stmt)
             },
-            .ForExpr(_, _, _, _) then self.check_expr_core_ref(expr, .None(), scope),
+            .ForExpr(_, _, _, _) then {
+                let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
+                self.require_effectful_statement_expression(expr, box(typed_expr), expr_span(expr))
+                break typed_expr
+            },
             .Block(statements, _) then self.check_block(statements, .None(), scope),
-            _ then self.check_expr_core_ref(expr, .None(), scope),
+            _ then {
+                let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
+                self.require_effectful_statement_expression(expr, box(typed_expr), expr_span(expr))
+                break typed_expr
+            },
         }
         return self.normalize_statement_body_expr(raw_expr)
     }
@@ -286,6 +415,7 @@ given TypeChecker {
             },
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
+                self.require_effectful_statement_expression(expr, box(typed_expr), span)
                 break TypedStatement.ExprStmt(box(typed_expr), span)
             },
         }
@@ -306,6 +436,7 @@ given TypeChecker {
             },
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
+                self.require_effectful_statement_expression(expr, box(typed_expr), span)
                 break TypedStatement.ExprStmt(box(typed_expr), span)
             },
         }
@@ -324,6 +455,7 @@ given TypeChecker {
             },
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
+                self.require_effectful_statement_expression(expr, box(typed_expr), span)
                 break TypedStatement.ExprStmt(box(typed_expr), span)
             },
         }
