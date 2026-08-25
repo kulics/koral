@@ -106,7 +106,7 @@ Use this bucket when changing escape promotion, conditional branch merge logic, 
 - `mut_ref_receiver_copy_field_escape_regression`
 - `ref_escape_pattern_alias`
 
-### Receiver syntax migration (`*self`, `*mut self`)
+### Receiver syntax migration (`*self`, `*mutable self`)
 
 Use this bucket when changing receiver auto-ref/auto-deref, managed receiver return paths, or U2 receiver syntax migration behavior.
 
@@ -116,7 +116,7 @@ Use this bucket when changing receiver auto-ref/auto-deref, managed receiver ret
 - `self_mut_ref_rvalue_receiver_error`
 - `value_semantics_self_ref_on_immutable_base_error`
 
-Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mut self`, `&`, `&mut`, `&!`, `*`).
+Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mutable self`, `&`, `&mutable`, `&!`, `*`).
 
 ## Rerun a bucket
 

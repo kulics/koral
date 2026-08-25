@@ -33,7 +33,7 @@ given TimeZone {
                 let abs_secs = if offset_secs < 0 then 0 - offset_secs(Int) else offset_secs(Int)
                 let hours = abs_secs / 3600
                 let mins = (abs_secs % 3600) / 60
-                let mut result = String.new()
+                let mutable result = String.new()
                 if offset_secs < 0 then {
                     result.push_byte('-')
                 } else {
@@ -54,12 +54,12 @@ given TimeZone {
             .Utc() then Duration.zero(),
             .Fixed(offset_secs) then 1s * offset_secs(Int),
             .Local(n) then {
-                let mut out Int32 = 0
+                let mutable out Int32 = 0
                 __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, &! out)
                 break 1s * out(Int)
             },
             .Named(n) then {
-                let mut out Int32 = 0
+                let mutable out Int32 = 0
                 __koral_timezone_offset_at(n.storage.data, datetime.unix_secs, &! out)
                 break 1s * out(Int)
             },
@@ -74,16 +74,16 @@ given DateTime {
 
     /// Returns the current local time.
     public now() DateTime = {
-        let mut s Int64 = 0
-        let mut n Int64 = 0
+        let mutable s Int64 = 0
+        let mutable n Int64 = 0
         __koral_wallclock_now(&! s, &! n)
         return DateTime(s, n(Int32), TimeZone.local())
     }
 
     /// Returns the current UTC time.
     public now_utc() DateTime = {
-        let mut s Int64 = 0
-        let mut n Int64 = 0
+        let mutable s Int64 = 0
+        let mutable n Int64 = 0
         __koral_wallclock_now(&! s, &! n)
         return DateTime(s, n(Int32), TimeZone.utc())
     }
@@ -101,7 +101,7 @@ given DateTime {
     /// Creates a DateTime from a Date and ClockTime in the given timezone.
     public from_parts(date Date, time ClockTime, timezone TimeZone) DateTime = {
         let day_count = days_from_civil(date.year(), date.month(), date.day())
-        let mut local_secs = day_count * 86400
+        let mutable local_secs = day_count * 86400
         local_secs = local_secs + time.hour()(Int64) * 3600
         local_secs = local_secs + time.minute()(Int64) * 60
         local_secs = local_secs + time.second()(Int64)
@@ -234,8 +234,8 @@ given DateTime {
     /// If current wall clock is earlier than self, returns Duration.zero().
     public elapsed(*self) Duration = {
         let current = DateTime.now()
-        let mut diff_secs = current.unix_secs - self.unix_secs
-        let mut diff_nanos = current.nanos(Int64) - self.nanos(Int64)
+        let mutable diff_secs = current.unix_secs - self.unix_secs
+        let mutable diff_nanos = current.nanos(Int64) - self.nanos(Int64)
         if diff_nanos < 0 then {
             diff_secs = diff_secs - 1
             diff_nanos = diff_nanos + 1_000_000_000
@@ -253,8 +253,8 @@ given DateTime as Add[Duration] {
 
     /// [Duration]Add: add — DateTime + Duration
     public add(self, v Duration) DateTime = {
-        let mut new_nanos = self.nanos(Int64) + v.nanos
-        let mut new_secs = self.unix_secs + v.secs
+        let mutable new_nanos = self.nanos(Int64) + v.nanos
+        let mutable new_secs = self.unix_secs + v.secs
         if new_nanos >= 1_000_000_000 then {
             new_secs = new_secs + new_nanos / 1_000_000_000
             new_nanos = new_nanos % 1_000_000_000
@@ -271,8 +271,8 @@ given DateTime as Sub[Duration] {
 
     /// [Duration]Sub: sub — DateTime - Duration
     public sub(self, v Duration) DateTime = {
-        let mut new_nanos = self.nanos(Int64) - v.nanos
-        let mut new_secs = self.unix_secs - v.secs
+        let mutable new_nanos = self.nanos(Int64) - v.nanos
+        let mutable new_secs = self.unix_secs - v.secs
         if new_nanos < 0 then {
             let borrow = (0 - new_nanos + 999_999_999) / 1_000_000_000
             new_secs = new_secs - borrow
@@ -289,8 +289,8 @@ given DateTime {
 
     /// Computes the Duration from self to other (returns other - self).
     public duration_to(*self, other DateTime) Duration = {
-        let mut diff_nanos = other.nanos(Int64) - self.nanos(Int64)
-        let mut diff_secs = other.unix_secs - self.unix_secs
+        let mutable diff_nanos = other.nanos(Int64) - self.nanos(Int64)
+        let mutable diff_secs = other.unix_secs - self.unix_secs
         if diff_nanos < 0 then {
             diff_secs = diff_secs - 1
             diff_nanos = diff_nanos + 1_000_000_000
@@ -334,30 +334,30 @@ given DateTime as ToString {
     /// Fixed offset: "2024-01-15T10:30:00+08:00"
     /// With nanos: "2024-01-15T10:30:00.123456789Z"
     public to_string(*self) String = {
-        let mut result = String.new()
+        let mutable result = String.new()
 
         // Date part
-        push_padded(&mut result, self.year(), 4)
+        push_padded(&mutable result, self.year(), 4)
         result.push_byte('-')
-        push_padded(&mut result, self.month(), 2)
+        push_padded(&mutable result, self.month(), 2)
         result.push_byte('-')
-        push_padded(&mut result, self.day(), 2)
+        push_padded(&mutable result, self.day(), 2)
         result.push_byte('T')
 
         // Time part
-        push_padded(&mut result, self.hour(), 2)
+        push_padded(&mutable result, self.hour(), 2)
         result.push_byte(':')
-        push_padded(&mut result, self.minute(), 2)
+        push_padded(&mutable result, self.minute(), 2)
         result.push_byte(':')
-        push_padded(&mut result, self.second(), 2)
+        push_padded(&mutable result, self.second(), 2)
 
         // Fractional seconds (if non-zero, trim trailing zeros)
         let ns = self.nanos(Int)
         if ns > 0 then {
             result.push_byte('.')
             // Write up to 9 digits, then trim trailing zeros
-            let mut digits = ns
-            let mut count = 9
+            let mutable digits = ns
+            let mutable count = 9
             // Remove trailing zeros
             while digits % 10 == 0 and count > 0 then {
                 digits = digits / 10
@@ -389,9 +389,9 @@ given DateTime as ToString {
             }
             let oh = abs_offset / 3600
             let om = (abs_offset % 3600) / 60
-            push_padded(&mut result, oh, 2)
+            push_padded(&mutable result, oh, 2)
             result.push_byte(':')
-            push_padded(&mut result, om, 2)
+            push_padded(&mutable result, om, 2)
         }
 
         return result
@@ -432,8 +432,8 @@ given DateTime as Parseable {
         let se = parse_digits(s, 17, 2)
         if se.value < 0 then { return Result[DateTime].Error(box("invalid ISO 8601: expected 2-digit second")) }
 
-        let mut pos = 19
-        let mut nanos = 0
+        let mutable pos = 19
+        let mutable nanos = 0
 
         // Optional fractional seconds
         if pos < len and s[pos(UInt)] == 46(UInt8) then { // '.'

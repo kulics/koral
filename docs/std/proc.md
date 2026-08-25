@@ -102,7 +102,7 @@ given StdoutPipe {
 }
 
 given StdoutPipe as Reader {
-    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given StderrPipe {
@@ -110,7 +110,7 @@ given StderrPipe {
 }
 
 given StderrPipe as Reader {
-    public read(*self, into: *mut List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given Process {

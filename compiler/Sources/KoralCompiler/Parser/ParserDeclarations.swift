@@ -7,9 +7,9 @@ extension Parser {
   private func parseSelfReceiverType() throws -> TypeNode {
     if currentToken === .multiply {
       try match(.multiply)
-      let sawMut = currentToken === .mutKeyword
+      let sawMut = currentToken === .mutableKeyword
       if sawMut {
-        try match(.mutKeyword)
+        try match(.mutableKeyword)
       }
       guard currentToken === .selfKeyword else {
         throw ParserError.invalidReceiverParameterSyntax(span: currentSpan)
@@ -61,10 +61,10 @@ extension Parser {
     if currentToken === .letKeyword {
       try match(.letKeyword)
 
-      // Check for mut keyword first
+      // Check for mutable keyword first
       var mutable = false
-      if currentToken === .mutKeyword {
-        try match(.mutKeyword)
+      if currentToken === .mutableKeyword {
+        try match(.mutableKeyword)
         mutable = true
       }
 
@@ -84,11 +84,11 @@ extension Parser {
         throw ParserError.foreignFunctionNoGenerics(span: currentSpan)
       }
 
-      // If mut keyword was detected, it must be a variable declaration
+      // If mutable keyword was detected, it must be a variable declaration
       if mutable {
         if isForeign {
           if currentToken === .leftParen {
-            throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mut cannot declare a function")
+            throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
           }
           return try foreignLetDeclaration(name: name, mutable: true, access: access, span: startSpan)
         }
@@ -244,9 +244,9 @@ extension Parser {
 
       while currentToken !== .rightParen {
         var isMut = false
-        if currentToken === .mutKeyword {
+        if currentToken === .mutableKeyword {
           isMut = true
-          try match(.mutKeyword)
+          try match(.mutableKeyword)
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
@@ -338,9 +338,9 @@ extension Parser {
 
       while currentToken !== .rightParen {
         var isMut = false
-        if currentToken === .mutKeyword {
+        if currentToken === .mutableKeyword {
           isMut = true
-          try match(.mutKeyword)
+          try match(.mutableKeyword)
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
@@ -435,9 +435,9 @@ extension Parser {
 
       while currentToken !== .rightParen {
         var isMut = false
-        if currentToken === .mutKeyword {
+        if currentToken === .mutableKeyword {
           isMut = true
-          try match(.mutKeyword)
+          try match(.mutableKeyword)
         }
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
@@ -610,11 +610,11 @@ extension Parser {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
     while currentToken !== .rightParen {
-      // 仅支持可选的前缀 mut；不再支持 own/ref
+      // 仅支持可选的前缀 mutable；不再支持 own/ref
       var isMut = false
-      if currentToken === .mutKeyword {
+      if currentToken === .mutableKeyword {
         isMut = true
-        try match(.mutKeyword)
+        try match(.mutableKeyword)
       }
       guard case .identifier(let pname) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
@@ -675,9 +675,9 @@ extension Parser {
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
     while currentToken !== .rightParen {
       var isMut = false
-      if currentToken === .mutKeyword {
+      if currentToken === .mutableKeyword {
         isMut = true
-        try match(.mutKeyword)
+        try match(.mutableKeyword)
       }
       guard case .identifier(let pname) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
@@ -795,10 +795,10 @@ extension Parser {
     while currentToken !== .rightParen {
       let fieldAccess = try parseAccessModifier(default: .public)
 
-      // Check for mut keyword for the field
+      // Check for mutable keyword for the field
       var fieldMutable = false
-      if currentToken === .mutKeyword {
-        try match(.mutKeyword)
+      if currentToken === .mutableKeyword {
+        try match(.mutableKeyword)
         fieldMutable = true
       }
 

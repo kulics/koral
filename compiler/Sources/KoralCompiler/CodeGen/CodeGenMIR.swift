@@ -1968,7 +1968,7 @@ final class MIRFunctionCodeEmitter {
     case .isUniqueMutable(let value):
       let valueEmission = emitValue(value, sourceMode: true)
       let result = codeGen.nextTempWithDecl(cType: "int")
-      // The value is ptr ref mut T — a raw pointer to the ref struct.
+      // The value is ptr ref mutable T — a raw pointer to the ref struct.
       // Dereference to access the control block: ((struct __koral_Ref*)ptr)->control
       let valueType = resolver.type(of: value) ?? .void
       let control: String
@@ -2531,7 +2531,7 @@ final class MIRFunctionCodeEmitter {
     case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference, .weakReference, .mutableWeakReference, .traitObject:
       return "\(value).control"
     case .pointer, .mutablePointer:
-      // ptr ref mut T — the value is a pointer to a ref struct, use -> for member access
+      // ptr ref mutable T — the value is a pointer to a ref struct, use -> for member access
       return "((struct __koral_Ref*)\(value))->control"
     default:
       return "NULL"

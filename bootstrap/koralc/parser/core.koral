@@ -10,8 +10,8 @@ private type ParseDeclFlags(
 
 public type Parser(
     tokens List[Token],
-    mut index UInt,
-    mut line_join_grouping_depth UInt,
+    mutable index UInt,
+    mutable line_join_grouping_depth UInt,
 )
 
 given Parser {
@@ -23,14 +23,14 @@ given Parser {
 
     protected token_position_text(self, token Token) String = {
         let _ = self
-        let mut text = token.line.to_string()
+        let mutable text = token.line.to_string()
         text.push_byte(':')
         text.push_string(token.column.to_string())
         return text
     }
 
     protected format_context_position_error(self, prefix String, context String, token Token) String = {
-        let mut text = prefix
+        let mutable text = prefix
         text.push_string(context)
         text.push_string(" at ")
         text.push_string(self.token_position_text(token))
@@ -38,7 +38,7 @@ given Parser {
     }
 
     protected format_progress_error(self, prefix String, context String, token Token) String = {
-        let mut text = self.format_context_position_error(prefix, context, token)
+        let mutable text = self.format_context_position_error(prefix, context, token)
         text.push_string(" (token: ")
         text.push_string(token_text(token))
         text.push_byte(')')
@@ -94,9 +94,9 @@ given Parser {
 
     // 按顶层 | 分割 pattern 文本（忽略括号内的 |）
     protected split_or_pattern(self, text String) List[String] = {
-        let mut result = List[String].new()
-        let mut current = String.new()
-        let mut depth UInt = 0
+        let mutable result = List[String].new()
+        let mutable current = String.new()
+        let mutable depth UInt = 0
         let runes = text.to_runes()
         for ch in runes then {
             if ch == '(' or ch == '[' then {
@@ -121,9 +121,9 @@ given Parser {
         let or_parts = self.split_or_pattern(text)
         if or_parts.count() > 1 then {
             // 有多个 or 分支，递归构建 OrPattern（右结合）
-            let mut i UInt = or_parts.count()
+            let mutable i UInt = or_parts.count()
             let last_part = or_parts[i - 1].trim_ascii()
-            let mut result = self.pattern_from_text(last_part, span)
+            let mutable result = self.pattern_from_text(last_part, span)
             while i > 1 then {
                 i -= 1
                 let part = or_parts[i - 1].trim_ascii()
@@ -145,7 +145,7 @@ given Parser {
         if self.is_decimal_digits(text) then {
             return PatternNode.IntegerLiteral(text, span)
         }
-        if text.starts_with("mut ") then {
+        if text.starts_with("mutable ") then {
             let name = text.substring(4..)
             if not name.is_empty() then {
                 return PatternNode.Variable(name, true, span)
@@ -161,7 +161,7 @@ given Parser {
                     when rest.find_last(")") in {
                         .Some(rparen_idx) then {
                             let inner = rest.substring(lparen_idx + 1..<rparen_idx).trim_ascii()
-                            let mut elements = List[PatternElement].new()
+                            let mutable elements = List[PatternElement].new()
                             if not inner.is_empty() then {
                                 // 按逗号分割，每个子 pattern 递归解析
                                 let parts = self.split_pattern_args(inner)
@@ -190,9 +190,9 @@ given Parser {
 
     // 按顶层逗号分割 pattern 参数列表（忽略括号内的逗号）
     protected split_pattern_args(self, text String) List[String] = {
-        let mut result = List[String].new()
-        let mut current = String.new()
-        let mut depth UInt = 0
+        let mutable result = List[String].new()
+        let mutable current = String.new()
+        let mutable depth UInt = 0
         let runes = text.to_runes()
         for ch in runes then {
             if ch == '(' or ch == '[' then {
@@ -227,7 +227,7 @@ given Parser {
 
     protected save_state(self) UInt = self.index
 
-    protected restore_state(*mut self, saved UInt) Void = {
+    protected restore_state(*mutable self, saved UInt) Void = {
         self.index = saved
     }
 
@@ -290,8 +290,8 @@ given Parser {
         }
         
         // Lookahead: 跳过 [...] 找到 ] 后的 token
-        let mut depth UInt = 0
-        let mut i = self.index
+        let mutable depth UInt = 0
+        let mutable i = self.index
         while i < self.tokens.count() then {
             let tok = self.tokens[i]
             when tok.kind in {
@@ -318,7 +318,7 @@ given Parser {
         return false
     }
 
-    protected advance(*mut self) Token = {
+    protected advance(*mutable self) Token = {
         let t = self.current()
         if not self.is_eof() then {
             self.index += 1
@@ -326,17 +326,17 @@ given Parser {
         return t
     }
 
-    protected consume_semicolon(*mut self) Void = {
+    protected consume_semicolon(*mutable self) Void = {
         if self.current().kind is .Semicolon() then {
             self.advance()
         }
     }
 
-    protected enter_line_join_grouping(*mut self) Void = {
+    protected enter_line_join_grouping(*mutable self) Void = {
         self.line_join_grouping_depth += 1(UInt)
     }
 
-    protected leave_line_join_grouping(*mut self) Void = {
+    protected leave_line_join_grouping(*mutable self) Void = {
         if self.line_join_grouping_depth > 0(UInt) then {
             self.line_join_grouping_depth -= 1(UInt)
         }
@@ -366,7 +366,7 @@ given Parser {
         return not self.current().has_newline_before or self.is_inside_line_join_grouping()
     }
 
-    protected require_no_line_break_before_rhs(*mut self) Result[Void] = {
+    protected require_no_line_break_before_rhs(*mutable self) Result[Void] = {
         if self.current().has_newline_before and not self.is_inside_line_join_grouping() then {
             return Result[Void].Error(box("Unexpected token: \(token_text(self.current()))"))
         }
@@ -396,7 +396,7 @@ given Parser {
     }
 
     // 消耗可选的语句终止符（分号或换行）
-    protected consume_statement_terminator(*mut self) Void = {
+    protected consume_statement_terminator(*mutable self) Void = {
         if self.current().kind is .Semicolon() then {
             self.advance()
         }
@@ -414,7 +414,7 @@ given Parser {
         }
     }
 
-    protected expect_identifier(*mut self, label String) Result[String] = {
+    protected expect_identifier(*mutable self, label String) Result[String] = {
         let t = self.current()
         if t.kind is .Identifier(name) then {
             self.advance()
@@ -423,12 +423,12 @@ given Parser {
         return .Error(box(self.format_context_position_error("Expected identifier for ", label, t)))
     }
 
-    protected parse_decl_flags(*mut self) ParseDeclFlags = {
-        let mut access = AccessModifier.Protected()
-        let mut has_explicit_access = false
-        let mut is_foreign = false
-        let mut is_intrinsic = false
-        let mut invalid_access_message = Option[String].None()
+    protected parse_decl_flags(*mutable self) ParseDeclFlags = {
+        let mutable access = AccessModifier.Protected()
+        let mutable has_explicit_access = false
+        let mutable is_foreign = false
+        let mutable is_intrinsic = false
+        let mutable invalid_access_message = Option[String].None()
 
         while true then {
             when self.current().kind in {
@@ -552,13 +552,13 @@ given Parser {
         }
     }
 
-    protected parse_type_arg_list(*mut self) Result[List[* TypeNode]] = {
+    protected parse_type_arg_list(*mutable self) Result[List[* TypeNode]] = {
         when self.current().kind in {
             .LBracket() then { self.advance() },
             _ then { return .Error(box("Expected '[' to start type argument list")) },
         }
 
-        let mut args = List[* TypeNode].new()
+        let mutable args = List[* TypeNode].new()
         while true then {
             if self.current().kind is .RBracket() then {
                 self.advance()
@@ -583,7 +583,7 @@ given Parser {
         return .Ok(args)
     }
 
-    protected parse_type(*mut self) Result[TypeNode] = {
+    protected parse_type(*mutable self) Result[TypeNode] = {
         when self.current().kind in {
             .QuestionMark() then {
                 self.advance()
@@ -592,7 +592,7 @@ given Parser {
                 } else {
                     return .Error(box("Expected '*' after '?'"))
                 }
-                let mut mutable = false
+                let mutable mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
                     mutable = true
@@ -606,7 +606,7 @@ given Parser {
                 self.advance()
                 if self.current().kind is .Bang() then {
                     self.advance()
-                    let mut mutable = false
+                    let mutable mutable = false
                     if self.current().kind is .KwMut() then {
                         self.advance()
                         mutable = true
@@ -616,7 +616,7 @@ given Parser {
                     }
                     return .Ok(TypeNode.Pointer(box(inner), mutable))
                 }
-                let mut mutable = false
+                let mutable mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
                     mutable = true
@@ -640,9 +640,9 @@ given Parser {
                     if args.is_empty() then {
                         return .Error(box("Function type must include a return type"))
                     }
-                    let mut param_types = List[* TypeNode].new()
-                    let mut return_type_opt = Option[* TypeNode].None()
-                    let mut i UInt = 0
+                    let mutable param_types = List[* TypeNode].new()
+                    let mutable return_type_opt = Option[* TypeNode].None()
+                    let mutable i UInt = 0
                     for arg in args then {
                         if i + 1 < args.count() then {
                             param_types.push(arg)
@@ -658,7 +658,7 @@ given Parser {
                 }
 
                 if not self.is_upper_first(module_or_name) then {
-                    let mut message = "Type name '"
+                    let mutable message = "Type name '"
                     message.push_string(module_or_name)
                     message.push_string("' must start with an uppercase letter")
                     return .Error(box(message))
@@ -679,8 +679,8 @@ given Parser {
         }
     }
 
-    protected parse_type_parameters(*mut self) Result[List[TypeParameter]] = {
-        let mut params = List[TypeParameter].new()
+    protected parse_type_parameters(*mutable self) Result[List[TypeParameter]] = {
+        let mutable params = List[TypeParameter].new()
 
         if self.current().kind is .LBracket() then {
             self.advance()
@@ -708,17 +708,17 @@ given Parser {
             // Reject lifetime parameters in generic parameter lists
             let is_lifetime_param = param_name.starts_with("'")
             if is_lifetime_param then {
-                return .Error(box("Lifetime syntax has been removed. Use *T/*mut T for managed references."))
+                return .Error(box("Lifetime syntax has been removed. Use *T/*mutable T for managed references."))
             }
             if not self.is_type_start() then {
                 let t = self.current()
-                let mut message = "Type parameter '"
+                let mutable message = "Type parameter '"
                 message.push_string(param_name)
                 message.push_string("' requires a constraint at ")
                 message.push_string(self.token_position_text(t))
                 return .Error(box(message))
             }
-            let mut constraints = List[* TypeNode].new()
+            let mutable constraints = List[* TypeNode].new()
             let first_constraint = self.parse_type() or else {
                 return .Error(box("parse type parameter constraint error"))
             }
@@ -748,24 +748,24 @@ given Parser {
         return .Ok(params)
     }
 
-    protected parse_param_list(*mut self) Result[List[Param]] = {
-        let mut params = List[Param].new()
+    protected parse_param_list(*mutable self) Result[List[Param]] = {
+        let mutable params = List[Param].new()
 
         while true then {
             if self.current().kind is .RParen() then {
                 return .Ok(params)
             }
 
-            let mut is_mut = false
+            let mutable is_mut = false
             if self.current().kind is .KwMut() then {
                 is_mut = true
                 self.advance()
             }
 
-            // Check for *self / *mut self prefix receiver
+            // Check for *self / *mutable self prefix receiver
             if self.current().kind is .Star() then {
                 self.advance()
-                let mut mutable = false
+                let mutable mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
                     mutable = true
@@ -779,12 +779,12 @@ given Parser {
                 }
             } else if self.current().kind is .KwSelf() then {
                 self.advance()
-                let mut self_type = TypeNode.InferredSelf()
+                let mutable self_type = TypeNode.InferredSelf()
                 if self.current().kind is .KwSelfType() then {
-                    return .Error(box("Invalid receiver parameter syntax: use 'self', '*self', or '*mut self'"))
+                    return .Error(box("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
                 }
                 if self.is_type_start() then {
-                    return .Error(box("Invalid receiver parameter syntax: use 'self', '*self', or '*mut self'"))
+                    return .Error(box("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
                 }
                 params.push(Param("self", false, self_type, false))
             } else {
@@ -792,7 +792,7 @@ given Parser {
                     return .Error(box("parse parameter error"))
                 }
 
-                let mut is_named = false
+                let mutable is_named = false
                 if self.current().kind is .Colon() then {
                     is_named = true
                     self.advance()
@@ -827,11 +827,11 @@ given Parser {
         return .Ok(params)
     }
 
-    protected parse_let_decl(*mut self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_let_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
-        let mut is_mut = false
+        let mutable is_mut = false
         if self.current().kind is .KwMut() then {
             is_mut = true
             self.advance()
@@ -842,7 +842,7 @@ given Parser {
 
         if self.current().kind is .LParen() then {
             if is_mut then {
-                return .Error(box("Function declaration cannot use mut before name"))
+                return .Error(box("Function declaration cannot use mutable before name"))
             }
 
             if is_foreign and not type_params.is_empty() then {
@@ -928,7 +928,7 @@ given Parser {
             return self.wrap_decl(access, is_foreign, is_intrinsic, base)
         }
 
-        let mut type_name = TypeNode.Identifier("Int")
+        let mutable type_name = TypeNode.Identifier("Int")
         if self.is_type_start() then {
             type_name = self.parse_type() or else {
                 return .Error(box("parse let declaration type error"))
@@ -947,11 +947,11 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    protected parse_type_decl(*mut self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    protected parse_type_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
-        let mut foreign_cname = Option[String].None()
+        let mutable foreign_cname = Option[String].None()
         if is_foreign then {
             if self.current().kind is .StringLiteral(v) then {
                 foreign_cname = .Some(v)
@@ -961,7 +961,7 @@ given Parser {
 
         let name = self.expect_identifier("type declaration") or return
         if not self.is_upper_first(name) then {
-            let mut message = "Type name '"
+            let mutable message = "Type name '"
             message.push_string(name)
             message.push_string("' must start with an uppercase letter")
             return .Error(box(message))
@@ -980,7 +980,7 @@ given Parser {
             },
             .LParen() then {
                 self.advance()
-                let mut fields = List[Field].new()
+                let mutable fields = List[Field].new()
                 while true then {
                     when self.current().kind in {
                         .RParen() then {
@@ -992,14 +992,14 @@ given Parser {
                         },
                         _ then {
                             let field_access = self.parse_access_modifier(AccessModifier.Public())
-                            let mut field_mut = false
+                            let mutable field_mut = false
                             if self.current().kind is .KwMut() then {
                                 field_mut = true
                                 self.advance()
                             }
 
                             let field_name = self.expect_identifier("field name") or return
-                            let mut field_named = false
+                            let mutable field_named = false
                             if self.current().kind is .Colon() then {
                                 field_named = true
                                 self.advance()
@@ -1034,7 +1034,7 @@ given Parser {
                     return .Error(box("foreign type must use an empty body: {}"))
                 }
                 self.advance()
-                let mut cases = List[EnumCase].new()
+                let mutable cases = List[EnumCase].new()
                 while true then {
                     when self.current().kind in {
                         .RBrace() then {
@@ -1046,7 +1046,7 @@ given Parser {
                         },
                         _ then {
                             let case_name = self.expect_identifier("enum case") or return
-                            let mut case_fields = List[EnumCaseField].new()
+                            let mutable case_fields = List[EnumCaseField].new()
 
                             if self.current().kind is .LParen() then {
                                 self.advance()
@@ -1061,7 +1061,7 @@ given Parser {
                                         },
                                         _ then {
                                             let payload_name = self.expect_identifier("enum payload name") or return
-                                            let mut payload_named = false
+                                            let mutable payload_named = false
                                             if self.current().kind is .Colon() then {
                                                 payload_named = true
                                                 self.advance()
@@ -1117,7 +1117,7 @@ given Parser {
         }
     }
 
-    protected parse_let_statement(*mut self) Result[Statement] = {
+    protected parse_let_statement(*mutable self) Result[Statement] = {
         let start = self.current()
         self.advance()
 
@@ -1125,7 +1125,7 @@ given Parser {
             return self.parse_pair_let_statement(start)
         }
 
-        let mut is_mut = false
+        let mutable is_mut = false
         if self.current().kind is .KwMut() then {
             is_mut = true
             self.advance()
@@ -1133,7 +1133,7 @@ given Parser {
 
         let name = self.expect_identifier("let statement") or return
 
-        let mut type_name = Option[TypeNode].None()
+        let mutable type_name = Option[TypeNode].None()
         if self.is_type_start() then {
             let parsed_type_name = self.parse_type() or else {
                 return .Error(box("parse let statement type error"))
@@ -1147,7 +1147,7 @@ given Parser {
         }
 
         self.advance()
-        let mut value = self.parse_expression_checked("let statement value") or return
+        let mutable value = self.parse_expression_checked("let statement value") or return
         if self.should_continue_postfix_after_expression() then {
             value = self.parse_postfix_suffixes(value) or return
         }
@@ -1155,7 +1155,7 @@ given Parser {
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
 
-    protected parse_pair_let_statement(*mut self, start Token) Result[Statement] = {
+    protected parse_pair_let_statement(*mutable self, start Token) Result[Statement] = {
         self.advance()
 
         let first = self.parse_pair_binding_element() or return
@@ -1182,7 +1182,7 @@ given Parser {
         return .Ok(Statement.PairLetStmt(first, second, value, self.span_from_start(start)))
     }
 
-    protected parse_pair_binding_element(*mut self) Result[PairBindingElement] = {
+    protected parse_pair_binding_element(*mutable self) Result[PairBindingElement] = {
         let start = self.current()
 
         if start.kind is .Identifier(name) and name == "_" then {
@@ -1190,7 +1190,7 @@ given Parser {
             return .Ok(PairBindingElement("_", false, Option[TypeNode].None(), true, self.span_from_start(start)))
         }
 
-        let mut is_mut = false
+        let mutable is_mut = false
         if self.current().kind is .KwMut() then {
             is_mut = true
             self.advance()
@@ -1198,7 +1198,7 @@ given Parser {
 
         let name = self.expect_identifier("pair let binding") or return
 
-        let mut type_name = Option[TypeNode].None()
+        let mutable type_name = Option[TypeNode].None()
         when self.current().kind in {
             .Comma() then {},
             .RParen() then {},
@@ -1247,7 +1247,7 @@ given Parser {
         }
     }
 
-    protected parse_expression_checked(*mut self, context String) Result[* Expr] = {
+    protected parse_expression_checked(*mutable self, context String) Result[* Expr] = {
         let t = self.current()
         self.parse_debug("expr begin")
         let before = self.index
@@ -1256,15 +1256,15 @@ given Parser {
             let t = self.current()
             return .Error(box(self.format_progress_error("Parser made no progress while parsing ", context, t)))
         }
-        let mut expr = parsed_expr
+        let mutable expr = parsed_expr
         if self.should_continue_postfix_after_expression() then {
             expr = self.parse_postfix_suffixes(expr) or return
         }
         return .Ok(expr)
     }
 
-    protected parse_statement_list_until_rbrace(*mut self, context String) Result[List[Statement]] = {
-        let mut statements = List[Statement].new()
+    protected parse_statement_list_until_rbrace(*mutable self, context String) Result[List[Statement]] = {
+        let mutable statements = List[Statement].new()
         self.parse_debug("stmt-list begin")
         while true then {
             when self.current().kind in {
@@ -1273,7 +1273,7 @@ given Parser {
                     break
                 },
                 .Eof() then {
-                    let mut message = "Unexpected EOF in "
+                    let mutable message = "Unexpected EOF in "
                     message.push_string(context)
                     return .Error(box(message))
                 },
@@ -1296,7 +1296,7 @@ given Parser {
         return when continuation in {
             .ImplicitMemberExpr(member_name, args, _) then {
                 let span = expr_span(continuation)
-                let mut path = List[String].new()
+                let mutable path = List[String].new()
                 path.push(member_name)
                 let callee = box(Expr.MemberPath(base, path, span))
                 break Result[* Expr].Ok(box(Expr.Call(callee, args, span)))
@@ -1305,8 +1305,8 @@ given Parser {
         }
     }
 
-    protected parse_statement_postfix_continuations(*mut self, statement Statement) Result[Statement] = {
-        let mut current = statement
+    protected parse_statement_postfix_continuations(*mutable self, statement Statement) Result[Statement] = {
+        let mutable current = statement
         while self.can_continue_dot_postfix() then {
             self.parse_debug("statement postfix continuation")
             let continuation = self.parse_expression_checked("statement postfix continuation") or return
@@ -1325,7 +1325,7 @@ given Parser {
         return .Ok(current)
     }
 
-    protected parse_statement(*mut self) Result[Statement] = {
+    protected parse_statement(*mutable self) Result[Statement] = {
         let start = self.current()
         self.parse_debug("statement dispatch")
         when self.current().kind in {
@@ -1365,7 +1365,7 @@ given Parser {
                 return .Ok(Statement.DeferStmt(value, self.span_from_start(start)))
             },
             _ then {
-                let mut value = self.parse_expression_checked("statement expression") or return
+                let mutable value = self.parse_expression_checked("statement expression") or return
                 if self.should_continue_postfix_after_expression() then {
                     value = self.parse_postfix_suffixes(value) or return
                 }

@@ -35,9 +35,9 @@ extension Parser {
           )
         }
         try match(.multiply)
-        let mutable = currentToken === .mutKeyword
+        let mutable = currentToken === .mutableKeyword
         if mutable {
-          try match(.mutKeyword)
+          try match(.mutableKeyword)
         }
         prefixes.append(.weakReference(mutable: mutable))
         continue
@@ -46,16 +46,16 @@ extension Parser {
         try match(.multiply)
         if currentToken === .bang {
           try match(.bang)
-          let mutable = currentToken === .mutKeyword
+          let mutable = currentToken === .mutableKeyword
           if mutable {
-            try match(.mutKeyword)
+            try match(.mutableKeyword)
           }
           prefixes.append(.pointer(mutable: mutable))
           continue
         }
-        let mutable = currentToken === .mutKeyword
+        let mutable = currentToken === .mutableKeyword
         if mutable {
-          try match(.mutKeyword)
+          try match(.mutableKeyword)
         }
         prefixes.append(.reference(mutable: mutable))
         continue
@@ -121,7 +121,7 @@ extension Parser {
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
   /// - Function types: Func[ParamType1, ParamType2, ReturnType]
-  /// - U2 reference types: *T, *mut T, ?*T, *raw T
+  /// - U2 reference types: *T, *mutable T, ?*T, *raw T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]
   func parseType() throws -> TypeNode {

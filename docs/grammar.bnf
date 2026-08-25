@@ -34,7 +34,7 @@
 
 // ============================================================================
 // Global Declarations
-// ============================================================================
+// ======================ref======================================================
 
 <global-decl> ::= <access-modifier>? "intrinsic"? <let-decl>
                | <access-modifier>? "foreign" <foreign-let-decl>
@@ -53,20 +53,20 @@
 // ============================================================================
 
 <let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"?
-             | "let" "mut"? <identifier> <type-annotation>? "=" <expression> ";"?
+             | "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"?
              | "let" <identifier> <generic-params>? <function-signature> ";"?  // intrinsic function
-// 说明：出现 mut 时必须是变量声明（不可接函数参数列表）
+// 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）
 
-<foreign-let-decl> ::= "let" "mut"? <identifier> <type-annotation> ";"?
+<foreign-let-decl> ::= "let" "mutable"? <identifier> <type-annotation> ";"?
                      | "let" <identifier> "(" <func-param-list>? ")" <type-annotation> ";"?
 // 说明：
-// 1) foreign 变量声明必须有类型（支持 mut）
+// 1) foreign 变量声明必须有类型（支持 mutable）
 // 2) foreign 函数不允许函数体，不支持泛型
 
 <function-signature> ::= "(" <func-param-list>? ")" <type-annotation>
 <func-param-list> ::= <func-param> ("," <func-param>)* ","?
-<func-param> ::= "mut"? <identifier> ":" <type-annotation>    // named parameter
-               | "mut"? <identifier> <type-annotation>          // positional parameter
+<func-param> ::= "mutable"? <identifier> ":" <type-annotation>    // named parameter
+               | "mutable"? <identifier> <type-annotation>          // positional parameter
 // Named parameters use `name: Type` syntax. Callers must provide the label at the call site.
 // Positional parameters use `name Type` syntax (no colon). Each parameter independently
 // decides whether it is named or positional; mixing is allowed in the same parameter list.
@@ -75,10 +75,10 @@
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
 <method-first-param> ::= "self"                                          // bare self
                        | "*self"                                          // managed receiver sugar
-                       | "*mut self"                                      // mutable managed receiver sugar
+                       | "*mutable self"                                      // mutable managed receiver sugar
                        | <func-param>
 // Receiver rules:
-// - *self / *mut self: managed receiver sugar, auto-ref allowed
+// - *self / *mutable self: managed receiver sugar, auto-ref allowed
 // - bare self: equivalent to managed value receiver
 // - auto-deref (*T -> T) only applies to self receivers (following Go)
 
@@ -105,8 +105,8 @@
 // 3) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
 
 <field-list> ::= <field> ("," <field>)* ","?
-<field> ::= <access-modifier>? "mut"? <identifier> ":" <type-annotation>    // named field
-          | <access-modifier>? "mut"? <identifier> <type-annotation>        // positional field
+<field> ::= <access-modifier>? "mutable"? <identifier> ":" <type-annotation>    // named field
+          | <access-modifier>? "mutable"? <identifier> <type-annotation>        // positional field
 
 <variant-list> ::= <variant> ("," <variant>)* ","?
 <variant> ::= <type-identifier> "(" <variant-field-list>? ")"
@@ -159,16 +159,16 @@
               | <function-type>
               | "Self"
 
-<type-prefix> ::= "*" "mut"?
-               | "?*" "mut"?
-               | "*raw" "mut"?
+<type-prefix> ::= "*" "mutable"?
+               | "?*" "mutable"?
+               | "*!" "mutable"?
 // *T             — managed read-only reference
-// *mut T         — managed mutable reference
-// *raw T         — read-only pointer
-// *raw mut T     — mutable pointer
+// *mutable T         — managed mutable reference
+// *!T         — read-only pointer
+// *!mutable T     — mutable pointer
 // ?*T            — read-only weak reference
-// ?*mut T        — mutable weak reference
-// Note: `mut` must follow the keyword, not precede it (e.g. `*mut T`, not `mut *T`).
+// ?*mutable T        — mutable weak reference
+// Note: `mutable` must follow the keyword, not precede it (e.g. `*mutable T`, not `mutable *T`).
 
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
 <function-type> ::= "Func" "[" <type-list> "]"
@@ -200,11 +200,11 @@
               | <defer-statement>
               | <expression-statement>
 
-<let-statement> ::= "let" "mut"? <identifier> <type-annotation>? "=" <expression> ";"?
+<let-statement> ::= "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"?
                 | "let" "(" <pair-binding> "," <pair-binding> ")" "=" <expression> ";"?
 
 <pair-binding> ::= "_"
-                | "mut"? <identifier> <type-annotation>?
+                | "mutable"? <identifier> <type-annotation>?
 
 <assignment-statement> ::= <expression> <assign-op> <expression> ";"?
 <assign-op> ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
@@ -314,13 +314,13 @@
 <prefix-expression> ::= "-" <prefix-expression>
                       | "~" <prefix-expression>
                       | "*" <prefix-expression>
-                      | "&" "raw" "mut"? <prefix-expression>
-                      | "&" "mut"? <prefix-expression>
+                      | "&" "!" "mutable"? <prefix-expression>
+                      | "&" "mutable"? <prefix-expression>
                       | <postfix-expression>
 // Prefix ref/pointer operators:
 // - *expr dereferences managed references and raw pointers
-// - &expr / &mut expr form managed references
-// - &raw expr / &raw mut expr form raw pointers
+// - &expr / &mutable expr form managed references
+// - &!expr / &!mutable expr form raw pointers
 // Mutability/addressability checks are semantic, not grammar-level.
 
 // ============================================================================
@@ -421,7 +421,7 @@
                     | <bool-literal>                          // bool literal pattern
                     | <string-literal>                        // string literal pattern
                     | <rune-literal>                          // rune literal pattern
-                    | "mut"? <identifier>                     // variable binding
+                    | "mutable"? <identifier>                     // variable binding
                     | <struct-pattern>                        // struct destructuring pattern
                     | <pair-pattern>                          // pair destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
@@ -520,11 +520,10 @@
 // ============================================================================
 
 // Reserved keywords:
-//   let, mut, type, trait, given, intrinsic, foreign
+//   let, mutable, type, trait, given, intrinsic, foreign
 //   using, self, Self, as
 //   if, then, else, while, for, when, is, in, it
 //   and, or, not
-//   raw, mut
 //   return, break, continue, defer
 //   true, false
 //   public, private, protected, protected public
@@ -551,13 +550,13 @@
 
 // No implicit ref promotion (T → *T) for function/method arguments.
 // No auto-deref (*T → T) for function/method arguments.
-// Use explicit &, &mut, &raw, &raw mut, and * at call sites.
+// Use explicit &, &mutable, &!, &!mutable, and * at call sites.
 // Auto-ref and auto-deref only apply to method receivers (self).
 // - *self: auto-ref allowed (T → *T)
-// - *mut self: auto-ref allowed when the receiver is a writable lvalue (T → *mut T)
+// - *mutable self: auto-ref allowed when the receiver is a writable lvalue (T → *mutable T)
 // - self: auto-deref allowed (*T → T, following Go's pointer receiver behavior)
 
-// Closures: let mut variables are captured by reference (byMutReference).
+// Closures: let mutable variables are captured by reference (byMutReference).
 // Mutations inside the closure are visible outside.
 
 // ============================================================================

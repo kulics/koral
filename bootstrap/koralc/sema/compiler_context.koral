@@ -16,12 +16,12 @@
 /// 使用 ref 持有 DefIdMap，与 Swift 版本的 class 语义一致，
 /// 避免 ~500 字节的 DefIdMap 在栈上复制。
 public type CompilerContext(
-    mut def_id_map *mut DefIdMap,
-    mut concrete_global_initializers *mut Dict[UInt, * TypedExpr],
-    mut concrete_function_bodies *mut Dict[UInt, * TypedExpr],
-    mut concrete_function_sources *mut Dict[UInt, ConcreteExprSource],
-    mut concrete_given_member_bodies *mut Dict[UInt, * TypedExpr],
-    mut concrete_given_member_sources *mut Dict[UInt, ConcreteExprSource],
+    mutable def_id_map *mutable DefIdMap,
+    mutable concrete_global_initializers *mutable Dict[UInt, * TypedExpr],
+    mutable concrete_function_bodies *mutable Dict[UInt, * TypedExpr],
+    mutable concrete_function_sources *mutable Dict[UInt, ConcreteExprSource],
+    mutable concrete_given_member_bodies *mutable Dict[UInt, * TypedExpr],
+    mutable concrete_given_member_sources *mutable Dict[UInt, ConcreteExprSource],
 )
 
 public type ConcreteExprSource(
@@ -43,7 +43,7 @@ given CompilerContext {
         )
     }
 
-    public from_def_id_map(map *mut DefIdMap) CompilerContext = {
+    public from_def_id_map(map *mutable DefIdMap) CompilerContext = {
         return CompilerContext(
             map,
             box(Dict[UInt, * TypedExpr].new()),
@@ -142,7 +142,7 @@ given CompilerContext {
     // ── DefId 分配 ────────────────────────────────────────────────────────
 
     public allocate_def_id(
-        *mut self,
+        *mutable self,
         module_path List[String],
         name String,
         kind DefKind,
@@ -189,7 +189,7 @@ given CompilerContext {
     // ── 符号创建 ──────────────────────────────────────────────────────────
 
     public create_symbol(
-        *mut self,
+        *mutable self,
         name String,
         module_path List[String],
         source_file String,
@@ -229,7 +229,7 @@ given CompilerContext {
     }
 
     public create_symbol_with_package(
-        *mut self,
+        *mutable self,
         name String,
         module_path List[String],
         source_file String,
@@ -301,7 +301,7 @@ given CompilerContext {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second
-                let mut idx UInt = 0
+                let mutable idx UInt = 0
                 for case_info in cases then {
                     if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
                         return idx
@@ -318,7 +318,7 @@ given CompilerContext {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second
-                let mut specs = List[FunctionParamSpec].new()
+                let mutable specs = List[FunctionParamSpec].new()
                 for case_info in cases then {
                     if case_info.name == case_name or case_info.name.ends_with(".\(case_name)") then {
                         for param in case_info.params then {
@@ -472,14 +472,14 @@ given CompilerContext {
         return when self.def_id_map.lookup_type(def_id) in {
             .Some(mapped) then when mapped in {
                 .GenericStruct(_, args) then {
-                    let mut unpacked = List[Type].new()
+                    let mutable unpacked = List[Type].new()
                     for arg in args then {
                         unpacked.push(*arg)
                     }
                     break Option[List[Type]].Some(unpacked)
                 },
                 .GenericEnum(_, args) then {
-                    let mut unpacked = List[Type].new()
+                    let mutable unpacked = List[Type].new()
                     for arg in args then {
                         unpacked.push(*arg)
                     }
@@ -629,11 +629,11 @@ given CompilerContext {
             .VoidType() then "Void",
             .NeverType() then "Never",
             .FunctionType(params, ret) then {
-                let mut parts = List[String].new()
+                let mutable parts = List[String].new()
                 for entry in params then {
                     parts.push(self.get_debug_name(entry.param_type))
                 }
-                let mut out = "Func["
+                let mutable out = "Func["
                 out.push_string(join_strings(parts, ", "))
                 if not parts.is_empty() then {
                     out.push_string(", ")
@@ -644,12 +644,12 @@ given CompilerContext {
             },
             .ReferenceType(inner) then "*\(self.get_debug_name(*inner))",
             .BorrowedReferenceType(inner) then "*\(self.get_debug_name(*inner))",
-            .MutableReferenceType(inner) then "*mut \(self.get_debug_name(*inner))",
-            .MutableBorrowedReferenceType(inner) then "*mut \(self.get_debug_name(*inner))",
+            .MutableReferenceType(inner) then "*mutable \(self.get_debug_name(*inner))",
+            .MutableBorrowedReferenceType(inner) then "*mutable \(self.get_debug_name(*inner))",
             .PointerType(inner) then "*! \(self.get_debug_name(*inner))",
-            .MutablePointerType(inner) then "*! mut \(self.get_debug_name(*inner))",
+            .MutablePointerType(inner) then "*! mutable \(self.get_debug_name(*inner))",
             .WeakReferenceType(inner) then "?*\(self.get_debug_name(*inner))",
-            .MutableWeakReferenceType(inner) then "?*mut \(self.get_debug_name(*inner))",
+            .MutableWeakReferenceType(inner) then "?*mutable \(self.get_debug_name(*inner))",
             .StructureType(def_id) then {
                 let base_name = when self.def_id_map.get_name(def_id) in {
                     .Some(n) then n,
@@ -657,7 +657,7 @@ given CompilerContext {
                 }
                 break when self.def_id_map.get_type_arguments(def_id) in {
                     .Some(args) then if not args.is_empty() then {
-                        let mut arg_parts = List[String].new()
+                        let mutable arg_parts = List[String].new()
                         for a in args then {
                             arg_parts.push(self.get_debug_name(a))
                         }
@@ -673,7 +673,7 @@ given CompilerContext {
                 }
                 break when self.def_id_map.get_type_arguments(def_id) in {
                     .Some(args) then if not args.is_empty() then {
-                        let mut arg_parts = List[String].new()
+                        let mutable arg_parts = List[String].new()
                         for a in args then {
                             arg_parts.push(self.get_debug_name(a))
                         }
@@ -693,14 +693,14 @@ given CompilerContext {
             },
             .GenericParameter(name) then name,
             .GenericStruct(template, args) then {
-                let mut arg_parts = List[String].new()
+                let mutable arg_parts = List[String].new()
                 for a in args then {
                     arg_parts.push(self.get_debug_name(*a))
                 }
                 break "\(template)[\(join_strings(arg_parts, ", "))]"
             },
             .GenericEnum(template, args) then {
-                let mut arg_parts = List[String].new()
+                let mutable arg_parts = List[String].new()
                 for a in args then {
                     arg_parts.push(self.get_debug_name(*a))
                 }
@@ -791,14 +791,14 @@ given CompilerContext {
             .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
             .GenericParameter(name) then "Param_\(name)",
             .GenericStruct(template, args) then {
-                let mut arg_keys = List[String].new()
+                let mutable arg_keys = List[String].new()
                 for a in args then {
                     arg_keys.push(self.get_layout_key(*a))
                 }
                 break "\(template)_\(join_strings(arg_keys, "_"))"
             },
             .GenericEnum(template, args) then {
-                let mut arg_keys = List[String].new()
+                let mutable arg_keys = List[String].new()
                 for a in args then {
                     arg_keys.push(self.get_layout_key(*a))
                 }
@@ -820,7 +820,7 @@ given CompilerContext {
         let access_opt = self.def_id_map.get_access(def_id)
         let source_opt = self.def_id_map.get_source_file(def_id)
 
-        let mut parts = List[String].new()
+        let mutable parts = List[String].new()
 
         if module_opt is .Some(mod_path) and not mod_path.is_empty() then {
             parts.push(join_strings(mod_path, "_"))
@@ -836,7 +836,7 @@ given CompilerContext {
         }
         if is_private then {
             if source_opt is .Some(sf) then {
-                let mut hash UInt = 0
+                let mutable hash UInt = 0
                 // 简单哈希
                 let bytes = sf.bytes()
                 for b in bytes then {
@@ -858,7 +858,7 @@ given CompilerContext {
                 .None() then false,
             }
             if not is_inst and not args.is_empty() then {
-                let mut arg_keys = List[String].new()
+                let mutable arg_keys = List[String].new()
                 for a in args then {
                     arg_keys.push(self.get_layout_key(a))
                 }
@@ -958,7 +958,7 @@ given CompilerContext {
 
     /// Drop and replace concrete body caches with empty dicts to free memory.
     /// Call after monomorphization — MIR lowering and codegen don't need these.
-    public drop_concrete_bodies(*mut self) Void = {
+    public drop_concrete_bodies(*mutable self) Void = {
         self.concrete_global_initializers = box(Dict[UInt, * TypedExpr].new())
         self.concrete_function_bodies = box(Dict[UInt, * TypedExpr].new())
         self.concrete_function_sources = box(Dict[UInt, ConcreteExprSource].new())
@@ -968,7 +968,7 @@ given CompilerContext {
 
     /// Drop DefId metadata that is only needed before codegen.
     /// Keep names/types/layout-related maps intact for MIR/codegen queries.
-    public drop_codegen_unused_metadata(*mut self) Void = {
+    public drop_codegen_unused_metadata(*mutable self) Void = {
         self.def_id_map.package_ids = Dict[UInt, String].new()
         self.def_id_map.spans = Dict[UInt, SourceSpan].new()
         self.def_id_map.import_records = Dict[UInt, ImportRecord].new()
@@ -981,8 +981,8 @@ given CompilerContext {
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 private let join_strings(parts List[String], sep String) String = {
-    let mut result = String.new()
-    let mut first = true
+    let mutable result = String.new()
+    let mutable first = true
     for p in parts then {
         if not first then { result.push_string(sep) }
         result.push_string(p)

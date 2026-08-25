@@ -12,7 +12,7 @@
 public type CstType {
     Named(name Token),
     SelfType(kw Token),
-    Mut(inner * CstType, kw Token),
+    mutable(inner * CstType, kw Token),
     Generic(lbracket Token, args List[CstTypeArg], rbracket Token, base Token),
     Ref(inner * CstType, kw Token),
     Ptr(inner * CstType, kw Token),
@@ -304,7 +304,7 @@ public type CstDecl {
 
 // Trait method parameter
 public type CstTraitMethodParam {
-    // self / *self / *self mut
+    // self / *self / *self mutable
     SelfParam(kw Token, mut_kw Option[Token], ref_kw Option[Token], comma Option[Token]),
     // name Type
     NamedParam(name Token, colon Option[Token], param_type * CstType, comma Option[Token]),
@@ -331,8 +331,8 @@ public type CstFile(items List[*CstItem])
 
 public type CstParser(
     tokens List[Token],
-    mut pos UInt,
-    mut line_join_grouping UInt,
+    mutable pos UInt,
+    mutable line_join_grouping UInt,
 )
 
 given CstParser {
@@ -344,7 +344,7 @@ given CstParser {
     // ========================================================================
 
     private peek(*self) Token = {
-        let mut i = self.pos
+        let mutable i = self.pos
         while i < self.tokens.count() then {
             when self.tokens[i] in {
                 .Newline() then { i += 1; continue },
@@ -359,14 +359,14 @@ given CstParser {
         return self.tokens[self.pos]
     }
 
-    private advance(*mut self) Token = {
+    private advance(*mutable self) Token = {
         if self.pos >= self.tokens.count() then { return .EOF() }
         let tok = self.tokens[self.pos]
         self.pos += 1
         return tok
     }
 
-    private skip_newlines(*mut self) Void = {
+    private skip_newlines(*mutable self) Void = {
         while self.pos < self.tokens.count() then {
             when self.tokens[self.pos] in {
                 .Newline() then { self.pos += 1 },
@@ -385,12 +385,12 @@ given CstParser {
     private check(*self, expected Token) Bool =
         Token.tag(self.peek()) == Token.tag(expected)
 
-    private expect(*mut self, expected Token, expected_name String) Result[Token] = {
+    private expect(*mutable self, expected Token, expected_name String) Result[Token] = {
         if self.check(expected) then { return .Ok(self.eat()) }
         return .Error(box(self.expected_error(expected_name)))
     }
 
-    private expect_ident(*mut self, what String) Result[Token] = 
+    private expect_ident(*mutable self, what String) Result[Token] = 
         when self.peek() in {
             .Ident(_) then .Ok(self.eat()),
             _ then .Error(box(self.expected_error(what))),
@@ -407,19 +407,19 @@ given CstParser {
         _ then false,
     }
 
-    private eat(*mut self) Token = {
+    private eat(*mutable self) Token = {
         self.skip_newlines()
         return self.advance()
     }
 
-    private eat_comma(*mut self) Option[Token] = {
+    private eat_comma(*mutable self) Option[Token] = {
         if self.check(Token.Comma()) then { return .Some(self.eat()) }
         return .None()
     }
 
     private count_newlines(*self) UInt = {
-        let mut count UInt = 0
-        let mut i = self.pos
+        let mutable count UInt = 0
+        let mutable i = self.pos
         while i < self.tokens.count() then {
             when self.tokens[i] in {
                 .Newline() then { count += 1; i += 1 },
@@ -430,8 +430,8 @@ given CstParser {
     }
 
     private peek_at_skip_nl(*self, offset UInt) Token = {
-        let mut count UInt = 0
-        let mut i = self.pos
+        let mutable count UInt = 0
+        let mutable i = self.pos
         while i < self.tokens.count() then {
             when self.tokens[i] in {
                 .Newline() then { i += 1; continue },
@@ -456,7 +456,7 @@ given CstParser {
         return 0
     }
 
-    private eat_vis(*mut self) Option[Token] = {
+    private eat_vis(*mutable self) Option[Token] = {
         if self.check(.KwProtected()) and self.peek_at_skip_nl(1) is .KwPublic() then {
             self.eat()
             self.eat()
@@ -466,8 +466,8 @@ given CstParser {
         return .None()
     }
 
-    private eat_modifiers(*mut self) List[Token] = {
-        let mut mods = List[Token].new()
+    private eat_modifiers(*mutable self) List[Token] = {
+        let mutable mods = List[Token].new()
         while true then {
             when self.peek() in {
                 .KwForeign() or .KwIntrinsic() then { mods.push(self.eat()) },
@@ -492,7 +492,7 @@ given CstParser {
     private at_newline_boundary(*self) Bool = {
         if self.pos == 0 then { return false }
         // Check if there's a newline between current pos-1 and the next non-newline
-        let mut i = self.pos
+        let mutable i = self.pos
         if i > 0 then {
             i -= 1
             while i > 0 then {
@@ -511,11 +511,11 @@ given CstParser {
         return self.count_newlines() > 0
     }
 
-    private enter_line_join_grouping(*mut self) Void = {
+    private enter_line_join_grouping(*mutable self) Void = {
         self.line_join_grouping += 1
     }
 
-    private leave_line_join_grouping(*mut self) Void = {
+    private leave_line_join_grouping(*mutable self) Void = {
         if self.line_join_grouping > 0 then {
             self.line_join_grouping -= 1
         }
@@ -525,14 +525,14 @@ given CstParser {
     // Type parsing
     // ========================================================================
 
-    public parse_type(*mut self) Result[CstType] = {
+    public parse_type(*mutable self) Result[CstType] = {
         return self.parse_type_node()
     }
 
-    private parse_type_node(*mut self) Result[CstType] = {
+    private parse_type_node(*mutable self) Result[CstType] = {
         if self.check(.KwPtr()) then {
             let kw = self.eat()
-            let mut mut_kw = Option[Token].None()
+            let mutable mut_kw = Option[Token].None()
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat())
             }
@@ -541,7 +541,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             if mut_kw is .Some(mk) then {
-                return .Ok(.Mut(box(CstType.Ptr(box(inner), kw)), mk))
+                return .Ok(.mutable(box(CstType.Ptr(box(inner), kw)), mk))
             }
             return .Ok(.Ptr(box(inner), kw))
         }
@@ -549,7 +549,7 @@ given CstParser {
             let kw = self.eat()
             if self.check(.Bang()) then {
                 let ignored_raw_kw = self.eat()
-                let mut mut_kw = Option[Token].None()
+                let mutable mut_kw = Option[Token].None()
                 if self.check(.KwMut()) then {
                     mut_kw = .Some(self.eat())
                 }
@@ -560,11 +560,11 @@ given CstParser {
                 let ptr_kw = Token.KwPtr()
                 let _ = ignored_raw_kw
                 if mut_kw is .Some(mk) then {
-                    return .Ok(.Mut(box(CstType.Ptr(box(inner), ptr_kw)), mk))
+                    return .Ok(.mutable(box(CstType.Ptr(box(inner), ptr_kw)), mk))
                 }
                 return .Ok(.Ptr(box(inner), ptr_kw))
             }
-            let mut mut_kw = Option[Token].None()
+            let mutable mut_kw = Option[Token].None()
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat())
             }
@@ -573,13 +573,13 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             if mut_kw is .Some(mk) then {
-                return .Ok(.Mut(box(CstType.Ref(box(inner), kw)), mk))
+                return .Ok(.mutable(box(CstType.Ref(box(inner), kw)), mk))
             }
             return .Ok(.Ref(box(inner), kw))
         }
         if self.check(.KwWeakref()) then {
             let kw = self.eat()
-            let mut mut_kw = Option[Token].None()
+            let mutable mut_kw = Option[Token].None()
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat())
             }
@@ -588,7 +588,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             if mut_kw is .Some(mk) then {
-                return .Ok(.Mut(box(CstType.Weakref(box(inner), kw)), mk))
+                return .Ok(.mutable(box(CstType.Weakref(box(inner), kw)), mk))
             }
             return .Ok(.Weakref(box(inner), kw))
         }
@@ -618,10 +618,10 @@ given CstParser {
             },
             _ then {},
         }
-        let mut t = CstType.Named(name)
+        let mutable t = CstType.Named(name)
         while self.check(.LBracket()) then {
             let lb = self.eat()
-            let mut args = List[CstTypeArg].new()
+            let mutable args = List[CstTypeArg].new()
             while not self.check(.RBracket()) and not self.is_eof() then {
                 let inner = when self.parse_type_node() in {
                     .Ok(parsed_type) then parsed_type,
@@ -642,7 +642,7 @@ given CstParser {
         return .Ok(t)
     }
 
-    private parse_type_suffix(*mut self, base CstType) CstType = {
+    private parse_type_suffix(*mutable self, base CstType) CstType = {
         return base
     }
 
@@ -650,7 +650,7 @@ given CstParser {
     // Generic parameters: [T Any, U Eq]
     // ========================================================================
 
-    private parse_generic_params(*mut self) Result[Option[* CstGenericParams]] = {
+    private parse_generic_params(*mutable self) Result[Option[* CstGenericParams]] = {
         if not self.check(.LBracket()) then {
             return .Ok(.None())
         }
@@ -658,13 +658,13 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let mut params = List[CstGenericParam].new()
+        let mutable params = List[CstGenericParam].new()
         while not self.check(.RBracket()) and not self.is_eof() then {
             let name = when self.expect_ident("generic parameter name") in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let mut constraints = List[* CstType].new()
+            let mutable constraints = List[* CstType].new()
             // Collect constraint types until comma or ]
             while not self.check(.Comma()) and not self.check(.RBracket()) and not self.is_eof() then {
                 if self.check(.KwAnd()) then {
@@ -691,14 +691,14 @@ given CstParser {
     // Parameters: (name Type, name2 Type2)
     // ========================================================================
 
-    private parse_params(*mut self) Result[List[CstParam]] = {
-        let mut params = List[CstParam].new()
-        let mut first UInt = 1
+    private parse_params(*mutable self) Result[List[CstParam]] = {
+        let mutable params = List[CstParam].new()
+        let mutable first UInt = 1
         while not self.check(.RParen()) and not self.is_eof() then {
-            // Method-first-param support: self / *self / *self mut
+            // Method-first-param support: self / *self / *self mutable
             if first == 1 and self.check(.Star()) then {
                 let ref_kw = self.eat()
-                let mut mut_kw = Option[Token].None()
+                let mutable mut_kw = Option[Token].None()
                 if self.check(.KwMut()) then {
                     mut_kw = .Some(self.eat())
                 }
@@ -719,7 +719,7 @@ given CstParser {
                 continue
             }
 
-            let mut param_mut = Option[Token].None()
+            let mutable param_mut = Option[Token].None()
             if self.check(.KwMut()) then {
                 param_mut = .Some(self.eat())
             }
@@ -729,7 +729,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
 
-            let mut colon = Option[Token].None()
+            let mutable colon = Option[Token].None()
             if self.check(.Colon()) then {
                 colon = .Some(self.eat())
             }
@@ -773,16 +773,16 @@ given CstParser {
     //   primary
     // ========================================================================
 
-    public parse_expr(*mut self) Result[CstExpr] = {
+    public parse_expr(*mutable self) Result[CstExpr] = {
         return self.parse_expr_node()
     }
 
-    private parse_expr_node(*mut self) Result[CstExpr] = {
+    private parse_expr_node(*mutable self) Result[CstExpr] = {
         return self.parse_or_return()
     }
 
-    private parse_or_return(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_or_else() in {
+    private parse_or_return(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_or_else() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -800,8 +800,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_or_else(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_or() in {
+    private parse_or_else(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_or() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -823,8 +823,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_or(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_and_then() in {
+    private parse_or(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_and_then() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -842,8 +842,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_and_then(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_and() in {
+    private parse_and_then(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_and() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -865,8 +865,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_and(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_not() in {
+    private parse_and(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_not() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -883,11 +883,11 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_single_pattern(*mut self) Result[CstPattern] = {
+    private parse_single_pattern(*mutable self) Result[CstPattern] = {
         return self.parse_primary_pattern()
     }
 
-    private parse_is(*mut self) Result[CstExpr] = {
+    private parse_is(*mutable self) Result[CstExpr] = {
         let left = when self.parse_bitwise_or() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
@@ -901,7 +901,7 @@ given CstParser {
         }
 
         let is_kw = self.eat()
-        let mut not_kw = Option[Token].None()
+        let mutable not_kw = Option[Token].None()
         if self.check(.KwNot()) then {
             not_kw = .Some(self.eat())
         }
@@ -912,7 +912,7 @@ given CstParser {
         return .Ok(.IsExpr(box(left), is_kw, not_kw, box(pattern)))
     }
 
-    private parse_not(*mut self) Result[CstExpr] = {
+    private parse_not(*mutable self) Result[CstExpr] = {
         if self.check(.KwNot()) then {
             let op = self.eat()
             let operand = when self.parse_is() in {
@@ -924,8 +924,8 @@ given CstParser {
         return self.parse_is()
     }
 
-    private parse_bitwise_or(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_bitwise_xor() in {
+    private parse_bitwise_or(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_bitwise_xor() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -941,8 +941,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_bitwise_xor(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_bitwise_and() in {
+    private parse_bitwise_xor(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_bitwise_and() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -958,8 +958,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_bitwise_and(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_range() in {
+    private parse_bitwise_and(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_range() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -975,7 +975,7 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_range(*mut self) Result[CstExpr] = {
+    private parse_range(*mutable self) Result[CstExpr] = {
         // Prefix range: ..b, ..<b, ..., ...<b, ....
         when self.peek() in {
             .Range() then {
@@ -1075,8 +1075,8 @@ given CstParser {
         _ then false,
     }
 
-    private parse_comparison(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_shift() in {
+    private parse_comparison(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_shift() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1097,8 +1097,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_shift(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_additive() in {
+    private parse_shift(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_additive() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1119,8 +1119,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_additive(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_multiplicative() in {
+    private parse_additive(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_multiplicative() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1150,8 +1150,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_multiplicative(*mut self) Result[CstExpr] = {
-        let mut left = when self.parse_prefix() in {
+    private parse_multiplicative(*mutable self) Result[CstExpr] = {
+        let mutable left = when self.parse_prefix() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1176,8 +1176,8 @@ given CstParser {
     // Prefix expressions
     // ========================================================================
 
-    private parse_prefix(*mut self) Result[CstExpr] = {
-        let mut leading_comments = List[Token].new()
+    private parse_prefix(*mutable self) Result[CstExpr] = {
+        let mutable leading_comments = List[Token].new()
         while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) or self.peek() is .Semi() then {
             if self.peek() is .Semi() then {
                 let ignored_semi = self.eat()
@@ -1237,11 +1237,11 @@ given CstParser {
             return .Ok(.Deref(op, box(operand)))
         }
 
-        // Address-of: &, &mut, &!, &! mut
+        // Address-of: &, &mutable, &!, &! mutable
         if self.check(.Amp()) then {
             let op = self.eat()
-            let mut raw_kw = Option[Token].None()
-            let mut mut_kw = Option[Token].None()
+            let mutable raw_kw = Option[Token].None()
+            let mutable mut_kw = Option[Token].None()
             if self.check(.Bang()) then {
                 raw_kw = .Some(self.eat())
                 if self.check(.KwMut()) then {
@@ -1264,8 +1264,8 @@ given CstParser {
     // Postfix expressions
     // ========================================================================
 
-    private parse_postfix(*mut self) Result[CstExpr] = {
-        let mut expr = when self.parse_primary() in {
+    private parse_postfix(*mutable self) Result[CstExpr] = {
+        let mutable expr = when self.parse_primary() in {
             .Ok(e) then e,
             .Error(e) then { return .Error(e) },
         }
@@ -1378,7 +1378,7 @@ given CstParser {
             if self.check(.LBracket()) then {
                 if self.is_type_start(self.peek_at_skip_nl(1)) then {
                     let lb = self.eat()
-                    let mut type_args = List[CstTypeArg].new()
+                    let mutable type_args = List[CstTypeArg].new()
                     while not self.check(.RBracket()) and not self.is_eof() then {
                         let t = when self.parse_type_node() in {
                             .Ok(parsed_type) then parsed_type,
@@ -1397,7 +1397,7 @@ given CstParser {
 
                 // Subscript: expr[args]
                 let lb = self.eat()
-                let mut args = List[CstCallArg].new()
+                let mutable args = List[CstCallArg].new()
                 while not self.check(.RBracket()) and not self.is_eof() then {
                     let value = when self.parse_expr_node() in {
                         .Ok(e) then e,
@@ -1419,26 +1419,26 @@ given CstParser {
         return .Ok(expr)
     }
 
-    private parse_call_args(*mut self) Result[List[CstCallArg]] = {
-        let mut args = List[CstCallArg].new()
+    private parse_call_args(*mutable self) Result[List[CstCallArg]] = {
+        let mutable args = List[CstCallArg].new()
         self.enter_line_join_grouping()
         while not self.check(.RParen()) and not self.is_eof() then {
             if self.check(.Semi()) then {
                 self.eat()
                 continue
             }
-            let mut leading_comments = List[Token].new()
+            let mutable leading_comments = List[Token].new()
             while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
                 leading_comments.push(self.eat())
             }
             let before = self.pos
-            let mut label = Option[Token].None()
-            let mut colon = Option[Token].None()
+            let mutable label = Option[Token].None()
+            let mutable colon = Option[Token].None()
             if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Colon() then {
                 label = .Some(self.eat())
                 colon = .Some(self.eat())
             }
-            let mut value = when self.parse_expr_node() in {
+            let mutable value = when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -1460,7 +1460,7 @@ given CstParser {
     // Primary expressions
     // ========================================================================
 
-    private parse_primary(*mut self) Result[CstExpr] = {
+    private parse_primary(*mutable self) Result[CstExpr] = {
         when self.peek() in {
             .KwIf() then { return self.parse_if_expr() },
             .KwWhile() then { return self.parse_while_expr() },
@@ -1540,7 +1540,7 @@ given CstParser {
         return .Error(box("Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())"))
     }
 
-    private parse_collection_literal(*mut self) Result[CstExpr] = {
+    private parse_collection_literal(*mutable self) Result[CstExpr] = {
         let lb = when self.expect(.LBracket(), "'['") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -1562,7 +1562,7 @@ given CstParser {
         }
 
         if self.check(.Colon()) then {
-            let mut entries = List[CstDictEntry].new()
+            let mutable entries = List[CstDictEntry].new()
             let first_colon = self.eat()
             let first_value = when self.parse_expr_node() in {
                 .Ok(e) then e,
@@ -1596,7 +1596,7 @@ given CstParser {
             return .Ok(.DictLiteral(lb, entries, rb))
         }
 
-        let mut elements = List[CstCollectionElement].new()
+        let mutable elements = List[CstCollectionElement].new()
         let first_comma = self.eat_comma()
         elements.push(CstCollectionElement(box(first), first_comma))
         while not self.check(.RBracket()) and not self.is_eof() then {
@@ -1621,12 +1621,12 @@ given CstParser {
     // Note: block body is statement-only (no trailing final-expression slot).
     // ========================================================================
 
-    private parse_block_expr(*mut self) Result[CstExpr] = {
+    private parse_block_expr(*mutable self) Result[CstExpr] = {
         let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let mut items = List[*CstItem].new()
+        let mutable items = List[*CstItem].new()
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
@@ -1658,8 +1658,8 @@ given CstParser {
         return .Ok(.Block(lb, items, rb))
     }
 
-    private parse_block_item(*mut self) Result[CstItem] = {
-        // Variable declaration: let [mut] name [Type] = expr
+    private parse_block_item(*mutable self) Result[CstItem] = {
+        // Variable declaration: let [mutable] name [Type] = expr
         if self.peek() is .KwLet() then {
             when self.parse_var_decl_stmt() in {
                 .Ok(s) then { return .Ok(.Stmt(box(s))) },
@@ -1677,7 +1677,7 @@ given CstParser {
     // Parenthesized expression or lambda
     // ========================================================================
 
-    private parse_paren_or_lambda(*mut self) Result[CstExpr] = {
+    private parse_paren_or_lambda(*mutable self) Result[CstExpr] = {
         // Try lambda: (params) [RetType] -> body
         let saved = self.pos
         let lambda_result = self.try_parse_lambda()
@@ -1741,17 +1741,17 @@ given CstParser {
         }
     }
 
-    private try_parse_lambda(*mut self) Option[CstExpr] = {
+    private try_parse_lambda(*mutable self) Option[CstExpr] = {
         let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
             .Error(_) then { return .None() },
         }
-        let mut params = List[CstLambdaParam].new()
+        let mutable params = List[CstLambdaParam].new()
         while not self.check(.RParen()) and not self.is_eof() then {
             if self.peek() is not .Ident(_) then { return .None() }
             let name = self.eat()
             // Optional type annotation
-            let mut pt = Option[* CstType].None()
+            let mutable pt = Option[* CstType].None()
             if self.peek() is .Ident(_) or self.peek() is .LBracket() or self.peek() is .KwSelfType() then {
                 // Check if this looks like a type (uppercase start or [)
                 let is_type = self.is_type_start(self.peek())
@@ -1773,7 +1773,7 @@ given CstParser {
         }
 
         // Optional return type
-        let mut ret = Option[* CstType].None()
+        let mutable ret = Option[* CstType].None()
         if self.peek() is .Ident(_) or self.peek() is .LBracket() or self.peek() is .KwSelfType() then {
             let is_type = self.is_type_start(self.peek())
             if is_type then {
@@ -1798,7 +1798,7 @@ given CstParser {
     // Control flow expressions
     // ========================================================================
 
-    private parse_if_expr(*mut self) Result[CstExpr] = {
+    private parse_if_expr(*mutable self) Result[CstExpr] = {
         let kw = when self.expect(.KwIf(), "'if'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -1828,7 +1828,7 @@ given CstParser {
         return .Ok(.If(kw, box(cond), then_kw, box(then_body), .None(), .None()))
     }
 
-    private parse_while_expr(*mut self) Result[CstExpr] = {
+    private parse_while_expr(*mutable self) Result[CstExpr] = {
         let kw = when self.expect(.KwWhile(), "'while'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -1856,7 +1856,7 @@ given CstParser {
         return .Ok(.While(kw, box(cond), then_kw, box(body)))
     }
 
-    private parse_for_expr(*mut self) Result[CstExpr] = {
+    private parse_for_expr(*mutable self) Result[CstExpr] = {
         let kw = when self.expect(.KwFor(), "'for'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -1884,7 +1884,7 @@ given CstParser {
         return .Ok(.For(kw, box(binding), in_kw, box(iterable), then_kw, box(body)))
     }
 
-    private parse_when_expr(*mut self) Result[CstExpr] = {
+    private parse_when_expr(*mutable self) Result[CstExpr] = {
         let kw = when self.expect(.KwWhen(), "'when'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -1902,11 +1902,11 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let mut arms = List[* CstWhenArm].new()
+        let mutable arms = List[* CstWhenArm].new()
         while not self.check(.RBrace()) and not self.is_eof() then {
             self.skip_newlines()
             if self.check(.RBrace()) or self.is_eof() then { break }
-            let mut leading_comments = List[Token].new()
+            let mutable leading_comments = List[Token].new()
             while self.peek() is .LineComment(_) or self.peek() is .BlockComment(_) then {
                 leading_comments.push(self.eat())
                 self.skip_newlines()
@@ -1925,7 +1925,7 @@ given CstParser {
         return .Ok(.When(kw, box(subject), in_kw, lb, arms, rb))
     }
 
-    private parse_when_arm(*mut self) Result[CstWhenArm] = {
+    private parse_when_arm(*mutable self) Result[CstWhenArm] = {
         let pattern = when self.parse_pattern_node() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
@@ -1946,7 +1946,7 @@ given CstParser {
             }
         }
         let comma = self.eat_comma()
-        let mut trailing_comments = List[Token].new()
+        let mutable trailing_comments = List[Token].new()
         while self.peek_raw() is .LineComment(_) or self.peek_raw() is .BlockComment(_) then {
             trailing_comments.push(self.advance())
         }
@@ -1955,7 +1955,7 @@ given CstParser {
         return .Ok(CstWhenArm(List[Token].new(), box(pattern), then_kw, box(body), comma, trailing_comments))
     }
 
-    private expect_pattern_value(*mut self, what String) Result[Token] = {
+    private expect_pattern_value(*mutable self, what String) Result[Token] = {
         return when self.peek() in {
             .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue() or .BoolFalse() or .Ident(_) then .Ok(self.eat()),
             _ then .Error(box(self.expected_error(what))),
@@ -1966,16 +1966,16 @@ given CstParser {
     // Pattern parsing
     // ========================================================================
 
-    public parse_pattern(*mut self) Result[CstPattern] = {
+    public parse_pattern(*mutable self) Result[CstPattern] = {
         return self.parse_pattern_node()
     }
 
-    private parse_pattern_node(*mut self) Result[CstPattern] = {
+    private parse_pattern_node(*mutable self) Result[CstPattern] = {
         return self.parse_or_pattern()
     }
 
-    private parse_or_pattern(*mut self) Result[CstPattern] = {
-        let mut left = when self.parse_and_pattern() in {
+    private parse_or_pattern(*mutable self) Result[CstPattern] = {
+        let mutable left = when self.parse_and_pattern() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
         }
@@ -1992,8 +1992,8 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_and_pattern(*mut self) Result[CstPattern] = {
-        let mut left = when self.parse_not_pattern() in {
+    private parse_and_pattern(*mutable self) Result[CstPattern] = {
+        let mutable left = when self.parse_not_pattern() in {
             .Ok(p) then p,
             .Error(e) then { return .Error(e) },
         }
@@ -2010,7 +2010,7 @@ given CstParser {
         return .Ok(left)
     }
 
-    private parse_not_pattern(*mut self) Result[CstPattern] = {
+    private parse_not_pattern(*mutable self) Result[CstPattern] = {
         if self.check(.KwNot()) then {
             let op = self.eat()
             let inner = when self.parse_not_pattern() in {
@@ -2022,7 +2022,7 @@ given CstParser {
         return self.parse_primary_pattern()
     }
 
-    private parse_primary_pattern(*mut self) Result[CstPattern] = {
+    private parse_primary_pattern(*mutable self) Result[CstPattern] = {
         // Comparison patterns: > n, < n, >= n, <= n
         when self.peek() in {
             .Gt() or .Lt() or .GtEq() or .LtEq() then {
@@ -2067,7 +2067,7 @@ given CstParser {
         // Wildcard
         if self.peek() is .Underscore() then { return .Ok(.Wildcard(self.eat())) }
 
-        // Mutable variable: mut name
+        // Mutable variable: mutable name
         if self.check(.KwMut()) then {
             let mut_kw = self.eat()
             let name = when self.expect_ident("pattern variable name") in {
@@ -2086,10 +2086,10 @@ given CstParser {
             }
             if self.check(.LParen()) then {
                 let lp = self.eat()
-                let mut args = List[CstPatternArg].new()
+                let mutable args = List[CstPatternArg].new()
                 while not self.check(.RParen()) and not self.is_eof() then {
-                    let mut label = Option[Token].None()
-                    let mut colon = Option[Token].None()
+                    let mutable label = Option[Token].None()
+                    let mutable colon = Option[Token].None()
                     if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Colon() then {
                         label = .Some(self.eat())
                         colon = .Some(self.eat())
@@ -2132,10 +2132,10 @@ given CstParser {
             }
             if self.check(.LParen()) then {
                 let lp = self.eat()
-                let mut args = List[CstPatternArg].new()
+                let mutable args = List[CstPatternArg].new()
                 while not self.check(.RParen()) and not self.is_eof() then {
-                    let mut label = Option[Token].None()
-                    let mut colon = Option[Token].None()
+                    let mutable label = Option[Token].None()
+                    let mutable colon = Option[Token].None()
                     if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Colon() then {
                         label = .Some(self.eat())
                         colon = .Some(self.eat())
@@ -2164,7 +2164,7 @@ given CstParser {
     // Statement parsing
     // ========================================================================
 
-    private parse_stmt(*mut self) Result[CstStmt] = {
+    private parse_stmt(*mutable self) Result[CstStmt] = {
         when self.peek() in {
             .KwDefer() then {
                 let kw = self.eat()
@@ -2242,12 +2242,12 @@ given CstParser {
             _ then {},
         }
         // Eat optional semicolon
-        let mut semi = Option[Token].None()
+        let mutable semi = Option[Token].None()
         if self.peek() is .Semi() then { semi = .Some(self.eat()) }
         return .Ok(.ExprStmt(box(expr), semi))
     }
 
-    private parse_var_decl_stmt(*mut self) Result[CstStmt] = {
+    private parse_var_decl_stmt(*mutable self) Result[CstStmt] = {
         let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
@@ -2283,7 +2283,7 @@ given CstParser {
             return .Ok(.PairVarDecl(let_kw, lp, first, comma, second, rp, eq, box(value)))
         }
 
-        let mut mut_kw = Option[Token].None()
+        let mutable mut_kw = Option[Token].None()
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat())
         }
@@ -2293,7 +2293,7 @@ given CstParser {
         }
 
         // Optional type annotation
-        let mut var_type = Option[* CstType].None()
+        let mutable var_type = Option[* CstType].None()
         if self.is_type_start(self.peek()) then {
             let t = when self.parse_type_node() in {
                 .Ok(parsed_type) then parsed_type,
@@ -2315,8 +2315,8 @@ given CstParser {
         return .Ok(.VarDecl(let_kw, mut_kw, name, var_type, eq, box(value)))
     }
 
-    private parse_pair_binding(*mut self) Result[CstPairBinding] = {
-        let mut mut_kw = Option[Token].None()
+    private parse_pair_binding(*mutable self) Result[CstPairBinding] = {
+        let mutable mut_kw = Option[Token].None()
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat())
         }
@@ -2331,7 +2331,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
 
-        let mut binding_type = Option[* CstType].None()
+        let mutable binding_type = Option[* CstType].None()
         if not self.check(.Comma()) and not self.check(.RParen()) then {
             let t = when self.parse_type_node() in {
                 .Ok(parsed_type) then parsed_type,
@@ -2348,8 +2348,8 @@ given CstParser {
     // ========================================================================
 
     // Main entry point
-    public parse(*mut self) Result[CstFile] = {
-        let mut items = List[*CstItem].new()
+    public parse(*mutable self) Result[CstFile] = {
+        let mutable items = List[*CstItem].new()
         while not self.is_eof() then {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
@@ -2385,7 +2385,7 @@ given CstParser {
         return .Ok(CstFile(items))
     }
 
-    private parse_top_item(*mut self) Result[CstItem] = {
+    private parse_top_item(*mutable self) Result[CstItem] = {
         // Using declaration
         if self.check(.KwUsing()) then {
             when self.parse_using_decl() in {
@@ -2408,7 +2408,7 @@ given CstParser {
         }
 
         // Determine declaration kind by peeking past access modifiers and modifiers
-        let mut offset UInt = self.access_modifier_token_count()
+        let mutable offset UInt = self.access_modifier_token_count()
         let after_access = self.peek_at_skip_nl(offset)
         if after_access is .KwForeign() or after_access is .KwIntrinsic() then { offset += 1 }
         let decl_kw = self.peek_at_skip_nl(offset)
@@ -2450,8 +2450,8 @@ given CstParser {
     // Using declarations
     // ========================================================================
 
-    private parse_using_decl(*mut self) Result[CstDecl] = {
-        let mut tokens = List[Token].new()
+    private parse_using_decl(*mutable self) Result[CstDecl] = {
+        let mutable tokens = List[Token].new()
         while not self.is_eof() then {
             when self.peek_raw() in {
                 .Newline() or .EOF() then { break },
@@ -2461,12 +2461,12 @@ given CstParser {
         return .Ok(.Using(tokens))
     }
 
-    private parse_foreign_using_decl(*mut self) Result[CstDecl] = {
+    private parse_foreign_using_decl(*mutable self) Result[CstDecl] = {
         let foreign_kw = when self.expect(.KwForeign(), "'foreign'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let mut tokens = List[Token].new()
+        let mutable tokens = List[Token].new()
         while not self.is_eof() then {
             when self.peek_raw() in {
                 .Newline() or .EOF() then { break },
@@ -2480,21 +2480,21 @@ given CstParser {
     // Let declaration (function or variable)
     // ========================================================================
 
-    private parse_let_decl(*mut self) Result[CstDecl] = {
+    private parse_let_decl(*mutable self) Result[CstDecl] = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
         let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let mut mut_kw = Option[Token].None()
+        let mutable mut_kw = Option[Token].None()
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat())
         }
         return self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw, false)
     }
 
-    private finish_func_or_var(*mut self,
+    private finish_func_or_var(*mutable self,
         vis Option[Token], mods List[Token],
         let_kw Option[Token], mut_kw Option[Token],
         in_member_context Bool
@@ -2509,9 +2509,9 @@ given CstParser {
         }
 
         // Parameters
-        let mut lp = Option[Token].None()
-        let mut params = List[CstParam].new()
-        let mut rp = Option[Token].None()
+        let mutable lp = Option[Token].None()
+        let mutable params = List[CstParam].new()
+        let mutable rp = Option[Token].None()
         if self.check(.LParen()) then {
             lp = .Some(self.eat())
             params = when self.parse_params() in {
@@ -2525,7 +2525,7 @@ given CstParser {
         }
 
         // Return type
-        let mut ret = Option[* CstType].None()
+        let mutable ret = Option[* CstType].None()
         if self.is_type_start(self.peek()) then {
             if not self.check(.Eq()) then {
                 let t = when self.parse_type_node() in {
@@ -2575,7 +2575,7 @@ given CstParser {
     // Type declaration
     // ========================================================================
 
-    private parse_type_decl(*mut self) Result[CstDecl] = {
+    private parse_type_decl(*mutable self) Result[CstDecl] = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
         let kw = when self.expect(.KwType(), "'type'") in {
@@ -2594,7 +2594,7 @@ given CstParser {
         // Struct body: (fields)
         if self.check(.LParen()) then {
             let lp = self.eat()
-            let mut items = List[*CstStructBodyItem].new()
+            let mutable items = List[*CstStructBodyItem].new()
             while not self.check(.RParen()) and not self.is_eof() then {
                 let nl_count = self.count_newlines()
                 if nl_count >= 2 then {
@@ -2617,7 +2617,7 @@ given CstParser {
                     }
                     continue
                 }
-                let mut field_mut = Option[Token].None()
+                let mutable field_mut = Option[Token].None()
                 let field_access = self.eat_vis()
                 if self.check(.KwMut()) then {
                     field_mut = .Some(self.eat())
@@ -2626,7 +2626,7 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                let mut colon = Option[Token].None()
+                let mutable colon = Option[Token].None()
                 if self.check(.Colon()) then {
                     colon = .Some(self.eat())
                 }
@@ -2648,7 +2648,7 @@ given CstParser {
         // Enum body: { .Variant1, .Variant2(T) }
         if self.check(.LBrace()) then {
             let lb = self.eat()
-            let mut cases = List[*CstItem].new()
+            let mutable cases = List[*CstItem].new()
             while not self.check(.RBrace()) and not self.is_eof() then {
                 let nl_count = self.count_newlines()
                 if nl_count >= 2 then {
@@ -2705,15 +2705,15 @@ given CstParser {
         return .Ok(.Type(vis, mods, kw, gp, name, box(CstTypeBody.Empty())))
     }
 
-    private parse_enum_variant_expr(*mut self) Result[CstExpr] = {
+    private parse_enum_variant_expr(*mutable self) Result[CstExpr] = {
         let name = when self.expect_ident("enum variant name") in {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
 
-        let mut lp = Option[Token].None()
-        let mut fields = List[CstEnumField].new()
-        let mut rp = Option[Token].None()
+        let mutable lp = Option[Token].None()
+        let mutable fields = List[CstEnumField].new()
+        let mutable rp = Option[Token].None()
 
         if self.check(.LParen()) then {
             lp = .Some(self.eat())
@@ -2722,7 +2722,7 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                let mut colon = Option[Token].None()
+                let mutable colon = Option[Token].None()
                 if self.check(.Colon()) then {
                     colon = .Some(self.eat())
                 }
@@ -2746,7 +2746,7 @@ given CstParser {
     // Trait declaration
     // ========================================================================
 
-    private parse_trait_decl(*mut self) Result[CstDecl] = {
+    private parse_trait_decl(*mutable self) Result[CstDecl] = {
         let vis = self.eat_vis()
         let kw = when self.expect(.KwTrait(), "'trait'") in {
             .Ok(t) then t,
@@ -2762,7 +2762,7 @@ given CstParser {
         }
 
         // Super traits (before {)
-        let mut supers = List[* CstType].new()
+        let mutable supers = List[* CstType].new()
         if not self.check(.LBrace()) and not self.is_eof() and self.peek_raw() is not .Newline() and self.peek_raw() is not .EOF() then {
             let first = when self.parse_type_node() in {
                 .Ok(parsed_type) then parsed_type,
@@ -2798,8 +2798,8 @@ given CstParser {
     // Trait members
     // ========================================================================
 
-    private parse_trait_members(*mut self) Result[List[*CstItem]] = {
-        let mut members = List[*CstItem].new()
+    private parse_trait_members(*mutable self) Result[List[*CstItem]] = {
+        let mutable members = List[*CstItem].new()
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
@@ -2831,7 +2831,7 @@ given CstParser {
         return .Ok(members)
     }
 
-    private parse_trait_method_sig(*mut self) Result[CstDecl] = {
+    private parse_trait_method_sig(*mutable self) Result[CstDecl] = {
         let vis = self.eat_vis()
         let name = when self.expect_ident("method name") in {
             .Ok(t) then t,
@@ -2845,13 +2845,13 @@ given CstParser {
             .Ok(t) then t,
             .Error(e) then { return .Error(e) },
         }
-        let mut params = List[CstTraitMethodParam].new()
-        let mut first UInt = 1
+        let mutable params = List[CstTraitMethodParam].new()
+        let mutable first UInt = 1
         while not self.check(.RParen()) and not self.is_eof() then {
-            // self / *self / *self mut
+            // self / *self / *self mutable
             if first == 1 and self.check(.Star()) then {
                 let ref_kw = self.eat()
-                let mut mut_kw = Option[Token].None()
+                let mutable mut_kw = Option[Token].None()
                 if self.check(.KwMut()) then {
                     mut_kw = .Some(self.eat())
                 }
@@ -2876,7 +2876,7 @@ given CstParser {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let mut colon = Option[Token].None()
+            let mutable colon = Option[Token].None()
             if self.check(.Colon()) then {
                 colon = .Some(self.eat())
             }
@@ -2893,7 +2893,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         // Return type (optional)
-        let mut ret = Option[* CstType].None()
+        let mutable ret = Option[* CstType].None()
         if not self.check(.RBrace()) and not self.is_eof() then {
             if self.peek_raw() is not .Newline() then {
                 let t = when self.parse_type_node() in {
@@ -2910,7 +2910,7 @@ given CstParser {
     // Given declaration
     // ========================================================================
 
-    private parse_given_decl(*mut self) Result[CstDecl] = {
+    private parse_given_decl(*mutable self) Result[CstDecl] = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
         let kw = when self.expect(.KwGiven(), "'given'") in {
@@ -2928,8 +2928,8 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
 
-        let mut as_kw = Option[Token].None()
-        let mut trait_type = Option[* CstType].None()
+        let mutable as_kw = Option[Token].None()
+        let mutable trait_type = Option[* CstType].None()
         if self.check(.KwNot()) then {
             let not_kw = self.eat()
             let trait_name = when self.expect_ident("trait name") in {
@@ -2968,8 +2968,8 @@ given CstParser {
     // Member items (shared by trait/given)
     // ========================================================================
 
-    private parse_member_items(*mut self) Result[List[*CstItem]] = {
-        let mut members = List[*CstItem].new()
+    private parse_member_items(*mutable self) Result[List[*CstItem]] = {
+        let mutable members = List[*CstItem].new()
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
@@ -2994,7 +2994,7 @@ given CstParser {
                 continue
             }
             // Determine if this is a let-decl or a method without let
-            let mut offset UInt = self.access_modifier_token_count()
+            let mutable offset UInt = self.access_modifier_token_count()
             let after_access = self.peek_at_skip_nl(offset)
             if after_access is .KwForeign() or after_access is .KwIntrinsic() then { offset += 1 }
             let kw = self.peek_at_skip_nl(offset)
@@ -3017,7 +3017,7 @@ given CstParser {
         return .Ok(members)
     }
 
-    private parse_member_no_let(*mut self) Result[CstDecl] = {
+    private parse_member_no_let(*mutable self) Result[CstDecl] = {
         let vis = self.eat_vis()
         let mods = self.eat_modifiers()
         // Generic params and name are handled by finish_func_or_var

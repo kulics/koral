@@ -217,7 +217,7 @@ extension TypeChecker {
         if !captures.contains(where: { $0.symbol.defId == defId }) {
           let captureKind: CaptureKind
           if info.mutable {
-            // let mut variables are captured by pointer so mutations are visible outside
+            // let mutable variables are captured by pointer so mutations are visible outside
             captureKind = .byMutReference
           } else if case .reference(_) = info.type {
             captureKind = .byReference

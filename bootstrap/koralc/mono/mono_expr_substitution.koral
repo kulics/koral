@@ -22,7 +22,7 @@ public let substitute_types_in_expression(
     let new_type = when expr.expr_kind in {
         .CastExpr(target_type, _) then when target_type in {
             .TraitObject(original_trait_name, original_type_args) then {
-                let mut substituted_type_args = List[* Type].new()
+                let mutable substituted_type_args = List[* Type].new()
                 for original_type_arg in original_type_args then {
                     substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                 }
@@ -66,7 +66,7 @@ private let recover_unknown_expr_type(
         .MemberPath(base, path) then recover_member_path_type(mono, base.expr_type, path, fallback),
         .MethodReference(_, _, method, _, _, _) then resolve_parameterized_type(mono, method.symbol_type),
         .LambdaExpr(params, return_type, _) then {
-            let mut param_entries = List[* FunctionParamEntry].new()
+            let mutable param_entries = List[* FunctionParamEntry].new()
             for param in params then {
                 param_entries.push(box(make_function_param_entry(resolve_parameterized_type(mono, param.param_type))))
             }
@@ -117,7 +117,7 @@ private let recover_type_construction_type(
     }
 
     if not type_args.is_empty() then {
-        let mut boxed_args = List[* Type].new()
+        let mutable boxed_args = List[* Type].new()
         for type_arg in type_args then {
             boxed_args.push(box(resolve_parameterized_type(mono, type_arg)))
         }
@@ -165,7 +165,7 @@ private let infer_type_construction_type_from_args(
     }
 
     if args.count() == 2(UInt) and (template_name == "Pair" or template_name.ends_with(".Pair")) then {
-        let mut pair_args = List[* Type].new()
+        let mutable pair_args = List[* Type].new()
         pair_args.push(box(resolve_parameterized_type(mono, args[0(UInt)].expr_type)))
         pair_args.push(box(resolve_parameterized_type(mono, args[1(UInt)].expr_type)))
         return Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct("Pair", pair_args)))
@@ -181,16 +181,16 @@ private let infer_type_construction_type_from_args(
             if template.fields.count() <> args.count() then {
                 return Option[Type].None()
             }
-            let mut bindings = Dict[String, Type].new()
+            let mutable bindings = Dict[String, Type].new()
             let empty_subst = Dict[String, Type].new()
-            let mut i UInt = 0
+            let mutable i UInt = 0
             while i < args.count() then {
                 let field_pattern = mono.resolve_type_node_impl(template.fields[i].field_type, empty_subst)
-                infer_type_bindings_from_constructor_pattern(mono, field_pattern, resolve_parameterized_type(mono, args[i].expr_type), &mut bindings)
+                infer_type_bindings_from_constructor_pattern(mono, field_pattern, resolve_parameterized_type(mono, args[i].expr_type), &mutable bindings)
                 i += 1
             }
 
-            let mut inferred_args = List[* Type].new()
+            let mutable inferred_args = List[* Type].new()
             for type_param in template.type_parameters then {
                 inferred_args.push(box(bindings.get(type_param.name) or else Type.GenericParameter(type_param.name)))
             }
@@ -204,7 +204,7 @@ private let infer_type_bindings_from_constructor_pattern(
     mono * Monomorphizer,
     pattern Type,
     concrete Type,
-    bindings *mut Dict[String, Type],
+    bindings *mutable Dict[String, Type],
 ) Void = {
     let normalized_pattern = resolve_parameterized_type(mono, pattern)
     let normalized_concrete = resolve_parameterized_type(mono, concrete)
@@ -244,7 +244,7 @@ private let infer_type_bindings_from_constructor_pattern(
         .FunctionType(pattern_params, pattern_return) then when normalized_concrete in {
             .FunctionType(concrete_params, concrete_return) then {
                 if pattern_params.count() == concrete_params.count() then {
-                    let mut i UInt = 0
+                    let mutable i UInt = 0
                     while i < pattern_params.count() then {
                         infer_type_bindings_from_constructor_pattern(mono, (*pattern_params[i]).param_type, (*concrete_params[i]).param_type, bindings)
                         i += 1
@@ -257,7 +257,7 @@ private let infer_type_bindings_from_constructor_pattern(
         .GenericStruct(pattern_name, pattern_args) then when normalized_concrete in {
             .GenericStruct(concrete_name, concrete_args) then {
                 if pattern_name == concrete_name and pattern_args.count() == concrete_args.count() then {
-                    let mut i UInt = 0
+                    let mutable i UInt = 0
                     while i < pattern_args.count() then {
                         infer_type_bindings_from_constructor_pattern(mono, (*pattern_args[i]), (*concrete_args[i]), bindings)
                         i += 1
@@ -269,7 +269,7 @@ private let infer_type_bindings_from_constructor_pattern(
         .GenericEnum(pattern_name, pattern_args) then when normalized_concrete in {
             .GenericEnum(concrete_name, concrete_args) then {
                 if pattern_name == concrete_name and pattern_args.count() == concrete_args.count() then {
-                    let mut i UInt = 0
+                    let mutable i UInt = 0
                     while i < pattern_args.count() then {
                         infer_type_bindings_from_constructor_pattern(mono, (*pattern_args[i]), (*concrete_args[i]), bindings)
                         i += 1
@@ -283,7 +283,7 @@ private let infer_type_bindings_from_constructor_pattern(
 }
 
 private let box_each_type(types List[Type]) List[* Type] = {
-    let mut out = List[* Type].with_capacity(types.count())
+    let mutable out = List[* Type].with_capacity(types.count())
     for t in types then {
         out.push(box(t))
     }
@@ -299,12 +299,12 @@ private let synthetic_args_from_expected_method_type(
     receiver_type Type,
     expected_method_type Type,
 ) List[* TypedExpr] = {
-    let mut args = List[* TypedExpr].new()
+    let mutable args = List[* TypedExpr].new()
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type)
     when resolve_parameterized_type(mono, expected_method_type) in {
         .FunctionType(expected_params, _) then {
             let param_types = param_entry_types(expected_params)
-            let mut start_idx UInt = 0
+            let mutable start_idx UInt = 0
             if not param_types.is_empty() then {
                 let first_param_type = resolve_parameterized_type(mono, (*param_types[0(UInt)]))
                 let receiver_matches = if layout_key(first_param_type) == layout_key(resolved_receiver_type) then {
@@ -365,7 +365,7 @@ private let synthetic_args_from_expected_method_type(
                     start_idx = 1
                 }
             }
-            let mut idx = start_idx
+            let mutable idx = start_idx
             while idx < param_types.count() then {
                 args.push(make_expected_type_placeholder_expr(resolve_parameterized_type(mono, (*param_types[idx]))))
                 idx += 1
@@ -571,9 +571,9 @@ private let normalize_method_symbol_type_for_base(
             if layout_key(normalized_first_param) == layout_key(first_param_type) then {
                 return resolved_method_type
             }
-            let mut normalized_params = List[* FunctionParamEntry].new()
+            let mutable normalized_params = List[* FunctionParamEntry].new()
             normalized_params.push(box(make_function_param_entry(normalized_first_param)))
-            let mut idx UInt = 1(UInt)
+            let mutable idx UInt = 1(UInt)
             while idx < param_types.count() then {
                 normalized_params.push(box(make_function_param_entry(resolve_parameterized_type(mono, (*param_types[idx])))))
                 idx += 1(UInt)
@@ -721,8 +721,8 @@ private let recover_member_field_type(
             }
             when mono.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(template) then {
-                    let mut subst = Dict[String, Type].new()
-                    let mut i UInt = 0
+                    let mutable subst = Dict[String, Type].new()
+                    let mutable i UInt = 0
                     while i < template.type_parameters.count() and i < args.count() then {
                         subst.insert(template.type_parameters[i].name, (*args[i]))
                         i += 1
@@ -759,7 +759,7 @@ private let recover_member_path_type(
     path List[String],
     fallback Type,
 ) Type = {
-    let mut current = resolve_parameterized_type(mono, base_type)
+    let mutable current = resolve_parameterized_type(mono, base_type)
     for member_name in path then {
         current = recover_member_field_type(mono, current, member_name, fallback)
     }
@@ -789,7 +789,7 @@ private let substitute_expr_kind(
         .CastExpr(target_type, e) then {
             let new_target = when target_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = List[* Type].new()
+                    let mutable substituted_type_args = List[* Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                     }
@@ -804,10 +804,10 @@ private let substitute_expr_kind(
             let new_inner = substitute_types_in_expression(mono, inner, substitution)
             let substituted_trait_type = mono.substitute_type_impl(trait_type, substitution)
             let resolved_substituted_trait_type = resolve_parameterized_type(mono, substituted_trait_type)
-            let mut new_trait_type = resolved_substituted_trait_type
+            let mutable new_trait_type = resolved_substituted_trait_type
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = List[* Type].new()
+                    let mutable substituted_type_args = List[* Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                     }
@@ -892,8 +892,8 @@ private let substitute_expr_kind(
 
         // Call: substitute callee and all arguments.
         .Call(callee, args) then {
-            let mut new_callee = substitute_types_in_expression(mono, callee, substitution)
-            let mut new_args = List[* TypedExpr].new()
+            let mutable new_callee = substitute_types_in_expression(mono, callee, substitution)
+            let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -907,7 +907,7 @@ private let substitute_expr_kind(
                             }
                             let filtered_candidates = when original_method_name in {
                                 .Some(method_name) then {
-                                    let mut filtered = List[Pair[DefId, Type]].new()
+                                    let mutable filtered = List[Pair[DefId, Type]].new()
                                     for candidate in candidates then {
                                         when mono.storage.receiver_method_dispatch.get(candidate.first) in {
                                             .Some(info) then {
@@ -926,9 +926,9 @@ private let substitute_expr_kind(
                                 break filtered_candidates
                             } else {
                                 let actual_receiver_type = resolve_parameterized_type(mono, new_args[0(UInt)].expr_type)
-                                let mut owner_filtered = List[Pair[DefId, Type]].new()
+                                let mutable owner_filtered = List[Pair[DefId, Type]].new()
                                 for candidate in filtered_candidates then {
-                                    let mut owner_matches_receiver = true
+                                    let mutable owner_matches_receiver = true
                                     when mono.concrete_callable_info(candidate.first) in {
                                         .Some(info) then {
                                             when info.owner_type in {
@@ -976,7 +976,7 @@ private let substitute_expr_kind(
                                 break owner_compatible_candidates
                             } else {
                                 let normalized_identifier_type = resolve_parameterized_type(mono, identifier.symbol_type)
-                                let mut strict_filtered = List[Pair[DefId, Type]].new()
+                                let mutable strict_filtered = List[Pair[DefId, Type]].new()
                                 for candidate in owner_compatible_candidates then {
                                     let candidate_type = resolve_parameterized_type(mono, substitute_type(mono, candidate.second, substitution))
                                     if candidate_type == normalized_identifier_type then {
@@ -985,7 +985,7 @@ private let substitute_expr_kind(
                                 }
                                 break if strict_filtered.is_empty() then owner_compatible_candidates else strict_filtered
                             }
-                            let mut expected_call_param_types = List[* Type].new()
+                            let mutable expected_call_param_types = List[* Type].new()
                             for arg in new_args then {
                                 expected_call_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
                             }
@@ -1001,7 +1001,7 @@ private let substitute_expr_kind(
                                 .None() then false,
                             }
                             if not skip_low_confidence_method_remap then {
-                                let mut matched = Option[Pair[DefId, Type]].None()
+                                let mutable matched = Option[Pair[DefId, Type]].None()
                                 for candidate in symbol_type_filtered_candidates then {
                                     if substitute_type(mono, candidate.second, substitution) == expected_call_type then {
                                         matched = Option[Pair[DefId, Type]].Some(candidate)
@@ -1018,8 +1018,8 @@ private let substitute_expr_kind(
                                                         if candidate_params.count() == expected_params.count()
                                                             and candidate_returns == expected_returns
                                                         then {
-                                                            let mut all_match = true
-                                                            let mut idx UInt = 0
+                                                            let mutable all_match = true
+                                                            let mutable idx UInt = 0
                                                             while idx < candidate_params.count() then {
                                                                 if (*candidate_params[idx]).param_type <> (*expected_params[idx]).param_type then {
                                                                     all_match = false
@@ -1066,12 +1066,12 @@ private let substitute_expr_kind(
                     }
                     if not base_is_trait_object and not has_generic_parameter(lookup_base_type) then {
                         let method_name = substitution_semantic_method_name(mono, *method)
-                        let mut resolved_method_type_args_ref = List[* Type].new()
+                        let mutable resolved_method_type_args_ref = List[* Type].new()
                         for method_type_arg in method_type_args then {
                             resolved_method_type_args_ref.push(box(resolve_parameterized_type(mono, method_type_arg)))
                         }
                         instantiate_trait_placeholder_method(mono, lookup_base_type, method_name, resolved_method_type_args_ref)
-                        let mut expected_call_param_types = List[* Type].new()
+                        let mutable expected_call_param_types = List[* Type].new()
                         expected_call_param_types.push(box(lookup_base_type))
                         for arg in new_args then {
                             expected_call_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
@@ -1126,7 +1126,7 @@ private let substitute_expr_kind(
             }
             when new_callee.expr_kind in {
                 .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
-                    let mut trait_object_type_opt Option[Type] = Option[Type].None()
+                    let mutable trait_object_type_opt Option[Type] = Option[Type].None()
                     let base_type = resolve_parameterized_type(mono, base.expr_type)
                     when base_type in {
                         .TraitObject(trait_name, trait_type_args) then {
@@ -1181,12 +1181,12 @@ private let substitute_expr_kind(
                     let base_type = resolve_parameterized_type(mono, base.expr_type)
                     if not has_generic_parameter(base_type) and not substitution_should_preserve_resolved_method_reference(mono, method, base_type) then {
                         let method_name = substitution_semantic_method_name(mono, *method)
-                        let mut resolved_method_type_args = List[Type].new()
+                        let mutable resolved_method_type_args = List[Type].new()
                         for method_type_arg in method_type_args then {
                             resolved_method_type_args.push(resolve_parameterized_type(mono, method_type_arg))
                         }
                         let expected_method_type = resolve_parameterized_type(mono, method.symbol_type)
-                        let mut expected_call_param_types = List[* Type].new()
+                        let mutable expected_call_param_types = List[* Type].new()
                         expected_call_param_types.push(box(base_type))
                         for arg in new_args then {
                             expected_call_param_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
@@ -1195,7 +1195,7 @@ private let substitute_expr_kind(
                             types_to_param_entries(expected_call_param_types),
                             box(substituted_expr_type)
                         )
-                        let mut expected_call_arg_types = List[* Type].new()
+                        let mutable expected_call_arg_types = List[* Type].new()
                         for arg in new_args then {
                             expected_call_arg_types.push(box(resolve_parameterized_type(mono, arg.expr_type)))
                         }
@@ -1204,19 +1204,19 @@ private let substitute_expr_kind(
                             box(substituted_expr_type)
                         )
                         let preferred_expected_types = if resolved_method_type_args.is_empty() and has_generic_parameter(expected_method_type) then {
-                            let mut expected_types = List[Type].new()
+                            let mutable expected_types = List[Type].new()
                             expected_types.push(expected_call_type_with_receiver)
                             expected_types.push(expected_method_type)
                             expected_types.push(expected_call_type_without_receiver)
                             break expected_types
                         } else {
-                            let mut expected_types = List[Type].new()
+                            let mutable expected_types = List[Type].new()
                             expected_types.push(expected_method_type)
                             expected_types.push(expected_call_type_with_receiver)
                             expected_types.push(expected_call_type_without_receiver)
                             break expected_types
                         }
-                        let mut rebound_method = *method
+                        let mutable rebound_method = *method
                         for expected_type in preferred_expected_types then {
                             when substitution_lookup_receiver_method_symbol(
                                 mono,
@@ -1254,15 +1254,15 @@ private let substitute_expr_kind(
         },
         .GenericCall(function_symbol, type_args, args) then {
             let new_function_symbol = substitute_symbol(mono, function_symbol, substitution)
-            let mut new_type_args = List[Type].new()
+            let mutable new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
             }
-            let mut new_args = List[* TypedExpr].new()
+            let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            let mut has_unresolved_type_arg = false
+            let mutable has_unresolved_type_arg = false
             for type_arg in new_type_args then {
                 if has_generic_parameter(type_arg) then {
                     has_unresolved_type_arg = true
@@ -1275,21 +1275,21 @@ private let substitute_expr_kind(
                 }
                 when template in {
                     .Some(found_template) then {
-                        let mut inferred = Dict[String, Type].new()
-                        let mut i UInt = 0
+                        let mutable inferred = Dict[String, Type].new()
+                        let mutable i UInt = 0
                         while i < found_template.parameters.count() and i < new_args.count() then {
                             bind_generic_function_type_node(
                                 mono,
                                 found_template.parameters[i].param_type,
                                 resolve_parameterized_type(mono, new_args[i].expr_type),
                                 found_template.type_parameters,
-                                &mut inferred,
+                                &mutable inferred,
                             )
                             i += 1
                         }
 
-                        let mut boxed_type_args = List[* Type].new()
-                        let mut has_unresolved_param = false
+                        let mutable boxed_type_args = List[* Type].new()
+                        let mutable has_unresolved_param = false
                         for type_param in found_template.type_parameters then {
                             let bound = when inferred.get(type_param.name) in {
                                 .Some(t) then resolve_parameterized_type(mono, t),
@@ -1332,7 +1332,7 @@ private let substitute_expr_kind(
                 }
                 when template in {
                     .Some(found_template) then {
-                        let mut boxed_type_args = List[* Type].new()
+                        let mutable boxed_type_args = List[* Type].new()
                         for type_arg in new_type_args then {
                             boxed_type_args.push(box(resolve_parameterized_type(mono, type_arg)))
                         }
@@ -1364,14 +1364,14 @@ private let substitute_expr_kind(
             break box(TypedExprKind.MemberPath(substitute_types_in_expression(mono, base, substitution), path))
         },
         .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
-            let mut new_base = substitute_types_in_expression(mono, base, substitution)
-            let mut new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
-            let mut new_method = substitute_symbol(mono, method, substitution)
-            let mut new_type_args = List[Type].new()
+            let mutable new_base = substitute_types_in_expression(mono, base, substitution)
+            let mutable new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
+            let mutable new_method = substitute_symbol(mono, method, substitution)
+            let mutable new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
             }
-            let mut new_method_type_args = List[Type].new()
+            let mutable new_method_type_args = List[Type].new()
             for method_type_arg in method_type_args then {
                 new_method_type_args.push(mono.substitute_type_impl(method_type_arg, substitution))
             }
@@ -1428,7 +1428,7 @@ private let substitute_expr_kind(
 
         // Block: substitute all statements.
         .Block(statements) then {
-            let mut new_stmts = List[* TypedStatement].new()
+            let mutable new_stmts = List[* TypedStatement].new()
             for stmt_ref in statements then {
                 new_stmts.push(box(substitute_statement(mono, stmt_ref, substitution)))
             }
@@ -1451,7 +1451,7 @@ private let substitute_expr_kind(
         // WhenExpr: substitute subject and all arms.
         .WhenExpr(subject, arms) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
-            let mut new_arms = List[* TypedWhenArm].new()
+            let mutable new_arms = List[* TypedWhenArm].new()
             for arm_ref in arms then {
                 let new_pattern  = substitute_pattern(mono, arm_ref.pattern, substitution)
                 let new_body     = substitute_types_in_expression(mono, arm_ref.body, substitution)
@@ -1463,7 +1463,7 @@ private let substitute_expr_kind(
 
         // LambdaExpr: substitute param types, return type, and body.
         .LambdaExpr(params, return_type, body) then {
-            let mut new_params = List[TypedParam].new()
+            let mutable new_params = List[TypedParam].new()
             for p in params then {
                 let new_pt = mono.substitute_type_impl(p.param_type, substitution)
                 new_params.push(TypedParam(p.name, p.mutable, new_pt, p.named))
@@ -1476,16 +1476,16 @@ private let substitute_expr_kind(
         // StaticMethodCall: substitute all args.
         .StaticMethodCall(receiver_type, method_name, method, type_args, method_type_args, args) then {
             let new_receiver_type = mono.substitute_type_impl(receiver_type, substitution)
-            let mut method_after_subst = substitute_symbol(mono, method, substitution)
-            let mut new_type_args = List[Type].new()
+            let mutable method_after_subst = substitute_symbol(mono, method, substitution)
+            let mutable new_type_args = List[Type].new()
             for type_arg in type_args then {
                 new_type_args.push(mono.substitute_type_impl(type_arg, substitution))
             }
-            let mut new_method_type_args = List[Type].new()
+            let mutable new_method_type_args = List[Type].new()
             for method_type_arg in method_type_args then {
                 new_method_type_args.push(mono.substitute_type_impl(method_type_arg, substitution))
             }
-            let mut new_args = List[* TypedExpr].new()
+            let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -1497,10 +1497,10 @@ private let substitute_expr_kind(
 
         .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution)
-            let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
+            let mutable new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = List[* Type].new()
+                    let mutable substituted_type_args = List[* Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                     }
@@ -1515,10 +1515,10 @@ private let substitute_expr_kind(
 
         .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then {
             let new_receiver = substitute_types_in_expression(mono, receiver, substitution)
-            let mut new_trait_type = mono.substitute_type_impl(trait_type, substitution)
+            let mutable new_trait_type = mono.substitute_type_impl(trait_type, substitution)
             when trait_type in {
                 .TraitObject(original_trait_name, original_type_args) then {
-                    let mut substituted_type_args = List[* Type].new()
+                    let mutable substituted_type_args = List[* Type].new()
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                     }
@@ -1526,7 +1526,7 @@ private let substitute_expr_kind(
                 },
                 _ then {},
             }
-            let mut new_args = List[* TypedExpr].new()
+            let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -1559,7 +1559,7 @@ private let substitute_expr_kind(
         // GenericInstantiation: substitute each type arg.
         .GenericInstantiation(base_type, type_args) then {
             let new_base_type = mono.substitute_type_impl(base_type, substitution)
-            let mut new_type_args = List[Type].new()
+            let mutable new_type_args = List[Type].new()
             for ta in type_args then {
                 new_type_args.push(mono.substitute_type_impl(ta, substitution))
             }
@@ -1570,11 +1570,11 @@ private let substitute_expr_kind(
                 mono,
                 mono.substitute_type_impl(identifier.symbol_type, substitution),
             )
-            let mut new_type_args = List[Type].new()
+            let mutable new_type_args = List[Type].new()
             for ta in type_args then {
                 new_type_args.push(mono.substitute_type_impl(ta, substitution))
             }
-            let mut new_args = List[* TypedExpr].new()
+            let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -1582,7 +1582,7 @@ private let substitute_expr_kind(
             break box(TypedExprKind.TypeConstruction(box(new_identifier), new_type_args, new_args))
         },
         .EnumConstruction(enum_type, case_name, args) then {
-            let mut new_args = List[* TypedExpr].new()
+            let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
@@ -1630,12 +1630,12 @@ private let remapped_function_def_id_for_type(
         .Some(info) then info.owner_type,
         .None() then Option[Type].None(),
     }
-    let mut had_candidates = false
+    let mutable had_candidates = false
     when mono.storage.remapped_function_def_ids.get(symbol.def_id.id) in {
         .Some(candidates) then {
             had_candidates = not candidates.is_empty()
             let normalized_type = resolve_parameterized_type(mono, resolved_type)
-            let mut compatible_candidates = List[Pair[DefId, Type]].new()
+            let mutable compatible_candidates = List[Pair[DefId, Type]].new()
             for candidate in candidates then {
                 let candidate_type = resolve_parameterized_type(mono, candidate.second)
                 if candidate_type <> normalized_type then {
@@ -1707,7 +1707,7 @@ private let remapped_function_def_id_for_type(
         let lookup_names = if template_name.is_empty() then {
             break List[String].new()
         } else {
-            let mut names = List[String].new()
+            let mutable names = List[String].new()
             names.push(template_name)
             when template_name.find("_") in {
                 .Some(underscore_idx) then {
@@ -1743,16 +1743,16 @@ private let remapped_function_def_id_for_type(
                     let concrete_type = resolve_parameterized_type(mono, resolved_type)
                     when concrete_type in {
                         .FunctionType(fn_params, return_type) then {
-                            let mut inferred = Dict[String, Type].new()
+                            let mutable inferred = Dict[String, Type].new()
                             let param_types = param_entry_types(fn_params)
-                            let mut i UInt = 0
+                            let mutable i UInt = 0
                             while i < template.parameters.count() and i < param_types.count() then {
-                                bind_generic_function_type_node(mono, template.parameters[i].param_type, (*param_types[i]), template.type_parameters, &mut inferred)
+                                bind_generic_function_type_node(mono, template.parameters[i].param_type, (*param_types[i]), template.type_parameters, &mutable inferred)
                                 i += 1
                             }
-                            bind_generic_function_type_node(mono, template.return_type, *return_type, template.type_parameters, &mut inferred)
+                            bind_generic_function_type_node(mono, template.return_type, *return_type, template.type_parameters, &mutable inferred)
 
-                            let mut boxed_type_args = List[* Type].new()
+                            let mutable boxed_type_args = List[* Type].new()
                             for type_param in template.type_parameters then {
                                 let bound = inferred.get(type_param.name) or else Type.GenericParameter(type_param.name)
                                 if has_generic_parameter(bound) then {
@@ -1785,7 +1785,7 @@ private let bind_generic_function_type_node(
     expected_node TypeNode,
     actual Type,
     type_params List[TypeParameterDecl],
-    bindings *mut Dict[String, Type],
+    bindings *mutable Dict[String, Type],
 ) Void = {
     when expected_node in {
         .Identifier(name) then {
@@ -1825,7 +1825,7 @@ private let bind_generic_function_type_node(
         .Generic(base, args) then when actual in {
             .GenericStruct(act_base, act_args) then {
                 if base == act_base then {
-                    let mut i UInt = 0
+                    let mutable i UInt = 0
                     while i < args.count() and i < act_args.count() then {
                         bind_generic_function_type_node(mono, (*args[i]), (*act_args[i]), type_params, bindings)
                         i += 1
@@ -1834,7 +1834,7 @@ private let bind_generic_function_type_node(
             },
             .GenericEnum(act_base, act_args) then {
                 if base == act_base then {
-                    let mut i UInt = 0
+                    let mutable i UInt = 0
                     while i < args.count() and i < act_args.count() then {
                         bind_generic_function_type_node(mono, (*args[i]), (*act_args[i]), type_params, bindings)
                         i += 1
@@ -1846,7 +1846,7 @@ private let bind_generic_function_type_node(
         .FunctionType(param_nodes, ret_node) then when actual in {
             .FunctionType(fn_params, ret_type) then {
                 let param_types = param_entry_types(fn_params)
-                let mut i UInt = 0
+                let mutable i UInt = 0
                 while i < param_nodes.count() and i < param_types.count() then {
                     bind_generic_function_type_node(mono, (*param_nodes[i]), (*param_types[i]), type_params, bindings)
                     i += 1
@@ -1885,13 +1885,13 @@ private let push_static_method_receiver_alias(alias_list List[String], alias Str
     for existing in alias_list then {
         if existing == alias then { return alias_list }
     }
-    let mut updated = alias_list
+    let mutable updated = alias_list
     updated.push(alias)
     return updated
 }
 
 private let strict_wrapper_receiver_aliases(t Type) List[String] = {
-    let mut aliases = List[String].new()
+    let mutable aliases = List[String].new()
     when t in {
         .ReferenceType(_) then {
             aliases = push_static_method_receiver_alias(aliases, "Ref")
@@ -1930,7 +1930,7 @@ private let strict_wrapper_receiver_aliases(t Type) List[String] = {
 }
 
 private let static_method_receiver_aliases(mono * Monomorphizer, t Type) List[String] = {
-    let mut aliases = List[String].new()
+    let mutable aliases = List[String].new()
     aliases = push_static_method_receiver_alias(aliases, static_method_receiver_key(t))
 
     when t in {
@@ -2098,7 +2098,7 @@ private let method_type_matches_expected_pattern(
                 if actual_params.count() <> expected_params.count() then {
                     return false
                 }
-                let mut idx UInt = 0
+                let mutable idx UInt = 0
                 while idx < actual_params.count() then {
                     if not method_type_matches_expected_pattern(mono, (*actual_params[idx]).param_type, (*expected_params[idx]).param_type) then {
                         return false
@@ -2237,7 +2237,7 @@ private let method_type_matches_expected_for_wrapper_receiver(
                         if candidate_params.count() <> expected_params.count() then {
                             return false
                         }
-                        let mut idx UInt = 1(UInt)
+                        let mutable idx UInt = 1(UInt)
                         while idx < candidate_params.count() then {
                             let candidate_param_type = resolve_parameterized_type(mono, (*candidate_params[idx]).param_type)
                             let expected_param_type = resolve_parameterized_type(mono, (*expected_params[idx]).param_type)
@@ -2281,7 +2281,7 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
                         if candidate_params.count() <> expected_params.count() then {
                             return false
                         }
-                        let mut idx UInt = 1(UInt)
+                        let mutable idx UInt = 1(UInt)
                         while idx < candidate_params.count() then {
                             let candidate_param_type = resolve_parameterized_type(mono, (*candidate_params[idx]).param_type)
                             let expected_param_type = resolve_parameterized_type(mono, (*expected_params[idx]).param_type)
@@ -2889,9 +2889,9 @@ private let substitution_semantic_method_name(
 private let substitution_ordered_trait_method_names_helper(
     mono * Monomorphizer,
     trait_name String,
-    visited *mut Set[String],
-    ordered *mut List[String],
-    seen *mut Set[String],
+    visited *mutable Set[String],
+    ordered *mutable List[String],
+    seen *mutable Set[String],
 ) Void = {
     if visited.contains(trait_name) then {
         return
@@ -2918,11 +2918,11 @@ private let substitution_vtable_method_index(
     trait_name String,
     method_name String,
 ) Int = {
-    let mut visited = Set[String].new()
-    let mut ordered = List[String].new()
-    let mut seen = Set[String].new()
-    substitution_ordered_trait_method_names_helper(mono, trait_name, &mut visited, &mut ordered, &mut seen)
-    let mut idx UInt = 0
+    let mutable visited = Set[String].new()
+    let mutable ordered = List[String].new()
+    let mutable seen = Set[String].new()
+    substitution_ordered_trait_method_names_helper(mono, trait_name, &mutable visited, &mutable ordered, &mutable seen)
+    let mutable idx UInt = 0
     while idx < ordered.count() then {
         if ordered[idx] == method_name then {
             return idx(Int)
@@ -3302,7 +3302,7 @@ public let substitute_statement(
         },
         .WhenStmt(subject, arms, span) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
-            let mut new_arms = List[* TypedWhenArm].new()
+            let mutable new_arms = List[* TypedWhenArm].new()
             for arm_ref in arms then {
                 let new_pattern = substitute_pattern(mono, arm_ref.pattern, substitution)
                 let new_body = substitute_types_in_expression(mono, arm_ref.body, substitution)
@@ -3354,7 +3354,7 @@ public let substitute_pattern(
     return when pattern in {
         // StructPattern: recurse into each element pattern.
         .StructPattern(type_name, elements) then {
-            let mut new_elements = List[* TypedPatternElement].new()
+            let mutable new_elements = List[* TypedPatternElement].new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
                 new_elements.push(box(TypedPatternElement(elem.label, box(new_sub))))
@@ -3364,7 +3364,7 @@ public let substitute_pattern(
 
         // EnumCase: recurse into each element pattern.
         .EnumCase(case_name, tag_index, elements) then {
-            let mut new_elements = List[* TypedPatternElement].new()
+            let mutable new_elements = List[* TypedPatternElement].new()
             for elem in elements then {
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
                 new_elements.push(box(TypedPatternElement(elem.label, box(new_sub))))

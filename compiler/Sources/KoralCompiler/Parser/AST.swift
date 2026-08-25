@@ -87,11 +87,11 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .identifier(let name):
       return name
     case .reference(let inner, let mutable):
-      return mutable ? "*mut \(inner)" : "*\(inner)"
+      return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable):
-      return mutable ? "*! mut \(inner)" : "*! \(inner)"
+      return mutable ? "*! mutable \(inner)" : "*! \(inner)"
     case .weakReference(let inner, let mutable):
-      return mutable ? "?*mut \(inner)" : "?*\(inner)"
+      return mutable ? "?*mutable \(inner)" : "?*\(inner)"
     case .generic(let base, let args):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(base)[\(argsStr)]"
@@ -315,7 +315,7 @@ public struct MethodDeclaration {
     self.access = access
   }
 }
-/// A single binding inside a pair destructuring: `[mut] name [Type]` or `_`
+/// A single binding inside a pair destructuring: `[mutable] name [Type]` or `_`
 public struct PairBindingElement {
   public let name: String        // "_" for discard
   public let type: TypeNode?
@@ -603,7 +603,7 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .stringLiteral(let value, _): return "\"\(value)\""
     case .runeLiteral(let value, _): return "'\(value)'"
     case .wildcard: return "_"
-    case .variable(let name, let mutable, _): return mutable ? "mut \(name)" : name
+    case .variable(let name, let mutable, _): return mutable ? "mutable \(name)" : name
     case .enumCase(let name, let elements, _):
       let args = elements.map { arg in
         if let label = arg.label {

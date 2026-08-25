@@ -455,7 +455,7 @@ extension TypeChecker {
         return (base, nil)
       }
       throw SemanticError(
-        .generic("Cannot call '*mut self' method '\(methodName)' on an rvalue; store the value in a 'let mut' variable first"),
+        .generic("Cannot call '*mutable self' method '\(methodName)' on an rvalue; store the value in a 'let mutable' variable first"),
         span: currentSpan
       )
     }
@@ -499,9 +499,9 @@ extension TypeChecker {
 
   /// Checks whether `expr` has a mutable reference type that can be widened
   /// to the expected (read-only) reference type.  Returns `true` when
-  /// `expr.type` is `T ref mut` and `expectedType` is `T ref` with the same
-  /// inner type.  Also handles `T ptr mut → T ptr` and
-  /// `T weakref mut → T weakref`.
+  /// `expr.type` is `T ref mutable` and `expectedType` is `T ref` with the same
+  /// inner type.  Also handles `T ptr mutable → T ptr` and
+  /// `T weakref mutable → T weakref`.
   func canWidenMutableReference(_ expr: TypedExpressionNode, expectedType: Type) -> Bool {
     guard let (expectedInner, actualInner) = expectedType.compatibleIndirectionInners(with: expr.type) else {
       return false
@@ -1953,15 +1953,15 @@ extension TypeChecker {
         case (.managedReference, false):
           spelledType = typedInner.type.containsBorrowedReference ? "borrowed *" : "*"
         case (.managedReference, true):
-          spelledType = typedInner.type.containsBorrowedReference ? "borrowed *mut" : "*mut"
+          spelledType = typedInner.type.containsBorrowedReference ? "borrowed *mutable" : "*mutable"
         case (.rawPointer, false):
           spelledType = "*!"
         case (.rawPointer, true):
-          spelledType = "*! mut"
+          spelledType = "*! mutable"
         case (.weakReference, false):
           spelledType = "?*"
         case (.weakReference, true):
-          spelledType = "?*mut"
+          spelledType = "?*mutable"
         }
         try requireDerefablePointee(targetType, operation: "*", spelledType: spelledType)
         return .derefExpression(expression: typedInner, type: targetType)
@@ -1977,7 +1977,7 @@ extension TypeChecker {
 
       if mutable && !canTakeMutableReference(to: typedInner) {
         let name = implicitSelfRefViolationName(typedInner) ?? String(describing: inner)
-        throw SemanticError(.generic("Cannot take '&mut' from immutable binding '\(name)'"), span: currentSpan)
+        throw SemanticError(.generic("Cannot take '&mutable' from immutable binding '\(name)'"), span: currentSpan)
       }
 
       let refType: Type = mutable ? .mutableReference(inner: typedInner.type) : .reference(inner: typedInner.type)
@@ -3754,7 +3754,7 @@ extension TypeChecker {
             let weakType: Type = .mutableWeakReference(inner: innerType)
             return .intrinsicCall(.downgradeMutRef(val: typedArg, resultType: weakType))
           default:
-            throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mut T), got \(typedArg.type)"), span: currentSpan)
+            throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(typedArg.type)"), span: currentSpan)
           }
         }
 
@@ -3774,7 +3774,7 @@ extension TypeChecker {
             let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
             return .intrinsicCall(.upgradeMutRef(val: typedArg, resultType: resultType))
           default:
-            throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mut T), got \(typedArg.type)"), span: currentSpan)
+            throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(typedArg.type)"), span: currentSpan)
           }
         }
       }
@@ -4167,7 +4167,7 @@ extension TypeChecker {
         guard case .mutablePointer(let elementType) = ptrExpr.type else {
           throw SemanticError(.generic("cannot use * on non-pointer type"))
         }
-        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mut")
+        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mutable")
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
 
@@ -4195,7 +4195,7 @@ extension TypeChecker {
           throw SemanticError.invalidArgumentCount(
             function: base, expected: 1, got: arguments.count)
         }
-        // Signature is ptr ref mut T — accept any ref/ptr type, infer freely
+        // Signature is ptr ref mutable T — accept any ref/ptr type, infer freely
         let val = try inferTypedExpression(arguments[0])
         return .intrinsicCall(.isUniqueMutable(val: val))
       }
@@ -4257,10 +4257,10 @@ extension TypeChecker {
           expectedType: .mutableReference(inner: resolvedArgs[1])
         )
         guard case .mutablePointer(let elementType) = ptr.type else {
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) *! mut", got: ptr.type.description)
+          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) *! mutable", got: ptr.type.description)
         }
         guard case .mutableReference = owner.type else {
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[1]) *mut", got: owner.type.description)
+          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[1]) *mutable", got: owner.type.description)
         }
         let resultType = Type.mutableReference(inner: elementType)
         return .intrinsicCall(.makeMutRef(ptr: ptr, owner: owner, resultType: resultType))
@@ -4474,7 +4474,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = typedArguments[0].type else {
         throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mut")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mutable")
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
     }
     if templateName == "null_ptr" {
@@ -4524,10 +4524,10 @@ extension TypeChecker {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]
       guard case .mutablePointer(let elementType) = ptr.type else {
-        throw SemanticError.typeMismatch(expected: "T *! mut", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "T *! mutable", got: ptr.type.description)
       }
       guard case .mutableReference = owner.type else {
-        throw SemanticError.typeMismatch(expected: "O *mut", got: owner.type.description)
+        throw SemanticError.typeMismatch(expected: "O *mutable", got: owner.type.description)
       }
       return .intrinsicCall(.makeMutRef(ptr: ptr, owner: owner, resultType: .mutableReference(inner: elementType)))
     }
@@ -4716,7 +4716,7 @@ extension TypeChecker {
             if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: effectiveParamType) {
               typedArg = flavorConversion
             } else if canWidenMutableReference(typedArg, expectedType: effectiveParamType) {
-              // ref mut → ref widening: pass through unchanged
+              // ref mutable → ref widening: pass through unchanged
             } else {
               throw SemanticError.typeMismatch(
                 expected: effectiveParamType.description,
@@ -5116,7 +5116,7 @@ extension TypeChecker {
            let methodResult = try inferMethodOnType(typeToLookup: typeToLookup, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
             // When a subscript expression is used as a mutable method receiver
             // (e.g. d[key].push(v)), use __index_mut_ref to get a proper
-            // ref mut V with lifetime bound to the collection's storage.
+            // ref mutable V with lifetime bound to the collection's storage.
             if case .methodReference(let methodBase, let method, _, _, let methodType) = methodResult,
                case .function(let params, _) = method.type,
                let selfParam = params.first,
@@ -5131,7 +5131,7 @@ extension TypeChecker {
               if let builtinKind = resolveBuiltinSubscriptKind(baseType: typedSubBase.type) {
                 switch builtinKind {
                 case .list, .deque, .dict:
-                  // Build __index_mut_ref call → ref mut V
+                  // Build __index_mut_ref call → ref mutable V
                   let refResult = try buildBuiltinSubscriptHelperCall(
                     base: typedSubBase, args: typedSubArgs, helperName: "__index_mut_ref")
                   if isMutableRefLikeType(refResult.type) {
@@ -6860,7 +6860,7 @@ extension TypeChecker {
               helperName: "__index_mut_ptr"
             )
             guard case .mutablePointer(let valueType) = ptrExpr.type else {
-              throw SemanticError.typeMismatch(expected: "*! mut return", got: ptrExpr.type.description)
+              throw SemanticError.typeMismatch(expected: "*! mutable return", got: ptrExpr.type.description)
             }
             return .derefExpression(expression: ptrExpr, type: valueType)
           case .pointer:
@@ -7098,13 +7098,13 @@ extension TypeChecker {
           "Cannot assign through read-only pointer of type '\(typedInner.type)'"
         ), span: currentSpan)
       case .mutableReference(let innerType):
-        try requireDerefablePointee(innerType, operation: "*", spelledType: "*mut")
+        try requireDerefablePointee(innerType, operation: "*", spelledType: "*mutable")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutableBorrowedReference(let innerType):
-        try requireDerefablePointee(innerType, operation: "*", spelledType: "borrowed *mut")
+        try requireDerefablePointee(innerType, operation: "*", spelledType: "borrowed *mutable")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutablePointer(let elementType):
-        try requireDerefablePointee(elementType, operation: "*", spelledType: "*! mut")
+        try requireDerefablePointee(elementType, operation: "*", spelledType: "*! mutable")
         return .derefExpression(expression: typedInner, type: elementType)
       default:
         throw SemanticError.typeMismatch(
@@ -7499,7 +7499,7 @@ extension TypeChecker {
   /// Type checks a for expression and desugars it to let + while + match.
   /// for <pattern> = <iterable> then <body>
   /// becomes:
-  /// let mut __koral_iter_N = <iterable>.iterator() then  // or just <iterable> if it's already an iterator
+  /// let mutable __koral_iter_N = <iterable>.iterator() then  // or just <iterable> if it's already an iterator
   ///   while true then
   ///     when __koral_iter_N.next() is {
   ///       .Some(<pattern>) then <body>,
@@ -7520,7 +7520,7 @@ extension TypeChecker {
     }
     
     // 2. First check if the expression type itself is an iterator
-    //    (has a next(*mut self) [T]Option method)
+    //    (has a next(*mutable self) [T]Option method)
     if let elementType = try? extractIteratorElementType(iterableType) {
       try enforceGenericTraitConformance(
         iterableType,
@@ -7584,7 +7584,7 @@ extension TypeChecker {
   }
 
   /// Extracts the element type T from an iterator type.
-  /// The iterator must have a next(*mut self) [T]Option method.
+  /// The iterator must have a next(*mutable self) [T]Option method.
   private func extractIteratorElementType(_ iteratorType: Type) throws -> Type {
     // Look up the next method on the iterator type
     guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
@@ -7736,7 +7736,7 @@ extension TypeChecker {
     iterRef: TypedExpressionNode,
     elementType: Type
   ) throws -> TypedExpressionNode {
-    // Get the iterator type from the reference (ref or ref mut)
+    // Get the iterator type from the reference (ref or ref mutable)
     let iteratorType: Type
     switch iterRef.type {
     case .reference(let inner),

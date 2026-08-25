@@ -27,8 +27,8 @@ foreign let __koral_try_waitpid(pid UInt32, exit_code *! Int32, signal_num *! In
 /// Concurrently read all data from stdout and stderr pipes (uses poll/select internally).
 /// Allocates memory for output buffers (caller must free with dealloc_memory).
 foreign let __koral_read_all_pipes(stdout_fd Int32, stderr_fd Int32,
-    out_stdout *! mut *! mut UInt8, out_stdout_len *! mut UInt64,
-    out_stderr *! mut *! mut UInt8, out_stderr_len *! mut UInt64) Int32
+    out_stdout *! mutable *! mutable UInt8, out_stdout_len *! mutable UInt64,
+    out_stderr *! mutable *! mutable UInt8, out_stderr_len *! mutable UInt64) Int32
 
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
@@ -45,16 +45,16 @@ foreign let __koral_read_all_pipes(stdout_fd Int32, stderr_fd Int32,
 /// Holds the PID, pipe file descriptors (-1 means no pipe), and wait status.
 type ProcessStorage(
     pid UInt32,
-    mut stdin_fd Int32,
-    mut stdout_fd Int32,
-    mut stderr_fd Int32,
-    mut waited Bool,
+    mutable stdin_fd Int32,
+    mutable stdout_fd Int32,
+    mutable stderr_fd Int32,
+    mutable waited Bool,
 )
 
 given ProcessStorage as Drop {
 
     /// On drop: close any un-taken pipe fds, then auto-wait to prevent zombie processes.
-    drop(source *! mut Self) Void = {
+    drop(source *! mutable Self) Void = {
         if source.stdin_fd >= 0 then {
             __koral_pipe_close(source.stdin_fd)
         }
@@ -75,7 +75,7 @@ given ProcessStorage as Drop {
 // ============================================================================
 
 /// Child process handle providing wait, pipe access, and lifecycle management.
-public type Process(protected mut storage *mut ProcessStorage)
+public type Process(protected mutable storage *mutable ProcessStorage)
 
 given Process {
 
@@ -87,8 +87,8 @@ given Process {
         if self.storage.waited then {
             return Result[ExitStatus].Error(box("process already waited"))
         }
-        let mut exit_code Int32 = 0
-        let mut signal_num Int32 = 0
+        let mutable exit_code Int32 = 0
+        let mutable signal_num Int32 = 0
         let result = __koral_waitpid_full(self.storage.pid, &! exit_code, &! signal_num)
         if result <> 0 then {
             return Result[ExitStatus].Error(box(last_error_message()))
@@ -116,10 +116,10 @@ given Process {
         self.storage.stderr_fd = -1
 
         // Read both pipes concurrently via C runtime (uses poll/select internally)
-        let mut out_stdout = null_ptr[UInt8]()
-        let mut out_stdout_len UInt64 = 0
-        let mut out_stderr = null_ptr[UInt8]()
-        let mut out_stderr_len UInt64 = 0
+        let mutable out_stdout = null_ptr[UInt8]()
+        let mutable out_stdout_len UInt64 = 0
+        let mutable out_stderr = null_ptr[UInt8]()
+        let mutable out_stderr_len UInt64 = 0
 
         defer {
             if stdout_fd >= 0 then {
@@ -176,8 +176,8 @@ given Process {
     /// Non-blocking check if the child process has exited.
     /// Returns Ok(Some(status)) if exited, Ok(None) if still running, Error on system error.
     public try_wait(*self) Result[Option[ExitStatus]] = {
-        let mut exit_code Int32 = 0
-        let mut signal_num Int32 = 0
+        let mutable exit_code Int32 = 0
+        let mutable signal_num Int32 = 0
         let result = __koral_try_waitpid(self.storage.pid, &! exit_code, &! signal_num)
         if result < 0 then {
             return Result[Option[ExitStatus]].Error(box(last_error_message()))

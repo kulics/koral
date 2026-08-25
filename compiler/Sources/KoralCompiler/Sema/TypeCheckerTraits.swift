@@ -199,7 +199,7 @@ extension TypeChecker {
 
       let paramsDesc = try method.parameters.map { param -> String in
         let resolvedType = try resolveTypeNode(param.type)
-        let mutPrefix = param.mutable ? "mut " : ""
+        let mutPrefix = param.mutable ? "mutable " : ""
         return "\(mutPrefix)\(param.name) \(resolvedType)"
       }.joined(separator: ", ")
 
@@ -256,7 +256,7 @@ extension TypeChecker {
       if let receiver = method.parameters.first, receiver.name == "self",
          !isObjectSafeReceiverType(receiver.type)
       {
-        reasons.append("method '\(name)' receiver must be '*self' or '*mut self'")
+        reasons.append("method '\(name)' receiver must be '*self' or '*mutable self'")
       }
 
       // Rule 2: Self must not appear in parameter types (except receiver) or return type

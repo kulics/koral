@@ -30,9 +30,9 @@ let local_point = Point(1, 2)
 let heap_point = box(Point(3, 4))
 
 // The '&' operator borrows from an existing lvalue.
-// Result mutability depends on the source: let mut → &mut, let → &.
-let mut local_point2 = Point(3, 4)
-let heap_point_ref = &mut local_point2  // &mut (from let mut)
+// Result mutability depends on the source: let mutable → &mutable, let → &.
+let mutable local_point2 = Point(3, 4)
+let heap_point_ref = &mutable local_point2  // &mutable (from let mutable)
 
 // Bumping the refcount, no deep copy
 let shared_point = heap_point 
@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
-- Reference types: `*` (managed read-only), `*mut` (managed mutable), `*!` (read-only), `*! mut` (mutable), `?*` (read-only weak), `?*mut` (mutable weak)
+- Reference types: `*` (managed read-only), `*mutable` (managed mutable), `*!` (read-only), `*! mutable` (mutable), `?*` (read-only weak), `?*mutable` (mutable weak)
 
 ### Control Flow
 
@@ -207,7 +207,7 @@ let result = list.iterator()
 - Trait definitions with inheritance: `trait Ord Eq { ... }`
 - Generic trait declarations use postfix type parameters: `trait Iterator[T Any] { ... }`
 - Implementations via `given` blocks
-- Trait objects for runtime polymorphism: `*Greet`, `*mut Greet`
+- Trait objects for runtime polymorphism: `*Greet`, `*mutable Greet`
 - Operator overloading through algebraic traits (`Add`, `Sub`, `Neg`, `Mul`, `Div`, `Rem`, `Eq`, `Ord`)
 
 ### Functions and Lambdas
@@ -232,33 +232,33 @@ let result = list.iterator()
 
 - Automatic reference counting with copy-on-write semantics
 - Escape analysis for stack vs. heap allocation decisions
-- Weak references (`?*` / `?*mut`) for breaking reference cycles
+- Weak references (`?*` / `?*mutable`) for breaking reference cycles
 - `defer` for deterministic resource cleanup
 
 Reference creation rules:
-- `&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
-- `&` result mutability depends on the source: `let mut` binding → `*mut T`, `let` binding → `*T`, mutable path → `*mut T`.
+- `&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
+- `&` result mutability depends on the source: `let mutable` binding → `*mutable T`, `let` binding → `*T`, mutable path → `*mutable T`.
 - `&` on rvalues is rejected by the compiler.
-- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must use `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
+- **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must use `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** `*self` methods accept values via auto-ref; `self` methods accept `*T` via auto-deref (following Go's pointer receiver behavior).
 - Calling a `*self` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
-- Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mut Trait` can call both `*mut self` and `*self` requirements.
-- Method receiver forms: `self` (managed value), `*self` / `*mut self` (managed receivers, auto-ref allowed), Auto-ref and auto-deref apply only to `self` and `*self` forms.
-- `*T` is read-only: `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
-- `*! T` is read-only: `*expr` dereference read only. `*! mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
-- Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mut T`.
+- Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mutable Trait` can call both `*mutable self` and `*self` requirements.
+- Method receiver forms: `self` (managed value), `*self` / `*mutable self` (managed receivers, auto-ref allowed), Auto-ref and auto-deref apply only to `self` and `*self` forms.
+- `*T` is read-only: `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
+- `*! T` is read-only: `*expr` dereference read only. `*! mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mutable T`.
 - `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
-- Ordinary parameter `mut` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
-- `Drop` uses `drop(source *! mut Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
+- Ordinary parameter `mutable` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
+- `Drop` uses `drop(source *! mutable Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
 
 Weak reference rules:
-- `downgrade(*T)` produces `?*T`; `downgrade_mut(*mut T)` produces `?*mut T`.
-- `upgrade(?*T)` returns `Option[*T]`; `upgrade_mut(?*mut T)` returns `Option[*mut T]`.
-- `?*mut T` implicitly converts to `?*T` (widening).
+- `downgrade(*T)` produces `?*T`; `downgrade_mut(*mutable T)` produces `?*mutable T`.
+- `upgrade(?*T)` returns `Option[*T]`; `upgrade_mut(?*mutable T)` returns `Option[*mutable T]`.
+- `?*mutable T` implicitly converts to `?*T` (widening).
 
 ```koral
-let strong *mut Int = box(42)
-let weak ?*mut Int = downgrade_mut(strong)   // *mut → ?*mut
+let strong *mutable Int = box(42)
+let weak ?*mutable Int = downgrade_mut(strong)   // *mutable → ?*mutable
 
 when upgrade_mut(weak) in {
     .Some(r) then println(*r),

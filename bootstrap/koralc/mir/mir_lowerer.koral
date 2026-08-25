@@ -1,16 +1,16 @@
-﻿public type MIRLowerer(
-    program *mut MonomorphizedProgram,
+public type MIRLowerer(
+    program *mutable MonomorphizedProgram,
     context * CompilerContext,
-    mut pending_work_items List[* MIRFunctionWorkItem],
-    mut streaming_nodes_prepared Bool,
+    mutable pending_work_items List[* MIRFunctionWorkItem],
+    mutable streaming_nodes_prepared Bool,
 )
 
 given MIRLowerer {
-    public new(program *mut MonomorphizedProgram, context * CompilerContext) MIRLowerer =
+    public new(program *mutable MonomorphizedProgram, context * CompilerContext) MIRLowerer =
         MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false)
 
     public metadata_program(self) * MIRProgram = {
-        let mut globals_reversed = List[MIRGlobal].new()
+        let mutable globals_reversed = List[MIRGlobal].new()
 
         for request in self.program.vtable_requests then {
             globals_reversed.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
@@ -50,7 +50,7 @@ given MIRLowerer {
                     globals_reversed.push(MIRGlobal.EnumDeclaration(identifier, cases))
                 },
                 .GivenDecl(target_type, members, _) then {
-                    let mut method_symbols = List[* Symbol].new()
+                    let mutable method_symbols = List[* Symbol].new()
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
@@ -62,7 +62,7 @@ given MIRLowerer {
                     }
                 },
                 .IntrinsicGivenDecl(target_type, members, _) then {
-                    let mut method_symbols = List[* Symbol].new()
+                    let mutable method_symbols = List[* Symbol].new()
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
@@ -74,16 +74,16 @@ given MIRLowerer {
                     }
                 },
                 .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
-                    let mut copied_trait_args = List[Type].new()
+                    let mutable copied_trait_args = List[Type].new()
                     for arg in trait_args then { copied_trait_args.push(arg) }
-                    let mut method_symbols = List[* Symbol].new()
+                    let mutable method_symbols = List[* Symbol].new()
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref)
                         if not self.context.contains_generic_parameter(symbol.symbol_type) then {
                             method_symbols.push(symbol)
                         }
                     }
-                    let mut trait_args_concrete = true
+                    let mutable trait_args_concrete = true
                     for arg in copied_trait_args then {
                         if self.context.contains_generic_parameter(arg) then {
                             trait_args_concrete = false
@@ -103,7 +103,7 @@ given MIRLowerer {
             }
         }
 
-        let mut globals = List[MIRGlobal].new()
+        let mutable globals = List[MIRGlobal].new()
         while not globals_reversed.is_empty() then {
             globals.push(globals_reversed.pop().unwrap())
         }
@@ -120,7 +120,7 @@ given MIRLowerer {
         return program
     }
 
-    public lower_next_work_item(*mut self) Option[* MIRFunction] = {
+    public lower_next_work_item(*mutable self) Option[* MIRFunction] = {
         self.prepare_streaming_nodes()
 
         while true then {
@@ -137,12 +137,12 @@ given MIRLowerer {
         return Option[* MIRFunction].None()
     }
 
-    protected prepare_streaming_nodes(*mut self) Void = {
+    protected prepare_streaming_nodes(*mutable self) Void = {
         if self.streaming_nodes_prepared then {
             return
         }
 
-        let mut reversed = List[* TypedDecl].new()
+        let mutable reversed = List[* TypedDecl].new()
         while not self.program.global_nodes.is_empty() then {
             reversed.push(self.program.global_nodes.pop().unwrap())
         }
@@ -150,11 +150,11 @@ given MIRLowerer {
         self.streaming_nodes_prepared = true
     }
 
-    protected enqueue_node_work_items(*mut self, node_ref * TypedDecl) Void = {
+    protected enqueue_node_work_items(*mutable self, node_ref * TypedDecl) Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier)
-                let mut context = self.context
+                let mutable context = self.context
                 let source_initializer = context.take_concrete_global_initializer(identifier.def_id) or else initializer
                 self.pending_work_items.push(box(MIRFunctionWorkItem(
                     init_function,
@@ -173,12 +173,12 @@ given MIRLowerer {
                         },
                         .None() then MIRFunctionKind.Global(),
                     }
-                    let mut context = self.context
+                    let mutable context = self.context
                     let source_body = when context.take_concrete_function_body(identifier.def_id) in {
                         .Some(existing_body) then existing_body,
                         .None() then when context.take_concrete_function_source(identifier.def_id) in {
                             .Some(source) then {
-                                let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
+                                let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                 let resolved = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
                                 break resolved
@@ -197,10 +197,10 @@ given MIRLowerer {
             },
             .GivenDecl(target_type, members, _) then {
                 let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                let mut methods_reversed = List[* MIRFunctionWorkItem].new()
+                let mutable methods_reversed = List[* MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
-                    let mut context = self.context
+                    let mutable context = self.context
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
@@ -210,7 +210,7 @@ given MIRLowerer {
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
+                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                     let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
@@ -232,13 +232,13 @@ given MIRLowerer {
                 }
             },
             .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
-                let mut copied_trait_args = List[Type].new()
+                let mutable copied_trait_args = List[Type].new()
                 for arg in trait_args then { copied_trait_args.push(arg) }
                 let kind = MIRFunctionKind.Given(target_type, Option[String].Some(trait_name), copied_trait_args)
-                let mut methods_reversed = List[* MIRFunctionWorkItem].new()
+                let mutable methods_reversed = List[* MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
-                    let mut context = self.context
+                    let mutable context = self.context
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
@@ -248,7 +248,7 @@ given MIRLowerer {
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
+                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                     let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
@@ -271,10 +271,10 @@ given MIRLowerer {
             },
             .IntrinsicGivenDecl(target_type, members, _) then {
                 let kind = MIRFunctionKind.Given(target_type, Option[String].None(), List[Type].new())
-                let mut methods_reversed = List[* MIRFunctionWorkItem].new()
+                let mutable methods_reversed = List[* MIRFunctionWorkItem].new()
                 for member_ref in members then {
                     let symbol = self.make_given_member_symbol(member_ref)
-                    let mut context = self.context
+                    let mutable context = self.context
                     when context.take_concrete_given_member_body(member_ref.def_id) in {
                         .Some(body) then {
                             if self.should_lower_function(symbol) then {
@@ -284,7 +284,7 @@ given MIRLowerer {
                         .None() then when context.take_concrete_given_member_source(member_ref.def_id) in {
                             .Some(source) then {
                                 if self.should_lower_function(symbol) then {
-                                    let mut checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
+                                    let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                     let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
                                     methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
@@ -309,9 +309,9 @@ given MIRLowerer {
         }
     }
 
-    public lower(*mut self) * MIRProgram = {
+    public lower(*mutable self) * MIRProgram = {
         let program = self.metadata_program()
-        let mut functions = List[* MIRFunction].new()
+        let mutable functions = List[* MIRFunction].new()
         while true then {
             when self.lower_next_work_item() in {
                 .Some(function) then functions.push(function),
@@ -327,7 +327,7 @@ given MIRLowerer {
             program.receiver_method_dispatch,
             program.concrete_callables_by_def_id,
         ))
-        let mut promoter = MIRReferenceAllocationPromoter.new(lowered)
+        let mutable promoter = MIRReferenceAllocationPromoter.new(lowered)
         return promoter.promote()
     }
 
@@ -343,7 +343,7 @@ given MIRLowerer {
         kind MIRFunctionKind,
         body * TypedExpr,
     ) * MIRFunction = {
-        let mut builder = MIRFunctionBuilder.new(
+        let mutable builder = MIRFunctionBuilder.new(
             self.program,
             identifier,
             params,
@@ -353,7 +353,7 @@ given MIRLowerer {
             body,
             self.context,
         )
-        return (&mut builder).lower()
+        return (&mutable builder).lower()
     }
 
     protected should_lower_function(self, identifier * Symbol) Bool = {
@@ -363,7 +363,7 @@ given MIRLowerer {
 
     protected make_global_initializer_symbol(self, identifier * Symbol) * Symbol = {
         let function_type = Type.FunctionType(List[* FunctionParamEntry].new(), box(identifier.symbol_type))
-        let mut context = *(self.context)
+        let mutable context = *(self.context)
         return box(context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
             self.context.get_module_path(identifier.def_id) or else List[String].new(),
@@ -381,7 +381,7 @@ given MIRLowerer {
         let function_type = when self.context.get_function_type(member.def_id) in {
             .Some(t) then t,
             .None() then {
-                let mut param_types = List[* Type].new()
+                let mutable param_types = List[* Type].new()
                 for param in member.params then {
                     param_types.push(box(param.param_type))
                 }
@@ -401,18 +401,18 @@ given MIRLowerer {
     }
 
     protected copy_type_ref_list(self, values List[* Type]) List[Type] = {
-        let mut out = List[Type].new()
+        let mutable out = List[Type].new()
         for value in values then { out.push(*value) }
         return out
     }
 
     protected make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
-        // Collect trait members without ref mut (ref mut doesn't persist in bootstrap codegen).
+        // Collect trait members without ref mutable (ref mutable doesn't persist in bootstrap codegen).
         // Use iterative approach with explicit work list.
-        let mut ordered_members = List[TypedTraitMember].new()
-        let mut visited_traits = Set[String].new()
-        let mut seen_methods = Set[String].new()
-        let mut work_stack = List[String].new()
+        let mutable ordered_members = List[TypedTraitMember].new()
+        let mutable visited_traits = Set[String].new()
+        let mutable seen_methods = Set[String].new()
+        let mutable work_stack = List[String].new()
         work_stack.push(request.trait_name)
         while not work_stack.is_empty() then {
             let trait_name = work_stack.pop() or else { continue }
@@ -421,7 +421,7 @@ given MIRLowerer {
             when self.program.traits.get(trait_name) in {
                 .Some(trait_info) then {
                     // Push parent traits in reverse order so we process them first
-                    let mut pi = trait_info.parent_traits.count()
+                    let mutable pi = trait_info.parent_traits.count()
                     while pi > 0(UInt) then {
                         pi -= 1(UInt)
                         work_stack.push(trait_info.parent_traits[pi].name)
@@ -438,7 +438,7 @@ given MIRLowerer {
         }
 
         let bindings = self.trait_member_type_bindings(request)
-        let mut methods = List[MIRTraitVTableMethod].new()
+        let mutable methods = List[MIRTraitVTableMethod].new()
         for member in ordered_members then {
             methods.push(self.make_trait_vtable_method(self.apply_type_bindings_to_trait_member(member, bindings)))
         }
@@ -453,11 +453,11 @@ given MIRLowerer {
     }
 
     protected trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
-        let mut bindings = Dict[String, Type].new()
+        let mutable bindings = Dict[String, Type].new()
         bindings.insert("Self", request.concrete_type)
         when self.program.traits.get(request.trait_name) in {
             .Some(trait_info) then {
-                let mut index UInt = 0
+                let mutable index UInt = 0
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {
                     bindings.insert(trait_info.type_params[index].name, (*request.trait_type_args[index]))
                     index += 1
@@ -482,24 +482,24 @@ given MIRLowerer {
             .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
             .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(self.apply_type_bindings(*inner, bindings))),
             .FunctionType(params, return_type) then {
-                let mut bound_params = List[* Type].new()
+                let mutable bound_params = List[* Type].new()
                 for param in params then {
                     bound_params.push(box(self.apply_type_bindings(param.param_type, bindings)))
                 }
                 break make_function_type(bound_params, self.apply_type_bindings(*return_type, bindings))
             },
             .GenericStruct(template, args) then {
-                let mut bound_args = List[* Type].new()
+                let mutable bound_args = List[* Type].new()
                 for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
                 break Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
-                let mut bound_args = List[* Type].new()
+                let mutable bound_args = List[* Type].new()
                 for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
                 break Type.GenericEnum(template, bound_args)
             },
             .TraitObject(trait_name, args) then {
-                let mut bound_args = List[* Type].new()
+                let mutable bound_args = List[* Type].new()
                 for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
                 break Type.TraitObject(trait_name, bound_args)
             },
@@ -508,7 +508,7 @@ given MIRLowerer {
     }
 
     protected apply_type_bindings_to_trait_member(self, member TypedTraitMember, bindings Dict[String, Type]) TypedTraitMember = {
-        let mut params = List[TypedParam].new()
+        let mutable params = List[TypedParam].new()
         for param in member.params then {
             params.push(TypedParam(param.name, param.mutable, self.apply_type_bindings(param.param_type, bindings), param.named))
         }
@@ -516,9 +516,9 @@ given MIRLowerer {
     }
 
     protected make_trait_vtable_method(self, member TypedTraitMember) MIRTraitVTableMethod = {
-        let mut params = List[MIRTraitVTableParameter].new()
-        let mut first = true
-        let mut self_by_value = false
+        let mutable params = List[MIRTraitVTableParameter].new()
+        let mutable first = true
+        let mutable self_by_value = false
         for param in member.params then {
             let is_self = param.name == "self"
             if first and is_self then {
@@ -565,7 +565,7 @@ type MIREscapeSummary(
     direct_reference_escaping_parameter_indices Set[UInt],
 )
 
-private let mark_local_escape(value MIRValue, escaping *mut Set[UInt]) Void = {
+private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) Void = {
     when value in {
         .Operand(.Local(local_id)) then { escaping.insert(local_id.raw_value) },
         .PlaceRead(.Local(local_id), _) then { escaping.insert(local_id.raw_value) },
@@ -577,14 +577,14 @@ private let mark_local_escape(value MIRValue, escaping *mut Set[UInt]) Void = {
 private let visit_local_escape_value(
     value MIRValue,
     summaries Dict[UInt, MIREscapeSummary],
-    escaping *mut Set[UInt]
+    escaping *mutable Set[UInt]
 ) Void = {
     when value in {
         .Call(call) then {
             when call.callee in {
                 .Function(callee_sym) then {
                     let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                    let mut ai = 0(UInt)
+                    let mutable ai = 0(UInt)
                     for arg in call.arguments then {
                         if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
                             mark_local_escape(*arg, escaping)
@@ -660,15 +660,15 @@ private let visit_local_escape_value(
 }
 
 private let compute_escaping_locals_for_function(function * MIRFunction, summaries Dict[UInt, MIREscapeSummary]) Set[UInt] = {
-    let mut escaping = Set[UInt].new()
+    let mutable escaping = Set[UInt].new()
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
-                .Assign(_, value) then visit_local_escape_value(value, summaries, &mut escaping),
-                .CompoundAssign(assignment) then visit_local_escape_value(assignment.value, summaries, &mut escaping),
-                .Evaluate(value) then visit_local_escape_value(value, summaries, &mut escaping),
-                .Retain(value) then visit_local_escape_value(value, summaries, &mut escaping),
-                .Release(value) then visit_local_escape_value(value, summaries, &mut escaping),
+                .Assign(_, value) then visit_local_escape_value(value, summaries, &mutable escaping),
+                .CompoundAssign(assignment) then visit_local_escape_value(assignment.value, summaries, &mutable escaping),
+                .Evaluate(value) then visit_local_escape_value(value, summaries, &mutable escaping),
+                .Retain(value) then visit_local_escape_value(value, summaries, &mutable escaping),
+                .Release(value) then visit_local_escape_value(value, summaries, &mutable escaping),
                 _ then {},
             }
         }
@@ -677,7 +677,7 @@ private let compute_escaping_locals_for_function(function * MIRFunction, summari
             _ then {},
         }
     }
-    let mut changed = true
+    let mutable changed = true
     while changed then {
         changed = false
         for block in function.blocks then {
@@ -716,7 +716,7 @@ private let compute_escaping_locals_for_function(function * MIRFunction, summari
 }
 
 private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
-    let mut temps = Set[UInt].new()
+    let mutable temps = Set[UInt].new()
     for local in function.locals then {
         if local.storage is .Temporary() then {
             temps.insert(local.id.raw_value)
@@ -726,8 +726,8 @@ private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
 }
 
 private let build_temporary_value_sources(function * MIRFunction, temporary_local_ids Set[UInt]) Dict[UInt, MIRValue] = {
-    let mut sources = Dict[UInt, MIRValue].new()
-    let mut ambiguous = Set[UInt].new()
+    let mutable sources = Dict[UInt, MIRValue].new()
+    let mutable ambiguous = Set[UInt].new()
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
@@ -761,14 +761,14 @@ private let build_temporary_value_sources(function * MIRFunction, temporary_loca
 }
 
 private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
-    let mut param_local_ids = List[UInt].new()
+    let mutable param_local_ids = List[UInt].new()
     for local in function.locals then {
         if local.storage is .Parameter() then {
             param_local_ids.push(local.id.raw_value)
         }
     }
-    let mut local_to_param = Dict[UInt, UInt].new()
-    let mut idx = 0(UInt)
+    let mutable local_to_param = Dict[UInt, UInt].new()
+    let mutable idx = 0(UInt)
     while idx < param_local_ids.count() and idx < function.params.count() then {
         local_to_param.insert(param_local_ids[idx], idx)
         idx += 1
@@ -776,7 +776,7 @@ private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
     return local_to_param
 }
 
-private let escape_mark(value MIRValue, param_map Dict[UInt, UInt], local_sources Dict[UInt, Set[UInt]], escaping *mut Set[UInt]) Void = {
+private let escape_mark(value MIRValue, param_map Dict[UInt, UInt], local_sources Dict[UInt, Set[UInt]], escaping *mutable Set[UInt]) Void = {
     collect_parameter_sources(value, param_map, local_sources, escaping)
 }
 
@@ -784,7 +784,7 @@ private let collect_parameter_sources(
     value MIRValue,
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
-    out *mut Set[UInt]
+    out *mutable Set[UInt]
 ) Void = {
     when value in {
         .Operand(.Local(local_id)) then {
@@ -822,12 +822,12 @@ private let merge_value_parameter_sources(
     target_local UInt,
     value MIRValue,
     param_map Dict[UInt, UInt],
-    local_sources *mut Dict[UInt, Set[UInt]]
+    local_sources *mutable Dict[UInt, Set[UInt]]
 ) Bool = {
-    let mut collected = Set[UInt].new()
-    collect_parameter_sources(value, param_map, *local_sources, &mut collected)
-    let mut merged = local_sources.get(target_local) or else Set[UInt].new()
-    let mut changed = false
+    let mutable collected = Set[UInt].new()
+    collect_parameter_sources(value, param_map, *local_sources, &mutable collected)
+    let mutable merged = local_sources.get(target_local) or else Set[UInt].new()
+    let mutable changed = false
     for pi in collected then {
         if not merged.contains(pi) then {
             merged.insert(pi)
@@ -844,7 +844,7 @@ private let mark_returning_from_value(
     value MIRValue,
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
-    returning *mut Set[UInt]
+    returning *mutable Set[UInt]
 ) Void = {
     collect_parameter_sources(value, param_map, local_sources, returning)
 }
@@ -854,15 +854,15 @@ private let visit_escape_value(
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
     summaries Dict[UInt, MIREscapeSummary],
-    returning *mut Set[UInt],
-    direct_escaping *mut Set[UInt]
+    returning *mutable Set[UInt],
+    direct_escaping *mutable Set[UInt]
 ) Void = {
     when value in {
         .Call(call) then {
             when call.callee in {
                 .Function(callee_sym) then {
                     let callee_summary = summaries.get(callee_sym.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                    let mut ai = 0(UInt)
+                    let mutable ai = 0(UInt)
                     for arg in call.arguments then {
                         if callee_summary.direct_reference_escaping_parameter_indices.contains(ai) then {
                             escape_mark(*arg, param_map, local_sources, direct_escaping)
@@ -951,51 +951,51 @@ private let visit_escape_statement(
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
     summaries Dict[UInt, MIREscapeSummary],
-    returning *mut Set[UInt],
-    direct_escaping *mut Set[UInt]
+    returning *mutable Set[UInt],
+    direct_escaping *mutable Set[UInt]
 ) Void = {
     visit_escape_value(value, param_map, local_sources, summaries, returning, direct_escaping)
 }
 
 private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeSummary] = {
-    let mut param_maps = Dict[UInt, Dict[UInt, UInt]].new()
+    let mutable param_maps = Dict[UInt, Dict[UInt, UInt]].new()
     for function_ref in program.functions then {
         param_maps.insert(function_ref.identifier.def_id.id, build_param_local_map(function_ref))
     }
-    let mut summaries = Dict[UInt, MIREscapeSummary].new()
+    let mutable summaries = Dict[UInt, MIREscapeSummary].new()
     for function_ref in program.functions then {
         summaries.insert(function_ref.identifier.def_id.id, MIREscapeSummary(Set[UInt].new(), Set[UInt].new()))
     }
-    let mut changed = true
+    let mutable changed = true
     while changed then {
         changed = false
         for function_ref in program.functions then {
             let func_id = function_ref.identifier.def_id.id
             let param_map = param_maps.get(func_id) or else Dict[UInt, UInt].new()
-            let mut returning = Set[UInt].new()
-            let mut direct_escaping = Set[UInt].new()
-            let mut local_sources = Dict[UInt, Set[UInt]].new()
+            let mutable returning = Set[UInt].new()
+            let mutable direct_escaping = Set[UInt].new()
+            let mutable local_sources = Dict[UInt, Set[UInt]].new()
             for block in function_ref.blocks then {
                 for statement in block.statements then {
                     when statement in {
                         .Assign(place, value) then {
-                            visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping)
+                            visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping)
                             when place in {
-                                .Local(local_id) then { let _ = merge_value_parameter_sources(local_id.raw_value, value, param_map, &mut local_sources) },
+                                .Local(local_id) then { let _ = merge_value_parameter_sources(local_id.raw_value, value, param_map, &mutable local_sources) },
                                 _ then {},
                             }
                         },
-                        .CompoundAssign(assignment) then visit_escape_statement(assignment.value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
-                        .Evaluate(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
-                        .Retain(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
-                        .Release(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mut returning, &mut direct_escaping),
+                        .CompoundAssign(assignment) then visit_escape_statement(assignment.value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
+                        .Evaluate(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
+                        .Retain(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
+                        .Release(value) then visit_escape_statement(value, param_map, local_sources, summaries, &mutable returning, &mutable direct_escaping),
                         _ then {},
                     }
                 }
                 when block.terminator in {
                     .ReturnValue(.Some(.Local(local_id))) then {
-                        let mut returned_params = Set[UInt].new()
-                        collect_parameter_sources(MIRValue.Operand(MIROperand.Local(local_id)), param_map, local_sources, &mut returned_params)
+                        let mutable returned_params = Set[UInt].new()
+                        collect_parameter_sources(MIRValue.Operand(MIROperand.Local(local_id)), param_map, local_sources, &mutable returned_params)
                         for pi in returned_params then { returning.insert(pi) }
                     },
                     _ then {},
@@ -1108,8 +1108,8 @@ given MIRReferenceAllocationPromoter {
         return MIRReferenceAllocationPromoter(program)
     }
 
-    public promote(*mut self) * MIRProgram = {
-        let mut needs_promotion = false
+    public promote(*mutable self) * MIRProgram = {
+        let mutable needs_promotion = false
         for function_ref in self.program.functions then {
             if mir_function_needs_reference_allocation_promotion(function_ref) then {
                 needs_promotion = true
@@ -1124,11 +1124,11 @@ given MIRReferenceAllocationPromoter {
         let parameter_types_by_name = self.build_parameter_types_by_name()
         let escape_summaries = compute_escape_summaries(self.program)
 
-        let mut functions = List[* MIRFunction].new()
+        let mutable functions = List[* MIRFunction].new()
         for function_ref in self.program.functions then {
             let escaping_locals = compute_escaping_locals_for_function(function_ref, escape_summaries)
             let temporary_ids = compute_temporary_local_ids(function_ref)
-            let mut promoter = MIRReferenceAllocationFunctionPromoter.new(
+            let mutable promoter = MIRReferenceAllocationFunctionPromoter.new(
                 function_ref,
                 parameter_types_by_def_id,
                 parameter_types_by_name,
@@ -1154,7 +1154,7 @@ given MIRReferenceAllocationPromoter {
     }
 
     protected build_parameter_types_by_def_id(self) Dict[UInt, List[* FunctionParamEntry]] = {
-        let mut map = Dict[UInt, List[* FunctionParamEntry]].new()
+        let mutable map = Dict[UInt, List[* FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
             map.insert(function_ref.identifier.def_id.id, self.function_param_entries(function_ref))
         }
@@ -1162,7 +1162,7 @@ given MIRReferenceAllocationPromoter {
     }
 
     protected build_parameter_types_by_name(self) Dict[String, List[* FunctionParamEntry]] = {
-        let mut map = Dict[String, List[* FunctionParamEntry]].new()
+        let mutable map = Dict[String, List[* FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
             let param_types = self.function_param_entries(function_ref)
             for name in self.callable_name_aliases(function_ref.identifier) then {
@@ -1194,7 +1194,7 @@ given MIRReferenceAllocationPromoter {
     }
 
     protected callable_name_aliases(self, symbol * Symbol) List[String] = {
-        let mut names = List[String].new()
+        let mutable names = List[String].new()
         let logical = self.callable_logical_name(symbol)
         if not logical.is_empty() then {
             names.push(logical)
@@ -1219,7 +1219,7 @@ given MIRReferenceAllocationPromoter {
             .FunctionType(params, _) then { return params },
             _ then {},
         }
-        let mut params = List[* FunctionParamEntry].new()
+        let mutable params = List[* FunctionParamEntry].new()
         for param in function.params then {
             params.push(box(make_function_param_entry(param.param_type)))
         }
@@ -1239,8 +1239,8 @@ given MIRReferenceAllocationFunctionPromoter {
         temporary_local_ids Set[UInt],
         escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
     ) MIRReferenceAllocationFunctionPromoter = {
-        let mut local_types_by_id = Dict[UInt, Type].new()
-        let mut local_storages_by_id = Dict[UInt, MIRStorage].new()
+        let mutable local_types_by_id = Dict[UInt, Type].new()
+        let mutable local_storages_by_id = Dict[UInt, MIRStorage].new()
         for local in function.locals then {
             local_types_by_id.insert(local.id.raw_value, local.local_type)
             local_storages_by_id.insert(local.id.raw_value, local.storage)
@@ -1261,14 +1261,14 @@ given MIRReferenceAllocationFunctionPromoter {
             escape_summaries_by_def_id,
         )
     }
-    public promote(*mut self) * MIRFunction = {
+    public promote(*mutable self) * MIRFunction = {
         if not mir_function_needs_reference_allocation_promotion(self.function) then {
             return self.function
         }
 
-        let mut blocks = List[* MIRBasicBlock].new()
+        let mutable blocks = List[* MIRBasicBlock].new()
         for block in self.function.blocks then {
-            let mut statements = List[* MIRStatement].new()
+            let mutable statements = List[* MIRStatement].new()
             for statement in block.statements then {
                 statements.push(box(self.promote_statement(*statement)))
             }
@@ -1285,7 +1285,7 @@ given MIRReferenceAllocationFunctionPromoter {
         ))
     }
 
-    protected promote_statement(*mut self, statement MIRStatement) MIRStatement = {
+    protected promote_statement(*mutable self, statement MIRStatement) MIRStatement = {
         return when statement in {
             .Assign(place, value) then {
                 let destination_type = self.destination_type_for_place(place)
@@ -1312,11 +1312,11 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_value(*mut self, value MIRValue, destination_type Option[Type]) MIRValue = {
+    protected promote_value(*mutable self, value MIRValue, destination_type Option[Type]) MIRValue = {
         return self.promote_value_with_place(value, destination_type, Option[MIRPlace].None())
     }
 
-    protected promote_value_with_place(*mut self, value MIRValue, destination_type Option[Type], destination_place Option[MIRPlace]) MIRValue = {
+    protected promote_value_with_place(*mutable self, value MIRValue, destination_type Option[Type], destination_place Option[MIRPlace]) MIRValue = {
         let promoted = when value in {
             .Call(call) then MIRValue.Call(MIRCall(
                 call.callee,
@@ -1326,14 +1326,14 @@ given MIRReferenceAllocationFunctionPromoter {
             )),
             .Intrinsic(node) then MIRValue.Intrinsic(self.promote_intrinsic(node)),
             .Aggregate(aggregate) then {
-                let mut fields = List[* MIRValue].new()
+                let mutable fields = List[* MIRValue].new()
                 for field in aggregate.fields then {
                     fields.push(box(self.promote_value(*field, Option[Type].None())))
                 }
                 break MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
             },
             .EnumCase(construction) then {
-                let mut args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new()
                 for arg in construction.arguments then {
                     args.push(box(self.promote_value(*arg, Option[Type].None())))
                 }
@@ -1341,7 +1341,7 @@ given MIRReferenceAllocationFunctionPromoter {
             },
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_value(*(conversion.inner), Option[Type].None())), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mut args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new()
                 for arg in call.arguments then {
                     args.push(box(self.promote_value(*arg, Option[Type].None())))
                 }
@@ -1385,7 +1385,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return promoted
     }
 
-    protected promote_call_arguments(*mut self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {
+    protected promote_call_arguments(*mutable self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {
         let params = when callee in {
             .Function(symbol) then self.parameters_for_call(symbol),
             _ then List[* FunctionParamEntry].new(),
@@ -1399,8 +1399,8 @@ given MIRReferenceAllocationFunctionPromoter {
                 break summary.direct_reference_escaping_parameter_indices
             },
             _ then {
-                let mut all_indices = Set[UInt].new()
-                let mut i = 0(UInt)
+                let mutable all_indices = Set[UInt].new()
+                let mutable i = 0(UInt)
                 while i < arguments.count() then {
                     all_indices.insert(i)
                     i += 1
@@ -1408,14 +1408,14 @@ given MIRReferenceAllocationFunctionPromoter {
                 break all_indices
             },
         }
-        let mut promoted = List[* MIRValue].new()
-        let mut index = 0(UInt)
+        let mutable promoted = List[* MIRValue].new()
+        let mutable index = 0(UInt)
         while index < arguments.count() then {
             let argument = (*arguments[index])
             let param_type = if index < params.count()
                 then Option[Type].Some(self.promotion_destination_type_for_param(*params[index]))
                 else Option[Type].None()
-            let mut arg_promoted = self.promote_value(argument, param_type)
+            let mutable arg_promoted = self.promote_value(argument, param_type)
             if direct_ref_escaping.contains(index) then {
                 arg_promoted = self.promote_direct_references(arg_promoted)
             }
@@ -1445,7 +1445,7 @@ given MIRReferenceAllocationFunctionPromoter {
     protected parameters_for_call(*self, symbol * Symbol) List[* FunctionParamEntry] = {
         when self.parameter_types_by_def_id.get(symbol.def_id.id) in {
             .Some(types) then {
-                let mut params = List[* FunctionParamEntry].new()
+                let mutable params = List[* FunctionParamEntry].new()
                 for t in types then { params.push(box(*t)) }
                 return params
             },
@@ -1454,7 +1454,7 @@ given MIRReferenceAllocationFunctionPromoter {
         for name in self.callable_name_aliases(symbol) then {
             when self.parameter_types_by_name.get(name) in {
                 .Some(types) then {
-                    let mut params = List[* FunctionParamEntry].new()
+                    let mutable params = List[* FunctionParamEntry].new()
                     for t in types then { params.push(box(*t)) }
                     return params
                 },
@@ -1471,7 +1471,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return List[* FunctionParamEntry].new()
     }
 
-    protected promote_intrinsic(*mut self, node MIRIntrinsic) MIRIntrinsic = {
+    protected promote_intrinsic(*mutable self, node MIRIntrinsic) MIRIntrinsic = {
         return when node in {
             .AllocMemory(count, result_type) then MIRIntrinsic.AllocMemory(box(self.promote_value(*count, Option[Type].None())), result_type),
             .DeallocMemory(pointer) then MIRIntrinsic.DeallocMemory(box(self.promote_value(*pointer, Option[Type].None()))),
@@ -1540,11 +1540,11 @@ given MIRReferenceAllocationFunctionPromoter {
     }
 
     protected resolve_temporary_ref_source(*self, value MIRValue) MIRValue = {
-        let mut seen = Set[UInt].new()
-        return self.resolve_temporary_ref_source_with_seen(value, &mut seen)
+        let mutable seen = Set[UInt].new()
+        return self.resolve_temporary_ref_source_with_seen(value, &mutable seen)
     }
 
-    protected resolve_temporary_ref_local(*self, local_id UInt, original MIRValue, seen *mut Set[UInt]) MIRValue = {
+    protected resolve_temporary_ref_local(*self, local_id UInt, original MIRValue, seen *mutable Set[UInt]) MIRValue = {
         if seen.contains(local_id) then {
             return original
         }
@@ -1562,7 +1562,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected resolve_temporary_ref_source_with_seen(*self, value MIRValue, seen *mut Set[UInt]) MIRValue = {
+    protected resolve_temporary_ref_source_with_seen(*self, value MIRValue, seen *mutable Set[UInt]) MIRValue = {
         return when value in {
             .Ref(_, _, _) then value,
             .Operand(.Local(local_id)) then self.resolve_temporary_ref_local(local_id.raw_value, value, seen),
@@ -1571,7 +1571,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_direct_references(*mut self, value MIRValue) MIRValue = {
+    protected promote_direct_references(*mutable self, value MIRValue) MIRValue = {
         let resolved = self.resolve_temporary_ref_source(value)
         return when resolved in {
             .Ref(place, kind, allocation) then when allocation in {
@@ -1579,14 +1579,14 @@ given MIRReferenceAllocationFunctionPromoter {
                 .HeapOwned() then resolved,
             },
             .Aggregate(aggregate) then {
-                let mut fields = List[* MIRValue].new()
+                let mutable fields = List[* MIRValue].new()
                 for field in aggregate.fields then {
                     fields.push(box(self.promote_direct_references(*field)))
                 }
                 break MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
             },
             .EnumCase(construction) then {
-                let mut args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new()
                 for arg in construction.arguments then {
                     args.push(box(self.promote_direct_references(*arg)))
                 }
@@ -1594,7 +1594,7 @@ given MIRReferenceAllocationFunctionPromoter {
             },
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_direct_references(*(conversion.inner))), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
-                let mut args = List[* MIRValue].new()
+                let mutable args = List[* MIRValue].new()
                 for arg in call.arguments then {
                     args.push(box(self.promote_direct_references(*arg)))
                 }
@@ -1624,7 +1624,7 @@ given MIRReferenceAllocationFunctionPromoter {
     }
 
     protected callable_name_aliases(self, symbol * Symbol) List[String] = {
-        let mut names = List[String].new()
+        let mutable names = List[String].new()
         let logical = self.callable_logical_name(symbol)
         if not logical.is_empty() then {
             names.push(logical)

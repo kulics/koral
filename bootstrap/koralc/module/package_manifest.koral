@@ -63,7 +63,7 @@ private let load_manifest_string_array(value * JsonValue, path String) Result[Li
     let arr = (*value).as_array() or else {
         return Result[List[String]].Error(box("Invalid manifest field '\(path)': expected string array"))
     }
-    let mut out List[String] = []
+    let mutable out List[String] = []
     for i in 0..<arr.count() then {
         let item = (*arr[i]).as_string() or else {
             return Result[List[String]].Error(box("Invalid manifest field '\(path)[\(i)]': expected string"))
@@ -77,8 +77,8 @@ private let load_manifest_string_dict(value * JsonValue, path String) Result[Dic
     let obj = (*value).as_object() or else {
         return Result[Dict[String, String]].Error(box("Invalid manifest field '\(path)': expected object"))
     }
-    let mut out = Dict[String, String].new()
-    let mut iter = obj.iterator()
+    let mutable out = Dict[String, String].new()
+    let mutable iter = obj.iterator()
     while iter.next() is .Some(entry) then {
         let str_value = (*entry.second).as_string() or else {
             return Result[Dict[String, String]].Error(box("Invalid manifest field '\(path).\(entry.first)': expected string"))
@@ -112,7 +112,7 @@ public let parse_manifest_module_name(name String) Option[List[String]] = {
     if name.is_empty() then {
         return Option[List[String]].None()
     }
-    let mut segments List[String] = []
+    let mutable segments List[String] = []
     for raw_segment in name.split("::") then {
         if raw_segment.is_empty() or not is_valid_manifest_module_segment(raw_segment) then {
             return Option[List[String]].None()
@@ -136,7 +136,7 @@ public let default_target_module_name(manifest PackageManifest) Result[String] =
     }
 
     if manifest.modules.count() == 1 then {
-        let mut iter = manifest.modules.iterator()
+        let mutable iter = manifest.modules.iterator()
         if iter.next() is .Some(entry) then {
             return Result[String].Ok(entry.first)
         }
@@ -182,13 +182,13 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         .None then List[String].new(),
     }
 
-    let mut dependencies = Dict[String, PackageDependencyConfig].new()
+    let mutable dependencies = Dict[String, PackageDependencyConfig].new()
     when json.get_field("dependencies") in {
         .Some(dep_ref) then {
             let dep_obj = (*dep_ref).as_object() or else {
                 return Result[PackageManifest].Error(box("Invalid manifest field 'dependencies': expected object"))
             }
-            let mut iter = dep_obj.iterator()
+            let mutable iter = dep_obj.iterator()
             while iter.next() is .Some(dep_entry) then {
                 let dep_json = *(dep_entry.second)
                 let dep_name_ref = dep_json.get_field("name") or else {
@@ -207,13 +207,13 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
         .None then {},
     }
 
-    let mut modules = Dict[String, PackageModuleConfig].new()
+    let mutable modules = Dict[String, PackageModuleConfig].new()
     when json.get_field("modules") in {
         .Some(modules_ref) then {
             let modules_obj = (*modules_ref).as_object() or else {
                 return Result[PackageManifest].Error(box("Invalid manifest field 'modules': expected object"))
             }
-            let mut iter = modules_obj.iterator()
+            let mutable iter = modules_obj.iterator()
             while iter.next() is .Some(module_entry) then {
                 let module_name = module_entry.first
                 let path_segments = parse_manifest_module_name(module_name) or else {
@@ -271,12 +271,12 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
 private let add_manifest_modules(
     manifest PackageManifest,
     package_kind ResolvedPackageKind,
-    modules_by_name *mut Dict[String, ResolvedModuleSpec],
+    modules_by_name *mutable Dict[String, ResolvedModuleSpec],
 ) Void = {
-    let mut iter = manifest.modules.iterator()
+    let mutable iter = manifest.modules.iterator()
     while iter.next() is .Some(entry) then {
         let module = entry.second
-        let mut all_links List[String] = []
+        let mutable all_links List[String] = []
         for link in manifest.links then { all_links.push(link) }
         for link in module.links then { all_links.push(link) }
         modules_by_name.insert(entry.first, ResolvedModuleSpec(
@@ -298,25 +298,25 @@ private let build_dependency_alias_rules(
     dependency_manifests Dict[String, PackageManifest],
     existing_module_names List[String],
 ) Result[List[ResolvedModuleAliasRule]] = {
-    let mut alias_count = 0(UInt)
-    let mut dep_count_iter = root_manifest.dependencies.iterator()
+    let mutable alias_count = 0(UInt)
+    let mutable dep_count_iter = root_manifest.dependencies.iterator()
     while dep_count_iter.next() is .Some(dep_entry) then {
         alias_count += dep_entry.second.module_aliases.count()
     }
 
-    let mut rules = List[ResolvedModuleAliasRule].with_capacity(alias_count)
-    let mut claimed_alias_names = List[String].with_capacity(existing_module_names.count() + alias_count)
+    let mutable rules = List[ResolvedModuleAliasRule].with_capacity(alias_count)
+    let mutable claimed_alias_names = List[String].with_capacity(existing_module_names.count() + alias_count)
     for existing_name in existing_module_names then {
         claimed_alias_names.push(existing_name)
     }
 
-    let mut dep_iter = root_manifest.dependencies.iterator()
+    let mutable dep_iter = root_manifest.dependencies.iterator()
     while dep_iter.next() is .Some(dep_entry) then {
         let dep_manifest = dependency_manifests.get(dep_entry.first) or else {
             continue
         }
 
-        let mut alias_iter = dep_entry.second.module_aliases.iterator()
+        let mutable alias_iter = dep_entry.second.module_aliases.iterator()
         while alias_iter.next() is .Some(alias_entry) then {
             let published_name = alias_entry.first
             let alias_name = alias_entry.second
@@ -345,11 +345,11 @@ private let build_dependency_alias_rules(
             }
             claimed_alias_names.push(alias_name)
 
-            let mut alias_path_segments List[String] = []
+            let mutable alias_path_segments List[String] = []
             for segment in alias_segments then {
                 alias_path_segments.push(module_file_name_to_identifier(segment))
             }
-            let mut target_path_segments List[String] = []
+            let mutable target_path_segments List[String] = []
             for segment in published_segments then {
                 target_path_segments.push(module_file_name_to_identifier(segment))
             }
@@ -374,12 +374,12 @@ private let rewrite_module_requirement_names(
         return requires
     }
 
-    let mut out = List[String].new()
+    let mutable out = List[String].new()
     for requirement in requires then {
-        let mut rewritten = requirement
-        let mut best_alias_len Int = -1
+        let mutable rewritten = requirement
+        let mutable best_alias_len Int = -1
         for rule in alias_rules then {
-            let mut candidate = Option[String].None()
+            let mutable candidate = Option[String].None()
             if requirement == rule.alias_full_name then {
                 candidate = Option[String].Some(rule.target_full_name)
             } else {
@@ -409,14 +409,14 @@ private let rewrite_module_requirement_names(
 private let validate_resolved_module_graph(
     modules_by_name Dict[String, ResolvedModuleSpec],
     name String,
-    visited *mut List[String],
-    stack *mut List[String],
+    visited *mutable List[String],
+    stack *mutable List[String],
 ) Result[Void] = {
     if visited.contains(name) then {
         return Result[Void].Ok({})
     }
     if stack.contains(name) then {
-        let mut cycle = stack.join_to_string(" -> ")
+        let mutable cycle = stack.join_to_string(" -> ")
         if not cycle.is_empty() then {
             cycle.push_string(" -> ")
         }
@@ -444,8 +444,8 @@ private let collect_reachable_modules(
     modules_by_name Dict[String, ResolvedModuleSpec],
     name String,
 ) List[String] = {
-    let mut reachable = List[String].new()
-    let mut pending = List[String].new()
+    let mutable reachable = List[String].new()
+    let mutable pending = List[String].new()
     pending.push(name)
 
     while not pending.is_empty() then {
@@ -455,7 +455,7 @@ private let collect_reachable_modules(
         }
         reachable.push(current)
         let spec = modules_by_name.get(current) or else { continue }
-        let mut index = spec.requires.count()
+        let mutable index = spec.requires.count()
         while index > 0(UInt) then {
             index -= 1(UInt)
             pending.push(spec.requires[index])
@@ -472,18 +472,18 @@ public let load_resolved_package_graph(
     deps_root Option[String],
 ) Result[ResolvedPackageGraph] = {
     let root_manifest = load_package_manifest(root_manifest_path) or return
-    let mut modules_by_name = Dict[String, ResolvedModuleSpec].new()
-    add_manifest_modules(root_manifest, ResolvedPackageKind.Root(), &mut modules_by_name)
-    let mut dependency_manifests = Dict[String, PackageManifest].new()
+    let mutable modules_by_name = Dict[String, ResolvedModuleSpec].new()
+    add_manifest_modules(root_manifest, ResolvedPackageKind.Root(), &mutable modules_by_name)
+    let mutable dependency_manifests = Dict[String, PackageManifest].new()
 
-    let mut resolved_std_manifest_path = Option[String].None()
-    let mut std_root_module_name = Option[String].None()
+    let mutable resolved_std_manifest_path = Option[String].None()
+    let mutable std_root_module_name = Option[String].None()
     when std_manifest_path in {
         .Some(path) then {
             let std_manifest = load_package_manifest(path) or return
-            add_manifest_modules(std_manifest, ResolvedPackageKind.Std(), &mut modules_by_name)
+            add_manifest_modules(std_manifest, ResolvedPackageKind.Std(), &mutable modules_by_name)
             resolved_std_manifest_path = Option[String].Some(std_manifest.manifest_path)
-            let mut iter = std_manifest.modules.iterator()
+            let mutable iter = std_manifest.modules.iterator()
             while iter.next() is .Some(entry) then {
                 if not entry.first.contains("::") then {
                     std_root_module_name = Option[String].Some(entry.first)
@@ -496,7 +496,7 @@ public let load_resolved_package_graph(
 
     when deps_root in {
         .Some(root) then {
-            let mut iter = root_manifest.dependencies.iterator()
+            let mutable iter = root_manifest.dependencies.iterator()
             while iter.next() is .Some(dep_entry) then {
                 let dep_manifest_path = root.into_path().join(dep_entry.first).join("koral.json").normalize().to_string()
                 if not path_exist(dep_manifest_path.into_path()) then {
@@ -504,14 +504,14 @@ public let load_resolved_package_graph(
                 }
                 let dep_manifest = load_package_manifest(dep_manifest_path) or return
                 dependency_manifests.insert(dep_entry.first, dep_manifest)
-                add_manifest_modules(dep_manifest, ResolvedPackageKind.Dependency(dep_entry.first), &mut modules_by_name)
+                add_manifest_modules(dep_manifest, ResolvedPackageKind.Dependency(dep_entry.first), &mutable modules_by_name)
             }
         },
         .None() then {},
     }
 
-    let mut existing_module_names = List[String].with_capacity(modules_by_name.count())
-    let mut name_iter = modules_by_name.iterator()
+    let mutable existing_module_names = List[String].with_capacity(modules_by_name.count())
+    let mutable name_iter = modules_by_name.iterator()
     while name_iter.next() is .Some(entry) then {
         if not existing_module_names.contains(entry.first) then {
             existing_module_names.push(entry.first)
@@ -519,7 +519,7 @@ public let load_resolved_package_graph(
     }
     let alias_rules = build_dependency_alias_rules(root_manifest, dependency_manifests, existing_module_names) or return
     if not alias_rules.is_empty() then {
-        let mut root_iter = root_manifest.modules.iterator()
+        let mutable root_iter = root_manifest.modules.iterator()
         while root_iter.next() is .Some(root_entry) then {
             when modules_by_name.get(root_entry.first) in {
                 .Some(spec) then {
@@ -545,15 +545,15 @@ public let load_resolved_package_graph(
     }
 
     let module_count = modules_by_name.count()
-    let mut visited = List[String].with_capacity(module_count)
-    let mut stack = List[String].with_capacity(module_count)
-    let mut iter = modules_by_name.iterator()
+    let mutable visited = List[String].with_capacity(module_count)
+    let mutable stack = List[String].with_capacity(module_count)
+    let mutable iter = modules_by_name.iterator()
     while iter.next() is .Some(entry) then {
-        let _ = validate_resolved_module_graph(modules_by_name, entry.first, &mut visited, &mut stack) or return
+        let _ = validate_resolved_module_graph(modules_by_name, entry.first, &mutable visited, &mutable stack) or return
     }
 
     let reachable = collect_reachable_modules(modules_by_name, target_module_name)
-    let mut reachable_names = List[String].with_capacity(reachable.count())
+    let mutable reachable_names = List[String].with_capacity(reachable.count())
     for name in reachable then {
         if not reachable_names.contains(name) then {
             reachable_names.push(name)

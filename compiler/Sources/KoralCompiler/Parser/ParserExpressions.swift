@@ -591,16 +591,16 @@ extension Parser {
       try match(.ampersand)
       if currentToken === .bang {
         try match(.bang)
-        let mutable = currentToken === .mutKeyword
+        let mutable = currentToken === .mutableKeyword
         if mutable {
-          try match(.mutKeyword)
+          try match(.mutableKeyword)
         }
         let expr = try parsePrefixExpression()
         return .ptrExpression(expr)
       }
-      let mutable = currentToken === .mutKeyword
+      let mutable = currentToken === .mutableKeyword
       if mutable {
-        try match(.mutKeyword)
+        try match(.mutableKeyword)
       }
       let expr = try parsePrefixExpression()
       return .addressOfExpression(expr, mutable: mutable)

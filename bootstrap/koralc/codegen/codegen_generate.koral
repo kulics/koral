@@ -149,7 +149,7 @@ given CodeGen {
     protected is_concrete_nominal_instance(self, t Type) Bool = {
         return when t in {
             .GenericStruct(_, type_args) then {
-                let mut concrete = true
+                let mutable concrete = true
                 for type_arg_ref in type_args then {
                     let type_arg = *type_arg_ref
                     if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
@@ -159,7 +159,7 @@ given CodeGen {
                 break concrete
             },
             .GenericEnum(_, type_args) then {
-                let mut concrete = true
+                let mutable concrete = true
                 for type_arg_ref in type_args then {
                     let type_arg = *type_arg_ref
                     if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
@@ -173,7 +173,7 @@ given CodeGen {
                     .Some(_) then {
                         break when self.context.get_type_arguments(def_id) in {
                             .Some(type_args) then {
-                                let mut concrete = true
+                                let mutable concrete = true
                                 for type_arg in type_args then {
                                     if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
                                         concrete = false
@@ -192,7 +192,7 @@ given CodeGen {
                     .Some(_) then {
                         break when self.context.get_type_arguments(def_id) in {
                             .Some(type_args) then {
-                                let mut concrete = true
+                                let mutable concrete = true
                                 for type_arg in type_args then {
                                     if has_generic_parameter(type_arg) or is_placeholder_inferred_type(type_arg) then {
                                         concrete = false
@@ -304,7 +304,7 @@ given CodeGen {
     /// 生成完整的 C 源代码
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
-    public generate_into_buffer(*mut self) Void = {
+    public generate_into_buffer(*mutable self) Void = {
         self.validate_codegen_inputs()
         self.generate_prelude_into_buffer()
         self.emit_mir_function_implementations()
@@ -313,7 +313,7 @@ given CodeGen {
 
     public validate_inputs_for_generate(*self) Void = self.validate_codegen_inputs()
 
-    public generate_prelude_into_buffer(*mut self) Void = {
+    public generate_prelude_into_buffer(*mutable self) Void = {
         self.buffer = box(CodegenBuffer.new())
         self.precompute_c_type_name_cache()
         self.precompute_callable_c_name_cache()
@@ -327,22 +327,22 @@ given CodeGen {
         self.emit_vtable_definitions()
     }
 
-    public finalize_program_into_buffer(*mut self) Void = {
+    public finalize_program_into_buffer(*mutable self) Void = {
         self.emit_c_main()
     }
 
     public generated_buffer(*self) * CodegenBuffer = self.buffer
 
-    public into_generated_string(*mut self) String = self.buffer.into_string()
+    public into_generated_string(*mutable self) String = self.buffer.into_string()
 
-    public generate(*mut self) String = {
+    public generate(*mutable self) String = {
         self.generate_into_buffer()
         return self.into_generated_string()
     }
 
-    protected scan_program_codegen_inputs(*mut self) ForeignDeclarations = {
-        let mut empty_types = List[String].new()
-        let mut foreign_functions = List[ForeignFunctionPrototype].new()
+    protected scan_program_codegen_inputs(*mutable self) ForeignDeclarations = {
+        let mutable empty_types = List[String].new()
+        let mutable foreign_functions = List[ForeignFunctionPrototype].new()
         let stdlib_functions = ["exit", "abort"]
 
         for global in self.program.globals then {
@@ -357,7 +357,7 @@ given CodeGen {
                 },
                 .ForeignFunction(identifier, params, return_type) then {
                     let name = self.c_identifier_for_symbol(identifier)
-                    let mut is_stdlib = false
+                    let mutable is_stdlib = false
                     for sf in stdlib_functions then {
                         if sf == name then { is_stdlib = true }
                     }
@@ -418,7 +418,7 @@ given CodeGen {
     /// 收集、拓扑排序、生成类型定义（结构体/枚举，含 copy/drop）
     ///
     /// Requirements: 3.1–3.8, 13.1
-    emit_type_declarations(*mut self) Void = {
+    emit_type_declarations(*mutable self) Void = {
         let sorted_decls = self.collect_and_sort_type_declarations()
         for decl in sorted_decls then {
             when decl in {
@@ -457,19 +457,19 @@ given CodeGen {
     // ── emit_mir_function_declarations ───────────────────────────────────────
 
     emit_mir_function_declarations(*self) Void = {
-        let mut emitted = Set[String].new()
+        let mutable emitted = Set[String].new()
         // Emit from actual function implementations first (correct types).
         for function_ref in self.program.functions then {
-            self.emit_symbol_function_declaration(function_ref.identifier, &mut emitted)
+            self.emit_symbol_function_declaration(function_ref.identifier, &mutable emitted)
         }
         // Emit remaining declarations from globals (initializers, given methods).
         for global in self.program.globals then {
             when global in {
-                .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(initializer_function, &mut emitted),
-                .Function(identifier, params, return_type, _) then self.emit_declared_function_declaration(identifier, params, return_type, &mut emitted),
+                .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(initializer_function, &mutable emitted),
+                .Function(identifier, params, return_type, _) then self.emit_declared_function_declaration(identifier, params, return_type, &mutable emitted),
                 .Given(_, _, _, methods) then {
                     for method in methods then {
-                        self.emit_symbol_function_declaration(method, &mut emitted)
+                        self.emit_symbol_function_declaration(method, &mutable emitted)
                     }
                 },
                 _ then {},
@@ -480,7 +480,7 @@ given CodeGen {
 
     // ── emit_mir_global_variables ────────────────────────────────────────────
 
-    emit_mir_global_variables(*mut self) Void = {
+    emit_mir_global_variables(*mutable self) Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignGlobalVariable(identifier, mutable, decl_type) then {
@@ -508,13 +508,13 @@ given CodeGen {
     /// 生成 vtable 定义（调用 process_vtable_requests）
     ///
     /// Requirements: 10.1–10.5
-    emit_vtable_definitions(*mut self) Void = {
+    emit_vtable_definitions(*mutable self) Void = {
         self.process_vtable_requests()
     }
 
     // ── emit_mir_function_implementations ────────────────────────────────────
 
-    public emit_mir_function_implementations(*mut self) Void = {
+    public emit_mir_function_implementations(*mutable self) Void = {
         for function in self.program.functions then {
             self.emit_mir_global_function(function)
         }
@@ -525,7 +525,7 @@ given CodeGen {
         identifier * Symbol,
         params List[TypedParam],
         return_type Type,
-        emitted *mut Set[String],
+        emitted *mutable Set[String],
     ) Void = {
         let c_name = self.callable_c_name(identifier)
         if emitted.contains(c_name) then { return }
@@ -541,7 +541,7 @@ given CodeGen {
         self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n")
     }
 
-    protected emit_symbol_function_declaration(*self, symbol * Symbol, emitted *mut Set[String]) Void = {
+    protected emit_symbol_function_declaration(*self, symbol * Symbol, emitted *mutable Set[String]) Void = {
         let c_name = self.callable_c_name(symbol)
         if emitted.contains(c_name) then { return }
         emitted.insert(c_name)
@@ -563,7 +563,7 @@ given CodeGen {
     /// 生成 C main 函数
     ///
     /// Requirements: 12.6, 12.7, 12.8
-    emit_c_main(*mut self) Void = {
+    emit_c_main(*mutable self) Void = {
         let has_global_inits = self.has_mir_global_initializers()
         let has_user_main = when self.user_main_function_name in {
             .Some(_) then true,
@@ -635,7 +635,7 @@ given CodeGen {
         return false
     }
 
-    protected emit_mir_global_initializers(*mut self) Void = {
+    protected emit_mir_global_initializers(*mutable self) Void = {
         for global in self.program.globals then {
             when global in {
                 .GlobalVariable(identifier, initializer_function, _, _) then {
@@ -655,8 +655,8 @@ given CodeGen {
     public build_param_list(self, params List[TypedParam]) String = {
         if params.is_empty() then { return "void" }
 
-        let mut result = String.new()
-        let mut first = true
+        let mutable result = String.new()
+        let mutable first = true
         for p in params then {
             if not first then {
                 result.push_string(", ")
@@ -675,8 +675,8 @@ given CodeGen {
     public build_param_type_list(self, params List[TypedParam]) String = {
         if params.is_empty() then { return "void" }
 
-        let mut result = String.new()
-        let mut first = true
+        let mutable result = String.new()
+        let mutable first = true
         for p in params then {
             let c_type = self.c_type_name(p.param_type)
             if not first then {
@@ -692,9 +692,9 @@ given CodeGen {
         return when fn_type in {
             .FunctionType(params, _) then {
                 if params.is_empty() then { return "void" }
-                let mut result = String.new()
-                let mut first = true
-                let mut index UInt = 0
+                let mutable result = String.new()
+                let mutable first = true
+                let mutable index UInt = 0
                 while index < params.count() then {
                     if not first then {
                         result.push_string(", ")

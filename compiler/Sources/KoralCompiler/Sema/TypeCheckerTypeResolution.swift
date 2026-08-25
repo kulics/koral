@@ -631,7 +631,7 @@ extension TypeChecker {
 
       let paramsDesc = try method.parameters.map { param -> String in
         let resolvedType = try resolveTypeNode(param.type)
-        let mutPrefix = param.mutable ? "mut " : ""
+        let mutPrefix = param.mutable ? "mutable " : ""
         return "\(mutPrefix)\(param.name) \(resolvedType)"
       }.joined(separator: ", ")
 

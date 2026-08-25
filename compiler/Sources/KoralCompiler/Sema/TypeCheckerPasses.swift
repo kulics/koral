@@ -11,7 +11,7 @@ extension TypeChecker {
     span: SourceSpan
   ) throws {
     guard !type.containsBorrowedReference else {
-      throw SemanticError(.generic("\(description) cannot contain borrowed `ref` / `ref mut` types: '\(type)'"), span: span)
+      throw SemanticError(.generic("\(description) cannot contain borrowed `ref` / `ref mutable` types: '\(type)'"), span: span)
     }
   }
 
@@ -22,7 +22,7 @@ extension TypeChecker {
   ) throws {
     guard params.count == 1 else {
       throw SemanticError.invalidOperation(
-        op: "drop must have exactly one parameter of type '*! mut Self'", type1: "", type2: "")
+        op: "drop must have exactly one parameter of type '*! mutable Self'", type1: "", type2: "")
     }
     let expectedParamType = Type.mutablePointer(element: selfType)
     guard params[0].type == expectedParamType else {

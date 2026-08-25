@@ -42,7 +42,7 @@ public enum Token: CustomStringConvertible {
   case lessEqual  // Less than or equal operator '<='
   case identifier(String)  // Identifier, e.g.: variableName, Int, Float64, String
   case letKeyword  // 'let' keyword
-  case mutKeyword  // 'mut' keyword
+  case mutableKeyword  // .mutable. keyword
   case semicolon  // Semicolon ';'
   case leftParen  // Left parenthesis '('
   case rightParen  // Right parenthesis ')'
@@ -147,7 +147,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.greater, .greater), (.less, .less), (.greaterEqual, .greaterEqual), (.lessEqual, .lessEqual):
       return true
-    case (.letKeyword, .letKeyword), (.mutKeyword, .mutKeyword):
+    case (.letKeyword, .letKeyword), (.mutableKeyword, .mutableKeyword):
       return true
     case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.arrow, .arrow):
       return true
@@ -246,8 +246,8 @@ public enum Token: CustomStringConvertible {
       return "Identifier(\(value))"
     case .letKeyword:
       return "let"
-    case .mutKeyword:
-      return "mut"
+    case .mutableKeyword:
+      return "mutable"
     case .semicolon:
       return ";"
     case .leftParen:
@@ -1514,7 +1514,7 @@ public class Lexer {
       let id = readIdentifier()
       return switch id {
       case "let": .letKeyword
-      case "mut": .mutKeyword
+      case "mutable": .mutableKeyword
       case "true": .bool(true)
       case "false": .bool(false)
       case "if": .ifKeyword

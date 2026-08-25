@@ -296,7 +296,7 @@ extension TypeChecker {
           helperName: "__index_mut_ptr"
         )
         guard case .mutablePointer(let valueType) = ptrExpr.type else {
-          throw SemanticError.typeMismatch(expected: "*! mut return", got: ptrExpr.type.description)
+          throw SemanticError.typeMismatch(expected: "*! mutable return", got: ptrExpr.type.description)
         }
         return .derefExpression(expression: ptrExpr, type: valueType)
       case .pointer:

@@ -48,39 +48,39 @@ public type CodeGen(
     c_keywords Set[String],
 
     // 输出缓冲区
-    mut buffer *mut CodegenBuffer,
+    mutable buffer *mutable CodegenBuffer,
 
     // 代码生成状态
-    mut indent String,
-    mut temp_var_counter UInt,
+    mutable indent String,
+    mutable temp_var_counter UInt,
 
     // 用户 main 函数
-    mut user_main_function_name Option[String],
-    mut user_main_return_type Option[Type],
+    mutable user_main_function_name Option[String],
+    mutable user_main_return_type Option[Type],
 
     // Vtable 追踪
-    mut generated_vtable_instances Set[String],
+    mutable generated_vtable_instances Set[String],
 
     // 当前正在生成的函数 owner 类型，用于在 codegen 中精确解析同 owner 方法调用
-    mut current_function_owner_type Option[Type],
+    mutable current_function_owner_type Option[Type],
 
     // 已输出函数实现名（避免同名函数重复定义）
-    mut emitted_function_names Set[String],
+    mutable emitted_function_names Set[String],
 
     // Lambda 嵌套函数定义（在父函数之前输出）
-    mut nested_function_definitions String,
+    mutable nested_function_definitions String,
 
     // 预热后的类型名缓存，降低 codegen 热路径中的字符串构造成本
-    mut c_type_name_cache Dict[String, String],
+    mutable c_type_name_cache Dict[String, String],
 
     // 预热后的 callable 名缓存，降低 MIR emit 热路径中的方法名拼接成本
-    mut callable_c_name_cache Dict[UInt, String],
+    mutable callable_c_name_cache Dict[UInt, String],
 
     // 预热后的方法 owner 类型缓存，降低 callable_c_name/current-owner 热路径中的全局扫描成本
-    mut method_owner_type_cache Dict[UInt, Type],
+    mutable method_owner_type_cache Dict[UInt, Type],
 
     // 跨 emitter 复用的 owner-sensitive callable 名缓存
-    mut current_owner_callable_c_name_cache Dict[String, String],
+    mutable current_owner_callable_c_name_cache Dict[String, String],
 )
 
 given CodeGen {
@@ -88,7 +88,7 @@ given CodeGen {
 
     /// 构造 CodeGen 实例，初始化所有状态并构建 C 标识符映射
     public new(program * MIRProgram, context CompilerContext) CodeGen = {
-        let mut cg = CodeGen(
+        let mutable cg = CodeGen(
             program,
             context,
             make_c_keywords_set(),
@@ -124,7 +124,7 @@ given CodeGen {
     }
 
     sanitize_codegen_identifier(self, name String) String = {
-        let mut result = String.new()
+        let mutable result = String.new()
         for ch in name.runes() then {
             if ch.is_ascii_alphabetic() or ch.is_ascii_digit() or ch == '_' then {
                 result.push_rune(ch)
@@ -168,8 +168,8 @@ given CodeGen {
     }
 
     generate_codegen_identifier(self, module_path List[String], name String, is_private Bool, source_file String) String = {
-        let mut result = String.new()
-        let mut needs_separator = false
+        let mutable result = String.new()
+        let mutable needs_separator = false
 
         if not module_path.is_empty() then {
             for seg in module_path then {
@@ -222,7 +222,7 @@ given CodeGen {
     }
 
     trait_object_type_from_name(self, trait_name String) Type = {
-        let mut trait_type_args = List[* Type].new()
+        let mutable trait_type_args = List[* Type].new()
         when self.program.traits.get(trait_name) in {
             .Some(info) then {
                 for type_param in info.type_params then {
@@ -270,17 +270,17 @@ given CodeGen {
             .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.apply_codegen_type_bindings(*inner_ref, bindings))),
             .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.apply_codegen_type_bindings(*inner_ref, bindings))),
             .GenericStruct(template, args) then {
-                let mut bound_args = List[* Type].new()
+                let mutable bound_args = List[* Type].new()
                 for arg_ref in args then { bound_args.push(box(self.apply_codegen_type_bindings(*arg_ref, bindings))) }
                 break Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
-                let mut bound_args = List[* Type].new()
+                let mutable bound_args = List[* Type].new()
                 for arg_ref in args then { bound_args.push(box(self.apply_codegen_type_bindings(*arg_ref, bindings))) }
                 break Type.GenericEnum(template, bound_args)
             },
             .FunctionType(fn_params, return_type_ref) then {
-                let mut bound_param_types = List[* Type].new()
+                let mutable bound_param_types = List[* Type].new()
                 for entry in fn_params then {
                     bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, bindings)))
                 }
@@ -290,8 +290,8 @@ given CodeGen {
         }
     }
 
-    protected append_generic_parameter_bindings(self, mut bindings Dict[String, Type], target_args List[* Type], base_args List[* Type]) Void = {
-        let mut i UInt = 0
+    protected append_generic_parameter_bindings(self, mutable bindings Dict[String, Type], target_args List[* Type], base_args List[* Type]) Void = {
+        let mutable i UInt = 0
         let n = if target_args.count() < base_args.count() then target_args.count() else base_args.count()
         while i < n then {
             when (*target_args[i]) in {
@@ -303,7 +303,7 @@ given CodeGen {
     }
 
     build_receiver_bindings(self, target_type Type, base_type Type) Dict[String, Type] = {
-        let mut bindings = Dict[String, Type].new()
+        let mutable bindings = Dict[String, Type].new()
         let concrete_base_type = self.concretize_codegen_type(base_type)
         let effective_base_type = when concrete_base_type in {
             .StructureType(def_id) then when self.context.lookup_type(def_id) in {
@@ -311,7 +311,7 @@ given CodeGen {
                 .None() then when self.context.get_template_name(def_id) in {
                     .Some(template_name) then when self.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
-                            let mut type_arg_refs = List[* Type].new()
+                            let mutable type_arg_refs = List[* Type].new()
                             for type_arg in type_args then { type_arg_refs.push(box(type_arg)) }
                             break Type.GenericStruct(template_name, type_arg_refs)
                         },
@@ -325,7 +325,7 @@ given CodeGen {
                 .None() then when self.context.get_template_name(def_id) in {
                     .Some(template_name) then when self.context.get_type_arguments(def_id) in {
                         .Some(type_args) then {
-                            let mut type_arg_refs = List[* Type].new()
+                            let mutable type_arg_refs = List[* Type].new()
                             for type_arg in type_args then { type_arg_refs.push(box(type_arg)) }
                             break Type.GenericEnum(template_name, type_arg_refs)
                         },
@@ -360,7 +360,7 @@ given CodeGen {
     protected bind_function_type(self, fn_type Type, receiver_bindings Dict[String, Type]) Type = {
         return when fn_type in {
             .FunctionType(fn_params, return_type_ref) then {
-                let mut bound_param_types = List[* Type].new()
+                let mutable bound_param_types = List[* Type].new()
                 for entry in fn_params then {
                     bound_param_types.push(box(self.apply_codegen_type_bindings(entry.param_type, receiver_bindings)))
                 }
@@ -476,7 +476,7 @@ given CodeGen {
 
         return when self.program.traits.get(trait_name) in {
             .Some(trait_info) then {
-                let mut found = Option[DefId].None()
+                let mutable found = Option[DefId].None()
                 for parent_trait_name in trait_info.parent_traits then {
                     found = self.lookup_trait_method_def_id(concrete_receiver_type, parent_trait_name.name, method_name)
                     if found is .Some(_) then { break }
@@ -670,8 +670,8 @@ given CodeGen {
     }
 
     def_ids_named(self, name String) List[DefId] = {
-        let mut out = List[DefId].new()
-        let mut id UInt = 1
+        let mutable out = List[DefId].new()
+        let mutable id UInt = 1
         while id < self.context.next_def_id() then {
             let def_id = DefId(id)
             if self.context.get_name(def_id) is .Some(found_name) and found_name == name then {
@@ -683,7 +683,7 @@ given CodeGen {
     }
 
     type_def_ids_named(self, name String) List[DefId] = {
-        let mut out = List[DefId].new()
+        let mutable out = List[DefId].new()
         for def_id in self.def_ids_named(name) then {
             when self.context.get_kind(def_id) in {
                 .Some(kind) then when kind in {
@@ -855,7 +855,7 @@ given CodeGen {
         if body.is_empty() then {
             return Option[String].None()
         }
-        let mut markers = List[String].new()
+        let mutable markers = List[String].new()
         markers.push("_R_")
         markers.push("_T_")
         markers.push("_K_")
@@ -882,9 +882,9 @@ given CodeGen {
         if not symbol_name.contains("_") then {
             return Option[String].None()
         }
-        let mut found_lower = false
-        let mut out = String.new()
-        let mut saw_prefix = false
+        let mutable found_lower = false
+        let mutable out = String.new()
+        let mutable saw_prefix = false
         for segment in symbol_name.split("_") then {
             if segment.is_empty() then {
                 continue
@@ -951,7 +951,7 @@ given CodeGen {
                         },
                         .Function(identifier, _, _, _) then {
                             let candidate_name = self.callable_logical_name(identifier.def_id)
-                            let mut method_name_matches = candidate_name == method_name
+                            let mutable method_name_matches = candidate_name == method_name
                             when helper_method_name_opt in {
                                 .Some(helper_method_name) then if candidate_name == helper_method_name then {
                                     method_name_matches = true
@@ -997,7 +997,7 @@ given CodeGen {
                     },
                     .None() then {},
                 }
-                let mut selected_method_name_opt = Option[String].None()
+                let mutable selected_method_name_opt = Option[String].None()
 
                 for global in self.program.globals then {
                     when global in {
@@ -1110,7 +1110,7 @@ given CodeGen {
         }
     }
 
-    public precompute_callable_c_name_cache(*mut self) Void = {
+    public precompute_callable_c_name_cache(*mutable self) Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(identifier, _, _) then self.callable_c_name_cache.insert(identifier.def_id.id, self.compute_callable_c_name_uncached(identifier)),
@@ -1127,7 +1127,7 @@ given CodeGen {
     }
 
     public build_method_owner_type_cache(*self) Dict[UInt, Type] = {
-        let mut cache = Dict[UInt, Type].new()
+        let mutable cache = Dict[UInt, Type].new()
         for function_ref in self.program.functions then {
             when function_ref.kind in {
                 .Given(target_type, _, _) then cache.insert(function_ref.identifier.def_id.id, target_type),
@@ -1456,7 +1456,7 @@ given CodeGen {
     /// 比较两个模块路径是否相等
     module_paths_equal(self, a List[String], b List[String]) Bool = {
         if a.count() <> b.count() then { return false }
-        let mut i UInt = 0
+        let mutable i UInt = 0
         while i < a.count() then {
             if a[i] <> b[i] then { return false }
             i += 1
@@ -1497,7 +1497,7 @@ given CodeGen {
             .MutableWeakReferenceType(inner) then "mutweakref_\(self.concrete_layout_key_for_type(*inner))",
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params)
-                let mut out = "fn"
+                let mutable out = "fn"
                 for pt in param_types then {
                     out.push_string("_")
                     out.push_string(self.concrete_layout_key_for_type(*pt))
@@ -1507,7 +1507,7 @@ given CodeGen {
                 break out
             },
             .GenericStruct(template, args) then {
-                let mut out = template
+                let mutable out = template
                 for arg in args then {
                     out.push_string("_")
                     out.push_string(self.concrete_layout_key_for_type(*arg))
@@ -1515,7 +1515,7 @@ given CodeGen {
                 break out
             },
             .GenericEnum(template, args) then {
-                let mut out = template
+                let mutable out = template
                 for arg in args then {
                     out.push_string("_")
                     out.push_string(self.concrete_layout_key_for_type(*arg))
@@ -1535,8 +1535,8 @@ given CodeGen {
         let is_private = if self.context.get_access(def_id) is .Some(access) then access is .Private() else false
         let source_file = self.context.get_source_file(def_id) or else ""
 
-        let mut out = String.new()
-        let mut needs_separator = false
+        let mutable out = String.new()
+        let mutable needs_separator = false
         if not module_path.is_empty() then {
             for seg in module_path then {
                 if needs_separator then { out.push_byte('_') }
@@ -1545,7 +1545,7 @@ given CodeGen {
             }
         }
         if is_private and not source_file.is_empty() then {
-            let mut hash UInt32 = 0
+            let mutable hash UInt32 = 0
             for byte in source_file.bytes() then {
                 hash = hash.wrapping_mul(31).wrapping_add(byte(UInt32))
             }
@@ -1602,9 +1602,9 @@ given CodeGen {
             .None() then {
                 break when self.concrete_enum_cases_from_program(def_id) in {
                     .Some(typed_cases) then {
-                        let mut enum_cases = List[EnumCaseInfo].new()
+                        let mutable enum_cases = List[EnumCaseInfo].new()
                         for typed_case in typed_cases then {
-                            let mut params = List[EnumCaseParam].new()
+                            let mutable params = List[EnumCaseParam].new()
                             for field in typed_case.fields then {
                                 params.push(EnumCaseParam(field.name, field.field_type, field.named))
                             }
@@ -1619,10 +1619,10 @@ given CodeGen {
 
         return when enum_cases_opt in {
             .Some(enum_cases) then {
-                let mut found_index UInt = 0
-                let mut found_params = List[EnumCaseParam].new()
-                let mut found = false
-                let mut i UInt = 0
+                let mutable found_index UInt = 0
+                let mutable found_params = List[EnumCaseParam].new()
+                let mutable found = false
+                let mutable i UInt = 0
                 for uc in enum_cases then {
                     if self.enum_case_name_matches(case_name, uc.name) then {
                         found_index = i
@@ -1987,7 +1987,7 @@ given CodeGen {
         panic("Unresolved type \(display) during codegen")
     }
 
-    protected cache_c_type_name(*mut self, t Type) Void = {
+    protected cache_c_type_name(*mutable self, t Type) Void = {
         if self.type_contains_generic(t) then { return }
         if t is .Unknown() then { return }
         let key = stable_type_key(t)
@@ -2013,7 +2013,7 @@ given CodeGen {
         self.c_type_name_cache.insert(key, self.compute_c_type_name_uncached(t))
     }
 
-    public precompute_c_type_name_cache(*mut self) Void = {
+    public precompute_c_type_name_cache(*mutable self) Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(_, params, return_type) then {
@@ -2082,7 +2082,7 @@ given CodeGen {
             return Option[Type].None()
         }
 
-        let mut id UInt = 1
+        let mutable id UInt = 1
         while id < self.context.next_def_id() then {
             let def_id = DefId(id)
             let candidate = self.c_identifier_opt(def_id) or else ""
@@ -2111,7 +2111,7 @@ given CodeGen {
     }
 
     // 将 C 类型字符串反向映射为内部 Type（用于临时变量类型跟踪）。
-    protected type_from_c_type_name(*mut self, c_type String) Type = {
+    protected type_from_c_type_name(*mutable self, c_type String) Type = {
         return when c_type in {
             "int8_t" then Type.Int8Type(),
             "int16_t" then Type.Int16Type(),
@@ -2136,9 +2136,9 @@ given CodeGen {
     // ── 临时变量生成 ──────────────────────────────────────────────────────────
 
     /// 生成下一个临时变量名（格式：`_t{N}`）
-    public next_temp(*mut self) String = {
+    public next_temp(*mutable self) String = {
         self.temp_var_counter += 1
-        let mut name = String.new()
+        let mutable name = String.new()
         name.push_string("_t")
         name.push_string(self.temp_var_counter.to_string())
         return name
@@ -2146,7 +2146,7 @@ given CodeGen {
 
     /// 生成临时变量并在 buffer 中声明（格式：`{c_type} _t{N};`）
     /// 返回变量名
-    public next_temp_with_decl(*mut self, c_type String) String = {
+    public next_temp_with_decl(*mutable self, c_type String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2158,7 +2158,7 @@ given CodeGen {
 
     /// 生成临时变量并在 buffer 中声明并初始化（格式：`{c_type} _t{N} = {init_expr};`）
     /// 返回变量名
-    public next_temp_with_init(*mut self, c_type String, init_expr String) String = {
+    public next_temp_with_init(*mutable self, c_type String, init_expr String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2170,7 +2170,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_call_1(*mut self, c_type String, func_name String, arg String) String = {
+    public next_temp_with_call_1(*mutable self, c_type String, func_name String, arg String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2184,7 +2184,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_call_0(*mut self, c_type String, func_name String) String = {
+    public next_temp_with_call_0(*mutable self, c_type String, func_name String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2196,7 +2196,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_call_2(*mut self, c_type String, func_name String, first_arg String, second_arg String) String = {
+    public next_temp_with_call_2(*mutable self, c_type String, func_name String, first_arg String, second_arg String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2213,7 +2213,7 @@ given CodeGen {
     }
 
     public push_joined_strings(*self, values List[String], separator String) Void = {
-        let mut first = true
+        let mutable first = true
         for value in values then {
             if not first then {
                 self.buffer.push_string(separator)
@@ -2223,7 +2223,7 @@ given CodeGen {
         }
     }
 
-    public next_temp_with_call_args(*mut self, c_type String, func_name String, arguments List[String]) String = {
+    public next_temp_with_call_args(*mutable self, c_type String, func_name String, arguments List[String]) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2237,7 +2237,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_braced_values(*mut self, c_type String, values List[String]) String = {
+    public next_temp_with_braced_values(*mutable self, c_type String, values List[String]) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2249,7 +2249,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_infix_init(*mut self, c_type String, left String, op String, right String) String = {
+    public next_temp_with_infix_init(*mutable self, c_type String, left String, op String, right String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2265,7 +2265,7 @@ given CodeGen {
         return name
     }
 
-    public next_temp_with_prefixed_value(*mut self, c_type String, prefix String, value String) String = {
+    public next_temp_with_prefixed_value(*mutable self, c_type String, prefix String, value String) String = {
         let name = self.next_temp()
         self.add_indent()
         self.buffer.push_string(c_type)
@@ -2281,17 +2281,17 @@ given CodeGen {
     // ── 缓冲区操作 ────────────────────────────────────────────────────────────
 
     /// 向 buffer 追加当前缩进
-    public add_indent(*mut self) Void = {
+    public add_indent(*mutable self) Void = {
         self.buffer.push_string(self.indent)
     }
 
     /// 向 buffer 追加当前缩进与文本，适合频繁的一行输出场景
-    public push_indented_string(*mut self, text String) Void = {
+    public push_indented_string(*mutable self, text String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(text)
     }
 
-    public push_indented_decl(*mut self, c_type String, name String) Void = {
+    public push_indented_decl(*mutable self, c_type String, name String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(c_type)
         self.buffer.push_rune(' ')
@@ -2299,7 +2299,7 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_assignment(*mut self, dest String, source String) Void = {
+    public push_indented_assignment(*mutable self, dest String, source String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(dest)
         self.buffer.push_string(" = ")
@@ -2307,7 +2307,7 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_member_assignment(*mut self, base String, member String, source String) Void = {
+    public push_indented_member_assignment(*mutable self, base String, member String, source String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(base)
         self.buffer.push_rune('.')
@@ -2317,7 +2317,7 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_control_assignment(*mut self, ref_name String, field String, source String) Void = {
+    public push_indented_control_assignment(*mutable self, ref_name String, field String, source String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("((struct __koral_Control*)")
         self.buffer.push_string(ref_name)
@@ -2328,40 +2328,40 @@ given CodeGen {
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_return_value(*mut self, value String) Void = {
+    public push_indented_return_value(*mutable self, value String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("return ")
         self.buffer.push_string(value)
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_return_void(*mut self) Void = {
+    public push_indented_return_void(*mutable self) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("return;\n")
     }
 
-    public push_indented_goto(*mut self, label String) Void = {
+    public push_indented_goto(*mutable self, label String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("goto ")
         self.buffer.push_string(label)
         self.buffer.push_string(";\n")
     }
 
-    public push_indented_if_open(*mut self, condition String) Void = {
+    public push_indented_if_open(*mutable self, condition String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string("if (")
         self.buffer.push_string(condition)
         self.buffer.push_string(") {\n")
     }
 
-    public push_indented_label_block_open(*mut self, label String) Void = {
+    public push_indented_label_block_open(*mutable self, label String) Void = {
         self.buffer.push_string(self.indent)
         self.buffer.push_string(label)
         self.buffer.push_string(": {\n")
     }
 
     /// 临时增加缩进，执行 body，然后恢复缩进
-    public with_indent(*mut self, body Func[Void]) Void = {
+    public with_indent(*mutable self, body Func[Void]) Void = {
         self.indent.push_string("    ")
         body()
         // 移除最后 4 个字符（一级缩进）
@@ -2372,7 +2372,7 @@ given CodeGen {
     }
 
     /// 向 buffer 追加文本
-    public append_to_buffer(*mut self, text String) Void = {
+    public append_to_buffer(*mutable self, text String) Void = {
         self.buffer.push_string(text)
     }
 

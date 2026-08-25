@@ -180,46 +180,46 @@ Notes:
 
 - String literals use double quotes (`"..."`); rune literals use single quotes (`'x'`).
 - Type aliases must start with an uppercase letter.
-- `[]` is builtin syntax only for `String`, `List`, `Deque`, `*!`, and `*! mut`; custom traits do not define subscript behavior.
+- `[]` is builtin syntax only for `String`, `List`, `Deque`, `*!`, and `*! mutable`; custom traits do not define subscript behavior.
 - `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
 
 ## Reference Creation Semantics (`&` / `box`)
 
-Koral distinguishes managed references (`*T`, `*mut T`) from raw pointers (`*! T`, `*! mut T`):
+Koral distinguishes managed references (`*T`, `*mutable T`) from raw pointers (`*! T`, `*! mutable T`):
 
 - Managed references may escape and are reference-counted. The compiler uses escape analysis to decide stack vs heap allocation.
-- `&expr` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
+- `&expr` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
 - Plain `&` produces `*T`.
-- `&mut` produces `*mut T`.
+- `&mutable` produces `*mutable T`.
 - Plain `&` may take an rvalue (for example `&42`) and materializes managed storage as needed.
-- `&mut` still requires a writable lvalue.
-- `&!` / `&! mut` require addressable storage and therefore reject literals and temporary values.
-- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must pass `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mut T` (auto-deref, following Go's pointer receiver behavior).
-- `*T` supports `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
-- `*! T` supports `*expr` dereference read only. `*! mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- `&mutable` still requires a writable lvalue.
+- `&!` / `&! mutable` require addressable storage and therefore reject literals and temporary values.
+- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must pass `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mutable T` (auto-deref, following Go's pointer receiver behavior).
+- `*T` supports `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
+- `*! T` supports `*expr` dereference read only. `*! mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
 - Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
-- `box(expr)` returns `*mut T` — an escaping managed reference from temporaries/literals.
-- `box` should be understood as binding its parameter locally and returning `*mut T`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
-- Ordinary parameter `mut` is local binding mutability only. It is not part of the function signature, function type, or trait/given conformance comparison.
+- `box(expr)` returns `*mutable T` — an escaping managed reference from temporaries/literals.
+- `box` should be understood as binding its parameter locally and returning `*mutable T`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
+- Ordinary parameter `mutable` is local binding mutability only. It is not part of the function signature, function type, or trait/given conformance comparison.
 
 ```koral
-let mut x = 10
-let rx *mut Int = &mut x
+let mutable x = 10
+let rx *mutable Int = &mutable x
 
 let y = 10
 let ry *Int = &y     // read-only reference
 
-let owned *mut Int = box(42)   // box() returns *mut T
+let owned *mutable Int = box(42)   // box() returns *mutable T
 let temp *Int = &42            // OK: managed & may materialize rvalues
 
-// let bad = &mut 42       // error: &mut still requires a writable lvalue
+// let bad = &mutable 42       // error: &mutable still requires a writable lvalue
 // let raw_bad = &! 42   // error: raw address-of needs addressable storage
 ```
 
 ## Drop Semantics
 
-- `Drop` uses `drop(source *! mut Self) Void`.
+- `Drop` uses `drop(source *! mutable Self) Void`.
 - Treat `Drop.drop` as a compiler-reserved destructor entry, not a normal user-callable method.
 - The parameter is raw owned storage, so `Drop` should not rely on ref-style escape distinctions such as borrow-vs-owned checks.
 - Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
@@ -231,7 +231,7 @@ When designing standard-library APIs, choose method receivers by ownership seman
 Primary rule:
 
 - Use `*self` for observation and derivation.
-- Use `*mut self` for in-place mutation.
+- Use `*mutable self` for in-place mutation.
 - Use `self` only when the method semantically consumes the receiver.
 
 This is a semantic default, not a mechanical rule. For small immutable value types that behave like scalars in the API, using `self` for observation can still be reasonable when it keeps the whole type family consistent and avoids borrow-heavy signatures.
@@ -239,7 +239,7 @@ This is a semantic default, not a mechanical rule. For small immutable value typ
 This rule matters because receiver adjustment has asymmetric call behavior:
 
 - `*self` accepts both lvalue and rvalue receivers. Rvalue calls may materialize a temporary.
-- `*mut self` requires a writable lvalue receiver.
+- `*mutable self` requires a writable lvalue receiver.
 - `self` transfers ownership and should therefore communicate real consumption, not just implementation preference.
 
 ### Default Receiver Choices
@@ -254,9 +254,9 @@ Common `*self` cases:
 - pure derived values such as `dir_name`, `base_name`, `components`
 - view-producing methods that do not consume the source
 
-Use `*mut self` when the method mutates the receiver in place.
+Use `*mutable self` when the method mutates the receiver in place.
 
-Common `*mut self` cases:
+Common `*mutable self` cases:
 
 - container updates such as `push`, `insert`, `remove`, `clear`
 - stateful cursor updates on direct value types
@@ -314,7 +314,7 @@ This exception can also cover "sum-of-small-values" enums and tiny wrappers whos
 
 ### Handle Types and Interior Mutation
 
-Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by internal `*mut` storage or OS resources.
+Some standard-library types are handles around shared mutable state, for example buffered readers, files, sockets, processes, or timers backed by internal `*mutable` storage or OS resources.
 
 For such handle types, methods may use `*self` even when the underlying state changes. In these cases the API models shared access to a handle, not direct value mutation of the outer type.
 
@@ -341,7 +341,7 @@ Examples:
 
 ### Iterable as a Borrowed Protocol
 
-`Iterator` itself is inherently consuming and should stay `next(*mut self)`.
+`Iterator` itself is inherently consuming and should stay `next(*mutable self)`.
 
 `Iterable`, however, is usually better modeled as a borrowed-producing protocol: creating an iterator is typically an observation of the source, not ownership transfer of the source.
 
@@ -409,10 +409,10 @@ Avoid exposing `*`-style dereference-copy patterns in public API design discussi
 For new traits, prefer the narrowest receiver that matches the semantic contract:
 
 - observation traits should usually use `*self`
-- mutation traits should use `*mut self`
+- mutation traits should use `*mutable self`
 - consuming traits should use `self`
-- traits intended for trait objects should keep requirement receivers on `*self` / `*mut self` only
-- `*Trait` can call only `*self` requirements, while `*mut Trait` can call both `*mut self` and `*self`
+- traits intended for trait objects should keep requirement receivers on `*self` / `*mutable self` only
+- `*Trait` can call only `*self` requirements, while `*mutable Trait` can call both `*mutable self` and `*self`
 
 Existing core traits are not fully uniform today. In particular, `ToString`, `Error`, and indexing traits already follow borrow-oriented design, while `Eq`, `Ord`, and `Hash` remain value-receiver traits for historical reasons. Treat those core traits as legacy constraints unless the task is explicitly a wider trait redesign.
 
@@ -436,7 +436,7 @@ Before adding or changing a method in `std/`, ask:
 4. Does the method name match the ownership behavior implied by the receiver?
 5. Would switching from `self` to `*self` silently broaden call sites by allowing rvalue temporary materialization, and is that desirable for this API?
 
-If the answer to (1) is yes, default to `*self`. If the answer to (3) is yes, `self` is usually the right choice. If the answer to (2) is direct mutation, use `*mut self`.
+If the answer to (1) is yes, default to `*self`. If the answer to (3) is yes, `self` is usually the right choice. If the answer to (2) is direct mutation, use `*mutable self`.
 
 ## Adding a New Type
 

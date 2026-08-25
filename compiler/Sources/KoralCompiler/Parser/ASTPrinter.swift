@@ -47,7 +47,7 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  Parameters:")
       for param in parameters {
-        let modStr = param.mutable ? "mut " : ""
+        let modStr = param.mutable ? "mutable " : ""
         print("\(indent)    \(modStr)\(param.name): \(param.type)")
       }
       print("\(indent)  ReturnType: \(returnType)")
@@ -90,7 +90,7 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)  TypeParameters: \(typeParameters)")
       print("\(indent)  Parameters:")
       for param in parameters {
-        let modStr = param.mutable ? "mut " : ""
+        let modStr = param.mutable ? "mutable " : ""
         print("\(indent)    \(modStr)\(param.name): \(param.type)")
       }
       print("\(indent)  ReturnType: \(returnType)")
@@ -101,7 +101,7 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)  Name: \(name)")
       print("\(indent)  Parameters:")
       for param in parameters {
-        let modStr = param.mutable ? "mut " : ""
+        let modStr = param.mutable ? "mutable " : ""
         print("\(indent)    \(modStr)\(param.name): \(param.type)")
       }
       print("\(indent)  ReturnType: \(returnType)")
@@ -125,7 +125,7 @@ public func printAST(_ node: ASTNode) {
           }
         }
     case .foreignLetDeclaration(let name, let type, let mutable, let access, _):
-        let mutLabel = mutable ? "mut " : ""
+        let mutLabel = mutable ? "mutable " : ""
         print("\(indent)ForeignLetDeclaration \(mutLabel)\(name)")
         print("\(indent)  Access: \(access)")
         print("\(indent)  Type: \(type)")
@@ -232,8 +232,8 @@ public func printAST(_ node: ASTNode) {
 
     case .pairVariableDeclaration(let first, let second, let value, _):
       print("\(indent)PairVariableDeclaration:")
-      print("\(indent)  First: \(first.isDiscard ? "_" : first.name)\(first.mutable ? " (mut)" : "")")
-      print("\(indent)  Second: \(second.isDiscard ? "_" : second.name)\(second.mutable ? " (mut)" : "")")
+      print("\(indent)  First: \(first.isDiscard ? "_" : first.name)\(first.mutable ? " (mutable)" : "")")
+      print("\(indent)  Second: \(second.isDiscard ? "_" : second.name)\(second.mutable ? " (mutable)" : "")")
       withIndent {
         printExpression(value)
       }
@@ -494,7 +494,7 @@ public func printAST(_ node: ASTNode) {
       }
 
     case .addressOfExpression(let expr, let mutable):
-      print("\(indent)AddressOfExpression\(mutable ? " mut" : ""):")
+      print("\(indent)AddressOfExpression\(mutable ? " mutable" : ""):")
       withIndent {
         printExpression(expr)
       }

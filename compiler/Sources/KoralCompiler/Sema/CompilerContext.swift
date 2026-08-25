@@ -291,13 +291,13 @@ public final class CompilerContext: @unchecked Sendable {
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
             return "(\(paramStr)) -> \(getDebugName(returns))"
         case .reference(let inner): return "*\(getDebugName(inner))"
-        case .mutableReference(let inner): return "*mut \(getDebugName(inner))"
+        case .mutableReference(let inner): return "*mutable \(getDebugName(inner))"
         case .borrowedReference(let inner): return "ref *\(getDebugName(inner))"
-        case .mutableBorrowedReference(let inner): return "ref mut *\(getDebugName(inner))"
+        case .mutableBorrowedReference(let inner): return "ref mutable *\(getDebugName(inner))"
         case .pointer(let element): return "*! \(getDebugName(element))"
-        case .mutablePointer(let element): return "*! mut \(getDebugName(element))"
+        case .mutablePointer(let element): return "*! mutable \(getDebugName(element))"
         case .weakReference(let inner): return "?*\(getDebugName(inner))"
-        case .mutableWeakReference(let inner): return "?*mut \(getDebugName(inner))"
+        case .mutableWeakReference(let inner): return "?*mutable \(getDebugName(inner))"
         case .structure(let defId):
             var name = defIdMap.getName(defId) ?? "<unknown>"
             if let typeArgs = defIdMap.getTypeArguments(defId), !typeArgs.isEmpty {

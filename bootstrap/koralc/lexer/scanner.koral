@@ -6,30 +6,30 @@ public type LexError(
 
 public type Lexer(
     source_runes List[Rune],
-    mut index UInt,
-    mut line UInt,
-    mut column UInt,
-    mut tokens List[Token],
-    mut has_newline_before Bool,
+    mutable index UInt,
+    mutable line UInt,
+    mutable column UInt,
+    mutable tokens List[Token],
+    mutable has_newline_before Bool,
 )
 
 given Lexer {
     private format_position(self, line UInt, column UInt) String = {
-        let mut text = line.to_string()
+        let mutable text = line.to_string()
         text.push_byte(':')
         text.push_string(column.to_string())
         return text
     }
 
     private rune_text(self, ch Rune) String = {
-        let mut text = String.new()
+        let mutable text = String.new()
         text.push_rune(ch)
         return text
     }
 
     private invalid_digit_message(self, ch Rune, prefix String) String = {
         let _ = self
-        let mut text = "Invalid digit '"
+        let mutable text = "Invalid digit '"
         text.push_string(self.rune_text(ch))
         text.push_string("' in ")
         text.push_string(prefix)
@@ -57,7 +57,7 @@ given Lexer {
         return .None()
     }
 
-    private advance(*mut self) Option[Rune] = {
+    private advance(*mutable self) Option[Rune] = {
         if self.is_at_end() then {
             return .None()
         }
@@ -86,20 +86,20 @@ given Lexer {
         return .Some(ch)
     }
 
-    private add(*mut self, kind TokenKind, line UInt, column UInt) Void = {
+    private add(*mutable self, kind TokenKind, line UInt, column UInt) Void = {
         self.tokens.push(Token(kind, line, column, self.has_newline_before))
         self.has_newline_before = false
     }
 
     private fail(self, line UInt, column UInt, message String) Result[List[Token]] = {
-        let mut text = "Lex error at "
+        let mutable text = "Lex error at "
         text.push_string(self.format_position(line, column))
         text.push_string(": ")
         text.push_string(message)
         return .Error(box(text))
     }
 
-    private match_next(*mut self, expected Rune) Bool = {
+    private match_next(*mutable self, expected Rune) Bool = {
         let next = self.peek() or else {
             return false
         }
@@ -118,8 +118,8 @@ given Lexer {
 
     private is_identifier_continue(ch Rune) Bool = ch.is_identifier_continue()
 
-    private read_identifier(*mut self, start_line UInt, start_col UInt, first Rune) Void = {
-        let mut text = String.new()
+    private read_identifier(*mutable self, start_line UInt, start_col UInt, first Rune) Void = {
+        let mutable text = String.new()
         text.push_rune(first)
 
         while self.peek() is .Some(ch) and Lexer.is_identifier_continue(ch) then {
@@ -136,7 +136,7 @@ given Lexer {
         }
     }
 
-    private read_duration_suffix_if_present(*mut self) Option[String] = {
+    private read_duration_suffix_if_present(*mutable self) Option[String] = {
         let first = self.peek() or else {
             return .None()
         }
@@ -144,7 +144,7 @@ given Lexer {
             return .None()
         }
 
-        let mut letters = String.new()
+        let mutable letters = String.new()
         letters.push_rune(self.advance().unwrap())
 
         while self.peek() is .Some(ch) and ch.is_ascii_alphabetic() then {
@@ -156,7 +156,7 @@ given Lexer {
             when self.peek() in {
                 .Some(next) then {
                     if Lexer.is_identifier_continue(next) then {
-                        let mut i = letters.to_runes().count()
+                        let mutable i = letters.to_runes().count()
                         while i > 0 then {
                             i -= 1
                             self.index -= 1
@@ -170,7 +170,7 @@ given Lexer {
             return .Some(letters)
         }
 
-        let mut i = letters.to_runes().count()
+        let mutable i = letters.to_runes().count()
         while i > 0 then {
             i -= 1
             self.index -= 1
@@ -179,8 +179,8 @@ given Lexer {
         return .None()
     }
 
-    private read_number(*mut self, start_line UInt, start_col UInt, first Rune) Result[Void] = {
-        let mut text = String.new()
+    private read_number(*mutable self, start_line UInt, start_col UInt, first Rune) Result[Void] = {
+        let mutable text = String.new()
         text.push_rune(first)
 
         // 检查是否为非十进制前缀（只支持小写 0b / 0o / 0x）
@@ -189,7 +189,7 @@ given Lexer {
                 .Some(prefix) then {
                     if prefix == 'b' then {
                         text.push_rune(self.advance().unwrap())
-                        let mut digit_count UInt = 0
+                        let mutable digit_count UInt = 0
                         while self.peek() is .Some(ch) then {
                             if ch == '0' or ch == '1' then {
                                 text.push_rune(self.advance().unwrap())
@@ -212,7 +212,7 @@ given Lexer {
                     }
                     if prefix == 'o' then {
                         text.push_rune(self.advance().unwrap())
-                        let mut digit_count UInt = 0
+                        let mutable digit_count UInt = 0
                         while self.peek() is .Some(ch) then {
                             if ch >= '0' and ch <= '7' then {
                                 text.push_rune(self.advance().unwrap())
@@ -235,7 +235,7 @@ given Lexer {
                     }
                     if prefix == 'x' then {
                         text.push_rune(self.advance().unwrap())
-                        let mut digit_count UInt = 0
+                        let mutable digit_count UInt = 0
                         while self.peek() is .Some(ch) then {
                             if Lexer.is_hex_digit(ch) then {
                                 text.push_rune(self.advance().unwrap())
@@ -281,7 +281,7 @@ given Lexer {
         }
 
         // 检查是否有小数点（浮点数）
-        let mut is_float = false
+        let mutable is_float = false
         when self.peek() in {
             .Some(dot) then {
                 if dot == '.' then {
@@ -374,7 +374,7 @@ given Lexer {
         if runes.is_empty() then {
             return .Error(box("empty hex string"))
         }
-        let mut value UInt32 = 0
+        let mutable value UInt32 = 0
         for ch in runes then {
             if not Lexer.is_hex_digit(ch) then {
                 return .Error(box("invalid hex digit"))
@@ -385,7 +385,7 @@ given Lexer {
     }
 
     // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
-    private read_escape(*mut self, start_line UInt, start_col UInt) Result[String] = {
+    private read_escape(*mutable self, start_line UInt, start_col UInt) Result[String] = {
         let next = self.peek() or else {
             return .Error(box("Unterminated escape sequence"))
         }
@@ -393,37 +393,37 @@ given Lexer {
 
         // 简单单字符转义
         if next == 'n' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\n')
             return .Ok(s)
         }
         if next == 't' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\t')
             return .Ok(s)
         }
         if next == 'r' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\r')
             return .Ok(s)
         }
         if next == '0' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\0')
             return .Ok(s)
         }
         if next == '"' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('"')
             return .Ok(s)
         }
         if next == '\'' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\'')
             return .Ok(s)
         }
         if next == '\\' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\\')
             return .Ok(s)
         }
@@ -432,7 +432,7 @@ given Lexer {
             let r = Rune.from_uint32(11) or else {
                 return .Error(box("invalid unicode scalar for \\v"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(s)
         }
@@ -441,15 +441,15 @@ given Lexer {
             let r = Rune.from_uint32(12) or else {
                 return .Error(box("invalid unicode scalar for \\f"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(s)
         }
 
         // \xHH — 2 hex digits, single byte
         if next == 'x' then {
-            let mut hex = String.new()
-            let mut i UInt = 0
+            let mutable hex = String.new()
+            let mutable i UInt = 0
             while i < 2 then {
                 let h = self.peek() or else {
                     return .Error(box("\\x escape requires exactly 2 hex digits"))
@@ -464,7 +464,7 @@ given Lexer {
             let r = Rune.from_uint32(code) or else {
                 return .Error(box("invalid unicode scalar in \\x escape"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(s)
         }
@@ -478,7 +478,7 @@ given Lexer {
                 return .Error(box("\\u escape requires braces: \\u{HHHH}"))
             }
             self.advance()
-            let mut hex = String.new()
+            let mutable hex = String.new()
             while self.peek() is .Some(h) then {
                 if h == '}' then {
                     self.advance()
@@ -499,7 +499,7 @@ given Lexer {
             let r = Rune.from_uint32(code) or else {
                 return .Error(box("invalid unicode scalar in \\u escape"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(s)
         }
@@ -507,8 +507,8 @@ given Lexer {
         return .Error(box("Unknown escape sequence"))
     }
 
-    private read_string(*mut self, start_line UInt, start_col UInt) Result[Void] = {
-        let mut text = String.new()
+    private read_string(*mutable self, start_line UInt, start_col UInt) Result[Void] = {
+        let mutable text = String.new()
 
         while self.peek() is .Some(ch) then {
             if ch == '"' then {
@@ -523,11 +523,11 @@ given Lexer {
                 when self.peek() in {
                     .Some(next) then {
                         if next == '(' then {
-                            self.append_backslashes(&mut text, slash_count)
+                            self.append_backslashes(&mutable text, slash_count)
                             if slash_count % 2 == 1 then {
                                 self.advance()
                                 text.push_rune('(')
-                                let _ = self.append_interpolation_tail(&mut text) or return
+                                let _ = self.append_interpolation_tail(&mutable text) or return
                             }
                             continue
                         }
@@ -535,7 +535,7 @@ given Lexer {
                     .None() then {},
                 }
 
-                self.append_backslashes(&mut text, slash_count / 2)
+                self.append_backslashes(&mutable text, slash_count / 2)
                 if slash_count % 2 == 1 then {
                     let escaped = self.read_escape(start_line, start_col) or return
                     text.push_string(escaped)
@@ -552,8 +552,8 @@ given Lexer {
         return .Error(box("Unterminated string literal"))
     }
 
-    private read_rune(*mut self, start_line UInt, start_col UInt) Result[Void] = {
-        let mut text = String.new()
+    private read_rune(*mutable self, start_line UInt, start_col UInt) Result[Void] = {
+        let mutable text = String.new()
 
         while self.peek() is .Some(ch) then {
             if ch == '\'' then {
@@ -574,8 +574,8 @@ given Lexer {
         return .Error(box("Unterminated rune literal"))
     }
 
-    private consume_backslash_run(*mut self) UInt = {
-        let mut count UInt = 0
+    private consume_backslash_run(*mutable self) UInt = {
+        let mutable count UInt = 0
         while self.peek() is .Some(ch) then {
             if ch <> '\\' then {
                 break
@@ -586,8 +586,8 @@ given Lexer {
         return count
     }
 
-    private append_backslashes(self, text *mut String, count UInt) Void = {
-        let mut i UInt = 0
+    private append_backslashes(self, text *mutable String, count UInt) Void = {
+        let mutable i UInt = 0
         while i < count then {
             text.push_rune('\\')
             i += 1
@@ -596,8 +596,8 @@ given Lexer {
 
     private leading_indent(self, line String) String = {
         let runes = line.to_runes()
-        let mut indent = String.new()
-        let mut i UInt = 0
+        let mutable indent = String.new()
+        let mutable i UInt = 0
         while i < runes.count() then {
             let ch = runes[i]
             if ch == ' ' or ch == '\t' then {
@@ -618,7 +618,7 @@ given Lexer {
     }
 
     private read_escape_from_runes(self, runes List[Rune], index UInt) Result[Pair[String, UInt]] = {
-        let mut cur_index = index
+        let mutable cur_index = index
         if cur_index >= runes.count() then {
             return .Error(box("Unterminated escape sequence"))
         }
@@ -627,37 +627,37 @@ given Lexer {
         cur_index += 1
 
         if next == 'n' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\n')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 't' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\t')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'r' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\r')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '0' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\0')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '"' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('"')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '\'' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\'')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == '\\' then {
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune('\\')
             return .Ok(Pair[String, UInt](s, cur_index))
         }
@@ -665,7 +665,7 @@ given Lexer {
             let r = Rune.from_uint32(11) or else {
                 return .Error(box("invalid unicode scalar for \\v"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(Pair[String, UInt](s, cur_index))
         }
@@ -673,13 +673,13 @@ given Lexer {
             let r = Rune.from_uint32(12) or else {
                 return .Error(box("invalid unicode scalar for \\f"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(Pair[String, UInt](s, cur_index))
         }
         if next == 'x' then {
-            let mut hex = String.new()
-            let mut i UInt = 0
+            let mutable hex = String.new()
+            let mutable i UInt = 0
             while i < 2 then {
                 if cur_index >= runes.count() then {
                     return .Error(box("\\x escape requires exactly 2 hex digits"))
@@ -696,7 +696,7 @@ given Lexer {
             let r = Rune.from_uint32(code) or else {
                 return .Error(box("invalid unicode scalar in \\x escape"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(Pair[String, UInt](s, cur_index))
         }
@@ -705,7 +705,7 @@ given Lexer {
                 return .Error(box("\\u escape requires braces: \\u{HHHH}"))
             }
             cur_index += 1
-            let mut hex = String.new()
+            let mutable hex = String.new()
             while cur_index < runes.count() then {
                 let h = runes[cur_index]
                 if h == '}' then {
@@ -728,7 +728,7 @@ given Lexer {
             let r = Rune.from_uint32(code) or else {
                 return .Error(box("invalid unicode scalar in \\u escape"))
             }
-            let mut s = String.new()
+            let mutable s = String.new()
             s.push_rune(r)
             return .Ok(Pair[String, UInt](s, cur_index))
         }
@@ -739,26 +739,26 @@ given Lexer {
     private process_string_content(self, content String) Result[String] = {
         let runes = content.to_runes()
         let total = runes.count()
-        let mut i UInt = 0
-        let mut text = String.new()
+        let mutable i UInt = 0
+        let mutable text = String.new()
 
         while i < total then {
             let ch = runes[i]
 
             if ch == '\\' then {
-                let mut slash_count UInt = 0
+                let mutable slash_count UInt = 0
                 while i + slash_count < total and runes[i + slash_count] == '\\' then {
                     slash_count += 1
                 }
 
                 if i + slash_count < total and runes[i + slash_count] == '(' then {
-                    self.append_backslashes(&mut text, slash_count)
+                    self.append_backslashes(&mutable text, slash_count)
                     i += slash_count
                     if slash_count % 2 == 1 then {
                         text.push_rune('(')
                         i += 1
 
-                        let mut depth UInt = 1
+                        let mutable depth UInt = 1
                         while i < total then {
                             let cur = runes[i]
                             i += 1
@@ -780,7 +780,7 @@ given Lexer {
                     continue
                 }
 
-                self.append_backslashes(&mut text, slash_count / 2)
+                self.append_backslashes(&mutable text, slash_count / 2)
                 i += slash_count
                 if slash_count % 2 == 1 then {
                     let escaped = self.read_escape_from_runes(runes, i) or return
@@ -797,7 +797,7 @@ given Lexer {
         return .Ok(text)
     }
 
-    private read_multiline_string(*mut self, start_line UInt, start_col UInt) Result[Void] = {
+    private read_multiline_string(*mutable self, start_line UInt, start_col UInt) Result[Void] = {
         // Caller has consumed the first quote; consume the remaining two of opening delimiter.
         self.advance()
         self.advance()
@@ -819,11 +819,11 @@ given Lexer {
             }
         }
 
-        let mut raw_lines = List[String].new()
-        let mut closing_indent = String.new()
+        let mutable raw_lines = List[String].new()
+        let mutable closing_indent = String.new()
 
         while true then {
-            let mut current_line = String.new()
+            let mutable current_line = String.new()
 
             while self.peek() is .Some(ch) then {
                 if ch == ' ' or ch == '\t' then {
@@ -884,7 +884,7 @@ given Lexer {
         }
 
         let closing_indent_count = closing_indent.count()
-        let mut stripped_lines = List[String].new()
+        let mutable stripped_lines = List[String].new()
         for line in raw_lines then {
             if not line.is_empty() and not line.starts_with(closing_indent) then {
                 return .Error(box("insufficient indentation in multiline string literal: each line must be indented at least as much as the closing \"\"\""))
@@ -902,8 +902,8 @@ given Lexer {
         return .Ok({})
     }
 
-    private append_interpolation_tail(*mut self, text *mut String) Result[Void] = {
-        let mut depth UInt = 1
+    private append_interpolation_tail(*mutable self, text *mutable String) Result[Void] = {
+        let mutable depth UInt = 1
 
         while self.peek() is .Some(ch) then {
             self.advance()
@@ -924,7 +924,7 @@ given Lexer {
         return .Error(box("unterminated string interpolation"))
     }
 
-    private skip_line_comment(*mut self) Void = {
+    private skip_line_comment(*mutable self) Void = {
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
                 break
@@ -933,8 +933,8 @@ given Lexer {
         }
     }
 
-    private skip_block_comment(*mut self) Result[Bool] = {
-        let mut saw_newline = false
+    private skip_block_comment(*mutable self) Result[Bool] = {
+        let mutable saw_newline = false
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
                 saw_newline = true
@@ -955,7 +955,7 @@ given Lexer {
         return .Error(box("Unterminated block comment"))
     }
 
-    public run(*mut self) Result[List[Token]] = {
+    public run(*mutable self) Result[List[Token]] = {
         while not self.is_at_end() then {
             let start_line = self.line
             let start_col = self.column
@@ -1026,7 +1026,7 @@ given Lexer {
                 if Lexer.is_identifier_start(next) then {
                     // Could be lifetime ('a, '_ ) or rune literal ('a')
                     // Build identifier and scan forward
-                    let mut name = String.new()
+                    let mutable name = String.new()
                     name.push_rune('\'')
                     name.push_rune(self.advance().unwrap())
                     while self.peek() is .Some(c) and Lexer.is_identifier_continue(c) then {
@@ -1106,7 +1106,7 @@ given Lexer {
                             self.add(TokenKind.LessRange(), start_line, start_col)
                         }
                     } else {
-                        let mut message = "Unexpected token at "
+                        let mutable message = "Unexpected token at "
                         message.push_string(self.format_position(start_line, start_col))
                         message.push_string(": expected '..' after '<.'")
                         return .Error(box(message))
@@ -1271,7 +1271,7 @@ given Lexer {
                 continue
             }
 
-            let mut message = "Unexpected character at "
+            let mutable message = "Unexpected character at "
             message.push_string(self.format_position(start_line, start_col))
             return .Error(box(message))
         }
@@ -1284,7 +1284,7 @@ given Lexer {
 private let keyword_kind(text String) Option[TokenKind] = {
     return when text in {
         "let" then .Some(TokenKind.KwLet()),
-        "mut" then .Some(TokenKind.KwMut()),
+        "mutable" then .Some(TokenKind.KwMut()),
         "type" then .Some(TokenKind.KwType()),
         "if" then .Some(TokenKind.KwIf()),
         "while" then .Some(TokenKind.KwWhile()),
@@ -1320,6 +1320,6 @@ private let keyword_kind(text String) Option[TokenKind] = {
 }
 
 public let lex(source String) Result[List[Token]] = {
-    let mut lexer = Lexer.new(source)
+    let mutable lexer = Lexer.new(source)
     return lexer.run()
 }

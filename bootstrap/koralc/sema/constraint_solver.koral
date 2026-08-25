@@ -55,9 +55,9 @@ given TypeSubstitution {
                 }
             },
             .FunctionType(params, ret) then {
-                let mut changed = false
-                let mut new_params = List[* Type].new()
-                let mut i = 0(UInt)
+                let mutable changed = false
+                let mutable new_params = List[* Type].new()
+                let mutable i = 0(UInt)
                 while i < params.count() then {
                     let original = (*params[i]).param_type
                     let substituted = self.apply_impl(original)
@@ -99,9 +99,9 @@ given TypeSubstitution {
                 break if *inner == substituted then t else Type.MutableWeakReferenceType(box(substituted))
             },
             .GenericStruct(template, args) then {
-                let mut changed = false
-                let mut new_args = List[* Type].new()
-                let mut i = 0(UInt)
+                let mutable changed = false
+                let mutable new_args = List[* Type].new()
+                let mutable i = 0(UInt)
                 while i < args.count() then {
                     let original = (*args[i])
                     let substituted = self.apply_impl(original)
@@ -112,9 +112,9 @@ given TypeSubstitution {
                 break if changed then Type.GenericStruct(template, new_args) else t
             },
             .GenericEnum(template, args) then {
-                let mut changed = false
-                let mut new_args = List[* Type].new()
-                let mut i = 0(UInt)
+                let mutable changed = false
+                let mutable new_args = List[* Type].new()
+                let mutable i = 0(UInt)
                 while i < args.count() then {
                     let original = (*args[i])
                     let substituted = self.apply_impl(original)
@@ -131,14 +131,14 @@ given TypeSubstitution {
 
 // 约束求解器。
 public type ConstraintSolver(
-    mut unifier Unifier,
-    mut constraints List[Constraint],
-    mut default_constraints List[Constraint],
-    mut errors List[ConstraintSolverError],
-    mut next_type_variable_id UInt,
+    mutable unifier Unifier,
+    mutable constraints List[Constraint],
+    mutable default_constraints List[Constraint],
+    mutable errors List[ConstraintSolverError],
+    mutable next_type_variable_id UInt,
     // 用于 Instantiate 约束判断 struct/enum 的类型查找回调。
     // 由 TypeChecker 在创建 ConstraintSolver 后注入。
-    mut enum_type_names Set[String],
+    mutable enum_type_names Set[String],
 )
 
 given ConstraintSolver {
@@ -154,26 +154,26 @@ given ConstraintSolver {
         )
     }
 
-    public fresh_type_variable(*mut self, name Option[String], span SourceSpan) TypeVariable = {
+    public fresh_type_variable(*mutable self, name Option[String], span SourceSpan) TypeVariable = {
         let id = self.next_type_variable_id
         self.next_type_variable_id += 1
         return TypeVariable(id, name, Option[LiteralDefaultKind].None(), span)
     }
 
-    public fresh_literal_type_variable(*mut self, kind LiteralDefaultKind, span SourceSpan) TypeVariable = {
+    public fresh_literal_type_variable(*mutable self, kind LiteralDefaultKind, span SourceSpan) TypeVariable = {
         let id = self.next_type_variable_id
         self.next_type_variable_id += 1
         return TypeVariable(id, Option[String].None(), Option[LiteralDefaultKind].Some(kind), span)
     }
 
     // 注册一个 enum 类型名称，用于 Instantiate 约束判断。
-    public register_enum_type(*mut self, name String) Void = {
+    public register_enum_type(*mutable self, name String) Void = {
         self.enum_type_names.insert(name)
     }
 
     // Debug helper: clear in-flight solver state between declarations.
     // Keeps enum type registry intact for Instantiate classification.
-    public clear_debug_state(*mut self) Void = {
+    public clear_debug_state(*mutable self) Void = {
         self.unifier = Unifier.new()
         self.constraints = List[Constraint].new()
         self.default_constraints = List[Constraint].new()
@@ -181,7 +181,7 @@ given ConstraintSolver {
     }
 
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
-    public add_constraint(*mut self, c Constraint) Void = {
+    public add_constraint(*mutable self, c Constraint) Void = {
         when c in {
             .DefaultInt(_, _) then { self.default_constraints.push(c) },
             .DefaultFloat(_, _) then { self.default_constraints.push(c) },
@@ -190,13 +190,13 @@ given ConstraintSolver {
     }
 
     // 对 constraints 按 priority 做插入排序（priority 越小越优先）。
-    private sort_constraints(*mut self) Void = {
+    private sort_constraints(*mutable self) Void = {
         let n = self.constraints.count()
-        let mut i = 1(UInt)
+        let mutable i = 1(UInt)
         while i < n then {
             let key = self.constraints[i]
             let key_priority = key.priority()
-            let mut j = i
+            let mutable j = i
             while j > 0(UInt) then {
                 let prev = self.constraints[j - 1(UInt)]
                 if prev.priority() > key_priority then {
@@ -212,18 +212,18 @@ given ConstraintSolver {
     }
 
     // 求解所有约束，返回 TypeSubstitution。
-    public solve(*mut self) Result[TypeSubstitution] = {
+    public solve(*mutable self) Result[TypeSubstitution] = {
         // 1. 按优先级排序
         self.sort_constraints()
 
         // 2. 依次处理每个约束（支持 re-queue）
-        let mut max_iterations = self.constraints.count() * 3(UInt) + 100(UInt)
-        let mut iteration = 0(UInt)
+        let mutable max_iterations = self.constraints.count() * 3(UInt) + 100(UInt)
+        let mutable iteration = 0(UInt)
         while self.constraints.count() > 0(UInt) and iteration < max_iterations then {
             let c = self.constraints[0(UInt)]
             // 移除第一个约束
-            let mut remaining = List[Constraint].new()
-            let mut j = 1(UInt)
+            let mutable remaining = List[Constraint].new()
+            let mutable j = 1(UInt)
             while j < self.constraints.count() then {
                 remaining.push(self.constraints[j])
                 j += 1(UInt)
@@ -234,7 +234,7 @@ given ConstraintSolver {
         }
 
         // 3. 处理 default_constraints
-        let mut di = 0(UInt)
+        let mutable di = 0(UInt)
         while di < self.default_constraints.count() then {
             let c = self.default_constraints[di]
             self.process_default_constraint(c)
@@ -248,7 +248,7 @@ given ConstraintSolver {
 
         // 5. 构建 TypeSubstitution（完全解析所有绑定）
         let bindings = self.unifier.current_bindings()
-        let mut resolved_bindings = Dict[UInt, Type].new()
+        let mutable resolved_bindings = Dict[UInt, Type].new()
         for entry in bindings then {
             resolved_bindings.insert(entry.first, self.unifier.resolve_deep(entry.second))
         }
@@ -256,7 +256,7 @@ given ConstraintSolver {
     }
 
     // 处理单个约束。
-    private process_constraint(*mut self, c Constraint) Void = {
+    private process_constraint(*mutable self, c Constraint) Void = {
         when c in {
             .Equal(lhs, rhs, span) then {
                 let result = self.unifier.unify(lhs, rhs, span)
@@ -298,7 +298,7 @@ given ConstraintSolver {
     }
 
     // 处理默认类型约束。
-    private process_default_constraint(*mut self, c Constraint) Void = {
+    private process_default_constraint(*mutable self, c Constraint) Void = {
         when c in {
             .DefaultInt(tv, span) then {
                 let resolved = self.unifier.resolve(Type.TypeVar(box(tv)))
@@ -338,7 +338,7 @@ given ConstraintSolver {
 
     // 辅助：将 [Type]List 转换为 [Type ref]List。
     private types_to_refs(self, types List[Type]) List[* Type] = {
-        let mut out = List[* Type].new()
+        let mutable out = List[* Type].new()
         for t in types then {
             out.push(box(t))
         }
@@ -346,7 +346,7 @@ given ConstraintSolver {
     }
 
     // 辅助：检查类型是否包含类型变量。
-    private type_contains_tv(*mut self, t Type) Bool = {
+    private type_contains_tv(*mutable self, t Type) Bool = {
         return when t in {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
@@ -378,7 +378,7 @@ given ConstraintSolver {
     }
 
     // 解析类型：将类型变量替换为已绑定的类型。
-    public resolve(*mut self, t Type) Type = {
+    public resolve(*mutable self, t Type) Type = {
         return self.unifier.resolve(t)
     }
 }

@@ -35,11 +35,11 @@ private type PendingUsing {
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
 protected type ModuleResolverStorage(
-    mut resolving_files List[String],
-    mut manifest_module_aliases List[ResolvedModuleAliasRule],
+    mutable resolving_files List[String],
+    mutable manifest_module_aliases List[ResolvedModuleAliasRule],
 )
 
-public type ModuleResolver(protected mut storage *mut ModuleResolverStorage)
+public type ModuleResolver(protected mutable storage *mutable ModuleResolverStorage)
 
 public type ResolvedModuleGraph(
     root_module_path String,
@@ -57,7 +57,7 @@ given ModuleResolver {
         return ModuleResolver(s)
     }
 
-    public set_manifest_module_aliases(*mut self, aliases List[ResolvedModuleAliasRule]) Void = {
+    public set_manifest_module_aliases(*mutable self, aliases List[ResolvedModuleAliasRule]) Void = {
         self.storage.manifest_module_aliases = aliases
     }
 
@@ -66,16 +66,16 @@ given ModuleResolver {
             return path_segments
         }
 
-        let mut best_match_count Int = -1
-        let mut best_target = path_segments
+        let mutable best_match_count Int = -1
+        let mutable best_target = path_segments
         for rule in self.storage.manifest_module_aliases then {
             let alias_count = rule.alias_path_segments.count()
             if path_segments.count() < alias_count then {
                 continue
             }
 
-            let mut matched = true
-            let mut i UInt = 0
+            let mutable matched = true
+            let mutable i UInt = 0
             while i < alias_count then {
                 if path_segments[i] <> rule.alias_path_segments[i] then {
                     matched = false
@@ -92,11 +92,11 @@ given ModuleResolver {
                 continue
             }
 
-            let mut resolved = List[String].new()
+            let mutable resolved = List[String].new()
             for segment in rule.target_path_segments then {
                 resolved.push(segment)
             }
-            let mut j = alias_count
+            let mutable j = alias_count
             while j < path_segments.count() then {
                 resolved.push(path_segments[j])
                 j += 1
@@ -123,10 +123,10 @@ given ModuleResolver {
             return Result[CompilationUnit].Error(box("Invalid entry file name '\(filename)': \(reason)"))
         }
 
-        let mut root_path = when root_module_path in {
+        let mutable root_path = when root_module_path in {
             .Some(path) then path,
             .None() then {
-                let mut default_path = List[String].new()
+                let mutable default_path = List[String].new()
                 default_path.push(module_file_name_to_identifier(filename))
                 break default_path
             },
@@ -147,8 +147,8 @@ given ModuleResolver {
     }
 
     public resolve_for_typecheck(self, entry_file String, no_std Bool) Result[ResolvedModuleGraph] = {
-        let mut user_unit_opt = Option[CompilationUnit].None()
-        let mut resolve_error = Option[* Error].None()
+        let mutable user_unit_opt = Option[CompilationUnit].None()
+        let mutable resolve_error = Option[* Error].None()
         when self.resolve_module(entry_file) in {
             .Ok(u) then {
                 user_unit_opt = Option[CompilationUnit].Some(u)
@@ -187,7 +187,7 @@ given ModuleResolver {
         std_unit Option[* CompilationUnit],
         user_unit * CompilationUnit,
     ) List[Pair[LoadedNode, List[String]]] = {
-        let mut result = List[Pair[LoadedNode, List[String]]].new()
+        let mutable result = List[Pair[LoadedNode, List[String]]].new()
         when std_unit in {
             .Some(su) then {
                 result = su.collect_all_nodes_with_path()
@@ -205,8 +205,8 @@ given ModuleResolver {
     }
 
     private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
-        let mut seen = Set[String].new()
-        let mut module_paths = List[List[String]].new()
+        let mutable seen = Set[String].new()
+        let mutable module_paths = List[List[String]].new()
         for pair in loaded_nodes_with_path.iterator() then {
             let path = pair.second
             let key = join_path(path, ".")
@@ -220,8 +220,8 @@ given ModuleResolver {
     }
 
     private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
-        let mut seen = Set[String].new()
-        let mut source_files = List[String].new()
+        let mutable seen = Set[String].new()
+        let mutable source_files = List[String].new()
         for node in loaded_nodes.iterator() then {
             if not seen.contains(node.source_file) then {
                 seen.insert(node.source_file)
@@ -237,7 +237,7 @@ given ModuleResolver {
         std_unit Option[* CompilationUnit],
         user_unit * CompilationUnit,
     ) ResolvedModuleGraph = {
-        let mut all_pairs = List[Pair[LoadedNode, List[String]]].new()
+        let mutable all_pairs = List[Pair[LoadedNode, List[String]]].new()
         for pair in self.collect_effective_std_nodes_with_path(std_unit, user_unit) then {
             all_pairs.push(Pair[LoadedNode, List[String]](
                 LoadedNode(pair.first.decl, pair.first.source_file, "std:std"),
@@ -251,14 +251,14 @@ given ModuleResolver {
             ))
         }
 
-        let mut loaded_nodes = List[LoadedNode].new()
-        let mut node_source_paths = List[String].new()
+        let mutable loaded_nodes = List[LoadedNode].new()
+        let mutable node_source_paths = List[String].new()
         for pair in all_pairs.iterator() then {
             loaded_nodes.push(pair.first)
             node_source_paths.push(pair.first.source_file)
         }
 
-        let mut merged_graph = ImportGraph.new()
+        let mutable merged_graph = ImportGraph.new()
         when std_unit in {
             .Some(su) then {
                 merged_graph.merge(su.import_graph())
@@ -348,7 +348,7 @@ given ModuleResolver {
         module_debug("[module] parse: done")
         module_debug("[module] decl-loop: begin")
 
-        let mut pending = List[PendingUsing].new()
+        let mutable pending = List[PendingUsing].new()
         for decl in program.declarations then {
             when decl in {
                 .ModuleUsingDecl(path_segments, items, _) then {
@@ -413,7 +413,7 @@ given ModuleResolver {
         if target_path.count() <= current_path.count() then {
             return Result[Void].Ok({})
         }
-        let mut idx UInt = 0
+        let mutable idx UInt = 0
         while idx < current_path.count() then {
             if target_path[idx] <> current_path[idx] then {
                 return Result[Void].Ok({})
@@ -426,8 +426,8 @@ given ModuleResolver {
             return Result[Void].Ok({})
         }
 
-        let mut relative_segments = List[String].new()
-        let mut rel_idx = current_path.count()
+        let mutable relative_segments = List[String].new()
+        let mutable rel_idx = current_path.count()
         while rel_idx < target_path.count() then {
             relative_segments.push(target_path[rel_idx])
             rel_idx += 1
@@ -436,8 +436,8 @@ given ModuleResolver {
             return Result[Void].Ok({})
         }
 
-        let mut dir_path = module.directory().into_path()
-        let mut seg_idx UInt = 0
+        let mutable dir_path = module.directory().into_path()
+        let mutable seg_idx UInt = 0
         while seg_idx + 1(UInt) < relative_segments.count() then {
             dir_path = dir_path.join(module_identifier_to_file_name(relative_segments[seg_idx]))
             seg_idx += 1(UInt)
@@ -480,9 +480,9 @@ given ModuleResolver {
 // e.g. "Primitives" -> "primitives", "BufReader" -> "buf_reader", "Std" -> "std"
 public let module_identifier_to_file_name(identifier String) String = {
     if identifier.is_empty() then { return identifier }
-    let mut result = String.new()
+    let mutable result = String.new()
     let runes = identifier.to_runes()
-    let mut first = true
+    let mutable first = true
     for ch in runes then {
         if ch.is_ascii_uppercase() then {
             if not first then {
@@ -500,8 +500,8 @@ public let module_identifier_to_file_name(identifier String) String = {
 // Convert snake_case file name to PascalCase module identifier
 // e.g. "primitives" -> "Primitives", "buf_reader" -> "BufReader"
 public let module_file_name_to_identifier(filename String) String = {
-    let mut result = String.new()
-    let mut capitalize_next = true
+    let mutable result = String.new()
+    let mutable capitalize_next = true
     let runes = filename.to_runes()
     for ch in runes then {
         if ch == '_' then {

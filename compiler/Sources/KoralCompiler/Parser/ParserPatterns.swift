@@ -206,8 +206,8 @@ extension Parser {
     }
     
     // Mutable variable binding pattern
-    if currentToken === .mutKeyword {
-      try match(.mutKeyword)
+    if currentToken === .mutableKeyword {
+      try match(.mutableKeyword)
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }

@@ -15,7 +15,7 @@ given TypeChecker {
         return when constructed_type in {
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
-                    let mut types = List[Type].new()
+                    let mutable types = List[Type].new()
                     for field in fields then {
                         types.push(field.field_type)
                     }
@@ -26,8 +26,8 @@ given TypeChecker {
             .GenericStruct(template_name, args) then when self.storage.generic_templates.lookup_struct(template_name) in {
                 .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                     .Some(fields) then {
-                        let mut bindings = Dict[String, Type].new()
-                        let mut index UInt = 0
+                        let mutable bindings = Dict[String, Type].new()
+                        let mutable index UInt = 0
                         let param_count = struct_template.type_parameters.count()
                         let arg_count = args.count()
                         let n = if param_count < arg_count then param_count else arg_count
@@ -35,7 +35,7 @@ given TypeChecker {
                             bindings.insert(struct_template.type_parameters[index].name, (*args[index]))
                             index += 1
                         }
-                        let mut types = List[Type].new()
+                        let mutable types = List[Type].new()
                         for field in fields then {
                             types.push(self.apply_type_bindings(field.field_type, bindings))
                         }
@@ -51,8 +51,8 @@ given TypeChecker {
 
     protected recheck_type_construction_args(self, args List[* Expr], constructed_type Type, scope Scope) List[* TypedExpr] = {
         let expected_types = self.type_construction_arg_types(constructed_type)
-        let mut typed_args = List[* TypedExpr].new()
-        let mut index UInt = 0
+        let mutable typed_args = List[* TypedExpr].new()
+        let mutable index UInt = 0
         for arg in args then {
             let expected_type = if index < expected_types.count() then Option[Type].Some(expected_types[index]) else Option[Type].None()
             typed_args.push(box(self.check_expr_scoped_ref(arg, expected_type, scope)))
@@ -126,9 +126,9 @@ given TypeChecker {
                 }
                 let method_name = path[path.count() - 1]
                 let receiver_expr = if path.count() == 1 then *base_ref else {
-                    let mut receiver_path = List[String].new()
-                    let mut receiver_type = base_ref.expr_type
-                    let mut idx UInt = 0
+                    let mutable receiver_path = List[String].new()
+                    let mutable receiver_type = base_ref.expr_type
+                    let mutable idx UInt = 0
                     while idx + 1 < path.count() then {
                         receiver_path.push(path[idx])
                         receiver_type = self.resolve_member_type(receiver_type, path[idx])
@@ -181,7 +181,7 @@ given TypeChecker {
 
     protected check_null_ptr_intrinsic(self, intrinsic_type_args List[Type], args * List[* Expr], expected Option[Type]) Option[TypedExpr] = {
         if args.count() <> 0 then { return Option[TypedExpr].None() }
-        let mut elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
+        let mutable elem_type = self.first_type_arg_or_unknown(intrinsic_type_args)
         if self.is_unresolved_expr_type(elem_type) or self.contains_generic_parameter(elem_type) then {
             when expected in {
                 .Some(expected_type) then when expected_type in {
@@ -272,7 +272,7 @@ given TypeChecker {
         let result_type = when pointer_expr.expr_type in {
             .MutablePointerType(_) then if owner_ok then Type.MutableReferenceType(box(pointee_type)) else Type.Unknown(),
             .PointerType(_) then {
-                let expected_pointer_type = "\(self.display_type_name(pointee_type)) *! mut"
+                let expected_pointer_type = "\(self.display_type_name(pointee_type)) *! mutable"
                 self.push_diagnostic_at_span(
                     "Type mismatch: expected \(expected_pointer_type), got \(self.display_type_name(pointer_expr.expr_type))",
                     expr_span(pointer_arg)
@@ -303,7 +303,7 @@ given TypeChecker {
         }
         if not out_handle_ok then {
             let first_arg = args[0(UInt)]
-            self.push_diagnostic_at_span("spawn_thread: first argument must be *! mut *! UInt8", expr_span(first_arg))
+            self.push_diagnostic_at_span("spawn_thread: first argument must be *! mutable *! UInt8", expr_span(first_arg))
         }
         let out_tid_ok = when out_tid.expr_type in {
             .MutablePointerType(inner) then *inner is .UInt64Type(),
@@ -311,7 +311,7 @@ given TypeChecker {
         }
         if not out_tid_ok then {
             let second_arg = args[1(UInt)]
-            self.push_diagnostic_at_span("spawn_thread: second argument must be *! mut UInt64", expr_span(second_arg))
+            self.push_diagnostic_at_span("spawn_thread: second argument must be *! mutable UInt64", expr_span(second_arg))
         }
         let closure_ok = when closure.expr_type in {
             .FunctionType(fn_params, return_type) then fn_params.is_empty() and *return_type is .VoidType(),
@@ -342,7 +342,7 @@ given TypeChecker {
             .GenericParameter(param_name) then {
                 let has_deref_bound = when self.storage.generic_param_constraints.get(param_name) in {
                     .Some(constraints) then {
-                        let mut found = false
+                        let mutable found = false
                         for c in constraints then {
                             if c.trait_name == "Deref" then { found = true }
                         }
@@ -350,12 +350,12 @@ given TypeChecker {
                     },
                     .None() then false,
                 }
-                let mut checked_type = Type.Unknown()
+                let mutable checked_type = Type.Unknown()
                 if has_deref_bound then {
                     checked_type = result_type
                 } else {
                     let ptr_type_name = when pointer_expr.expr_type in {
-                        .MutablePointerType(_) then "\(param_name) *! mut",
+                        .MutablePointerType(_) then "\(param_name) *! mutable",
                         _ then "\(param_name) *!",
                     }
                     self.push_expr_diagnostic(
@@ -431,7 +431,7 @@ given TypeChecker {
             self.check_type_visibility(receiver_type, effective_type_name, scope)
         }
 
-        let mut resolved_type_args = List[Type].new()
+        let mutable resolved_type_args = List[Type].new()
         for ta in type_args then {
             resolved_type_args.push(self.resolve_type_in_scope(*ta, scope))
         }
@@ -452,9 +452,9 @@ given TypeChecker {
                 .None() then 0(UInt),
             },
         }
-        let mut receiver_type_args = List[Type].new()
-        let mut method_type_args = List[Type].new()
-        let mut resolved_type_arg_idx UInt = 0
+        let mutable receiver_type_args = List[Type].new()
+        let mutable method_type_args = List[Type].new()
+        let mutable resolved_type_arg_idx UInt = 0
         while resolved_type_arg_idx < resolved_type_args.count() then {
             let resolved_type_arg = resolved_type_args[resolved_type_arg_idx]
             if resolved_type_arg_idx < receiver_type_param_count then {
@@ -464,7 +464,7 @@ given TypeChecker {
             }
             resolved_type_arg_idx += 1
         }
-        let mut receiver_type_arg_refs = List[* Type].new()
+        let mutable receiver_type_arg_refs = List[* Type].new()
         for rt in receiver_type_args then {
             receiver_type_arg_refs.push(box(rt))
         }
@@ -529,8 +529,8 @@ given TypeChecker {
                     method_type_args,
                     expected,
                 )
-                let mut bound_params = List[Type].new()
-                let mut param_i UInt = 0
+                let mutable bound_params = List[Type].new()
+                let mutable param_i UInt = 0
                 while param_i < self.method_param_count(sig) then {
                     let param_type = self.method_param_type(sig, param_i) or else Type.Unknown()
                     bound_params.push(self.apply_type_bindings(param_type, bindings))
@@ -549,8 +549,8 @@ given TypeChecker {
             },
         }
         let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
-        let mut typed_args = List[* TypedExpr].new()
-        let mut static_arg_idx UInt = 0
+        let mutable typed_args = List[* TypedExpr].new()
+        let mutable static_arg_idx UInt = 0
         for a in args then {
             let static_param_expected = when static_param_types.get(static_arg_idx) in {
                 .Some(pt) then Option[Type].Some(pt),
@@ -697,8 +697,8 @@ given TypeChecker {
     }
 
     protected check_intrinsic_call_ref(self, callee * Expr, args * List[* Expr], expected Option[Type], scope Scope) Option[TypedExpr] = {
-        let mut intrinsic_name = ""
-        let mut intrinsic_type_args = List[Type].new()
+        let mutable intrinsic_name = ""
+        let mutable intrinsic_type_args = List[Type].new()
 
         when callee in {
             .Identifier(name, _) then {
@@ -762,7 +762,7 @@ given TypeChecker {
                     break Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeMutRef(box(inner), weak_type)), weak_type))
                 },
                 _ then {
-                    self.push_expr_diagnostic(box(arg_expr), "'downgrade_mut' expects a mutable managed reference (*mut T), got \(self.display_type_name(inner.expr_type))")
+                    self.push_expr_diagnostic(box(arg_expr), "'downgrade_mut' expects a mutable managed reference (*mutable T), got \(self.display_type_name(inner.expr_type))")
                     break Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.DowngradeMutRef(box(inner), Type.Unknown())), Type.Unknown()))
                 },
             }
@@ -776,7 +776,7 @@ given TypeChecker {
             let result = when inner.expr_type in {
                 .WeakReferenceType(inner_ref) then {
                     let strong_type = Type.ReferenceType(box(*inner_ref))
-                    let mut opt_args = List[* Type].new()
+                    let mutable opt_args = List[* Type].new()
                     opt_args.push(box(strong_type))
                     let result_type = Type.GenericEnum("Option", opt_args)
                     break Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeRef(box(inner), result_type)), result_type))
@@ -796,13 +796,13 @@ given TypeChecker {
             let result = when inner.expr_type in {
                 .MutableWeakReferenceType(inner_ref) then {
                     let strong_type = Type.MutableReferenceType(box(*inner_ref))
-                    let mut opt_args = List[* Type].new()
+                    let mutable opt_args = List[* Type].new()
                     opt_args.push(box(strong_type))
                     let result_type = Type.GenericEnum("Option", opt_args)
                     break Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeMutRef(box(inner), result_type)), result_type))
                 },
                 _ then {
-                    self.push_expr_diagnostic(box(arg_expr), "'upgrade_mut' expects a mutable weak reference (?*mut T), got \(self.display_type_name(inner.expr_type))")
+                    self.push_expr_diagnostic(box(arg_expr), "'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(self.display_type_name(inner.expr_type))")
                     break Option[TypedExpr].Some(make_typed_expr(TypedExprKind.IntrinsicCall(TypedIntrinsic.UpgradeMutRef(box(inner), Type.Unknown())), Type.Unknown()))
                 },
             }
@@ -864,7 +864,7 @@ given TypeChecker {
     }
 
     protected check_call_expr_ref(self, callee * Expr, args List[* Expr], expected Option[Type], scope Scope) TypedExpr = {
-        let mut call_args = List[* Expr].new()
+        let mutable call_args = List[* Expr].new()
         for arg in args then {
             call_args.push(arg)
         }
@@ -886,7 +886,7 @@ given TypeChecker {
             _ then {},
         }
 
-        if self.check_intrinsic_call_ref(callee, &mut call_args, expected, scope) is .Some(intrinsic_expr) then {
+        if self.check_intrinsic_call_ref(callee, &mutable call_args, expected, scope) is .Some(intrinsic_expr) then {
             return intrinsic_expr
         }
 
@@ -905,11 +905,11 @@ given TypeChecker {
                                 .Some(kind) then when kind in {
                                     .List(element_type) or .Deque(element_type) then {
                                         if self.method_requires_mut_ref(element_type, member_name) then {
-                                            let mut typed_sub_args = List[* TypedExpr].new()
+                                            let mutable typed_sub_args = List[* TypedExpr].new()
                                             for a in sub_args then {
                                                 typed_sub_args.push(box(self.check_expr_scoped_ref(a, Option[Type].Some(Type.UIntType()), scope)))
                                             }
-                                            // Use __index_mut_ref to get *mut V directly
+                                            // Use __index_mut_ref to get *mutable V directly
                                             let ref_result = self.build_builtin_subscript_helper_call(typed_sub_base, typed_sub_args, "__index_mut_ref")
                                             when ref_result.expr_type in {
                                                 .MutableReferenceType(ref_el) then {
@@ -918,10 +918,10 @@ given TypeChecker {
                                                         .Some(method_sym) then {
                                                             let sym_type = method_sym.symbol_type
                                                             let typed_method_ref = make_typed_expr(TypedExprKind.MethodReference(box(ref_result), *ref_el, box(method_sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type)
-                                                            let mut typed_call_args = List[* TypedExpr].new()
+                                                            let mutable typed_call_args = List[* TypedExpr].new()
                                                             let param_types = self.resolve_method_param_types(*ref_el, member_name)
                                                             let expected_count = if param_types.count() > 0(UInt) then param_types.count() - 1(UInt) else 0(UInt)
-                                                            let mut a_idx UInt = 0
+                                                            let mutable a_idx UInt = 0
                                                             for a in call_args then {
                                                                 let arg_expected = if a_idx < expected_count then Option[Type].Some(param_types[a_idx + 1(UInt)]) else Option[Type].None()
                                                                 typed_call_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
@@ -938,11 +938,11 @@ given TypeChecker {
                                     },
                                     .Dict(_, value_type) then {
                                         if self.method_requires_mut_ref(value_type, member_name) then {
-                                            let mut typed_sub_args = List[* TypedExpr].new()
+                                            let mutable typed_sub_args = List[* TypedExpr].new()
                                             for a in sub_args then {
                                                 typed_sub_args.push(box(self.check_expr_scoped_ref(a, .None(), scope)))
                                             }
-                                            // Use __index_mut_ref to get *mut V directly
+                                            // Use __index_mut_ref to get *mutable V directly
                                             let ref_result = self.build_builtin_subscript_helper_call(typed_sub_base, typed_sub_args, "__index_mut_ref")
                                             when ref_result.expr_type in {
                                                 .MutableReferenceType(ref_el) then {
@@ -951,10 +951,10 @@ given TypeChecker {
                                                         .Some(method_sym) then {
                                                             let sym_type = method_sym.symbol_type
                                                             let typed_method_ref = make_typed_expr(TypedExprKind.MethodReference(box(ref_result), *ref_el, box(method_sym), List[Type].new(), List[Type].new(), Option[DefId].None()), sym_type)
-                                                            let mut typed_call_args = List[* TypedExpr].new()
+                                                            let mutable typed_call_args = List[* TypedExpr].new()
                                                             let param_types = self.resolve_method_param_types(*ref_el, member_name)
                                                             let expected_count = if param_types.count() > 0(UInt) then param_types.count() - 1(UInt) else 0(UInt)
-                                                            let mut a_idx UInt = 0
+                                                            let mutable a_idx UInt = 0
                                                             for a in call_args then {
                                                                 let arg_expected = if a_idx < expected_count then Option[Type].Some(param_types[a_idx + 1(UInt)]) else Option[Type].None()
                                                                 typed_call_args.push(box(self.check_expr_scoped_ref(a, arg_expected, scope)))
@@ -1006,11 +1006,11 @@ given TypeChecker {
             _ then {},
         }
         let typed_callee_ref = box(typed_callee)
-        if not self.validate_function_expression_argument_count(typed_callee_ref, &mut call_args) then {
+        if not self.validate_function_expression_argument_count(typed_callee_ref, &mutable call_args) then {
             return make_typed_expr(TypedExprKind.Call(typed_callee_ref, List[* TypedExpr].new()), Type.Unknown())
         }
         let call_has_named_args = if call_args.is_empty() then false else {
-            let mut has_named = false
+            let mutable has_named = false
             for arg in call_args then {
                 when arg in {
                     .NamedArgument(_, _, _) then {
@@ -1027,8 +1027,8 @@ given TypeChecker {
             _ then List[FunctionParamSpec].new(),
         }
         let generic_function_template_opt = self.generic_function_template_for_callee(typed_callee_ref)
-        let mut generic_function_bindings = Dict[String, Type].new()
-        let mut has_generic_function_bindings = false
+        let mutable generic_function_bindings = Dict[String, Type].new()
+        let mutable has_generic_function_bindings = false
         when self.initial_generic_function_bindings(callee, typed_callee_ref, scope) in {
             .Some(bindings) then {
                 generic_function_bindings = bindings
@@ -1036,14 +1036,14 @@ given TypeChecker {
             },
             .None() then {},
         }
-        let mut method_param_types_for_inference = List[Type].new()
-        let mut method_call_bindings = Dict[String, Type].new()
-        let mut has_method_call_bindings = false
+        let mutable method_param_types_for_inference = List[Type].new()
+        let mutable method_call_bindings = Dict[String, Type].new()
+        let mutable has_method_call_bindings = false
         // Cache for resolved method signature to avoid triple resolution
-        let mut cached_method_sig = Option[Symbol].None()
-        let mut cached_adapted_base_type = Type.Unknown()
-        let mut cached_adapted_base_expr = Option[TypedExpr].None()
-        let mut cached_materialized_receiver_binding = Option[* Symbol].None()
+        let mutable cached_method_sig = Option[Symbol].None()
+        let mutable cached_adapted_base_type = Type.Unknown()
+        let mutable cached_adapted_base_expr = Option[TypedExpr].None()
+        let mutable cached_materialized_receiver_binding = Option[* Symbol].None()
         when typed_callee.expr_kind in {
             .MethodReference(base_ref, _, method, _, _, _) then {
                 let method_val = *method
@@ -1063,7 +1063,7 @@ given TypeChecker {
                     .FunctionType(params, _) then param_entry_types(params),
                     _ then List[* Type].new(),
                 }
-                let mut param_i UInt = 1
+                let mutable param_i UInt = 1
                 while param_i < param_types.count() then {
                     method_param_types_for_inference.push((*param_types[param_i]))
                     param_i += 1
@@ -1090,7 +1090,7 @@ given TypeChecker {
                                 .FunctionType(params, _) then param_entry_types(params),
                                 _ then List[* Type].new(),
                             }
-                            let mut param_i UInt = 1
+                            let mutable param_i UInt = 1
                             while param_i < param_types.count() then {
                                 method_param_types_for_inference.push((*param_types[param_i]))
                                 param_i += 1
@@ -1125,7 +1125,7 @@ given TypeChecker {
                                 .FunctionType(params, _) then param_entry_types(params),
                                 _ then List[* Type].new(),
                             }
-                            let mut param_i UInt = 1
+                            let mutable param_i UInt = 1
                             while param_i < param_types.count() then {
                                 method_param_types_for_inference.push((*param_types[param_i]))
                                 param_i += 1
@@ -1154,8 +1154,8 @@ given TypeChecker {
             .MemberPath(_, _) then self.resolve_expected_constructor_param_types(callee, expected, scope),
             _ then List[Type].new(),
         }
-        let mut typed_args = List[* TypedExpr].new()
-        let mut arg_idx UInt = 0
+        let mutable typed_args = List[* TypedExpr].new()
+        let mutable arg_idx UInt = 0
         for a in call_args then {
             let fallback_param_expected = when expected_constructor_param_types.get(arg_idx) in {
                 .Some(pt) then Option[Type].Some(pt),
@@ -1243,7 +1243,7 @@ given TypeChecker {
                         make_diagnostic(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            self.format_call_type_mismatch_message(callee, &mut call_args, expected_t, adjusted_arg.expr_type)
+                            self.format_call_type_mismatch_message(callee, &mutable call_args, expected_t, adjusted_arg.expr_type)
                         )
                     )
                 }
@@ -1253,7 +1253,7 @@ given TypeChecker {
                     .Some(template) then {
                         when self.raw_generic_function_param_type(template, arg_idx) in {
                             .Some(raw_param_type) then {
-                                self.infer_type_bindings(raw_param_type, typed_arg.expr_type, &mut generic_function_bindings)
+                                self.infer_type_bindings(raw_param_type, typed_arg.expr_type, &mutable generic_function_bindings)
                             },
                             .None() then {},
                         }
@@ -1263,7 +1263,7 @@ given TypeChecker {
             } else if has_method_call_bindings then {
                 when method_param_types_for_inference.get(arg_idx) in {
                     .Some(raw_param_type) then {
-                        self.infer_type_bindings(raw_param_type, typed_arg.expr_type, &mut method_call_bindings)
+                        self.infer_type_bindings(raw_param_type, typed_arg.expr_type, &mutable method_call_bindings)
                     },
                     .None() then {},
                 }
@@ -1356,8 +1356,8 @@ given TypeChecker {
             .None() then Option[Type].None(),
         }
         let generic_struct_constructor_return_type = self.infer_generic_struct_constructor_return_type(callee, typed_args)
-        let mut has_direct_generic_instantiation_return_type = false
-        let mut direct_generic_instantiation_return_type = Type.Unknown()
+        let mutable has_direct_generic_instantiation_return_type = false
+        let mutable direct_generic_instantiation_return_type = Type.Unknown()
         when typed_callee.expr_kind in {
             .GenericInstantiation(_, _) then {
                 direct_generic_instantiation_return_type = typed_callee.expr_type
@@ -1384,7 +1384,7 @@ given TypeChecker {
                     },
                 },
         }
-        let mut ret_type = when resolved_ret_type in {
+        let mutable ret_type = when resolved_ret_type in {
             .Unknown() then when expected in {
                 .Some(et) then et,
                 .None() then resolved_ret_type,
@@ -1466,7 +1466,7 @@ given TypeChecker {
         }
         let generic_call_type_args = when generic_function_template_opt in {
             .Some(template) then {
-                let mut resolved = List[Type].new()
+                let mutable resolved = List[Type].new()
                 for tp in template.type_parameters then {
                     resolved.push(generic_function_bindings.get(tp.name) or else Type.GenericParameter(tp.name))
                 }
@@ -1506,7 +1506,7 @@ given TypeChecker {
                     .Some(_) then Option[Type].None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let mut prepared_base_binding = cached_materialized_receiver_binding
+                let mutable prepared_base_binding = cached_materialized_receiver_binding
                 let adapted_base = when cached_adapted_base_expr in {
                     .Some(cached) then cached,
                     .None() then {
@@ -1533,7 +1533,7 @@ given TypeChecker {
                     .Some(method_symbol) then method_symbol,
                     .None() then self.make_method_symbol(method_name, method_ret_type),
                 }
-                let mut structured_call = Option[TypedExpr].None()
+                let mutable structured_call = Option[TypedExpr].None()
                 let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
                     or trait_constraint_opt is .Some(_)
                     or direct_method_signature_opt is .Some(_)
@@ -1541,7 +1541,7 @@ given TypeChecker {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
-                            let mut static_args = List[* TypedExpr].new()
+                            let mutable static_args = List[* TypedExpr].new()
                             static_args.push(box(adapted_base))
                             for arg in typed_args then {
                                 static_args.push(arg)
@@ -1637,7 +1637,7 @@ given TypeChecker {
                     .Some(_) then Option[Type].None(),
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 }
-                let mut prepared_base_binding = cached_materialized_receiver_binding
+                let mutable prepared_base_binding = cached_materialized_receiver_binding
                 let adapted_base = when cached_adapted_base_expr in {
                     .Some(cached) then cached,
                     .None() then {
@@ -1662,7 +1662,7 @@ given TypeChecker {
                     .Some(method_symbol) then method_symbol,
                     .None() then self.make_method_symbol(method_name, method_ret_type),
                 }
-                let mut structured_call = Option[TypedExpr].None()
+                let mutable structured_call = Option[TypedExpr].None()
                 let should_lower_to_method_call = self.is_unresolved_expr_type(base_type)
                     or trait_constraint_opt is .Some(_)
                     or direct_method_signature_opt is .Some(_)
@@ -1670,7 +1670,7 @@ given TypeChecker {
                     let static_receiver_opt = self.resolve_static_receiver_type(box(adapted_base))
                     when static_receiver_opt in {
                         .Some(receiver_type) then {
-                            let mut static_args = List[* TypedExpr].new()
+                            let mutable static_args = List[* TypedExpr].new()
                             static_args.push(box(adapted_base))
                             for arg in typed_args then {
                                 static_args.push(arg)
@@ -1795,9 +1795,9 @@ given TypeChecker {
         return when callee in {
             .Identifier(name, _) then when self.storage.generic_templates.lookup_struct(name) in {
                 .Some(template) then {
-                    let mut inferred = Option[Type].None()
+                    let mutable inferred = Option[Type].None()
                     if name == "Pair" and typed_args.count() == 2 then {
-                        let mut resolved_args = List[* Type].new()
+                        let mutable resolved_args = List[* Type].new()
                         resolved_args.push(box(self.concretize_default_literal_type(typed_args[0(UInt)].expr_type)))
                         resolved_args.push(box(self.concretize_default_literal_type(typed_args[1(UInt)].expr_type)))
                         inferred = Option[Type].Some(Type.GenericStruct(name, resolved_args))

@@ -166,21 +166,21 @@ a = 6 // Error
 
 #### Mutable Variables
 
-If we need a variable that can be reassigned, we can use a mutable variable declaration with `let mut`.
+If we need a variable that can be reassigned, we can use a mutable variable declaration with `let mutable`.
 
 ```koral
-let mut a Int = 5   // Explicit type annotation
-let mut b = 123     // Automatic type inference
+let mutable a Int = 5   // Explicit type annotation
+let mutable b = 123     // Automatic type inference
 ```
 
 #### Pair Destructuring
 
-When the right-hand side expression is a `Pair`, you can use parenthesized syntax to bind each element to a separate variable. Each binding position supports `_` (discard), `mut` (mutable), and an optional type annotation.
+When the right-hand side expression is a `Pair`, you can use parenthesized syntax to bind each element to a separate variable. Each binding position supports `_` (discard), `mutable` (mutable), and an optional type annotation.
 
 ```koral
 let (a, b) = (1, 2)                  // Type inference
 let (c Int, d String) = (3, "hello")  // Explicit type annotations
-let (mut e, f) = (10, 20)             // Mutable binding
+let (mutable e, f) = (10, 20)             // Mutable binding
 let (_, g) = (1, 2)                   // Discard first element
 ```
 
@@ -190,41 +190,41 @@ The compiler moves fields directly from the Pair value into the target variables
 
 Koral uses reference types to refer to another value rather than holding it:
 
-- `*T` / `*mut T` are managed references.
+- `*T` / `*mutable T` are managed references.
   - May escape; can be returned, stored in fields, containers, or enum payloads.
-- `*mut T` implicitly converts to `*T`. The reverse is not allowed.
+- `*mutable T` implicitly converts to `*T`. The reverse is not allowed.
 
 `&` is the reference-of operator:
 
 - Plain `&` may take either an lvalue or an rvalue. Rvalues are materialized into managed storage as needed.
-- `&mut` requires a writable lvalue.
-- `&!` / `&! mut` require addressable storage, so literals and temporary values are rejected.
-- `&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide stack vs heap allocation.
-- `box(expr)` is explicit managed construction, returning `*mut T`.
+- `&mutable` requires a writable lvalue.
+- `&!` / `&! mutable` require addressable storage, so literals and temporary values are rejected.
+- `&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
+- `box(expr)` is explicit managed construction, returning `*mutable T`.
 
 Implicit conversion rules:
 
-- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mut T`, the caller must use `&x` or `&mut x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
-- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T` or `*mut T` (auto-deref, following Go's pointer receiver behavior).
+- **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must use `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
+- **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T` or `*mutable T` (auto-deref, following Go's pointer receiver behavior).
 
 Receiver adjustment rules:
 
 - `*self` is a managed receiver; it accepts both lvalue and rvalue receiver expressions. For rvalue receivers, the compiler materializes a stable temporary for the duration of the call.
-- `*mut self` is a mutable managed receiver; it still requires a writable lvalue receiver; rvalues are rejected.
+- `*mutable self` is a mutable managed receiver; it still requires a writable lvalue receiver; rvalues are rejected.
 - `*self` on rvalues may introduce hidden retain/allocation cost due to temporary materialization.
 - Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
 
 ```koral
-let mut x = 10
-let rx *mut Int = &mut x
+let mutable x = 10
+let rx *mutable Int = &mutable x
 
 let y = 10
 let ry *Int = &y       // read-only reference
 
-let owned *mut Int = box(42) // box() returns *mut T
+let owned *mutable Int = box(42) // box() returns *mutable T
 let temp *Int = &42          // OK: managed & may materialize rvalues
 
-// let bad = &mut 42      // error: &mut still requires a writable lvalue
+// let bad = &mutable 42      // error: &mutable still requires a writable lvalue
 // let raw_bad = &! 42  // error: raw address-of needs addressable storage
 
 // No implicit managed-ref promotion for function arguments:
@@ -234,7 +234,7 @@ let v = 42
 takes_ref(&v)                // OK: explicit &
 
 // Auto-deref only for method receivers:
-type Counter(mut value Int)
+type Counter(mutable value Int)
 given Counter {
     public get(*self) Int = self.value
 }
@@ -247,7 +247,7 @@ c.get()                      // OK: auto-ref for *self receiver
 For mutable variables, we can change their value multiple times when needed.
 
 ```koral
-let mut a = 0
+let mutable a = 0
 a = 1  // Legal
 a = 2  // Legal
 ```
@@ -512,44 +512,44 @@ Rules:
 Reference types are used to refer to another value rather than holding it. This is useful when sharing data or avoiding copying:
 
 - `*T` — managed read-only reference. Supports `*expr` dereference read but NOT `*expr = value` assignment.
-- `*mut T` — managed mutable reference. Supports both `*expr` dereference read and `*expr = value` assignment.
+- `*mutable T` — managed mutable reference. Supports both `*expr` dereference read and `*expr = value` assignment.
 
-Use the `&` prefix expression to create a managed reference. Plain `&` produces `*T`; `&mut` produces `*mut T`.
+Use the `&` prefix expression to create a managed reference. Plain `&` produces `*T`; `&mutable` produces `*mutable T`.
 
 ```koral
-let mut n = 42
-let a *mut Int = &mut n
+let mutable n = 42
+let a *mutable Int = &mutable n
 let b = *a            // Dereference, gets 42
-*a = 100              // Deref assignment (*mut supports *expr = value)
+*a = 100              // Deref assignment (*mutable supports *expr = value)
 
 let m = 42
 let c *Int = &m
 let d = *c            // Dereference read, gets 42
 // *c = 100           // Error: * does not support deref assignment
 
-let owned *mut Int = &mut n
+let owned *mutable Int = &mutable n
 ```
 
-`&` produces a `*T` (or `*mut T` with `&mut`). The compiler uses escape analysis to decide whether the reference can be stack-allocated or must be heap-allocated. `box(expr)` always explicitly constructs a managed `*mut T`.
+`&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide whether the reference can be stack-allocated or must be heap-allocated. `box(expr)` always explicitly constructs a managed `*mutable T`.
 
 Pointer types follow the same read-only / mutable distinction:
 
 - `*! T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
-- `*! mut T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
-- `*! mut T` implicitly converts to `*! T`. The reverse is not allowed.
+- `*! mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
+- `*! mutable T` implicitly converts to `*! T`. The reverse is not allowed.
 
 #### Weak References
 
-Weak references don't increase the reference count, used to break reference cycles. Like `*`/`*mut`, weak references also distinguish mutability: `?*T` (read-only) and `?*mut T` (mutable).
+Weak references don't increase the reference count, used to break reference cycles. Like `*`/`*mutable`, weak references also distinguish mutability: `?*T` (read-only) and `?*mutable T` (mutable).
 
-Use `downgrade(*T)` to create `?*T` (or `downgrade_mut(*mut T)` for `?*mut T`), and `upgrade(?*T)` to attempt upgrading back to `Option[*T]` (or `upgrade_mut(?*mut T)` for `Option[*mut T]`).
+Use `downgrade(*T)` to create `?*T` (or `downgrade_mut(*mutable T)` for `?*mutable T`), and `upgrade(?*T)` to attempt upgrading back to `Option[*T]` (or `upgrade_mut(?*mutable T)` for `Option[*mutable T]`).
 
 ```koral
-let strong *mut Int = box(42)
+let strong *mutable Int = box(42)
 
-// Mutable path: *mut → ?*mut → Option[*mut T]
-let weak = downgrade_mut(strong)              // *mut T → ?*mut T
-let upgraded = upgrade_mut(weak)           // ?*mut T → Option[*mut T]
+// Mutable path: *mutable → ?*mutable → Option[*mutable T]
+let weak = downgrade_mut(strong)              // *mutable T → ?*mutable T
+let upgraded = upgrade_mut(weak)           // ?*mutable T → Option[*mutable T]
 
 // Read-only path: * → ?* → Option[*T]
 let ro *Int = strong                // implicit widening
@@ -562,7 +562,7 @@ let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `*` / `*mut` are managed references. Plain `&` may form managed references from lvalues or rvalues; `&mut` still requires a writable lvalue. `&!` / `&! mut` form raw pointers only from addressable storage. The compiler uses escape analysis to decide stack vs heap allocation for managed references, and `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call, while `*mut self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `*` / `*mutable` are managed references. Plain `&` may form managed references from lvalues or rvalues; `&mutable` still requires a writable lvalue. `&!` / `&! mutable` form raw pointers only from addressable storage. The compiler uses escape analysis to decide stack vs heap allocation for managed references, and `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call, while `*mutable self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -660,14 +660,14 @@ These range operators construct `Range` values. They are distinct from chained c
 ### Compound Assignment
 
 ```koral
-let mut x = 10
+let mutable x = 10
 x += 5       // x = x + 5
 x -= 2       // x = x - 2
 x *= 3       // x = x * 3
 x /= 2       // x = x / 2
 x %= 4       // x = x % 4
 
-let mut y = 12
+let mutable y = 12
 y &= 10     // y = y & 10
 y |= 1      // y = y | 1
 y ^= 15     // y = y ^ 15
@@ -722,21 +722,21 @@ let ordered = Vec2(1, 0) < Vec2(2, 0)
 
 Builtin subscript rules:
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `*! T`, and `*! mut T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `*! T`, and `*! mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
-- `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `*` / `*mut` contexts.
-- `*! T` supports reads only. `*! mut T` supports both reads and writes.
+- `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `*` / `*mutable` contexts.
+- `*! T` supports reads only. `*! mutable T` supports both reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
-let mut list = [10, 20, 30]
+let mutable list = [10, 20, 30]
 println(list[0])
 list[1] = 99
 
 let text = "abc"
 let b UInt8 = text[1]
 
-let p *! mut Int = alloc_memory[Int](2)
+let p *! mutable Int = alloc_memory[Int](2)
 p[0] = list[0]
 let first = p[0]
 dealloc_memory(p)
@@ -782,7 +782,7 @@ It must be used inside a function whose return kind matches the propagated value
 Operator precedence from high to low:
 
 1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified/generic method suffixes
-2. Prefix: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mut`, `&!`, `&! mut`
+2. Prefix: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mutable`, `&!`, `&!mutable`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
@@ -878,7 +878,7 @@ Rules for condition composition:
 In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is statement-only.
 
 ```koral
-let mut i = 0
+let mutable i = 0
 while i < 10 then {
     println(i)
     i += 1
@@ -890,7 +890,7 @@ while i < 10 then {
 `while` also supports `is` pattern matching, commonly used for iterator loops:
 
 ```koral
-let mut iter = list.iterator()
+let mutable iter = list.iterator()
 while iter.next() is .Some(v) then {
     println(v)
 }
@@ -912,7 +912,7 @@ For `while` conditions, clauses are also left-to-right and short-circuiting. Whe
 - `continue`: Skip the current iteration.
 
 ```koral
-let mut i = 0
+let mutable i = 0
 while true then {
     if i > 20 then break
     if i % 2 == 0 then { i += 1; continue }
@@ -969,7 +969,7 @@ let main() Void = {
 `defer` binds to the block scope where it is declared, not the function scope. In loops, `defer` executes at the end of each iteration:
 
 ```koral
-let mut i = 0
+let mutable i = 0
 while i < 3 then {
     i += 1
     defer println("cleanup")
@@ -1031,7 +1031,7 @@ Supported patterns include:
 
 - Wildcard pattern: `_` (matches any value)
 - Literal patterns: `1`, `"abc"`, `'a'`, `true`
-- Variable binding patterns: `x` (matches any value and binds to x), `mut x` (mutable binding)
+- Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
@@ -1160,13 +1160,13 @@ let add(x Int, y Int) Int = x + y
 let a = add(1, 2) // a == 3
 ```
 
-Mutable parameters use the `mut` keyword:
+Mutable parameters use the `mutable` keyword:
 
 ```koral
-let increment(mut x Int) Int = { x += 1; return x }
+let increment(mutable x Int) Int = { x += 1; return x }
 ```
 
-For ordinary parameters, `mut` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the `Func[...]` type, and is ignored when checking trait/given method compatibility.
+For ordinary parameters, `mutable` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the `Func[...]` type, and is ignored when checking trait/given method compatibility.
 
 #### Named Parameters
 
@@ -1297,14 +1297,14 @@ let result = add10(32)  // result == 42
 
 #### Capture Rules
 
-Closures can capture both immutable and mutable (`let mut`) variables. Mutable variables are captured by reference, so mutations inside the closure are visible outside.
+Closures can capture both immutable and mutable (`let mutable`) variables. Mutable variables are captured by reference, so mutations inside the closure are visible outside.
 
 ```koral
 let x = 10
 let f = () -> x + 1  // OK: x is immutable
 
-let mut counter = 0
-let increment = () -> { counter = counter + 1 }  // OK: let mut captured by reference
+let mutable counter = 0
+let increment = () -> { counter = counter + 1 }  // OK: let mutable captured by reference
 increment()
 // counter is now 1
 ```
@@ -1362,15 +1362,15 @@ let main() Void = {
 
 #### Mutable Member Variables
 
-Member variables are read-only by default. Use the `mut` keyword to mark mutable member variables:
+Member variables are read-only by default. Use the `mutable` keyword to mark mutable member variables:
 
 ```koral
-type Point(mut x Int, mut y Int)
+type Point(mutable x Int, mutable y Int)
 
 let main() Void = {
     let a = Point(64, 128)
-    a.x = 2  // ok, because x is mut
-    a.y = 0  // ok, because y is mut
+    a.x = 2  // ok, because x is mutable
+    a.y = 0  // ok, because y is mutable
 }
 ```
 
@@ -1424,7 +1424,7 @@ let process(opt Option[Int]) Void = when opt in {
 process(.Some(10))
 
 // In assignments
-let mut x Option[Int] = .None()
+let mutable x Option[Int] = .None()
 x = .Some(100)
 
 // In conditional expression branches
@@ -1568,7 +1568,7 @@ Constrained tool block example:
 
 ```koral
 trait Iterator[T Any] {
-    next(*mut self) Option[T]
+    next(*mutable self) Option[T]
 }
 
 given[T Ord] Iterator[T] {
@@ -1645,58 +1645,58 @@ The most commonly used core traits are:
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
-- `Iterator[T]`: iteration protocol (`next(*mut self) Option[T]`).
+- `Iterator[T]`: iteration protocol (`next(*mutable self) Option[T]`).
 - `Error`: error message interface (`message(*self) String`).
-- `Drop`: destructor hook (`drop(source *! mut Self) Void`).
+- `Drop`: destructor hook (`drop(source *! mutable Self) Void`).
 
 Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
-`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source *! mut Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
+`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source *! mutable Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
 
 ### Method Receiver Forms
 
 - self: managed value receiver (equivalent to managed value receiver).
-- *self / *mut self: managed receivers; auto-ref allowed on call sites.
-- self methods can accept *T or *mut T (auto-deref).
+- *self / *mutable self: managed receivers; auto-ref allowed on call sites.
+- self methods can accept *T or *mutable T (auto-deref).
 - Auto-ref and auto-deref apply only to self and *self forms.
 
 ### Trait Objects
 
-Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `*TraitName` or `*mut TraitName` syntax, you can erase any type that implements a Trait into a uniform reference type.
+Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch). Using the `*TraitName` or `*mutable TraitName` syntax, you can erase any type that implements a Trait into a uniform reference type.
 
 #### Basic Syntax
 
 Trait-object construction follows these rules:
 
-- The target type is written as `*TraitName` or `*mut TraitName`.
+- The target type is written as `*TraitName` or `*mutable TraitName`.
 - The source value must implement the trait and be converted in a context expecting that trait-object type.
 - `box(...)` is the standard way to provide an owned value for this conversion.
 
 ```koral
 trait Drawable {
     draw(*self) String
-    reset(*mut self) Void
+    reset(*mutable self) Void
 }
 
-type Circle(mut radius Int)
-type Square(mut side Int)
+type Circle(mutable radius Int)
+type Square(mutable side Int)
 
 given Circle as Drawable {
     public draw(*self) String = "Drawing circle"
-    public reset(*mut self) Void = {
+    public reset(*mutable self) Void = {
         self.radius = 0
     }
 }
 given Square as Drawable {
     public draw(*self) String = "Drawing square"
-    public reset(*mut self) Void = {
+    public reset(*mutable self) Void = {
         self.side = 0
     }
 }
 
 // Create trait objects
 let shape *Drawable = box(Circle(10))
-let mutable_shape *mut Drawable = box(Square(4))
+let mutable_shape *mutable Drawable = box(Square(4))
 
 // Call methods through the trait object (dynamic dispatch)
 shape.draw()  // "Drawing circle"
@@ -1707,15 +1707,15 @@ mutable_shape.draw()
 Dispatch through trait objects respects reference mutability:
 
 - `*TraitName` can call only requirements declared with `*self`.
-- `*mut TraitName` can call both `*mut self` and `*self` requirements.
-- `*TraitName` cannot call `*mut self` requirements.
+- `*mutable TraitName` can call both `*mutable self` and `*self` requirements.
+- `*TraitName` cannot call `*mutable self` requirements.
 
 #### Object Safety
 
 Only Traits that satisfy the following conditions can be used as trait objects:
 
 - Methods must not have generic parameters
-- The receiver, if present, must be `*self` or `*mut self`
+- The receiver, if present, must be `*self` or `*mutable self`
 - `Self` must not appear in method parameters or return types (except within that receiver)
 
 ```koral
@@ -1734,7 +1734,7 @@ trait Resettable {
 }
 ```
 
-Trait objects (`*TraitName`, `*mut TraitName`) do not support direct dereference; use trait methods through dynamic dispatch.
+Trait objects (`*TraitName`, `*mutable TraitName`) do not support direct dereference; use trait methods through dynamic dispatch.
 
 ## Generics
 

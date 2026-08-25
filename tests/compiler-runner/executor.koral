@@ -61,7 +61,7 @@ private type CommandExecution {
 }
 
 private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
-    let mut args = ["build"]
+    let mutable args = ["build"]
     when find_case_manifest(config, info) in {
         .Some(manifest_path) then {
             args.push("--package-config")
@@ -84,7 +84,7 @@ private let build_command_args_for_case(config RunnerConfig, info CaseInfo, outp
 }
 
 private let check_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
-    let mut args = ["check"]
+    let mutable args = ["check"]
     when find_case_manifest(config, info) in {
         .Some(manifest_path) then {
             args.push("--package-config")
@@ -115,7 +115,7 @@ private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
 
 private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
     let cases_root = config.cases_root.normalize()
-    let mut current = info.absolute_path.dir_name().normalize()
+    let mutable current = info.absolute_path.dir_name().normalize()
     while true then {
         let candidate = current.join("koral.json")
         if path_exist(candidate) then {
@@ -143,11 +143,11 @@ private let find_case_deps_root(manifest_path Path) Option[Path] = {
 
 private let find_built_executable(output_dir Path) Result[Path] = {
     let is_windows = is_windows_host()
-    let mut iter = read_dir(output_dir) or else {
+    let mutable iter = read_dir(output_dir) or else {
         return Result[Path].Error(it)
     }
 
-    let mut found = List[Path].new()
+    let mutable found = List[Path].new()
     while iter.next() is .Some(entry) then {
         if not entry.is_file() then {
             continue
@@ -188,7 +188,7 @@ private let prepared_run_executable_path(info CaseInfo, output_dir Path, launch_
     // "patch", which can make the exact same binary fail to launch normally.
     // Run through a fresh neutral filename on each attempt to avoid transient
     // Windows file-visibility and file-lock races immediately after build.
-    let mut copy_attempt = launch_attempt
+    let mutable copy_attempt = launch_attempt
     while copy_attempt < launch_attempt + 16 then {
         let launch_path = output_dir.join("run-" + copy_attempt.to_string() + ".exe")
         if path_exist(launch_path) then {
@@ -232,7 +232,7 @@ private let has_runtime_expect_error(expect_error List[String]) Bool = {
 }
 
 private let non_empty_lines(lines List[String]) List[String] = {
-    let mut out = List[String].new()
+    let mutable out = List[String].new()
     for line in lines then {
         if not line.is_empty() then {
             out.push(line)
@@ -298,11 +298,11 @@ private let execute_command_with_timeout(
     let command_start = MonoTime.now()
     let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap()
 
-    let mut timed_out = false
-    let mut memory_exceeded = false
-    let mut peak_memory UInt = 0
+    let mutable timed_out = false
+    let mutable memory_exceeded = false
+    let mutable peak_memory UInt = 0
     let memory_limit_bytes = config.memory_limit_mb * 1024(UInt) * 1024(UInt)
-    let mut exit_status = Option[ExitStatus].None()
+    let mutable exit_status = Option[ExitStatus].None()
 
     while exit_status is .None() then {
         when proc.try_wait() in {
@@ -450,7 +450,7 @@ private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Pa
         },
     }
 
-    let mut attempt UInt = 0
+    let mutable attempt UInt = 0
     while attempt < 4096 then {
         let candidate = case_root.join(attempt.to_string())
         when create_dir(candidate) in {
@@ -498,14 +498,14 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         )
     }
 
-    let mut active_output_dir = temp_output_dir
+    let mutable active_output_dir = temp_output_dir
 
     let check_only_expect_error = expectations.expect_error.count() > 0
         and expectations.expect_output.is_empty()
         and expectations.expect_exact_output.is_empty()
         and not has_runtime_expect_error(expectations.expect_error)
 
-    let mut build_args = when if check_only_expect_error
+    let mutable build_args = when if check_only_expect_error
         then check_command_args_for_case(config, info, active_output_dir)
         else build_command_args_for_case(config, info, active_output_dir) in {
         .Ok(args) then args,
@@ -521,14 +521,14 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             )
         },
     }
-    let mut compile_command_name = if check_only_expect_error then "check" else "build"
+    let mutable compile_command_name = if check_only_expect_error then "check" else "build"
 
     if config.verbose then {
         println("RUN \(info.relative_path)")
         println("  cmd: \(config.compiler_bin.to_string()) \(build_args.join_to_string(" "))")
     }
 
-    let mut build_output = when execute_command_with_timeout(
+    let mutable build_output = when execute_command_with_timeout(
         config,
         config.compiler_bin.to_string(),
         build_args,
@@ -573,9 +573,9 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         },
     }
 
-    let mut build_combined = normalize_output(build_output.stdout + build_output.stderr)
-    let mut build_lines = output_lines_trimmed(build_combined)
-    let mut build_exit_code = infer_exit_code(build_output.status)
+    let mutable build_combined = normalize_output(build_output.stdout + build_output.stderr)
+    let mutable build_lines = output_lines_trimmed(build_combined)
+    let mutable build_exit_code = infer_exit_code(build_output.status)
     let duration_ms = start.elapsed().as_milliseconds()
 
     if expectations.expect_error.is_empty() and build_exit_code <> 0 and build_combined.is_empty() then {

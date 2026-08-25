@@ -76,7 +76,7 @@ given DirEntry {
 given DirEntry as ToString {
 
     public to_string(*self) String = {
-        let mut s = String.new()
+        let mutable s = String.new()
         s.push_string("DirEntry(")
         s.push_string(self._name)
         s.push_string(", ")
@@ -90,22 +90,22 @@ private type DirIteratorStorage(handle *! CDirHandle, base Path)
 
 given DirIteratorStorage as Drop {
 
-    drop(source *! mut Self) Void = {
+    drop(source *! mutable Self) Void = {
         if source.handle <> null_ptr[CDirHandle]() then {
             __koral_closedir(source.handle)
         }
     }
 }
 
-public type DirIterator(protected storage *mut DirIteratorStorage)
+public type DirIterator(protected storage *mutable DirIteratorStorage)
 
-private type WalkDirStorage(mut stack List[DirIterator])
+private type WalkDirStorage(mutable stack List[DirIterator])
 
-public type WalkDirIterator(protected mut storage *mut WalkDirStorage)
+public type WalkDirIterator(protected mutable storage *mutable WalkDirStorage)
 
 given DirIterator as Iterator[DirEntry] {
 
-    public next(*mut self) Option[DirEntry] = {
+    public next(*mutable self) Option[DirEntry] = {
         let entry = __koral_readdir(self.storage.handle)
         if entry == null_ptr[CDirEntry]() then {
             return Option[DirEntry].None()
@@ -124,13 +124,13 @@ given DirIterator as Iterator[DirEntry] {
 
 given WalkDirIterator as Iterator[DirEntry] {
 
-    public next(*mut self) Option[DirEntry] = {
+    public next(*mutable self) Option[DirEntry] = {
         let top_opt = self.storage.stack.pop()
         if top_opt is .None then {
             return Option[DirEntry].None()
         }
 
-        let mut top = top_opt.unwrap()
+        let mutable top = top_opt.unwrap()
         when top.next() in {
             .Some(entry) then {
                 self.storage.stack.push(top)
@@ -168,7 +168,7 @@ public let create_dir[T IntoPath](path T) Result[Void] = {
 
 /// Create directory recursively (creates all missing parent directories)
 public let create_dir_all[T IntoPath](path T) Result[Void] = {
-    let mut normalized = path.into_path().to_string().replace_all("\\", with: "/")
+    let mutable normalized = path.into_path().to_string().replace_all("\\", with: "/")
     if normalized.is_empty() then {
         return Result[Void].Ok({})
     }
@@ -185,8 +185,8 @@ public let create_dir_all[T IntoPath](path T) Result[Void] = {
         return Result[Void].Ok({})
     }
 
-    let mut current = String.new()
-    let mut i UInt = 0
+    let mutable current = String.new()
+    let mutable i UInt = 0
     let n = normalized.count()
 
     if normalized.starts_with("//") then {
@@ -258,8 +258,8 @@ public let remove_dir[T IntoPath](path T) Result[Void] = {
 /// Remove directory recursively (removes all contents first)
 public let remove_dir_all[T IntoPath](path T) Result[Void] = {
     let p = path.into_path()
-    let mut dirs List[Path] = []
-    let mut entries = walk_dir(p) or else {
+    let mutable dirs List[Path] = []
+    let mutable entries = walk_dir(p) or else {
         return Result[Void].Error(it)
     }
 
@@ -301,7 +301,7 @@ public let read_dir[T IntoPath](path T) Result[DirIterator] = {
 /// Returned entries include both files and directories under `path`.
 /// The root path itself is not yielded.
 public let walk_dir[T IntoPath](path T) Result[WalkDirIterator] = {
-    let mut stack List[DirIterator] = []
+    let mutable stack List[DirIterator] = []
     let root_iter = read_dir(path) or else {
         return .Error(it)
     }
@@ -321,7 +321,7 @@ public let create_temp_dir[T IntoPath](dir T, prefix: String) Result[Path] = {
     let dir_path = dir.into_path()
     let base = if dir_path.is_empty() then temp_dir() else dir_path
     let base_str = base.to_string()
-    let mut template = String.new()
+    let mutable template = String.new()
     template.push_string(base_str)
     if not base_str.ends_with("/") and not base_str.ends_with("\\") then {
         template.push_byte('/')

@@ -73,7 +73,7 @@ public enum CaptureKind {
   case byValue
   /// Reference capture: capture reference type, increment reference count
   case byReference
-  /// Mutable capture: capture let mut variable by pointer so mutations are visible outside
+  /// Mutable capture: capture let mutable variable by pointer so mutations are visible outside
   case byMutReference
 }
 
@@ -510,7 +510,7 @@ extension TypedExpressionNode {
     case .ptrExpression:
       return .rvalue
     case .castExpression(let inner, let type):
-      // Reference-to-reference casts (identity, ref↔ref mut) preserve the
+      // Reference-to-reference casts (identity, ref↔ref mutable) preserve the
       // underlying value category because the C representation is identical
       // (struct __koral_Ref). All other casts produce rvalues.
       switch (inner.type, type) {

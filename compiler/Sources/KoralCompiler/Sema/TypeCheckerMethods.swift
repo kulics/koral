@@ -1246,7 +1246,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(finalBase, expectedType: firstParam.type) {
           finalBase = implicitDeref
         } else if canWidenMutableReference(finalBase, expectedType: firstParam.type) {
-          // ref mut -> ref widening
+          // ref mutable -> ref widening
         } else {
           throw SemanticError.typeMismatch(
             expected: firstParam.type.description,
@@ -1271,7 +1271,7 @@ extension TypeChecker {
         } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
           typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
-          // ref mut → ref widening: pass through unchanged
+          // ref mutable → ref widening: pass through unchanged
         } else {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -1356,7 +1356,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = ptr.type else {
         throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mut")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mutable")
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
     case "spawn_thread":
@@ -1369,10 +1369,10 @@ extension TypeChecker {
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
       guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be *! mut *! UInt8"))
+        throw SemanticError(.generic("spawn_thread: first argument must be *! mutable *! UInt8"))
       }
       guard case .mutablePointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be *! mut UInt64"))
+        throw SemanticError(.generic("spawn_thread: second argument must be *! mutable UInt64"))
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

@@ -190,8 +190,8 @@ public class Parser {
   ) {
     try match(.letKeyword)
     var mutable = false
-    if currentToken === .mutKeyword {
-      try match(.mutKeyword)
+    if currentToken === .mutableKeyword {
+      try match(.mutableKeyword)
       mutable = true
     }
     guard case .identifier(let name) = currentToken else {
@@ -225,10 +225,10 @@ public class Parser {
       return try parsePairVariableDeclaration(startSpan: startSpan)
     }
 
-    // Normal variable declaration: let [mut] name [Type] = expr
+    // Normal variable declaration: let [mutable] name [Type] = expr
     var mutable = false
-    if currentToken === .mutKeyword {
-      try match(.mutKeyword)
+    if currentToken === .mutableKeyword {
+      try match(.mutableKeyword)
       mutable = true
     }
     guard case .identifier(let name) = currentToken else {
@@ -254,7 +254,7 @@ public class Parser {
   }
 
   /// Parse pair destructuring: `let (binding1, binding2) = expr`
-  /// Each binding is: `_` | `[mut] name [Type]`
+  /// Each binding is: `_` | `[mutable] name [Type]`
   private func parsePairVariableDeclaration(startSpan: SourceSpan) throws -> StatementNode {
     try match(.leftParen)
 
@@ -272,7 +272,7 @@ public class Parser {
     return .pairVariableDeclaration(first: first, second: second, value: value, span: startSpan)
   }
 
-  /// Parse a single binding element inside pair destructuring: `_` | `[mut] name [Type]`
+  /// Parse a single binding element inside pair destructuring: `_` | `[mutable] name [Type]`
   private func parsePairBindingElement() throws -> PairBindingElement {
     let elemSpan = currentSpan
 
@@ -282,10 +282,10 @@ public class Parser {
       return PairBindingElement(name: "_", type: nil, mutable: false, isDiscard: true, span: elemSpan)
     }
 
-    // Check for mut
+    // Check for mutable
     var mutable = false
-    if currentToken === .mutKeyword {
-      try match(.mutKeyword)
+    if currentToken === .mutableKeyword {
+      try match(.mutableKeyword)
       mutable = true
     }
 

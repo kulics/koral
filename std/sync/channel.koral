@@ -19,20 +19,20 @@ private type ChannelStorage[T Any](
     mutex Mutex,
     not_empty MutexCondvar,          // notify consumer: new message available
     not_full MutexCondvar,           // notify producer: space available
-    mut queue List[T],          // message queue
+    mutable queue List[T],          // message queue
     capacity UInt,              // buffer size
-    mut sender_closed Bool,     // all SendChannels have been dropped
-    mut receiver_closed Bool,   // all RecvChannels have been dropped
+    mutable sender_closed Bool,     // all SendChannels have been dropped
+    mutable receiver_closed Bool,   // all RecvChannels have been dropped
 )
 
 // ============================================================================
 // SendChannelStorage / RecvChannelStorage (tracks last-holder close semantics)
 // ============================================================================
 
-private type SendChannelStorage[T Any](channel *mut ChannelStorage[T])
+private type SendChannelStorage[T Any](channel *mutable ChannelStorage[T])
 
 given[T Any] SendChannelStorage[T] as Drop {
-    drop(source *! mut Self) Void = {
+    drop(source *! mutable Self) Void = {
         source.channel.mutex.lock()
         defer source.channel.mutex.unlock()
         source.channel.sender_closed = true
@@ -40,10 +40,10 @@ given[T Any] SendChannelStorage[T] as Drop {
     }
 }
 
-private type RecvChannelStorage[T Any](channel *mut ChannelStorage[T])
+private type RecvChannelStorage[T Any](channel *mutable ChannelStorage[T])
 
 given[T Any] RecvChannelStorage[T] as Drop {
-    drop(source *! mut Self) Void = {
+    drop(source *! mutable Self) Void = {
         source.channel.mutex.lock()
         defer source.channel.mutex.unlock()
         source.channel.receiver_closed = true
@@ -55,7 +55,7 @@ given[T Any] RecvChannelStorage[T] as Drop {
 // SendChannel Type
 // ============================================================================
 
-public type SendChannel[T Any](private storage *mut SendChannelStorage[T])
+public type SendChannel[T Any](private storage *mutable SendChannelStorage[T])
 
 given[T Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
@@ -94,7 +94,7 @@ given[T Any] SendChannel[T] {
 // RecvChannel Type
 // ============================================================================
 
-public type RecvChannel[T Any](private storage *mut RecvChannelStorage[T])
+public type RecvChannel[T Any](private storage *mutable RecvChannelStorage[T])
 
 given[T Any] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）

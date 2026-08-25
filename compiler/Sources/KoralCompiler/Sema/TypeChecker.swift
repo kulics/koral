@@ -111,7 +111,7 @@ public class TypeChecker {
   let ast: ASTNode
   // TypeName -> MethodName -> MethodSymbol
   var extensionMethods: [String: [String: Symbol]] = [:]
-  // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `*self` / `*mut self`.
+  // DefId.id set for methods declared with receiver syntax: first parameter must be `self` / `*self` / `*mutable self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
   var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
@@ -708,9 +708,9 @@ public class TypeChecker {
     case .`enum`:
       return "Koral enum types cannot be used in foreign functions"
     case .reference:
-      return "Managed reference types (* / *mut) cannot be used in foreign functions"
+      return "Managed reference types (* / *mutable) cannot be used in foreign functions"
     case .borrowedReference, .mutableBorrowedReference:
-      return "Borrowed `ref` / `ref mut` types cannot be used in foreign functions"
+      return "Borrowed `ref` / `ref mutable` types cannot be used in foreign functions"
     case .function:
       return "Function types cannot be used in foreign functions"
     case .genericParameter, .genericStruct, .genericEnum:
@@ -1173,7 +1173,7 @@ public class TypeChecker {
     _ body: ExpressionNode
   ) throws -> (TypedExpressionNode, Type) {
     if returnType.containsBorrowedReference {
-      throw SemanticError(.generic("function return type cannot contain borrowed `ref` / `ref mut` types: '\(returnType)'"), span: currentSpan)
+      throw SemanticError(.generic("function return type cannot contain borrowed `ref` / `ref mutable` types: '\(returnType)'"), span: currentSpan)
     }
     let previousReturnType = currentFunctionReturnType
     currentFunctionReturnType = returnType

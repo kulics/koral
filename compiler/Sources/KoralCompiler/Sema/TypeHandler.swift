@@ -957,11 +957,11 @@ public class ReferenceHandler: TypeHandler {
         case .reference(let inner):
             return "*\(inner.description)"
         case .mutableReference(let inner):
-            return "*mut \(inner.description)"
+            return "*mutable \(inner.description)"
         case .borrowedReference(let inner):
             return "ref *\(inner.description)"
         case .mutableBorrowedReference(let inner):
-            return "ref mut *\(inner.description)"
+            return "ref mutable *\(inner.description)"
         default:
             return ""
         }
@@ -1136,7 +1136,7 @@ public class WeakReferenceHandler: TypeHandler {
         case .weakReference(let inner):
             return "weakref \(inner.description)"
         case .mutableWeakReference(let inner):
-            return "weakref mut \(inner.description)"
+            return "weakref mutable \(inner.description)"
         default:
             return ""
         }
@@ -1224,7 +1224,7 @@ public class PointerHandler: TypeHandler {
         case .pointer(let element):
             return "ptr \(element.description)"
         case .mutablePointer(let element):
-            return "ptr mut \(element.description)"
+            return "ptr mutable \(element.description)"
         default:
             return ""
         }

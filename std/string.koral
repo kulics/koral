@@ -9,26 +9,26 @@
 // ============================================================================
 
 // Internal storage for String (COW semantics)
-protected public type StringStorage(mut data *! mut UInt8, mut len UInt, mut cap UInt)
+protected public type StringStorage(mutable data *! mutable UInt8, mutable len UInt, mutable cap UInt)
 
 given StringStorage as Drop {
 
-    drop(source *! mut Self) Void = {
+    drop(source *! mutable Self) Void = {
         dealloc_memory(source.data)
     }
 }
 
 // String type with COW semantics
-public type String(protected public mut storage *mut StringStorage)
+public type String(protected public mutable storage *mutable StringStorage)
 
 // String iterator types
-public type StringSplitAsciiWhitespaceIterator(protected source String, protected mut index UInt)
+public type StringSplitAsciiWhitespaceIterator(protected source String, protected mutable index UInt)
 
-public type StringSplitIterator(protected source String, protected sep String, protected mut index UInt)
+public type StringSplitIterator(protected source String, protected sep String, protected mutable index UInt)
 
-public type StringLinesIterator(protected source String, protected mut index UInt)
+public type StringLinesIterator(protected source String, protected mutable index UInt)
 
-public type StringBytesIterator(protected source String, protected mut index UInt)
+public type StringBytesIterator(protected source String, protected mutable index UInt)
 
 // ============================================================================
 // String Methods
@@ -46,14 +46,14 @@ given String {
     }
 
     // Unsafe constructor for compiler lowering: takes ownership of an allocated UTF-8 buffer.
-    protected public from_owned_utf8_ptr_unchecked(bytes *! mut UInt8, len UInt, cap UInt) String = {
+    protected public from_owned_utf8_ptr_unchecked(bytes *! mutable UInt8, len UInt, cap UInt) String = {
         let storage = box(StringStorage(bytes, len, cap))
         return String(storage)
     }
 
     // Validate UTF-8 byte sequence (strict)
     private validate_utf8(bytes *! UInt8, len UInt) Bool = {
-        let mut i UInt = 0
+        let mutable i UInt = 0
         while i < len then {
             let b0 = bytes[i]
             // 1-byte (ASCII)
@@ -141,7 +141,7 @@ given String {
 
     // Checked constructor from C string (null-terminated, validates UTF-8)
     public from_cstring(cstr *! UInt8) Result[String] = {
-        let mut len UInt = 0
+        let mutable len UInt = 0
         while cstr[len] <> 0(UInt8) then {
             len += 1
         }
@@ -149,7 +149,7 @@ given String {
     }
 
     public from_cstring_unchecked(cstr *! UInt8) String = {
-        let mut len UInt = 0
+        let mutable len UInt = 0
         while cstr[len] <> 0(UInt8) then {
             len += 1
         }
@@ -195,7 +195,7 @@ given String {
         }
     }
 
-    private ensure_unique(*mut self) Void = {
+    private ensure_unique(*mutable self) Void = {
         if not is_unique_mutable(&! self.storage) then {
             let old = self.storage
             let new_data = alloc_memory[UInt8](old.cap)
@@ -205,11 +205,11 @@ given String {
         }
     }
 
-    private ensure_capacity(*mut self, min_cap UInt) Void = {
+    private ensure_capacity(*mutable self, min_cap UInt) Void = {
         if self.storage.cap >= min_cap then {
             return
         }
-        let mut new_cap = self.storage.cap * 2
+        let mutable new_cap = self.storage.cap * 2
         if new_cap < min_cap then {
             new_cap = min_cap
         }
@@ -226,7 +226,7 @@ given String {
 
     public to_bytes(*self) List[UInt8] = {
         let len = self.storage.len
-        let mut bytes = make_bytes(len)
+        let mutable bytes = make_bytes(len)
         if len == 0 then {
             return bytes
         }
@@ -248,7 +248,7 @@ given String {
         return self.storage.data[key]
     }
 
-    public push_byte(*mut self, value UInt8) Void = {
+    public push_byte(*mutable self, value UInt8) Void = {
         self.ensure_unique()
         self.ensure_capacity(self.storage.len + 2)
         init_memory(self.storage.data + self.storage.len, value)
@@ -256,7 +256,7 @@ given String {
         self.storage.data[self.storage.len] = 0
     }
 
-    public push_string(*mut self, other String) Void = {
+    public push_string(*mutable self, other String) Void = {
         let other_len = other.storage.len
         if other_len == 0 then {
             return
@@ -269,7 +269,7 @@ given String {
         self.storage.data[self.storage.len] = 0
     }
 
-    public push_substring(*mut self, other String, range Range[UInt]) Void = {
+    public push_substring(*mutable self, other String, range Range[UInt]) Void = {
         let span = other.slice_spec(range)
         let start = span.start()
         let copy_len = span.len()
@@ -283,7 +283,7 @@ given String {
         self.storage.data[self.storage.len] = 0
     }
 
-    public reserve(*mut self, capacity UInt) Void = {
+    public reserve(*mutable self, capacity UInt) Void = {
         self.ensure_unique()
         self.ensure_capacity(capacity + 1)
     }
@@ -319,8 +319,8 @@ given String {
         if pat.storage.len == 0 then {
             return Option[UInt].None()
         }
-        let mut result = Option[UInt].None()
-        let mut start UInt = 0
+        let mutable result = Option[UInt].None()
+        let mutable start UInt = 0
         // Using while is pattern matching for iterator-like loop
         while self.find_from(start, pat) is .Some(idx) then {
             result = Option[UInt].Some(idx)
@@ -367,8 +367,8 @@ given String {
 
     public slice_spec(*self, range Range[UInt]) SliceSpec = {
         let len = self.storage.len
-        let mut start UInt = 0
-        let mut end UInt = 0
+        let mutable start UInt = 0
+        let mutable end UInt = 0
 
         when range in {
             .Closed(s, e) then {
@@ -455,7 +455,7 @@ given String {
     }
 
     public trim_ascii_start(*self) String = {
-        let mut i UInt = 0
+        let mutable i UInt = 0
         while i < self.storage.len and String.is_ascii_space(self.storage.data[i]) then {
             i += 1
         }
@@ -463,7 +463,7 @@ given String {
     }
 
     public trim_ascii_end(*self) String = {
-        let mut end = self.storage.len
+        let mutable end = self.storage.len
         while end > 0 and String.is_ascii_space(self.storage.data[end - 1]) then {
             end -= 1
         }
@@ -522,7 +522,7 @@ given String {
     public to_ascii_titlecase(*self) String = {
         let cap = self.storage.len + 1
         let data = alloc_memory[UInt8](cap)
-        let mut in_word = false
+        let mutable in_word = false
         for i in 0..<self.storage.len then {
             let b = self.storage.data[i]
             if String.is_ascii_space(b) then {
@@ -552,11 +552,11 @@ given String {
         if pat.storage.len > self.storage.len then {
             return Option[UInt].None()
         }
-        let mut i = start
+        let mutable i = start
         let max = self.storage.len - pat.storage.len
         while i <= max then {
-            let mut j UInt = 0
-            let mut ok = true
+            let mutable j UInt = 0
+            let mutable ok = true
             while j < pat.storage.len then {
                 if self.storage.data[i + j] <> pat.storage.data[j] then {
                     ok = false
@@ -581,7 +581,7 @@ given String {
         let total = self.storage.len * times
         let cap = total + 1
         let data = alloc_memory[UInt8](cap)
-        let mut offset UInt = 0
+        let mutable offset UInt = 0
         for _ in 0..<times then {
             copy_memory(data + offset, self.storage.data, self.storage.len)
             offset += self.storage.len
@@ -600,9 +600,9 @@ given String {
         if n == 0 then {
             return self.make_substring(0, self.storage.len)
         }
-        let mut result = String.new()
-        let mut start UInt = 0
-        let mut count UInt = 0
+        let mutable result = String.new()
+        let mutable start UInt = 0
+        let mutable count UInt = 0
         while count < n then {
             when self.find_from(start, pat) in {
                 .Some(idx) then {
@@ -663,8 +663,8 @@ given String {
         if pat.storage.len == 0 then {
             panic("replace empty pattern")
         }
-        let mut result = String.new()
-        let mut start UInt = 0
+        let mutable result = String.new()
+        let mutable start UInt = 0
         // Using while is pattern matching
         while self.find_from(start, pat) is .Some(idx) then {
             let prefix_len = idx - start
@@ -729,7 +729,7 @@ given String {
 
     // Convert string to a List of Runes for random access
     public to_runes(*self) List[Rune] = {
-        let mut list = List[Rune].new()
+        let mutable list = List[Rune].new()
         for r in self.runes() then {
             list.push(r)
         }
@@ -737,7 +737,7 @@ given String {
     }
 
     // Append a rune to the string (encodes as UTF-8)
-    public push_rune(*mut self, rune Rune) Void = {
+    public push_rune(*mutable self, rune Rune) Void = {
         let cp = rune.value
 
         // Handle invalid code points - append replacement character
@@ -814,7 +814,7 @@ given String as Ord {
 given String as Hash {
 
     public hash(self) UInt = {
-        let mut h UInt = 2166136261
+        let mutable h UInt = 2166136261
         for i in 0..<self.storage.len then {
             let b UInt8 = self.storage.data[i]
             h = h.combine_hash(b(UInt))
@@ -830,9 +830,9 @@ given String as Hash {
 // Iterator types provide next() method
 given StringSplitAsciiWhitespaceIterator as Iterator[String] {
 
-    public next(*mut self) Option[String] = {
+    public next(*mutable self) Option[String] = {
         let len = self.source.count()
-        let mut i = self.index
+        let mutable i = self.index
         while i < len and String.is_ascii_space(self.source[i]) then {
             i += 1
         }
@@ -851,7 +851,7 @@ given StringSplitAsciiWhitespaceIterator as Iterator[String] {
 
 given StringSplitIterator as Iterator[String] {
 
-    public next(*mut self) Option[String] = {
+    public next(*mutable self) Option[String] = {
         let len = self.source.count()
         if self.sep.count() == 0 then {
             if self.index == 0 then {
@@ -880,7 +880,7 @@ given StringSplitIterator as Iterator[String] {
 
 given StringLinesIterator as Iterator[String] {
 
-    public next(*mut self) Option[String] = {
+    public next(*mutable self) Option[String] = {
         let len = self.source.count()
         if self.index > len then {
             return Option[String].None()
@@ -909,12 +909,12 @@ given StringLinesIterator as Iterator[String] {
 // ============================================================================
 
 // Iterator type for rune iteration (provides next() method)
-public type StringRunesIterator(protected source String, protected mut byte_index UInt)
+public type StringRunesIterator(protected source String, protected mutable byte_index UInt)
 
 given StringRunesIterator as Iterator[Rune] {
 
     // Decode next UTF-8 sequence and return Rune
-    public next(*mut self) Option[Rune] = {
+    public next(*mutable self) Option[Rune] = {
         let len = self.source.count()
         if self.byte_index >= len then {
             return Option[Rune].None()
@@ -1011,7 +1011,7 @@ given StringRunesIterator as Iterator[Rune] {
 // ============================================================================
 given StringBytesIterator as Iterator[UInt8] {
 
-    public next(*mut self) Option[UInt8] = {
+    public next(*mutable self) Option[UInt8] = {
         if self.index >= self.source.count() then {
             return Option[UInt8].None()
         }

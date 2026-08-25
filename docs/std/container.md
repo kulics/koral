@@ -31,9 +31,9 @@ given[T Ord and Deref] PriorityQueue[T] {
     public with_capacity(capacity UInt) Self
     public count(*self) UInt
     public is_empty(*self) Bool
-    public clear(*mut self) Void
-    public push(*mut self, value T) Void
-    public pop(*mut self) Option[T]
+    public clear(*mutable self) Void
+    public push(*mutable self, value T) Void
+    public pop(*mutable self) Option[T]
     public peek(*self) Option[T]
 }
 
@@ -42,7 +42,7 @@ given[T Ord and Deref] PriorityQueue[T] as Iterable[T, PriorityQueueIterator[T]]
 }
 
 given[T Ord and Deref] PriorityQueueIterator[T] as Iterator[T] {
-    public next(*mut self) Option[T]
+    public next(*mutable self) Option[T]
 }
 
 given[T Deref] Queue[T] {
@@ -50,9 +50,9 @@ given[T Deref] Queue[T] {
     public with_capacity(capacity UInt) Self
     public count(*self) UInt
     public is_empty(*self) Bool
-    public clear(*mut self) Void
-    public push(*mut self, value T) Void
-    public pop(*mut self) Option[T]
+    public clear(*mutable self) Void
+    public push(*mutable self, value T) Void
+    public pop(*mutable self) Option[T]
     public peek(*self) Option[T]
 }
 
@@ -61,7 +61,7 @@ given[T Deref] Queue[T] as Iterable[T, QueueIterator[T]] {
 }
 
 given[T Deref] QueueIterator[T] as Iterator[T] {
-    public next(*mut self) Option[T]
+    public next(*mutable self) Option[T]
 }
 
 given[T Deref] Stack[T] {
@@ -69,9 +69,9 @@ given[T Deref] Stack[T] {
     public with_capacity(capacity UInt) Self
     public count(*self) UInt
     public is_empty(*self) Bool
-    public clear(*mut self) Void
-    public push(*mut self, value T) Void
-    public pop(*mut self) Option[T]
+    public clear(*mutable self) Void
+    public push(*mutable self, value T) Void
+    public pop(*mutable self) Option[T]
     public peek(*self) Option[T]
 }
 
@@ -80,6 +80,6 @@ given[T Deref] Stack[T] as Iterable[T, StackIterator[T]] {
 }
 
 given[T Deref] StackIterator[T] as Iterator[T] {
-    public next(*mut self) Option[T]
+    public next(*mutable self) Option[T]
 }
 ```

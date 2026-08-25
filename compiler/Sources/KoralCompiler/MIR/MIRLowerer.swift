@@ -2937,7 +2937,7 @@ private final class MIRFunctionBuilder {
         return lowerBorrowedSourceValue(argument)
       }
     case .mutableReference(let inner):
-      // Managed ref mut T: only pass through existing compatible refs, no implicit T → ref mut T
+      // Managed ref mutable T: only pass through existing compatible refs, no implicit T → ref mutable T
       if isCompatibleManagedReferenceArgument(argument.type, expectedInner: inner, mutable: true) {
         return lowerBorrowedSourceValue(argument)
       }

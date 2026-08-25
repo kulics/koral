@@ -8,39 +8,39 @@ using std::os { env }
 // value without losing mutations (mirrors the List/storage ref pattern).
 
 protected type TypeCheckerStorage(
-    mut global_scope Scope,
-    mut context CompilerContext,
-    mut method_table MethodTable,
-    mut diagnostics DiagnosticCollector,
-    mut file_path String,
-    mut module_path List[String],
-    mut package_id String,
-    mut function_return_context FunctionReturnContext,
-    mut in_loop Bool,
-    mut loop_depth UInt,
-    mut in_defer Bool,
-    mut branch_break_targets List[*mut BranchBreakTarget],
-    mut exitable_construct_stack List[ExitableConstruct],
-    mut constraint_solver ConstraintSolver,
-    mut trait_registry TraitRegistry,
-    mut generic_param_constraints Dict[String, List[GenericConstraintBound]],
-    mut generic_templates *mut GenericTemplateRegistry,
-    mut instantiation_requests Set[InstantiationRequest],
-    mut import_graph Option[ImportGraph],
-    mut explicit_trait_conformances Set[ExplicitTraitConformanceKey],
-    mut generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
-    mut conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
-    mut trait_requirement_in_progress Set[ExplicitTraitConformanceKey],
-    mut generic_trait_status_in_progress Set[ExplicitTraitConformanceKey],
-    mut trait_requirement_cache Dict[ExplicitTraitConformanceKey, Bool],
-    mut generic_trait_status_cache Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus],
+    mutable global_scope Scope,
+    mutable context CompilerContext,
+    mutable method_table MethodTable,
+    mutable diagnostics DiagnosticCollector,
+    mutable file_path String,
+    mutable module_path List[String],
+    mutable package_id String,
+    mutable function_return_context FunctionReturnContext,
+    mutable in_loop Bool,
+    mutable loop_depth UInt,
+    mutable in_defer Bool,
+    mutable branch_break_targets List[*mutable BranchBreakTarget],
+    mutable exitable_construct_stack List[ExitableConstruct],
+    mutable constraint_solver ConstraintSolver,
+    mutable trait_registry TraitRegistry,
+    mutable generic_param_constraints Dict[String, List[GenericConstraintBound]],
+    mutable generic_templates *mutable GenericTemplateRegistry,
+    mutable instantiation_requests Set[InstantiationRequest],
+    mutable import_graph Option[ImportGraph],
+    mutable explicit_trait_conformances Set[ExplicitTraitConformanceKey],
+    mutable generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
+    mutable conformance_index Dict[String, List[GenericTraitConformanceTemplate]],
+    mutable trait_requirement_in_progress Set[ExplicitTraitConformanceKey],
+    mutable generic_trait_status_in_progress Set[ExplicitTraitConformanceKey],
+    mutable trait_requirement_cache Dict[ExplicitTraitConformanceKey, Bool],
+    mutable generic_trait_status_cache Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus],
     /// Current scope for type resolution — analogous to Swift's `currentScope`.
     /// Always points to the innermost scope. Type resolution walks up the scope chain.
     /// Initialized to global_scope in the constructor.
-    mut current_scope Scope,
+    mutable current_scope Scope,
 )
 
-public type TypeChecker(protected mut storage *mut TypeCheckerStorage)
+public type TypeChecker(protected mutable storage *mutable TypeCheckerStorage)
 
 protected type IfChain(
     arms List[Pair[* Expr, * Expr]],
@@ -49,7 +49,7 @@ protected type IfChain(
 
 protected type BranchBreakTarget(
     span SourceSpan,
-    mut did_explicit_branch_break Bool,
+    mutable did_explicit_branch_break Bool,
     construct_stack_depth_at_creation UInt,
 )
 
@@ -63,9 +63,9 @@ protected type ExitableConstruct(
 )
 
 protected type FunctionReturnContext(
-    mut expected_return_type Option[Type],
-    mut inferred_return_type Option[Type],
-    mut is_inferring Bool,
+    mutable expected_return_type Option[Type],
+    mutable inferred_return_type Option[Type],
+    mutable is_inferring Bool,
 )
 
 /// A single trait bound on a generic parameter, preserving type arguments.
@@ -102,7 +102,7 @@ given ExplicitTraitConformanceKey as Eq {
 
 given ExplicitTraitConformanceKey as Hash {
     public hash(self) UInt = {
-        let mut h = self.target_type.hash().combine_hash(self.trait_name.hash())
+        let mutable h = self.target_type.hash().combine_hash(self.trait_name.hash())
         for arg in self.trait_arg_types then {
             h = h.combine_hash(arg.hash())
         }
@@ -131,7 +131,7 @@ given TypeChecker {
             false,
             0,
             false,
-            List[*mut BranchBreakTarget].new(),
+            List[*mutable BranchBreakTarget].new(),
             List[ExitableConstruct].new(),
             ConstraintSolver.new(),
             TraitRegistry.new(),
@@ -158,7 +158,7 @@ given TypeChecker {
     }
 
     protected register_receiver_dispatch_for_given_members(
-        *mut self,
+        *mutable self,
         target_type Type,
         trait_name Option[String],
         members List[* TypedGivenMember],
@@ -179,7 +179,7 @@ given TypeChecker {
 
     protected duplicate_definition_message(self, name String) String = {
         let _ = self
-        let mut message = "Duplicate definition: "
+        let mutable message = "Duplicate definition: "
         message.push_string(name)
         return message
     }
@@ -338,7 +338,7 @@ given TypeChecker {
         let instantiation_request_count = self.storage.instantiation_requests.count()
         let generic_param_constraint_name_count = self.storage.generic_param_constraints.count()
         let extension_key_count = self.storage.generic_templates.extension_methods.count()
-        let mut extension_template_count = 0(UInt)
+        let mutable extension_template_count = 0(UInt)
         for entry in self.storage.generic_templates.extension_methods then {
             extension_template_count += entry.second.count()
         }
@@ -353,7 +353,7 @@ given TypeChecker {
         let def_id_symbol_kind_count = context.def_id_map.symbol_kinds.count()
         let def_id_param_spec_count = context.def_id_map.param_specs.count()
         let def_id_module_path_count = context.def_id_map.module_paths.count()
-        let mut binding_count = 0(UInt)
+        let mutable binding_count = 0(UInt)
         for _entry in self.storage.constraint_solver.unifier.current_bindings() then {
             binding_count += 1
         }
@@ -395,7 +395,7 @@ given TypeChecker {
         raw_members List[TraitMember],
         typed_members List[TypedTraitMember],
     ) Void = {
-        let mut param_names = List[String].new()
+        let mutable param_names = List[String].new()
         for tp in type_params then {
             param_names.push(tp.name)
         }
@@ -441,20 +441,20 @@ given TypeChecker {
     }
 
     protected allocate_unindexed_def_id(self, name String, kind DefKind) DefId = {
-        let mut context = self.context()
+        let mutable context = self.context()
         return context.allocate_unindexed(name, kind)
     }
 
     // Reuse the pass1 DefId for top-level declarations, matching Swift's
     // makeGlobalSymbol/getOrAllocateTypeDefId flow instead of allocating fallback ids.
     protected get_or_allocate_top_level_def_id(
-        *mut self,
+        *mutable self,
         name String,
         kind DefKind,
         access AccessModifier,
         span SourceSpan,
     ) DefId = {
-        let mut context = self.context()
+        let mutable context = self.context()
         return when access in {
             .Private() then when context.lookup_def_id(self.storage.module_path, name, Option[String].Some(self.storage.file_path)) in {
                 .Some(existing) then existing,
@@ -468,7 +468,7 @@ given TypeChecker {
     }
 
     protected make_top_level_symbol(
-        *mut self,
+        *mutable self,
         name String,
         symbol_type Type,
         kind SymbolKind,
@@ -484,14 +484,14 @@ given TypeChecker {
         }
         let def_id = self.get_or_allocate_top_level_def_id(name, def_kind, access, span)
         let symbol = Symbol(def_id, symbol_type, kind)
-        let mut context = self.context()
+        let mutable context = self.context()
         context.set_symbol_info(def_id, SymbolInfo(symbol_type, kind, MethodKind.Normal(), is_mutable))
         self.storage.global_scope.define(context, symbol)
         return symbol
     }
 
     protected make_top_level_type_symbol(
-        *mut self,
+        *mutable self,
         name String,
         type_kind TypeDefKind,
         symbol_type Type,
@@ -500,7 +500,7 @@ given TypeChecker {
     ) Symbol = {
         let def_id = self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(type_kind), access, span)
         let symbol = Symbol(def_id, symbol_type, SymbolKind.TypeSymbol())
-        let mut context = self.context()
+        let mutable context = self.context()
         context.set_symbol_info(def_id, SymbolInfo(symbol_type, SymbolKind.TypeSymbol(), MethodKind.Normal(), false))
         return symbol
     }
@@ -768,7 +768,7 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.canonicalize_alias_type(*inner))),
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params)
-                let mut resolved_params = List[* Type].new()
+                let mutable resolved_params = List[* Type].new()
                 for pt in param_types then {
                     resolved_params.push(intern_type(self.canonicalize_alias_type(*pt)))
                 }
@@ -797,21 +797,21 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(self.concretize_default_literal_type(*inner))),
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params)
-                let mut resolved_params = List[* Type].new()
+                let mutable resolved_params = List[* Type].new()
                 for pt in param_types then {
                     resolved_params.push(box(self.concretize_default_literal_type(*pt)))
                 }
                 break Type.FunctionType(types_to_param_entries(resolved_params), box(self.concretize_default_literal_type(*return_type)))
             },
             .GenericStruct(template, args) then {
-                let mut resolved_args = List[* Type].new()
+                let mutable resolved_args = List[* Type].new()
                 for arg in args then {
                     resolved_args.push(box(self.concretize_default_literal_type(*arg)))
                 }
                 break Type.GenericStruct(template, resolved_args)
             },
             .GenericEnum(template, args) then {
-                let mut resolved_args = List[* Type].new()
+                let mutable resolved_args = List[* Type].new()
                 for arg in args then {
                     resolved_args.push(box(self.concretize_default_literal_type(*arg)))
                 }
@@ -849,39 +849,39 @@ given TypeChecker {
                 .None() then type_to_string(resolved),
             },
             .ReferenceType(inner) then {
-                let mut out = "*"
+                let mutable out = "*"
                 out.push_string(self.display_type_name(*inner))
                 break out
             },
             .MutableReferenceType(inner) then {
-                let mut out = "*mut "
+                let mutable out = "*mutable "
                 out.push_string(self.display_type_name(*inner))
                 break out
             },
             .PointerType(inner) then {
-                let mut out = "*! "
+                let mutable out = "*! "
                 out.push_string(self.display_type_name(*inner))
                 break out
             },
             .MutablePointerType(inner) then {
-                let mut out = "*! mut "
+                let mutable out = "*! mutable "
                 out.push_string(self.display_type_name(*inner))
                 break out
             },
             .WeakReferenceType(inner) then {
-                let mut out = "?*"
+                let mutable out = "?*"
                 out.push_string(self.display_type_name(*inner))
                 break out
             },
             .MutableWeakReferenceType(inner) then {
-                let mut out = "?*mut "
+                let mutable out = "?*mutable "
                 out.push_string(self.display_type_name(*inner))
                 break out
             },
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params)
-                let mut out = "Func["
-                let mut first = true
+                let mutable out = "Func["
+                let mutable first = true
                 for pt in param_types then {
                     if not first then { out.push_string(", ") }
                     out.push_string(self.display_type_name(*pt))
@@ -895,9 +895,9 @@ given TypeChecker {
                 break out
             },
             .GenericStruct(template, args) then {
-                let mut out = template
+                let mutable out = template
                 out.push_byte('[')
-                let mut first = true
+                let mutable first = true
                 for arg in args then {
                     if not first then { out.push_string(", ") }
                     out.push_string(self.display_type_name(*arg))
@@ -907,9 +907,9 @@ given TypeChecker {
                 break out
             },
             .GenericEnum(template, args) then {
-                let mut out = template
+                let mutable out = template
                 out.push_byte('[')
-                let mut first = true
+                let mutable first = true
                 for arg in args then {
                     if not first then { out.push_string(", ") }
                     out.push_string(self.display_type_name(*arg))
@@ -1082,21 +1082,21 @@ given TypeChecker {
                 break TypedDecl.TypeEnumDecl(access, name, List[TypedEnumCase].new(), span, id)
             },
             .GivenDecl(target_type, members, span) then {
-                let mut skeleton_members = List[* TypedGivenMember].new()
+                let mutable skeleton_members = List[* TypedGivenMember].new()
                 for member_ref in members then {
                     skeleton_members.push(self.retained_given_member_skeleton(member_ref))
                 }
                 break TypedDecl.GivenDecl(target_type, skeleton_members, span)
             },
             .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
-                let mut skeleton_members = List[* TypedGivenMember].new()
+                let mutable skeleton_members = List[* TypedGivenMember].new()
                 for member_ref in members then {
                     skeleton_members.push(self.retained_given_member_skeleton(member_ref))
                 }
                 break TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, skeleton_members, span)
             },
             .IntrinsicGivenDecl(target_type, members, span) then {
-                let mut skeleton_members = List[* TypedGivenMember].new()
+                let mutable skeleton_members = List[* TypedGivenMember].new()
                 for member_ref in members then {
                     skeleton_members.push(self.retained_given_member_skeleton(member_ref))
                 }
@@ -1148,9 +1148,9 @@ given TypeChecker {
         }
     }
 
-    public check_program(*mut self, program Program, retain_checked_template_bodies Bool) TypedProgram = {
+    public check_program(*mutable self, program Program, retain_checked_template_bodies Bool) TypedProgram = {
         self.collect_signatures(program)
-        let mut typed_decls = List[* TypedDecl].new()
+        let mutable typed_decls = List[* TypedDecl].new()
         let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled()
         for decl in program.declarations then {
             when decl in {
@@ -1175,7 +1175,7 @@ given TypeChecker {
 
     // Multi-module variant: check a flat list of LoadedNodes (std + user combined).
     // Each node carries its own source_file for accurate diagnostics.
-    public check_loaded_nodes(*mut self, nodes List[Pair[LoadedNode, List[String]]], retain_checked_template_bodies Bool) TypedProgram = {
+    public check_loaded_nodes(*mutable self, nodes List[Pair[LoadedNode, List[String]]], retain_checked_template_bodies Bool) TypedProgram = {
         let debug_progress = self.sema_progress_debug_enabled()
         if debug_progress then {
             println("[sema-phase] pass2: collect signatures begin nodes=\(nodes.count())")
@@ -1219,9 +1219,9 @@ given TypeChecker {
             println("[sema-phase] pass3: check decl begin")
         }
         // Pass 3: check bodies
-        let mut typed_decls = List[* TypedDecl].new()
+        let mutable typed_decls = List[* TypedDecl].new()
         let total_nodes = nodes.count()
-        let mut checked_decl_count = 0(UInt)
+        let mutable checked_decl_count = 0(UInt)
         let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled()
         let skip_decl_check = self.skip_decl_check_debug_enabled()
         let skip_function_decl_check = self.skip_function_decl_check_debug_enabled()
@@ -1273,7 +1273,7 @@ given TypeChecker {
                 or (retain_checked_template_bodies and self.decl_can_clear_local_symbol_types_in_build(pair.first.decl))
             if can_clear_local_symbol_types then {
                 let decl_end_def_id = self.context().next_def_id()
-                let mut context = self.context()
+                let mutable context = self.context()
                 context.clear_variable_symbol_types_in_range(decl_start_def_id, decl_end_def_id)
             }
             if debug_progress and checked_decl_count % 8(UInt) == 0(UInt) then {
@@ -1289,7 +1289,7 @@ given TypeChecker {
         return TypedProgram(typed_decls, self.context().get_names())
     }
 
-    protected finalize_checked_decl_constraints(*mut self, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
+    protected finalize_checked_decl_constraints(*mutable self, typed_decl Option[TypedDecl]) Option[TypedDecl] = {
         let subst_result = self.storage.constraint_solver.solve()
         let skip_checked_decl_substitution = self.skip_checked_decl_substitution_debug_enabled()
         return when subst_result in {
@@ -1308,7 +1308,7 @@ given TypeChecker {
             },
             .Error(e) then {
                 let partial_bindings = self.storage.constraint_solver.unifier.current_bindings()
-                let mut resolved_bindings = Dict[UInt, Type].new()
+                let mutable resolved_bindings = Dict[UInt, Type].new()
                 for entry in partial_bindings then {
                     resolved_bindings.insert(entry.first, self.storage.constraint_solver.unifier.resolve_deep(entry.second))
                 }
@@ -1329,10 +1329,10 @@ given TypeChecker {
         }
     }
 
-    protected refresh_concrete_stored_exprs(*mut self, subst TypeSubstitution, typed_decl TypedDecl) Void = {
+    protected refresh_concrete_stored_exprs(*mutable self, subst TypeSubstitution, typed_decl TypedDecl) Void = {
         when typed_decl in {
             .LetDecl(_, _, _, _, _, _, id) then {
-                let mut context = self.context()
+                let mutable context = self.context()
                 when context.get_concrete_global_initializer(id.def_id) in {
                     .Some(initializer) then {
                         context.set_concrete_global_initializer(id.def_id, self.apply_subst_to_expr(subst, initializer))
@@ -1341,7 +1341,7 @@ given TypeChecker {
                 }
             },
             .FunctionDecl(_, _, _, _, _, _, id) then {
-                let mut context = self.context()
+                let mutable context = self.context()
                 when context.get_concrete_function_body(id.def_id) in {
                     .Some(body) then {
                         context.set_concrete_function_body(id.def_id, self.apply_subst_to_expr(subst, body))
@@ -1362,8 +1362,8 @@ given TypeChecker {
         }
     }
 
-    protected refresh_concrete_given_member_body_list(*mut self, subst TypeSubstitution, members List[* TypedGivenMember]) Void = {
-        let mut context = self.context()
+    protected refresh_concrete_given_member_body_list(*mutable self, subst TypeSubstitution, members List[* TypedGivenMember]) Void = {
+        let mutable context = self.context()
         for member_ref in members then {
             when context.get_concrete_given_member_body(member_ref.def_id) in {
                 .Some(body) then {
@@ -1374,7 +1374,7 @@ given TypeChecker {
         }
     }
 
-    protected collect_signatures(*mut self, program Program) Void = {
+    protected collect_signatures(*mutable self, program Program) Void = {
         for decl in program.declarations then {
             when decl in {
                 .TraitDecl(_, _, _, _, _, _) then self.collect_decl_signature(decl),
@@ -1389,7 +1389,7 @@ given TypeChecker {
         }
     }
 
-    protected collect_decl_signature(*mut self, decl Decl) Void = {
+    protected collect_decl_signature(*mutable self, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let resolved_type = self.lookup_current_file_type_symbol(name)
@@ -1398,7 +1398,7 @@ given TypeChecker {
                     self.storage.generic_templates.concrete_struct_types.insert(name, resolved_type)
                 } else when resolved_type in {
                     .StructureType(def_id) then {
-                        let mut template_fields = List[TemplateField].new()
+                        let mutable template_fields = List[TemplateField].new()
                         for field in fields then {
                             template_fields.push(TemplateField(field.access, field.name, field.mutable, self.copy_type_node(field.type_name), field.named))
                         }
@@ -1410,7 +1410,7 @@ given TypeChecker {
                     _ then panic("TypeChecker pass2 error: generic struct symbol for \(name) is not a structure"),
                 }
                 if resolved_type is .StructureType(def_id) then {
-                    let mut sf = List[StructField].new()
+                    let mutable sf = List[StructField].new()
                     if type_params.is_empty() then {
                         for f in fields then {
                             sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
@@ -1421,7 +1421,7 @@ given TypeChecker {
                             sf.push(StructField(f.name, self.resolve_type_with_bindings(f.type_name, bindings), f.mutable, f.access, f.named))
                         }
                     }
-                    let mut context = self.context()
+                    let mutable context = self.context()
                     context.set_struct_fields(def_id, sf)
                 } else {
                     panic("TypeChecker pass2 error: struct declaration \(name) resolved to non-structure type")
@@ -1434,9 +1434,9 @@ given TypeChecker {
                     self.storage.generic_templates.concrete_enum_types.insert(name, resolved_type)
                 } else when resolved_type in {
                     .EnumType(def_id) then {
-                        let mut template_cases = List[TemplateCase].new()
+                        let mutable template_cases = List[TemplateCase].new()
                         for case_ in cases then {
-                            let mut template_params = List[TemplateParam].new()
+                            let mutable template_params = List[TemplateParam].new()
                             for field in case_.fields then {
                                 template_params.push(TemplateParam(field.name, false, self.copy_type_node(field.type_name), field.named))
                             }
@@ -1450,10 +1450,10 @@ given TypeChecker {
                     _ then panic("TypeChecker pass2 error: generic enum symbol for \(name) is not an enum"),
                 }
                 if resolved_type is .EnumType(def_id) then {
-                    let mut uc = List[EnumCaseInfo].new()
+                    let mutable uc = List[EnumCaseInfo].new()
                     if type_params.is_empty() then {
                         for c in cases then {
-                            let mut params = List[EnumCaseParam].new()
+                            let mutable params = List[EnumCaseParam].new()
                             for f in c.fields then {
                                 params.push(EnumCaseParam(f.name, self.resolve_type(f.type_name), f.named))
                             }
@@ -1462,14 +1462,14 @@ given TypeChecker {
                     } else {
                         let bindings = self.generic_type_param_bindings(type_params)
                         for c in cases then {
-                            let mut params = List[EnumCaseParam].new()
+                            let mutable params = List[EnumCaseParam].new()
                             for f in c.fields then {
                                 params.push(EnumCaseParam(f.name, self.resolve_type_with_bindings(f.type_name, bindings), f.named))
                             }
                             uc.push(EnumCaseInfo(c.name, params))
                         }
                     }
-                    let mut context = self.context()
+                    let mutable context = self.context()
                     context.set_enum_cases(def_id, uc)
                 } else {
                     panic("TypeChecker pass2 error: enum declaration \(name) resolved to non-enum type")
@@ -1478,7 +1478,7 @@ given TypeChecker {
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 if not type_params.is_empty() then {
                     let bindings = self.generic_type_param_bindings(type_params)
-                    let mut checked_param_types = List[Type].new()
+                    let mutable checked_param_types = List[Type].new()
                     for p in params then {
                         checked_param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
                     }
@@ -1496,7 +1496,7 @@ given TypeChecker {
                         Option[Type].Some(checked_return_type),
                     )
                 }
-                let mut param_types = List[Type].new()
+                let mutable param_types = List[Type].new()
                 let resolved_ret = if type_params.is_empty() then {
                     for p in params then {
                         param_types.push(self.resolve_type(p.type_name))
@@ -1509,14 +1509,14 @@ given TypeChecker {
                     }
                     break self.resolve_type_with_bindings(return_type, bindings)
                 }
-                let mut stable_param_types = List[Type].new()
+                let mutable stable_param_types = List[Type].new()
                 for param_type in param_types then {
                     stable_param_types.push(param_type)
                 }
                 let stable_ret = resolved_ret
-                let mut context = self.context()
+                let mutable context = self.context()
                 let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
-                let mut pt_refs = List[* Type].new()
+                let mutable pt_refs = List[* Type].new()
                 for pt in stable_param_types then {
                     pt_refs.push(box(pt))
                 }
@@ -1528,7 +1528,7 @@ given TypeChecker {
                 if not type_params.is_empty() then {
                     // Generic intrinsic: only register template, defer type resolution to instantiation (Swift alignment)
                     let bindings = self.generic_type_param_bindings(type_params)
-                    let mut checked_param_types = List[Type].new()
+                    let mutable checked_param_types = List[Type].new()
                     for p in params then {
                         checked_param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
                     }
@@ -1547,17 +1547,17 @@ given TypeChecker {
                     )
                 } else {
                     // Non-generic intrinsic: resolve types eagerly
-                    let mut param_types = List[Type].new()
+                    let mutable param_types = List[Type].new()
                     for p in params then {
                         param_types.push(self.resolve_type(p.type_name))
                     }
                     let resolved_ret = self.resolve_type(return_type)
-                    let mut stable_param_types = List[Type].new()
+                    let mutable stable_param_types = List[Type].new()
                     for param_type in param_types then {
                         stable_param_types.push(param_type)
                     }
                     let stable_ret = resolved_ret
-                    let mut context = self.context()
+                    let mutable context = self.context()
                     let typed_params_for_specs = self.build_typed_params_from_resolved(params, param_types)
                     let fn_type = Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret))
                     let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
@@ -1566,34 +1566,34 @@ given TypeChecker {
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
-                let mut param_types = List[Type].new()
+                let mutable param_types = List[Type].new()
                 for p in params then {
                     param_types.push(self.resolve_type(p.type_name))
                 }
-                let mut stable_param_types = List[Type].new()
+                let mutable stable_param_types = List[Type].new()
                 for param_type in param_types then {
                     stable_param_types.push(param_type)
                 }
                 let stable_ret = resolved_ret
-                let mut context = self.context()
+                let mutable context = self.context()
                 let fn_type = Type.FunctionType(types_to_param_entries(self.to_type_ref_list(stable_param_types)), box(stable_ret))
                 let sym = self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)
                 context.set_param_specs(sym.def_id, self.function_param_specs_from_typed_params(self.check_params(params)))
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 if fields is .Some(raw_fields) and self.lookup_current_file_type_symbol(name) is .Some(t) and t is .StructureType(def_id) then {
-                    let mut sf = List[StructField].new()
+                    let mutable sf = List[StructField].new()
                     for f in raw_fields then {
                         sf.push(StructField(f.name, self.resolve_type(f.type_name), true, f.access, f.named))
                     }
-                    let mut context = self.context()
+                    let mutable context = self.context()
                     context.set_struct_fields(def_id, sf)
                 }
             },
             .TypeAliasDecl(_, name, target, _) then {
                 let resolved_target = self.canonicalize_alias_type(self.resolve_type(target))
                 if self.lookup_current_file_def_id(name) is .Some(def_id) then {
-                    let mut context = self.context()
+                    let mutable context = self.context()
                     context.add_type(def_id, resolved_target)
                 }
                 if self.lookup_current_file_def_id(name) is .Some(_) then {
@@ -1697,7 +1697,7 @@ given TypeChecker {
                     if self.sema_progress_debug_enabled() then {
                         println("[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=collect-signatures-done trait=\(trait_name)")
                     }
-                    let mut needs_template_registration = not type_params.is_empty()
+                    let mutable needs_template_registration = not type_params.is_empty()
                     if not needs_template_registration then {
                         for member in members then {
                             if not member.type_params.is_empty() then {
@@ -1831,12 +1831,12 @@ given TypeChecker {
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 // 在 signature 收集阶段注册完整 Trait（包含方法）,
                 // 确保跨模块 given 检查能读取到正确的 requirement 集合。
-                let mut parent_constraints = List[ParentTraitConstraint].new()
+                let mutable parent_constraints = List[ParentTraitConstraint].new()
                 for p in parents then {
                     let pname = self.type_node_name(p)
                     let type_arg_nodes = when p in {
                         .Generic(_, args) then {
-                            let mut nodes = List[TypeNode].new()
+                            let mutable nodes = List[TypeNode].new()
                             for arg in args then {
                                 nodes.push(*arg)
                             }
@@ -1858,7 +1858,7 @@ given TypeChecker {
         // Always set current_scope (like Swift's withNewScope) so generic params are visible
         let prev_scope = self.storage.current_scope
         defer { self.storage.current_scope = prev_scope }
-        let mut sig_scope = Scope.new_child(self.storage.current_scope)
+        let mutable sig_scope = Scope.new_child(self.storage.current_scope)
         for tp in owner_type_params then {
             sig_scope.define_generic_param(tp.name)
         }
@@ -1874,7 +1874,7 @@ given TypeChecker {
             .GenericEnum(template, _) then template,
             _ then "",
         }
-        let mut seen_names = List[String].new()
+        let mutable seen_names = List[String].new()
         for m in members then {
             if self.sema_progress_debug_enabled() then {
                 println("[sema-pass2-given] target=\(self.context().type_display_name(target_type)) member=\(m.name)")
@@ -1907,7 +1907,7 @@ given TypeChecker {
                 println("[sema-pass2-given-step] member=\(m.name) step=resolve-return")
             }
             let ret = self.resolve_given_member_type_with_bindings(m.return_type, target_type, member_bindings)
-            let mut param_types = List[Type].new()
+            let mutable param_types = List[Type].new()
             for param in m.params then {
                 param_types.push(self.resolve_given_member_type_with_bindings(param.type_name, target_type, member_bindings))
             }
@@ -1940,7 +1940,7 @@ given TypeChecker {
     }
 
     protected string_list_contains(self, values List[String], target String) Bool = {
-        let mut index = 0(UInt)
+        let mutable index = 0(UInt)
         while index < values.count() then {
             if values[index] == target then {
                 return true
@@ -1951,9 +1951,9 @@ given TypeChecker {
     }
 
     protected to_template_type_params(self, type_params List[TypeParameter]) List[TypeParameterDecl] = {
-        let mut out = List[TypeParameterDecl].new()
+        let mutable out = List[TypeParameterDecl].new()
         for tp in type_params then {
-            let mut constraints = List[TypeNode].new()
+            let mutable constraints = List[TypeNode].new()
             for constraint in tp.constraints then {
                 constraints.push(*constraint)
             }
@@ -1963,7 +1963,7 @@ given TypeChecker {
     }
 
     protected generic_type_param_bindings(self, type_params List[TypeParameter]) Dict[String, Type] = {
-        let mut bindings = Dict[String, Type].new()
+        let mutable bindings = Dict[String, Type].new()
         for tp in type_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name))
         }
@@ -1971,7 +1971,7 @@ given TypeChecker {
     }
 
     protected merged_type_param_bindings(self, owner_params List[TypeParameter], method_params List[TypeParameter]) Dict[String, Type] = {
-        let mut bindings = Dict[String, Type].new()
+        let mutable bindings = Dict[String, Type].new()
         for tp in owner_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name))
         }
@@ -1982,7 +1982,7 @@ given TypeChecker {
     }
 
     protected to_template_params(self, params List[Param]) List[TemplateParam] = {
-        let mut out = List[TemplateParam].new()
+        let mutable out = List[TemplateParam].new()
         for p in params then {
             out.push(TemplateParam(p.name, p.mutable, self.copy_type_node(p.type_name), p.named))
         }
@@ -1994,7 +1994,7 @@ given TypeChecker {
     }
 
     protected copy_type_node_ref_list(self, type_nodes List[* TypeNode]) List[* TypeNode] = {
-        let mut copied = List[* TypeNode].with_capacity(type_nodes.count())
+        let mutable copied = List[* TypeNode].with_capacity(type_nodes.count())
         for type_node in type_nodes then {
             copied.push(self.copy_type_node_ref(type_node))
         }
@@ -2015,7 +2015,7 @@ given TypeChecker {
     }
 
     protected to_type_ref_list(self, types List[Type]) List[* Type] = {
-        let mut out = List[* Type].new()
+        let mutable out = List[* Type].new()
         for t in types then {
             out.push(box(t))
         }
@@ -2023,9 +2023,9 @@ given TypeChecker {
     }
 
     protected from_template_type_params(self, type_params List[TypeParameterDecl]) List[TypeParameter] = {
-        let mut out = List[TypeParameter].new()
+        let mutable out = List[TypeParameter].new()
         for tp in type_params then {
-            let mut constraints = List[* TypeNode].new()
+            let mutable constraints = List[* TypeNode].new()
             for constraint in tp.constraints then {
                 constraints.push(box(constraint))
             }
@@ -2036,7 +2036,7 @@ given TypeChecker {
 
 
     protected constraint_bounds_for_type_param(self, tp TypeParameter) List[GenericConstraintBound] = {
-        let mut constraints = List[GenericConstraintBound].new()
+        let mutable constraints = List[GenericConstraintBound].new()
         for c in tp.constraints then {
             constraints.push(self.resolve_constraint_bound(*c))
         }
@@ -2050,7 +2050,7 @@ given TypeChecker {
         return when node in {
             .Identifier(name) then GenericConstraintBound(name, List[Type].new()),
             .Generic(base, args) then {
-                let mut resolved_args = List[Type].new()
+                let mutable resolved_args = List[Type].new()
                 for arg in args then {
                     resolved_args.push(self.resolve_constraint_type_arg(*arg))
                 }
@@ -2078,7 +2078,7 @@ given TypeChecker {
     }
 
     protected resolve_constraint_generic_type(self, base String, args List[* TypeNode]) Type = {
-        let mut resolved_args = List[Type].new()
+        let mutable resolved_args = List[Type].new()
         for arg in args then {
             resolved_args.push(self.resolve_constraint_type_arg(*arg))
         }
@@ -2094,11 +2094,11 @@ given TypeChecker {
     }
 
     protected snapshot_generic_constraints(self, type_params List[TypeParameter]) GenericConstraintSnapshot = {
-        let mut previous_constraints = Dict[String, Option[List[GenericConstraintBound]]].new()
+        let mutable previous_constraints = Dict[String, Option[List[GenericConstraintBound]]].new()
         for tp in type_params then {
             let previous = when self.storage.generic_param_constraints.get(tp.name) in {
                 .Some(existing) then {
-                    let mut copied = List[GenericConstraintBound].with_capacity(existing.count())
+                    let mutable copied = List[GenericConstraintBound].with_capacity(existing.count())
                     for constraint in existing then {
                         copied.push(constraint)
                     }
@@ -2163,7 +2163,7 @@ given TypeChecker {
         }
     }
 
-    protected mark_not_deref_type(*mut self, type_params List[TypeParameter], type_node TypeNode, trait_name String) Void = {
+    protected mark_not_deref_type(*mutable self, type_params List[TypeParameter], type_node TypeNode, trait_name String) Void = {
         if trait_name <> "Deref" then {
             self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "Only 'not Deref' is currently supported"))
             return
@@ -2180,7 +2180,7 @@ given TypeChecker {
         let resolved_type = self.resolve_type(type_node)
         when self.nominal_def_id_for_type(resolved_type) in {
             .Some(def_id) then {
-                let mut context = self.context()
+                let mutable context = self.context()
                 context.set_not_deref(def_id)
             },
             .None() then {
@@ -2189,7 +2189,7 @@ given TypeChecker {
         }
     }
 
-    protected check_given_not_trait_decl(*mut self, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {
+    protected check_given_not_trait_decl(*mutable self, target_type TypeNode, type_params List[TypeParameter], trait_name String, span SourceSpan) Void = {
         let _ = span
         self.mark_not_deref_type(type_params, target_type, trait_name)
     }

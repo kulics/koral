@@ -14,14 +14,14 @@ type SetBucket[T Hash] {
 }
 
 protected type SetStorage[T Hash](
-    mut buckets *! mut SetBucket[T],
-    mut count UInt,
-    mut capacity UInt,
+    mutable buckets *! mutable SetBucket[T],
+    mutable count UInt,
+    mutable capacity UInt,
 )
 
 given[T Hash] SetStorage[T] as Drop {
 
-    drop(source *! mut Self) Void = {
+    drop(source *! mutable Self) Void = {
         for i in 0..<source.capacity then {
             deinit_memory(source.buckets + i)
         }
@@ -29,9 +29,9 @@ given[T Hash] SetStorage[T] as Drop {
     }
 }
 
-public type Set[T Hash](protected mut storage *mut SetStorage[T])
+public type Set[T Hash](protected mutable storage *mutable SetStorage[T])
 
-public type SetIterator[T Hash](protected storage * SetStorage[T], protected mut index UInt)
+public type SetIterator[T Hash](protected storage * SetStorage[T], protected mutable index UInt)
 
 // ============================================================================
 // Set Methods
@@ -61,7 +61,7 @@ given[T Hash] Set[T] {
 
     public count(*self) UInt = self.storage.count
 
-    private ensure_unique(*mut self) Void = {
+    private ensure_unique(*mutable self) Void = {
         if not is_unique_mutable(&! self.storage) then {
             let old = self.storage
             let new_buckets = alloc_memory[SetBucket[T]](old.capacity)
@@ -77,9 +77,9 @@ given[T Hash] Set[T] {
     // Using when for bucket handling
     private find_slot(*self, value T) Option[UInt] = {
         let h = value.hash()
-        let mut idx = h % self.storage.capacity
-        let mut first_deleted = Option[UInt].None()
-        let mut probes UInt = 0
+        let mutable idx = h % self.storage.capacity
+        let mutable first_deleted = Option[UInt].None()
+        let mutable probes UInt = 0
         while probes < self.storage.capacity then {
             let bucket = self.storage.buckets[idx]
             when bucket in {
@@ -113,7 +113,7 @@ given[T Hash] Set[T] {
         return first_deleted
     }
 
-    private rehash(*mut self) Void = {
+    private rehash(*mutable self) Void = {
         let old_cap = self.storage.capacity
         let old_buckets = self.storage.buckets
         let new_cap = old_cap * 2(UInt)
@@ -136,11 +136,11 @@ given[T Hash] Set[T] {
         dealloc_memory(old_buckets)
     }
 
-    public insert(*mut self, value T) Void = {
+    public insert(*mutable self, value T) Void = {
         let _ = self.try_insert(value)
     }
 
-    public try_insert(*mut self, value T) Bool = {
+    public try_insert(*mutable self, value T) Bool = {
         self.ensure_unique()
         if self.storage.count * 2 >= self.storage.capacity then {
             self.rehash();
@@ -165,7 +165,7 @@ given[T Hash] Set[T] {
         }
     }
 
-    public insert_set(*mut self, other Set[T]) Void = {
+    public insert_set(*mutable self, other Set[T]) Void = {
         for v in other then {
             self.insert(v)
         }
@@ -186,11 +186,11 @@ given[T Hash] Set[T] {
         }
     }
 
-    public remove(*mut self, value T) Void = {
+    public remove(*mutable self, value T) Void = {
         let _ = self.try_remove(value)
     }
 
-    public try_remove(*mut self, value T) Bool = {
+    public try_remove(*mutable self, value T) Bool = {
         self.ensure_unique()
         when self.find_slot(value) in {
             .None then {
@@ -223,7 +223,7 @@ given[T Hash] Set[T] {
 
     public is_superset_of(*self, other Set[T]) Bool = other.is_subset_of(*self)
 
-    public clear(*mut self) Void = {
+    public clear(*mutable self) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.capacity then {
             self.storage.buckets[i] = SetBucket[T].Empty()
@@ -232,7 +232,7 @@ given[T Hash] Set[T] {
     }
 
     // Retains only elements satisfying the predicate. O(n).
-    public retain(*mut self, predicate Func[T, Bool]) Void = {
+    public retain(*mutable self, predicate Func[T, Bool]) Void = {
         self.ensure_unique()
         for i in 0..<self.storage.capacity then {
             let bucket = self.storage.buckets[i]
@@ -250,7 +250,7 @@ given[T Hash] Set[T] {
 
     // Using while is pattern matching for iterator loops
     public union(*self, other Set[T]) Set[T] = {
-        let mut result = Set[T].new()
+        let mutable result = Set[T].new()
         for v in self then {
             result.insert(v)
         }
@@ -261,7 +261,7 @@ given[T Hash] Set[T] {
     }
 
     public intersection(*self, other Set[T]) Set[T] = {
-        let mut result = Set[T].new()
+        let mutable result = Set[T].new()
         for v in self then {
             if other.contains(v) then {
                 result.insert(v)
@@ -271,7 +271,7 @@ given[T Hash] Set[T] {
     }
 
     public difference(*self, other Set[T]) Set[T] = {
-        let mut result = Set[T].new()
+        let mutable result = Set[T].new()
         for v in self then {
             if not other.contains(v) then {
                 result.insert(v)
@@ -281,7 +281,7 @@ given[T Hash] Set[T] {
     }
 
     public symmetric_difference(*self, other Set[T]) Set[T] = {
-        let mut result = Set[T].new()
+        let mutable result = Set[T].new()
         for v in self then {
             if not other.contains(v) then {
                 result.insert(v)
@@ -307,7 +307,7 @@ given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
 // ============================================================================
 given[T Hash] SetIterator[T] as Iterator[T] {
 
-    public next(*mut self) Option[T] = {
+    public next(*mutable self) Option[T] = {
         while self.index < self.storage.capacity then {
             let bucket = self.storage.buckets[self.index]
             self.index = self.index + 1
