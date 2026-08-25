@@ -279,6 +279,7 @@ a = 2  // 合法
 - `return`、`break`、`continue` 可以让块提前结束，因此对应块类型会变成 `Never`。
 - `break <expression>` 不是通用的块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内，用于产出该分支的值并提前退出分支体。
 - 不带表达式的 `break` 退出最近的 `while` 或 `for` 循环。
+- `break`（无论是否带表达式）不能穿透最内侧的可退出构造。这意味着 `break` 不能穿越循环边界（例如在分支内的 `for`/`while` 循环中）或分支边界（例如在循环内的 `if`/`when` 表达式中）到达外层目标。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
 
 通过块表达式可以组合一系列语句。
@@ -947,7 +948,7 @@ while iter.next() is .Some(item) and parse(item) is .Ok(v) then {
 
 ### break 和 continue
 
-- `break`: 退出循环。
+- `break`: 退出循环。不能穿透最内侧的可退出构造（循环或分支）。
 - `continue`: 跳过当前迭代。
 
 ```koral

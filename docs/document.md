@@ -263,6 +263,7 @@ Block rules:
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
 - `break <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch, where it produces the value of that branch and exits the branch body early.
 - Plain `break` (without expression) exits the nearest enclosing `while` or `for` loop.
+- `break` (with or without expression) cannot penetrate through the innermost exitable construct. This means `break` cannot cross a loop boundary (e.g., inside a `for`/`while` inside a branch) or a branch boundary (e.g., inside an `if`/`when` expression inside a loop) to reach an outer target.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
 
 ```koral
@@ -907,7 +908,7 @@ For `while` conditions, clauses are also left-to-right and short-circuiting. Whe
 
 ### break and continue
 
-- `break`: Exit the loop.
+- `break`: Exit the loop. Cannot penetrate through the innermost exitable construct (loop or branch).
 - `continue`: Skip the current iteration.
 
 ```koral
