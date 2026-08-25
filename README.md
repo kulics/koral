@@ -243,7 +243,7 @@ Reference creation rules:
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** `*self` methods accept values via auto-ref; `self` methods accept `*T` via auto-deref (following Go's pointer receiver behavior).
 - Calling a `*self` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
 - Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mut Trait` can call both `*mut self` and `*self` requirements.
-- Method receiver forms: `self` (managed value), `*self` / `*mut self` (managed receivers, auto-ref allowed), and explicit managed forms `*self Self` / `*mut self Self` (no auto-ref/auto-deref). Auto-ref and auto-deref apply only to `self` and `*self` forms.
+- Method receiver forms: `self` (managed value), `*self` / `*mut self` (managed receivers, auto-ref allowed), Auto-ref and auto-deref apply only to `self` and `*self` forms.
 - `*T` is read-only: `*expr` dereference read only. `*mut T` supports `*expr` dereference read and `*expr = value` assignment.
 - `*raw T` is read-only: `*expr` dereference read only. `*raw mut T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
 - Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mut T`.

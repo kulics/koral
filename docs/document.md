@@ -1179,11 +1179,11 @@ Named parameters follow these rules:
 
 ```koral
 // Mixed positional and named parameters
-let create_rect(x Int, y Int, width: Int, height: Int) Rect = todo()
+let create_rect(x Int, y Int, width: Int, height: Int) Rect = Rect(Point(x, y), width, height)
 create_rect(10, 20, width: 100, height: 200)
 
 // All named parameters
-let connect(host: String, port: Int) Void = todo()
+let connect(host: String, port: Int) Void = {}
 connect(host: "localhost", port: 8080)
 ```
 
@@ -1219,7 +1219,7 @@ trait Drawable {
     draw(*self, at_x: Int, at_y: Int) Void
 }
 given MyType as Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void = todo()  // must match
+    draw(*self, at_x: Int, at_y: Int) Void = {}  // must match
 }
 ```
 
@@ -1654,10 +1654,10 @@ Arithmetic and comparison operators are lowered to trait methods internally (for
 
 ### Method Receiver Forms
 
-- self: managed value receiver (equivalent to self Self).
+- self: managed value receiver (equivalent to managed value receiver).
 - *self / *mut self: managed receivers; auto-ref allowed on call sites.
-- *self Self / *mut self Self: explicit managed receivers; no auto-ref or auto-deref.
-- Auto-ref and auto-deref apply only to self and *self forms; explicit managed/borrowed forms require the caller to provide the exact binding.
+- self methods can accept *T or *mut T (auto-deref).
+- Auto-ref and auto-deref apply only to self and *self forms.
 
 ### Trait Objects
 

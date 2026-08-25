@@ -1219,11 +1219,11 @@ let increment(mut x Int) Int = { x += 1; return x }
 
 ```koral
 // 混合位置参数和命名参数
-let create_rect(x Int, y Int, width: Int, height: Int) Rect = todo()
+let create_rect(x Int, y Int, width: Int, height: Int) Rect = Rect(Point(x, y), width, height)
 create_rect(10, 20, width: 100, height: 200)
 
 // 全部命名参数
-let connect(host: String, port: Int) Void = todo()
+let connect(host: String, port: Int) Void = {}
 connect(host: "localhost", port: 8080)
 ```
 
@@ -1259,7 +1259,7 @@ trait Drawable {
     draw(*self, at_x: Int, at_y: Int) Void
 }
 given MyType as Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void = todo()  // 必须匹配
+    draw(*self, at_x: Int, at_y: Int) Void = {}  // 必须匹配
 }
 ```
 
@@ -1693,10 +1693,10 @@ let p = Point.origin()
 
 ### 方法接收器形式
 
-- `​self`：托管值接收器（等价于 `self Self`）。
+- `​self`：托管值接收器（equivalent to managed value receiver）。
 - `*self` / `*mut self`：托管接收器，调用端允许 auto-ref。
-- `*self Self` / `*mut self Self`：显式托管接收器，不允许 auto-ref/auto-deref。
-- Auto-ref 和 auto-deref 仅适用于 `self` 和 `*self` 形式；显式托管形式要求调用方提供确切的绑定。
+- `self` 方法可接受 `*T` / `*mut T`（auto-deref）。
+- Auto-ref 和 auto-deref 仅适用于 `self` 和 `*self` 形式。
 
 ### Trait Object
 
