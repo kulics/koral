@@ -46,6 +46,12 @@ struct BranchBreakTarget {
   let preferredType: Type?
   var resultType: Type?
   var didExplicitBranchBreak: Bool
+  let constructStackDepthAtCreation: Int
+}
+
+enum ExitableConstruct {
+  case loop
+  case branch
 }
 
 struct ConformanceKey: Hashable {
@@ -211,6 +217,7 @@ public class TypeChecker {
   var currentBlockExpressionDepth: Int = 0
   var branchBreakTargets: [BranchBreakTarget] = []
   var nextBranchBreakTargetId: Int = 0
+  var exitableConstructStack: [ExitableConstruct] = []
 
   var synthesizedTempIndex: Int = 0
   

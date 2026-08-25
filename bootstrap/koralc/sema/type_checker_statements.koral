@@ -53,10 +53,14 @@ given TypeChecker {
     }
 
     protected push_branch_break_target(self, span SourceSpan) Void = {
-        self.storage.branch_break_targets.push(box(BranchBreakTarget(span, false)))
+        self.storage.exitable_construct_stack.push(ExitableConstruct(ExitableConstructKind.Branch()))
+        self.storage.branch_break_targets.push(box(BranchBreakTarget(span, false, self.storage.exitable_construct_stack.count())))
     }
 
     protected pop_branch_break_target(self) Option[*mut BranchBreakTarget] = {
+        if not self.storage.exitable_construct_stack.is_empty() then {
+            let _ = self.storage.exitable_construct_stack.pop()
+        }
         return if self.storage.branch_break_targets.is_empty()
             then Option[*mut BranchBreakTarget].None()
             else self.storage.branch_break_targets.pop()
@@ -430,8 +434,14 @@ given TypeChecker {
                 }
                 let prev_in_loop = self.storage.in_loop
                 self.storage.in_loop = true
+                self.storage.loop_depth = self.storage.loop_depth + 1
+                self.storage.exitable_construct_stack.push(ExitableConstruct(ExitableConstructKind.Loop()))
                 let typed_body = self.check_statement_body_expr(body, scope)
                 self.storage.in_loop = prev_in_loop
+                self.storage.loop_depth = self.storage.loop_depth - 1
+                if not self.storage.exitable_construct_stack.is_empty() then {
+                    let _ = self.storage.exitable_construct_stack.pop()
+                }
                 break TypedStatement.WhileStmt(box(typed_cond), box(typed_body), span)
             },
             _ then {
@@ -1004,18 +1014,38 @@ given TypeChecker {
                             self.push_diagnostic_at_span("control flow statement 'break' is not allowed in defer expression", span)
                         } else if self.storage.branch_break_targets.is_empty() then {
                             self.push_diagnostic_at_span("break with value outside of branch expression body", span)
-                        } else when self.current_branch_break_target() in {
-                            .Some(target) then { target.did_explicit_branch_break = true },
-                            .None() then {},
+                        } else {
+                            // Check if there are intervening constructs between the break and the branch target
+                            when self.current_branch_break_target() in {
+                                .Some(target) then {
+                                    if self.storage.exitable_construct_stack.count() > target.construct_stack_depth_at_creation then {
+                                        let last = self.storage.exitable_construct_stack[self.storage.exitable_construct_stack.count() - 1(UInt)]
+                                        if last.kind is .Branch() then {
+                                            self.push_diagnostic_at_span("break with value cannot penetrate through branch boundary", span)
+                                        } else {
+                                            self.push_diagnostic_at_span("break with value cannot penetrate through loop boundary", span)
+                                        }
+                                    }
+                                    target.did_explicit_branch_break = true
+                                },
+                                .None() then {},
+                            }
                         }
                         return TypedStatement.BranchBreakStmt(box(self.check_expr_scoped_ref(expr, expected, scope)), span)
                     },
                     .None() then {
-                        if not self.storage.in_loop then {
-                            self.push_diagnostic_at_span("'break' used outside of loop", span)
-                        }
                         if self.storage.in_defer then {
                             self.push_diagnostic_at_span("'break' is not allowed inside 'defer'", span)
+                        }
+                        // Check if the innermost exitable construct is a branch
+                        if not self.storage.exitable_construct_stack.is_empty() then {
+                            let last = self.storage.exitable_construct_stack[self.storage.exitable_construct_stack.count() - 1(UInt)]
+                            if last.kind is .Branch() then {
+                                self.push_diagnostic_at_span("break cannot penetrate through branch boundary", span)
+                            }
+                        }
+                        if not self.storage.in_loop then {
+                            self.push_diagnostic_at_span("'break' used outside of loop", span)
                         }
                         return TypedStatement.BreakStmt(span)
                     },

@@ -1289,15 +1289,20 @@ private let substitute_expr_kind(
                         }
 
                         let mut boxed_type_args = List[* Type].new()
+                        let mut has_unresolved_param = false
                         for type_param in found_template.type_parameters then {
                             let bound = when inferred.get(type_param.name) in {
                                 .Some(t) then resolve_parameterized_type(mono, t),
                                 .None() then Type.GenericParameter(type_param.name),
                             }
                             if has_generic_parameter(bound) then {
-                                break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                                has_unresolved_param = true
+                                break
                             }
                             boxed_type_args.push(box(bound))
+                        }
+                        if has_unresolved_param then {
+                            break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                         }
 
                         let instantiated = mono.instantiate_function_impl(found_template, boxed_type_args)

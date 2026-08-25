@@ -257,7 +257,11 @@ extension TypeChecker {
           expected: "Bool", got: typedCondition.type.description)
       }
       loopDepth += 1
-      defer { loopDepth -= 1 }
+      exitableConstructStack.append(.loop)
+      defer {
+        loopDepth -= 1
+        if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
+      }
       let typedBody = try inferStatementBodyExpression(body)
       return .whileStatement(condition: typedCondition, body: typedBody)
 
@@ -830,6 +834,19 @@ extension TypeChecker {
       }
       if let value {
         if let currentTarget = branchBreakTargets.last {
+          // Check if there are intervening constructs between the break and the branch target
+          if exitableConstructStack.count > currentTarget.constructStackDepthAtCreation {
+            if let penetrated = exitableConstructStack.last {
+              switch penetrated {
+              case .loop:
+                throw SemanticError(.generic(
+                  "break with value cannot penetrate through loop boundary"), span: span)
+              case .branch:
+                throw SemanticError(.generic(
+                  "break with value cannot penetrate through branch boundary"), span: span)
+              }
+            }
+          }
           let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
           var typedValueOpt: TypedExpressionNode?
           for expectedType in candidateExpectedTypes {
@@ -855,6 +872,11 @@ extension TypeChecker {
         }
 
         throw SemanticError(.generic("break with value outside of branch expression body"), span: span)
+      }
+      // Check if the innermost exitable construct is a branch (not a loop)
+      if let lastConstruct = exitableConstructStack.last, lastConstruct == .branch {
+        throw SemanticError(.generic(
+          "break cannot penetrate through branch boundary"), span: span)
       }
       if loopDepth <= 0 {
         throw SemanticError.invalidOperation(op: "break outside of while", type1: "", type2: "")

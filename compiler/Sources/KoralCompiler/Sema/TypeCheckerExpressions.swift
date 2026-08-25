@@ -659,13 +659,15 @@ extension TypeChecker {
   ) -> BranchBreakTargetId {
     let id = BranchBreakTargetId(rawValue: nextBranchBreakTargetId)
     nextBranchBreakTargetId += 1
+    exitableConstructStack.append(.branch)
     branchBreakTargets.append(BranchBreakTarget(
       id: id,
       kind: kind,
       span: span,
       preferredType: preferredType,
       resultType: nil,
-      didExplicitBranchBreak: false
+      didExplicitBranchBreak: false,
+      constructStackDepthAtCreation: exitableConstructStack.count
     ))
     return id
   }
@@ -701,6 +703,9 @@ extension TypeChecker {
     }
     guard popped.id == id else {
       fatalError("branch-break target stack mismatch")
+    }
+    if !exitableConstructStack.isEmpty {
+      exitableConstructStack.removeLast()
     }
     return popped
   }
@@ -1158,7 +1163,11 @@ extension TypeChecker {
     let (typedPattern, bindings) = try checkPattern(pattern, subjectType: subjectType)
 
     loopDepth += 1
-    defer { loopDepth -= 1 }
+    exitableConstructStack.append(.loop)
+    defer {
+      loopDepth -= 1
+      if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
+    }
 
     let typedBody = try withNewScope {
       for symbol in extractPatternSymbols(from: typedPattern) {
@@ -7781,8 +7790,10 @@ extension TypeChecker {
 
       // Type check body
       loopDepth += 1
+      exitableConstructStack.append(.loop)
       let result = try inferCheckedStatementBodyExpression(body)
       loopDepth -= 1
+      if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
       return result
     }
     
