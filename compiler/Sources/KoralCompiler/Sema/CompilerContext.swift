@@ -294,8 +294,8 @@ public final class CompilerContext: @unchecked Sendable {
         case .mutableReference(let inner): return "*mut \(getDebugName(inner))"
         case .borrowedReference(let inner): return "ref *\(getDebugName(inner))"
         case .mutableBorrowedReference(let inner): return "ref mut *\(getDebugName(inner))"
-        case .pointer(let element): return "*raw \(getDebugName(element))"
-        case .mutablePointer(let element): return "*raw mut \(getDebugName(element))"
+        case .pointer(let element): return "*! \(getDebugName(element))"
+        case .mutablePointer(let element): return "*! mut \(getDebugName(element))"
         case .weakReference(let inner): return "?*\(getDebugName(inner))"
         case .mutableWeakReference(let inner): return "?*mut \(getDebugName(inner))"
         case .structure(let defId):

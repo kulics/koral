@@ -14,7 +14,7 @@ public type Token {
     KwSelf(), KwSelfType(),
     KwReturn(), KwBreak(), KwContinue(),
     KwDefer(),
-    KwRef(), KwPtr(), KwRaw(), KwDeptr(), KwVal(), KwWeakref(),
+    KwRef(), KwPtr(), Bang(), KwDeptr(), KwVal(), KwWeakref(),
     KwPublic(), KwPrivate(), KwProtected(), KwProtectedPublic(), KwSuper(),
 
     // Literals
@@ -82,7 +82,7 @@ given Token {
         .KwSelf then "self", .KwSelfType then "Self",
         .KwReturn then "return", .KwBreak then "break", .KwContinue then "continue",
         .KwDefer then "defer",
-        .KwRef then "*", .KwPtr then "*raw", .KwRaw then "raw", .KwDeptr then "deptr",
+        .KwRef then "*", .KwPtr then "*!", .Bang then "!", .KwDeptr then "deptr",
         .KwVal then "val", .KwWeakref then "?*",
         .KwPublic then "public", .KwPrivate then "private", .KwProtected then "protected",
         .KwProtectedPublic then "protected public",
@@ -121,7 +121,7 @@ given Token {
         or .KwSelf or .KwSelfType
         or .KwReturn or .KwBreak or .KwContinue
         or .KwDefer
-        or .KwRef or .KwPtr or .KwRaw or .KwDeptr or .KwVal or .KwWeakref
+        or .KwRef or .KwPtr or .Bang or .KwDeptr or .KwVal or .KwWeakref
         or .KwPublic or .KwPrivate or .KwProtected or .KwProtectedPublic or .KwSuper then true,
         _ then false,
     }
@@ -166,7 +166,7 @@ given Token {
         .KwForeign then 19, .KwIntrinsic then 20, .KwSelf then 21, .KwSelfType then 22,
         .KwReturn then 23, .KwBreak then 24, .KwContinue then 25,
         .KwDefer then 94,
-        .KwRef then 95, .KwPtr then 96, .KwRaw then 97, .KwDeptr then 98, .KwVal then 99,
+        .KwRef then 95, .KwPtr then 96, .Bang then 97, .KwDeptr then 98, .KwVal then 99,
         .KwWeakref then 100, .KwPublic then 30, .KwPrivate then 31,
         .KwProtected then 32, .KwProtectedPublic then 101, .KwSuper then 33,
         .BoolTrue then 34, .BoolFalse then 35,
@@ -612,7 +612,7 @@ given Tokenizer {
             "break" then .KwBreak(),
             "continue" then .KwContinue(),
             "defer" then .KwDefer(),
-            "raw" then .KwRaw(),
+            // "raw" removed: use "!" instead
             "deptr" then .KwDeptr(),
             "val" then .KwVal(),
             "public" then .KwPublic(),
@@ -675,6 +675,10 @@ given Tokenizer {
             self.pos += 1
             return .Some(.Tilde())
         }
+        if cp == 33 then {
+            self.pos += 1
+            return .Some(.Bang())
+        }
 
         // + +=
         if cp == 43 then {
@@ -704,22 +708,12 @@ given Tokenizer {
             return .Some(.Minus())
         }
 
-        // * *= *raw
+        // * *= *!
         if cp == 42 then {
             if self.peek() is .Some(n) then {
-                if Tokenizer.rune_eq(n, 'r') then {
-                    if self.peek_at(2) is .Some(n2) and Tokenizer.rune_eq(n2, 'a') then {
-                        if self.peek_at(3) is .Some(n3) and Tokenizer.rune_eq(n3, 'w') then {
-                            let boundary = when self.peek_at(4) in {
-                                .Some(n4) then not n4.is_identifier_continue(),
-                                .None() then true,
-                            }
-                            if boundary then {
-                                self.pos += 4
-                                return .Some(.KwPtr())
-                            }
-                        }
-                    }
+                if Tokenizer.rune_eq(n, '!') then {
+                    self.pos += 2
+                    return .Some(.KwPtr())
                 }
                 if Tokenizer.rune_eq(n, '=') then {
                     self.pos += 1

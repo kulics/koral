@@ -17,7 +17,7 @@ private type UdpSocketStorage(fd Int64)
 given UdpSocketStorage as Drop {
 
     /// Automatically close the socket when UdpSocketStorage is dropped.
-    drop(source *raw mut Self) Void = {
+    drop(source *! mut Self) Void = {
         if source.fd >= 0 then {
             __koral_socket_close(source.fd)
         }
@@ -118,7 +118,7 @@ given UdpSocket {
         let mut addr_len UInt32 = 128(UInt32)
 
         let data_ptr = into.borrow_mut_ptr() + start
-        let n = __koral_socket_recvfrom(self.storage.fd, data_ptr, span.len()(UInt64), 0(Int32), addr_buf, &raw addr_len)
+        let n = __koral_socket_recvfrom(self.storage.fd, data_ptr, span.len()(UInt64), 0(Int32), addr_buf, &! addr_len)
         if n < 0 then {
             return Result[Pair[UInt, SocketAddr]].Error(box(last_error_message()))
         }
@@ -203,7 +203,7 @@ given UdpSocket {
         }
         let mut addr_len UInt32 = 128(UInt32)
 
-        let result = __koral_socket_getsockname(self.storage.fd, addr_buf, &raw addr_len)
+        let result = __koral_socket_getsockname(self.storage.fd, addr_buf, &! addr_len)
         if result <> 0 then {
             return Result[SocketAddr].Error(box(last_error_message()))
         }
@@ -227,7 +227,7 @@ given UdpSocket {
         }
         let mut addr_len UInt32 = 128(UInt32)
 
-        let result = __koral_socket_getpeername(self.storage.fd, addr_buf, &raw addr_len)
+        let result = __koral_socket_getpeername(self.storage.fd, addr_buf, &! addr_len)
         if result <> 0 then {
             return Result[SocketAddr].Error(box(last_error_message()))
         }
@@ -272,7 +272,7 @@ given UdpSocket {
         init_memory(opt_buf + 2, 0(UInt8))
         init_memory(opt_buf + 3, 0(UInt8))
         let mut opt_len UInt32 = 4(UInt32)
-        let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_BROADCAST(), opt_buf, &raw opt_len)
+        let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_BROADCAST(), opt_buf, &! opt_len)
         if result <> 0 then {
             return Result[Bool].Error(box(last_error_message()))
         }
@@ -339,7 +339,7 @@ given UdpSocket {
             init_memory(tv_buf + i, 0(UInt8))
         }
         let mut opt_len UInt32 = 16(UInt32)
-        let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, &raw opt_len)
+        let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_RCVTIMEO(), tv_buf, &! opt_len)
         if result <> 0 then {
             return Result[Option[Duration]].Error(box(last_error_message()))
         }
@@ -356,7 +356,7 @@ given UdpSocket {
             init_memory(tv_buf + i, 0(UInt8))
         }
         let mut opt_len UInt32 = 16(UInt32)
-        let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, &raw opt_len)
+        let result = __koral_socket_getsockopt(self.storage.fd, __koral_const_SOL_SOCKET(), __koral_const_SO_SNDTIMEO(), tv_buf, &! opt_len)
         if result <> 0 then {
             return Result[Option[Duration]].Error(box(last_error_message()))
         }
@@ -370,7 +370,7 @@ given UdpSocket {
 
     /// Convert a Duration to a struct timeval (16 bytes) in a raw buffer.
     /// timeval layout: tv_sec (Int64, 8 bytes LE) + tv_usec (Int64, 8 bytes LE)
-    private duration_to_timeval(duration Duration, buf *raw mut UInt8) Void = {
+    private duration_to_timeval(duration Duration, buf *! mut UInt8) Void = {
         let secs = duration.secs
         let usec = duration.nanos / 1000
 
@@ -397,7 +397,7 @@ given UdpSocket {
 
     /// Convert a struct timeval (16 bytes) from a raw buffer to a [Duration]Option.
     /// Returns None if both tv_sec and tv_usec are zero (no timeout set).
-    private timeval_to_duration(buf *raw UInt8) Option[Duration] = {
+    private timeval_to_duration(buf *! UInt8) Option[Duration] = {
         // Read tv_sec as little-endian Int64 (bytes 0..7)
         let secs = (
             buf[0](UInt)(Int64)

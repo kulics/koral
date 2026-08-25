@@ -103,7 +103,7 @@ public enum Token: CustomStringConvertible {
   case continueKeyword // 'continue' keyword
   case forKeyword // 'for' keyword
   case usingKeyword // 'using' keyword
-  case rawKeyword // 'raw' keyword
+  case bang // "!" symbol
   case deferKeyword // 'defer' keyword
   case itKeyword // 'it' keyword
 
@@ -187,7 +187,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.usingKeyword, .usingKeyword):
       return true
-    case (.rawKeyword, .rawKeyword):
+    case (.bang, .bang):
       return true
     case (.deferKeyword, .deferKeyword):
       return true
@@ -365,8 +365,8 @@ public enum Token: CustomStringConvertible {
       return "<.."
     case .lessRangeLess:
       return "<..<"
-    case .rawKeyword:
-      return "raw"
+    case .bang:
+      return "!"
     case .deferKeyword:
       return "defer"
     case .itKeyword:
@@ -1392,7 +1392,7 @@ public class Lexer {
       return .equal
     case "!":
       // Koral does not use '!' (use `not expr`) and does not use '!=' (use '<>').
-      throw LexerError.unexpectedCharacter(span: tokenSpan, "!")
+      return .bang
     case "&":
       if let nextChar = getNextChar() {
         if nextChar == "=" { return .ampersandEqual }
@@ -1543,7 +1543,7 @@ public class Lexer {
       case "break": .breakKeyword
       case "continue": .continueKeyword
       case "for": .forKeyword
-      case "raw": .rawKeyword
+      // raw is no longer a keyword; use '!' for raw pointers
       case "defer": .deferKeyword
       case "it": .itKeyword
       default: .identifier(id)

@@ -44,8 +44,8 @@ extension Parser {
       }
       if currentToken === .multiply {
         try match(.multiply)
-        if currentToken === .rawKeyword {
-          try match(.rawKeyword)
+        if currentToken === .bang {
+          try match(.bang)
           let mutable = currentToken === .mutKeyword
           if mutable {
             try match(.mutKeyword)

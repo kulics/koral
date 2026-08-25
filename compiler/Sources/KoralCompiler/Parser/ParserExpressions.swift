@@ -589,8 +589,8 @@ extension Parser {
     }
     if currentToken === .ampersand {
       try match(.ampersand)
-      if currentToken === .rawKeyword {
-        try match(.rawKeyword)
+      if currentToken === .bang {
+        try match(.bang)
         let mutable = currentToken === .mutKeyword
         if mutable {
           try match(.mutKeyword)

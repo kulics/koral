@@ -1946,9 +1946,9 @@ extension TypeChecker {
         case (.managedReference, true):
           spelledType = typedInner.type.containsBorrowedReference ? "borrowed *mut" : "*mut"
         case (.rawPointer, false):
-          spelledType = "*raw"
+          spelledType = "*!"
         case (.rawPointer, true):
-          spelledType = "*raw mut"
+          spelledType = "*! mut"
         case (.weakReference, false):
           spelledType = "?*"
         case (.weakReference, true):
@@ -1979,9 +1979,9 @@ extension TypeChecker {
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
       if !isAddressable {
         if isLiteralExpression(inner) {
-          throw SemanticError(.generic("cannot take &raw of literal"))
+          throw SemanticError(.generic("cannot take &! of literal"))
         }
-        throw SemanticError(.generic("cannot take &raw of temporary value"))
+        throw SemanticError(.generic("cannot take &! of temporary value"))
       }
       let ptrType: Type = canTakeMutableReference(to: typedInner)
         ? .mutablePointer(element: typedInner.type)
@@ -4158,7 +4158,7 @@ extension TypeChecker {
         guard case .mutablePointer(let elementType) = ptrExpr.type else {
           throw SemanticError(.generic("cannot use * on non-pointer type"))
         }
-        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*raw mut")
+        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mut")
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
 
@@ -4223,7 +4223,7 @@ extension TypeChecker {
         case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
           elementType = resolvedElement
         default:
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) *raw", got: ptr.type.description)
+          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) *!", got: ptr.type.description)
         }
         switch owner.type {
         case .reference, .mutableReference:
@@ -4248,7 +4248,7 @@ extension TypeChecker {
           expectedType: .mutableReference(inner: resolvedArgs[1])
         )
         guard case .mutablePointer(let elementType) = ptr.type else {
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) *raw mut", got: ptr.type.description)
+          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) *! mut", got: ptr.type.description)
         }
         guard case .mutableReference = owner.type else {
           throw SemanticError.typeMismatch(expected: "\(resolvedArgs[1]) *mut", got: owner.type.description)
@@ -4465,7 +4465,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = typedArguments[0].type else {
         throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*raw mut")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*! mut")
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
     }
     if templateName == "null_ptr" {
@@ -4501,7 +4501,7 @@ extension TypeChecker {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]
       guard case .pointer(let elementType) = ptr.type else {
-        throw SemanticError.typeMismatch(expected: "T *raw", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "T *!", got: ptr.type.description)
       }
       switch owner.type {
       case .reference, .mutableReference:
@@ -4515,7 +4515,7 @@ extension TypeChecker {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]
       guard case .mutablePointer(let elementType) = ptr.type else {
-        throw SemanticError.typeMismatch(expected: "T *raw mut", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "T *! mut", got: ptr.type.description)
       }
       guard case .mutableReference = owner.type else {
         throw SemanticError.typeMismatch(expected: "O *mut", got: owner.type.description)
@@ -5140,7 +5140,7 @@ extension TypeChecker {
           if isPointerAccess,
              case .structure = typeToLookup {
             throw SemanticError(.generic(
-              "cannot call method '\(memberName)' on raw pointer type '\(currentType.description)'; raw pointers support direct field access only"
+              "cannot call method '\(memberName)' on pointer type '\(currentType.description)'; pointers support direct field access only"
             ), span: currentSpan)
           }
         }
@@ -6851,7 +6851,7 @@ extension TypeChecker {
               helperName: "__index_mut_ptr"
             )
             guard case .mutablePointer(let valueType) = ptrExpr.type else {
-              throw SemanticError.typeMismatch(expected: "*raw mut return", got: ptrExpr.type.description)
+              throw SemanticError.typeMismatch(expected: "*! mut return", got: ptrExpr.type.description)
             }
             return .derefExpression(expression: ptrExpr, type: valueType)
           case .pointer:
@@ -7095,7 +7095,7 @@ extension TypeChecker {
         try requireDerefablePointee(innerType, operation: "*", spelledType: "borrowed *mut")
         return .derefExpression(expression: typedInner, type: innerType)
       case .mutablePointer(let elementType):
-        try requireDerefablePointee(elementType, operation: "*", spelledType: "*raw mut")
+        try requireDerefablePointee(elementType, operation: "*", spelledType: "*! mut")
         return .derefExpression(expression: typedInner, type: elementType)
       default:
         throw SemanticError.typeMismatch(

@@ -362,9 +362,9 @@ public indirect enum Type: CustomStringConvertible {
     case .mutableBorrowedReference(let inner):
       return "ref mut \(inner.description)"
     case .pointer(let element):
-      return "*raw \(element.description)"
+      return "*! \(element.description)"
     case .mutablePointer(let element):
-      return "*raw mut \(element.description)"
+      return "*! mut \(element.description)"
     case .weakReference(let inner):
       return "?*\(inner.description)"
     case .mutableWeakReference(let inner):

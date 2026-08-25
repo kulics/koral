@@ -113,7 +113,7 @@ public trait Error {
 }
 
 public trait Drop {
-    drop(source *raw mut Self) Void
+    drop(source *! mut Self) Void
 }
 ```
 
@@ -1105,8 +1105,8 @@ given[T Deref] List[T] {
     public fill(*mut self, value T) Void
     public map[U Deref](*self, fn Func[T, U]) List[U]
     public reverse(*mut self) Void
-    public borrow_ptr(*self) *raw T
-    public borrow_mut_ptr(*mut self) *raw mut T
+    public borrow_ptr(*self) *! T
+    public borrow_mut_ptr(*mut self) *! mut T
     public slice_spec(*self, range Range[UInt]) SliceSpec
     public sublist(*self, range Range[UInt]) List[T]
     public enumerate(*self) EnumerateIterator[T, ListIterator[T]]
@@ -1497,18 +1497,18 @@ given[T Hash] SetIterator[T] as Iterator[T] {
 }
 
 given String {
-    public from_utf8_ptr_unchecked(bytes *raw UInt8, len UInt) String
-    public from_utf8_ptr(bytes *raw UInt8, len UInt) Result[String]
+    public from_utf8_ptr_unchecked(bytes *! UInt8, len UInt) String
+    public from_utf8_ptr(bytes *! UInt8, len UInt) Result[String]
     public from_bytes(bytes List[UInt8]) Result[String]
     public from_bytes_unchecked(bytes List[UInt8]) String
-    public from_cstring(cstr *raw UInt8) Result[String]
-    public from_cstring_unchecked(cstr *raw UInt8) String
+    public from_cstring(cstr *! UInt8) Result[String]
+    public from_cstring_unchecked(cstr *! UInt8) String
     public with_capacity(capacity UInt) String
     public new() String
     public count(*self) UInt
     public is_empty(*self) Bool
     public capacity(*self) UInt
-    public borrow_ptr(*self) *raw UInt8
+    public borrow_ptr(*self) *! UInt8
     public to_bytes(*self) List[UInt8]
     public get(*self, index UInt) Option[UInt8]
     public push_byte(*mut self, value UInt8) Void
@@ -1722,19 +1722,19 @@ given Int64 as Hash {
     public hash(self) UInt
 }
 
-given[T Any] *raw T as Eq {
-    public equals(self, other *raw T) Bool
+given[T Any] *! T as Eq {
+    public equals(self, other *! T) Bool
 }
 
-given[T Any] *raw T as Hash {
+given[T Any] *! T as Hash {
     public hash(self) UInt
 }
 
-given[T Any] *raw mut T as Eq {
-    public equals(self, other *raw mut T) Bool
+given[T Any] *! mut T as Eq {
+    public equals(self, other *! mut T) Bool
 }
 
-given[T Any] *raw mut T as Hash {
+given[T Any] *! mut T as Hash {
     public hash(self) UInt
 }
 

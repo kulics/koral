@@ -9,11 +9,11 @@
 // ============================================================================
 
 // Internal storage for String (COW semantics)
-protected public type StringStorage(mut data *raw mut UInt8, mut len UInt, mut cap UInt)
+protected public type StringStorage(mut data *! mut UInt8, mut len UInt, mut cap UInt)
 
 given StringStorage as Drop {
 
-    drop(source *raw mut Self) Void = {
+    drop(source *! mut Self) Void = {
         dealloc_memory(source.data)
     }
 }
@@ -36,7 +36,7 @@ public type StringBytesIterator(protected source String, protected mut index UIn
 given String {
 
     // Unsafe constructor: does not validate UTF-8
-    public from_utf8_ptr_unchecked(bytes *raw UInt8, len UInt) String = {
+    public from_utf8_ptr_unchecked(bytes *! UInt8, len UInt) String = {
         let cap = len + 1
         let data = alloc_memory[UInt8](cap)
         copy_memory(data, bytes, len)
@@ -46,13 +46,13 @@ given String {
     }
 
     // Unsafe constructor for compiler lowering: takes ownership of an allocated UTF-8 buffer.
-    protected public from_owned_utf8_ptr_unchecked(bytes *raw mut UInt8, len UInt, cap UInt) String = {
+    protected public from_owned_utf8_ptr_unchecked(bytes *! mut UInt8, len UInt, cap UInt) String = {
         let storage = box(StringStorage(bytes, len, cap))
         return String(storage)
     }
 
     // Validate UTF-8 byte sequence (strict)
-    private validate_utf8(bytes *raw UInt8, len UInt) Bool = {
+    private validate_utf8(bytes *! UInt8, len UInt) Bool = {
         let mut i UInt = 0
         while i < len then {
             let b0 = bytes[i]
@@ -126,7 +126,7 @@ given String {
     }
 
     // Checked constructor: validates UTF-8
-    public from_utf8_ptr(bytes *raw UInt8, len UInt) Result[String] = {
+    public from_utf8_ptr(bytes *! UInt8, len UInt) Result[String] = {
         if not String.validate_utf8(bytes, len) then {
             return Result[String].Error(box("Invalid UTF-8"))
         }
@@ -140,7 +140,7 @@ given String {
         String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count())
 
     // Checked constructor from C string (null-terminated, validates UTF-8)
-    public from_cstring(cstr *raw UInt8) Result[String] = {
+    public from_cstring(cstr *! UInt8) Result[String] = {
         let mut len UInt = 0
         while cstr[len] <> 0(UInt8) then {
             len += 1
@@ -148,7 +148,7 @@ given String {
         return String.from_utf8_ptr(cstr, len)
     }
 
-    public from_cstring_unchecked(cstr *raw UInt8) String = {
+    public from_cstring_unchecked(cstr *! UInt8) String = {
         let mut len UInt = 0
         while cstr[len] <> 0(UInt8) then {
             len += 1
@@ -196,7 +196,7 @@ given String {
     }
 
     private ensure_unique(*mut self) Void = {
-        if not is_unique_mutable(&raw self.storage) then {
+        if not is_unique_mutable(&! self.storage) then {
             let old = self.storage
             let new_data = alloc_memory[UInt8](old.cap)
             copy_memory(new_data, old.data, old.len + 1)
@@ -222,7 +222,7 @@ given String {
     public count(*self) UInt = self.storage.len
     public is_empty(*self) Bool = self.storage.len == 0
     public capacity(*self) UInt = self.storage.cap - 1
-    public borrow_ptr(*self) *raw UInt8 = self.storage.data
+    public borrow_ptr(*self) *! UInt8 = self.storage.data
 
     public to_bytes(*self) List[UInt8] = {
         let len = self.storage.len
