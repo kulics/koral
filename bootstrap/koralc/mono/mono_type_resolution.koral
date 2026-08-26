@@ -496,7 +496,7 @@ private let resolve_def_id_backed_type(
                         if resolved_field_type <> field.field_type then {
                             changed = true
                         }
-                        resolved_fields.push(StructField(field.name, resolved_field_type, field.mutable, field.access, field.named))
+                        resolved_fields.push(StructField(field.name, resolved_field_type, field.is_mutable, field.access, field.named))
                     }
                     if changed then {
                         mono.storage.context.set_struct_fields(local_def_id, resolved_fields)
@@ -1193,11 +1193,11 @@ public let resolve_type_node(mono * Monomorphizer, node TypeNode, substitution D
         },
 
         // TypeNode.Reference: recursively resolve inner type and wrap.
-        .Reference(inner, mutable) then {
+        .Reference(inner, is_mutable) then {
             let trait_ref_override = when *inner in {
                 .Identifier(name) then if mono.storage.generic_templates.traits.get(name) is .Some(_) then {
                     let trait_ref_inner = trait_object_type_from_registry(mono, name)
-                    break Option[Type].Some(if mutable
+                    break Option[Type].Some(if is_mutable
                         then Type.MutableReferenceType(box(trait_ref_inner))
                         else Type.ReferenceType(box(trait_ref_inner)))
                 } else Option[Type].None(),
@@ -1210,7 +1210,7 @@ public let resolve_type_node(mono * Monomorphizer, node TypeNode, substitution D
                         }
                         let canonical_args = canonicalize_type_arguments(mono, resolved_args)
                         let trait_ref_inner = Type.TraitObject(base, canonical_args)
-                        break Option[Type].Some(if mutable
+                        break Option[Type].Some(if is_mutable
                             then Type.MutableReferenceType(box(trait_ref_inner))
                             else Type.ReferenceType(box(trait_ref_inner)))
                     } else Option[Type].None()
@@ -1222,25 +1222,25 @@ public let resolve_type_node(mono * Monomorphizer, node TypeNode, substitution D
                 .None() then {},
             }
             let resolved_inner = resolve_type_node(mono, *inner, substitution)
-            break if mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
+            break if is_mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
         },
 
         // TypeNode.BorrowedReference: recursively resolve inner type and wrap with lifetime.
-        .BorrowedReference(inner, mutable) then {
+        .BorrowedReference(inner, is_mutable) then {
             let resolved_inner = resolve_type_node(mono, *inner, substitution)
-            break if mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner))
+            break if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner))
         },
 
         // TypeNode.Pointer: recursively resolve inner type and wrap.
-        .Pointer(inner, mutable) then {
+        .Pointer(inner, is_mutable) then {
             let resolved_inner = resolve_type_node(mono, *inner, substitution)
-            break if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+            break if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
         },
 
         // TypeNode.WeakReference: recursively resolve inner type and wrap.
-        .WeakReference(inner, mutable) then {
+        .WeakReference(inner, is_mutable) then {
             let resolved_inner = resolve_type_node(mono, *inner, substitution)
-            break if mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner))
+            break if is_mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner))
         },
 
         // TypeNode.FunctionType: recursively resolve param types and return type.
@@ -2088,7 +2088,7 @@ private let resolve_concrete_qualified_trait_member(
                 let mutable resolved_params = List[TypedParam].new()
                 for param in member.params then {
                     let resolved_param_type = resolve_parameterized_type(mono, substitute_type(mono, param.param_type, bindings))
-                    resolved_params.push(TypedParam(param.name, param.mutable, resolved_param_type, param.named))
+                    resolved_params.push(TypedParam(param.name, param.is_mutable, resolved_param_type, param.named))
                 }
 
                 let resolved_return_type = resolve_parameterized_type(mono, substitute_type(mono, member.return_type, bindings))
@@ -2940,7 +2940,7 @@ private let resolve_types_in_statement(mono * Monomorphizer, stmt * TypedStateme
                     .None() then MethodKind.Normal(),
                 }
                 let symbol_mutable = when mono.storage.context.get_symbol_mutable(new_symbol.def_id) in {
-                    .Some(mutable) then mutable,
+                    .Some(is_mutable) then is_mutable,
                     .None() then false,
                 }
                 if current_registered_type <> effective_symbol_type then {
@@ -5085,7 +5085,7 @@ private let mono_register_pattern_binding_symbol_type(
                     .None() then MethodKind.Normal(),
                 }
                 let symbol_mutable = when mono.storage.context.get_symbol_mutable(symbol.def_id) in {
-                    .Some(mutable) then mutable,
+                    .Some(is_mutable) then is_mutable,
                     .None() then false,
                 }
                 mono.storage.context.set_symbol_info(symbol.def_id, SymbolInfo(bound_type, symbol_kind, symbol_method_kind, symbol_mutable))
@@ -6432,7 +6432,7 @@ private let resolve_expr_kind(mono * Monomorphizer, expr * TypedExpr) * TypedExp
             let mutable new_params = List[TypedParam].new()
             for p in params then {
                 let new_type = resolve_parameterized_type(mono, p.param_type)
-                new_params.push(TypedParam(p.name, p.mutable, new_type, p.named))
+                new_params.push(TypedParam(p.name, p.is_mutable, new_type, p.named))
             }
             let new_return = resolve_parameterized_type(mono, return_type)
             break box(TypedExprKind.LambdaExpr(new_params, new_return, resolve_types_in_expression(mono, body)))
@@ -9493,7 +9493,7 @@ private let resolve_global_node_source_params(mono * Monomorphizer, def_id DefId
                 let mutable index UInt = 0
                 for entry in param_entries then {
                     let spec = if index < param_specs.count() then param_specs[index] else FunctionParamSpec("", false, false)
-                    params.push(TypedParam(spec.name, spec.mutable, entry.param_type, spec.named))
+                    params.push(TypedParam(spec.name, spec.is_mutable, entry.param_type, spec.named))
                     index += 1
                 }
                 break params
@@ -9536,7 +9536,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
             let mutable resolved_params = List[TypedParam].new()
             for p in source_params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
-                resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
+                resolved_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named))
             }
             let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, id.def_id, return_type))
             let source_body = when mono.storage.context.take_concrete_function_body(id.def_id) in {
@@ -9562,7 +9562,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
             let mutable resolved_params = List[TypedParam].new()
             for p in source_params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
-                resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
+                resolved_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named))
             }
             let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, id.def_id, return_type))
             break TypedDecl.IntrinsicFunctionDecl(access, name, resolved_params, resolved_return, span, id)
@@ -9574,7 +9574,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
             let mutable resolved_params = List[TypedParam].new()
             for p in source_params then {
                 let resolved_type = resolve_parameterized_type(mono, p.param_type)
-                resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
+                resolved_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named))
             }
             let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, id.def_id, return_type))
             break TypedDecl.ForeignFunctionDecl(access, name, resolved_params, resolved_return, span, id)
@@ -9586,7 +9586,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
                 .Some(existing) then {
                     let mutable hydrated = List[TypedField].new()
                     for field in existing then {
-                        hydrated.push(TypedField(field.access, field.name, field.mutable, field.field_type, field.named))
+                        hydrated.push(TypedField(field.access, field.name, field.is_mutable, field.field_type, field.named))
                     }
                     break hydrated
                 },
@@ -9596,7 +9596,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
             for f in source_fields then {
                 let resolved_type = resolve_parameterized_type(mono, f.field_type)
                 collect_vtable_request_if_needed(mono, resolved_type)
-                resolved_fields.push(TypedField(f.access, f.name, f.mutable, resolved_type, f.named))
+                resolved_fields.push(TypedField(f.access, f.name, f.is_mutable, resolved_type, f.named))
             }
             break TypedDecl.TypeStructDecl(access, name, resolved_fields, span, id)
         },
@@ -9641,7 +9641,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
                 let mutable resolved_params = List[TypedParam].new()
                 for p in source_params then {
                     let resolved_type = resolve_parameterized_type(mono, p.param_type)
-                        resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
+                        resolved_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named))
                 }
                 let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, m_ref.def_id, m_ref.return_type))
                 if mono.storage.resolved_given_member_body_ids.contains(m_ref.def_id.id) then {
@@ -9695,7 +9695,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
                 let mutable resolved_params = List[TypedParam].new()
                 for p in source_params then {
                     let resolved_type = resolve_parameterized_type(mono, p.param_type)
-                        resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
+                        resolved_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named))
                 }
                 let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, m_ref.def_id, m_ref.return_type))
                 if mono.storage.resolved_given_member_body_ids.contains(m_ref.def_id.id) then {
@@ -9744,7 +9744,7 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
                 let mutable resolved_params = List[TypedParam].new()
                 for p in source_params then {
                     let resolved_type = resolve_parameterized_type(mono, p.param_type)
-                        resolved_params.push(TypedParam(p.name, p.mutable, resolved_type, p.named))
+                        resolved_params.push(TypedParam(p.name, p.is_mutable, resolved_type, p.named))
                 }
                 let resolved_return = resolve_parameterized_type(mono, resolve_global_node_source_return_type(mono, m_ref.def_id, m_ref.return_type))
                 if mono.storage.resolved_given_member_body_ids.contains(m_ref.def_id.id) then {
@@ -9782,22 +9782,22 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
         },
 
         // LetDecl: resolve decl type and initializer expression.
-        .LetDecl(access, name, mutable, decl_type, initializer, span, id) then {
+        .LetDecl(access, name, is_mutable, decl_type, initializer, span, id) then {
             let resolved_type = resolve_parameterized_type(mono, decl_type)
             if mono.storage.context.get_concrete_global_initializer(id.def_id) is .Some(_) then {
-                return TypedDecl.LetDecl(access, name, mutable, resolved_type, box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved_type)), span, id)
+                return TypedDecl.LetDecl(access, name, is_mutable, resolved_type, box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved_type)), span, id)
             }
             let source_initializer = mono.storage.context.take_concrete_global_initializer(id.def_id) or else initializer
             let resolved_initializer = resolve_types_in_expression(mono, source_initializer)
             let mutable context = mono.storage.context
             context.set_concrete_global_initializer(id.def_id, resolved_initializer)
-            break TypedDecl.LetDecl(access, name, mutable, resolved_type, box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved_type)), span, id)
+            break TypedDecl.LetDecl(access, name, is_mutable, resolved_type, box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved_type)), span, id)
         },
 
         // ForeignLetDecl: resolve decl type.
-        .ForeignLetDecl(access, name, mutable, decl_type, span, id) then {
+        .ForeignLetDecl(access, name, is_mutable, decl_type, span, id) then {
             let resolved_type = resolve_parameterized_type(mono, decl_type)
-            break TypedDecl.ForeignLetDecl(access, name, mutable, resolved_type, span, id)
+            break TypedDecl.ForeignLetDecl(access, name, is_mutable, resolved_type, span, id)
         },
 
         // TypeAliasDecl: resolve target type.

@@ -11,7 +11,7 @@ given TypeChecker {
     protected function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new()
         for param in params then {
-            specs.push(FunctionParamSpec(param.name, param.mutable, param.named))
+            specs.push(FunctionParamSpec(param.name, param.is_mutable, param.named))
         }
         return specs
     }
@@ -19,7 +19,7 @@ given TypeChecker {
     protected function_param_specs_from_params(self, params List[Param]) List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new()
         for param in params then {
-            specs.push(FunctionParamSpec(param.name, param.mutable, param.named))
+            specs.push(FunctionParamSpec(param.name, param.is_mutable, param.named))
         }
         return specs
     }
@@ -141,7 +141,7 @@ given TypeChecker {
                     let mutable idx UInt = 0
                     for entry in param_entries then {
                         let spec = param_specs[idx]
-                        params.push(TypedParam(spec.name, spec.mutable, entry.param_type, spec.named))
+                        params.push(TypedParam(spec.name, spec.is_mutable, entry.param_type, spec.named))
                         idx += 1(UInt)
                     }
                     break Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, *return_type_ref))
@@ -186,7 +186,7 @@ given TypeChecker {
     protected check_params(self, params List[Param]) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
-            out.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name), p.named))
+            out.push(TypedParam(p.name, p.is_mutable, self.resolve_type(p.type_name), p.named))
         }
         return out
     }
@@ -198,7 +198,7 @@ given TypeChecker {
         let mutable idx UInt = 0
         while idx < params.count() and idx < resolved_types.count() then {
             let p = params[idx]
-            out.push(TypedParam(p.name, p.mutable, resolved_types[idx], p.named))
+            out.push(TypedParam(p.name, p.is_mutable, resolved_types[idx], p.named))
             idx += 1
         }
         return out
@@ -207,7 +207,7 @@ given TypeChecker {
     protected check_params_in_scope(self, params List[Param], scope Scope) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
-            out.push(TypedParam(p.name, p.mutable, self.resolve_type_in_scope(p.type_name, scope), p.named))
+            out.push(TypedParam(p.name, p.is_mutable, self.resolve_type_in_scope(p.type_name, scope), p.named))
         }
         return out
     }
@@ -227,7 +227,7 @@ given TypeChecker {
     protected check_given_member_params_with_bindings(self, params List[Param], self_type Type, bindings Dict[String, Type]) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
-            out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self_and_bindings(p.type_name, self_type, bindings), p.named))
+            out.push(TypedParam(p.name, p.is_mutable, self.resolve_type_with_self_and_bindings(p.type_name, self_type, bindings), p.named))
         }
         return out
     }
@@ -255,9 +255,9 @@ given TypeChecker {
         let mutable first = true
         for p in params then {
             if first and p.name == "self" then {
-                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
+                out.push(TypedParam(p.name, p.is_mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
             } else {
-                out.push(TypedParam(p.name, p.mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
+                out.push(TypedParam(p.name, p.is_mutable, self.resolve_type_with_self(p.type_name, self_type), p.named))
             }
             first = false
         }
@@ -280,11 +280,11 @@ given TypeChecker {
                     break self.resolve_named_type(name)
                 },
             },
-            .Reference(inner, mutable) then {
+            .Reference(inner, is_mutable) then {
                 let trait_ref_override = when *inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
-                        break Option[Type].Some(if mutable
+                        break Option[Type].Some(if is_mutable
                             then self.resolve_mutable_reference_type(trait_ref_inner)
                             else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
@@ -295,7 +295,7 @@ given TypeChecker {
                                 resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings))
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                            break Option[Type].Some(if mutable
+                            break Option[Type].Some(if is_mutable
                                 then self.resolve_mutable_reference_type(trait_ref_inner)
                                 else self.resolve_reference_type(trait_ref_inner))
                         } else Option[Type].None()
@@ -307,26 +307,26 @@ given TypeChecker {
                     .None() then {},
                 }
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if mutable
+                break if is_mutable
                     then self.resolve_mutable_reference_type(resolved_inner)
                     else self.resolve_reference_type(resolved_inner)
             },
-            .BorrowedReference(inner, mutable) then {
+            .BorrowedReference(inner, is_mutable) then {
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if mutable
+                break if is_mutable
                     then Type.MutableBorrowedReferenceType(box(resolved_inner))
                     else Type.BorrowedReferenceType(box(resolved_inner))
             },
-            .Pointer(inner, mutable) then {
+            .Pointer(inner, is_mutable) then {
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+                break if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
             },
-            .WeakReference(inner, mutable) then {
+            .WeakReference(inner, is_mutable) then {
                 // Check if inner is a trait name → trait object weakref
                 let trait_ref_override = when *inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
-                        break Option[Type].Some(if mutable
+                        break Option[Type].Some(if is_mutable
                             then self.resolve_mutable_weak_reference_type(trait_ref_inner)
                             else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
@@ -337,7 +337,7 @@ given TypeChecker {
                                 resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings))
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                            break Option[Type].Some(if mutable
+                            break Option[Type].Some(if is_mutable
                                 then self.resolve_mutable_weak_reference_type(trait_ref_inner)
                                 else self.resolve_weak_reference_type(trait_ref_inner))
                         } else Option[Type].None()
@@ -349,7 +349,7 @@ given TypeChecker {
                     .None() then {},
                 }
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
+                break if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[* Type].new()
@@ -376,7 +376,7 @@ given TypeChecker {
     protected check_fields(self, fields List[Field]) List[TypedField] = {
         let mutable out = List[TypedField].new()
         for f in fields then {
-            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type(f.type_name), f.named))
+            out.push(TypedField(f.access, f.name, f.is_mutable, self.resolve_type(f.type_name), f.named))
         }
         return out
     }
@@ -384,7 +384,7 @@ given TypeChecker {
     protected check_fields_in_scope(self, fields List[Field], scope Scope) List[TypedField] = {
         let mutable out = List[TypedField].new()
         for f in fields then {
-            out.push(TypedField(f.access, f.name, f.mutable, self.resolve_type_in_scope(f.type_name, scope), f.named))
+            out.push(TypedField(f.access, f.name, f.is_mutable, self.resolve_type_in_scope(f.type_name, scope), f.named))
         }
         return out
     }
@@ -536,7 +536,7 @@ given TypeChecker {
             defer { self.storage.current_scope = prev_member_scope }
             let mutable typed_params = List[TypedParam].new()
             for p in m.params then {
-                typed_params.push(TypedParam(p.name, p.mutable, self.resolve_type(p.type_name), p.named))
+                typed_params.push(TypedParam(p.name, p.is_mutable, self.resolve_type(p.type_name), p.named))
             }
             out.push(TypedTraitMember(m.name, typed_params, self.resolve_type(m.return_type)))
         }
@@ -955,13 +955,13 @@ given TypeChecker {
         let mutable first = true
         for p in params then {
             if first and p.name == "self" then {
-                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.is_mutable))
                 let def_id = self.allocate_unindexed_def_id("self", DefKind.Variable())
                 scope.define(self.context(), Symbol(def_id, p.param_type, kind))
                 first = false
             } else {
                 first = false
-                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+                let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.is_mutable))
                 let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
                 scope.define(self.context(), Symbol(def_id, p.param_type, kind))
             }
@@ -972,7 +972,7 @@ given TypeChecker {
     protected make_fn_scope(self, params List[TypedParam]) Scope = {
         let mutable scope = Scope.new_child(self.storage.global_scope)
         for p in params then {
-            let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+            let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.is_mutable))
             let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
             scope.define(self.context(), Symbol(def_id, p.param_type, kind))
         }
@@ -985,7 +985,7 @@ given TypeChecker {
             scope.define_generic_param(tp.name)
         }
         for p in params then {
-            let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.mutable))
+            let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.is_mutable))
             let def_id = self.allocate_unindexed_def_id(p.name, DefKind.Variable())
             scope.define(self.context(), Symbol(def_id, p.param_type, kind))
         }

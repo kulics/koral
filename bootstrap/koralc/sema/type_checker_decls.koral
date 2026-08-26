@@ -41,7 +41,7 @@ given TypeChecker {
 
     protected check_decl(*mutable self, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
         return when decl in {
-            .LetDecl(access, name, mutable, type_name, initializer, span) then {
+            .LetDecl(access, name, is_mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
                 self.validate_signature_type_visibility(name, access, [resolved], span)
                 if resolved is .TraitObject(_, _) then {
@@ -63,9 +63,9 @@ given TypeChecker {
                     context.set_concrete_global_initializer(placeholder_id, box(typed_init))
                     break box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved))
                 } else box(typed_init)
-                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
-                let sym = box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable))
-                break TypedDecl.LetDecl(access, name, mutable, resolved, stable_initializer, span, sym)
+                let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
+                let sym = box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable))
+                break TypedDecl.LetDecl(access, name, is_mutable, resolved, stable_initializer, span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 // Enter function context — cleanup via defer (Swift: withNewScope pattern)
@@ -266,7 +266,7 @@ given TypeChecker {
                 let fn_type = make_function_type(param_refs, resolved_ret)
                 break TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
             },
-            .ForeignLetDecl(access, name, mutable, type_name, span) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
                 self.validate_signature_type_visibility(name, access, [resolved], span)
                 if not self.is_ffi_compatible_type(resolved) then {
@@ -278,8 +278,8 @@ given TypeChecker {
                         )
                     )
                 }
-                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
-                break TypedDecl.ForeignLetDecl(access, name, mutable, resolved, span, box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable)))
+                let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
+                break TypedDecl.ForeignLetDecl(access, name, is_mutable, resolved, span, box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable)))
             },
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let typed_fields = if type_params.is_empty() then {

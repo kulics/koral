@@ -519,7 +519,7 @@ given Parser {
         if is_foreign then {
             return when base in {
                 .FunctionDecl(_, name, _, params, return_type, _, span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span)),
-                .LetDecl(_, name, mutable, type_name, _, span) then .Ok(Decl.ForeignLetDecl(access, name, mutable, type_name, span)),
+                .LetDecl(_, name, is_mutable, type_name, _, span) then .Ok(Decl.ForeignLetDecl(access, name, is_mutable, type_name, span)),
                 .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span)),
                 .GivenDecl(_, _, _, _) then .Error(box("foreign given declaration is not supported")),
                 .GivenTraitDecl(_, _, _, _, _) then .Error(box("foreign given declaration is not supported")),
@@ -547,6 +547,7 @@ given Parser {
             .Bang() then true,
             .QuestionMark() then true,
             .KwSelfType() then true,
+            .KwUnsafe() then true,
             .Identifier(_) then true,
             _ then false,
         }
@@ -592,43 +593,43 @@ given Parser {
                 } else {
                     return .Error(box("Expected '*' after '?'"))
                 }
-                let mutable mutable = false
+                let mutable is_mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
-                    mutable = true
+                    is_mutable = true
                 }
                 let inner = self.parse_type() or else {
                     return .Error(box("parse type error"))
                 }
-                return .Ok(TypeNode.WeakReference(box(inner), mutable))
+                return .Ok(TypeNode.WeakReference(box(inner), is_mutable))
             },
             .KwUnsafe() then {
                 self.advance()
                 if self.current().kind is .Star() then {
                     self.advance()
-                    let mutable mutable = false
+                    let mutable is_mutable = false
                     if self.current().kind is .KwMut() then {
                         self.advance()
-                        mutable = true
+                        is_mutable = true
                     }
                     let inner = self.parse_type() or else {
                         return .Error(box("parse type error"))
                     }
-                    return .Ok(TypeNode.Pointer(box(inner), mutable))
+                    return .Ok(TypeNode.Pointer(box(inner), is_mutable))
                 }
                 return .Error(box("Expected '*' after 'unsafe'"))
             },
             .Star() then {
                 self.advance()
-                let mutable mutable = false
+                let mutable is_mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
-                    mutable = true
+                    is_mutable = true
                 }
                 let inner = self.parse_type() or else {
                     return .Error(box("parse type error"))
                 }
-                return .Ok(TypeNode.Reference(box(inner), mutable))
+                return .Ok(TypeNode.Reference(box(inner), is_mutable))
             },
             .KwSelfType() then {
                 self.advance()
@@ -769,14 +770,14 @@ given Parser {
             // Check for *self / *mutable self prefix receiver
             if self.current().kind is .Star() then {
                 self.advance()
-                let mutable mutable = false
+                let mutable is_mutable = false
                 if self.current().kind is .KwMut() then {
                     self.advance()
-                    mutable = true
+                    is_mutable = true
                 }
                 if self.current().kind is .KwSelf() then {
                     self.advance()
-                    let self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), mutable)
+                    let self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), is_mutable)
                     params.push(Param("self", false, self_type, false))
                 } else {
                     return .Error(box("Expected 'self' after '*' in receiver"))
@@ -1315,9 +1316,9 @@ given Parser {
             self.parse_debug("statement postfix continuation")
             let continuation = self.parse_expression_checked("statement postfix continuation") or return
             current = when current in {
-                .LetStmt(name, mutable, type_name, value, span) then {
+                .LetStmt(name, is_mutable, type_name, value, span) then {
                     let updated = self.apply_statement_postfix_continuation(value, continuation) or return
-                    break Statement.LetStmt(name, mutable, type_name, updated, span)
+                    break Statement.LetStmt(name, is_mutable, type_name, updated, span)
                 },
                 .ExprStmt(expr, span) then {
                     let updated = self.apply_statement_postfix_continuation(expr, continuation) or return

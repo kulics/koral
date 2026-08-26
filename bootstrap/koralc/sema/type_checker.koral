@@ -1400,7 +1400,7 @@ given TypeChecker {
                     .StructureType(def_id) then {
                         let mutable template_fields = List[TemplateField].new()
                         for field in fields then {
-                            template_fields.push(TemplateField(field.access, field.name, field.mutable, self.copy_type_node(field.type_name), field.named))
+                            template_fields.push(TemplateField(field.access, field.name, field.is_mutable, self.copy_type_node(field.type_name), field.named))
                         }
                         self.storage.generic_templates.struct_templates.insert(
                             name,
@@ -1413,12 +1413,12 @@ given TypeChecker {
                     let mutable sf = List[StructField].new()
                     if type_params.is_empty() then {
                         for f in fields then {
-                            sf.push(StructField(f.name, self.resolve_type(f.type_name), f.mutable, f.access, f.named))
+                            sf.push(StructField(f.name, self.resolve_type(f.type_name), f.is_mutable, f.access, f.named))
                         }
                     } else {
                         let bindings = self.generic_type_param_bindings(type_params)
                         for f in fields then {
-                            sf.push(StructField(f.name, self.resolve_type_with_bindings(f.type_name, bindings), f.mutable, f.access, f.named))
+                            sf.push(StructField(f.name, self.resolve_type_with_bindings(f.type_name, bindings), f.is_mutable, f.access, f.named))
                         }
                     }
                     let mutable context = self.context()
@@ -1818,15 +1818,15 @@ given TypeChecker {
                 }
             },
             .GivenNotTraitDecl(_, _, _, _) then {},
-            .LetDecl(access, name, mutable, type_name, initializer, span) then {
+            .LetDecl(access, name, is_mutable, type_name, initializer, span) then {
                 let resolved = self.resolve_type(type_name)
-                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
-                let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable)
+                let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
+                let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable)
             },
-            .ForeignLetDecl(access, name, mutable, type_name, span) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
-                let variable_kind = if mutable then VariableKind.MutableValue() else VariableKind.Value()
-                let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, mutable)
+                let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
+                let _ = self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 // 在 signature 收集阶段注册完整 Trait（包含方法）,
@@ -1984,7 +1984,7 @@ given TypeChecker {
     protected to_template_params(self, params List[Param]) List[TemplateParam] = {
         let mutable out = List[TemplateParam].new()
         for p in params then {
-            out.push(TemplateParam(p.name, p.mutable, self.copy_type_node(p.type_name), p.named))
+            out.push(TemplateParam(p.name, p.is_mutable, self.copy_type_node(p.type_name), p.named))
         }
         return out
     }
@@ -2004,10 +2004,10 @@ given TypeChecker {
     protected copy_type_node(self, type_node TypeNode) TypeNode = {
         return when type_node in {
             .Identifier(name) then TypeNode.Identifier(name),
-            .Reference(inner, mutable) then TypeNode.Reference(self.copy_type_node_ref(inner), mutable),
-            .BorrowedReference(inner, mutable) then TypeNode.BorrowedReference(self.copy_type_node_ref(inner), mutable),
-            .Pointer(inner, mutable) then TypeNode.Pointer(self.copy_type_node_ref(inner), mutable),
-            .WeakReference(inner, mutable) then TypeNode.WeakReference(self.copy_type_node_ref(inner), mutable),
+            .Reference(inner, is_mutable) then TypeNode.Reference(self.copy_type_node_ref(inner), is_mutable),
+            .BorrowedReference(inner, is_mutable) then TypeNode.BorrowedReference(self.copy_type_node_ref(inner), is_mutable),
+            .Pointer(inner, is_mutable) then TypeNode.Pointer(self.copy_type_node_ref(inner), is_mutable),
+            .WeakReference(inner, is_mutable) then TypeNode.WeakReference(self.copy_type_node_ref(inner), is_mutable),
             .Generic(base, args) then TypeNode.Generic(base, self.copy_type_node_ref_list(args)),
             .InferredSelf() then TypeNode.InferredSelf(),
             .FunctionType(param_types, return_type) then TypeNode.FunctionType(self.copy_type_node_ref_list(param_types), self.copy_type_node_ref(return_type)),
@@ -2065,7 +2065,7 @@ given TypeChecker {
         return when node in {
             .Identifier(name) then self.resolve_constraint_identifier(name),
             .Generic(base, args) then self.resolve_constraint_generic_type(base, args),
-            .Reference(inner, mutable) then self.resolve_constraint_ref_type(*inner, mutable),
+            .Reference(inner, is_mutable) then self.resolve_constraint_ref_type(*inner, is_mutable),
             _ then Type.Unknown(),
         }
     }
@@ -2085,9 +2085,9 @@ given TypeChecker {
         return Type.GenericStruct(base, self.to_type_ref_list_in_resolution(resolved_args))
     }
 
-    protected resolve_constraint_ref_type(self, inner TypeNode, mutable Bool) Type = {
+    protected resolve_constraint_ref_type(self, inner TypeNode, is_mutable Bool) Type = {
         let resolved_inner = self.resolve_constraint_type_arg(inner)
-        if mutable then {
+        if is_mutable then {
             return Type.MutableReferenceType(box(resolved_inner))
         }
         return Type.ReferenceType(box(resolved_inner))

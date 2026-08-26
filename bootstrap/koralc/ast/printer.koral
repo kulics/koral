@@ -74,7 +74,7 @@ private let type_params_note(type_params List[TypeParameter]) String = {
 }
 
 private let param_prefix(p Param) String = {
-    return if p.mutable then "mutable " else ""
+    return if p.is_mutable then "mutable " else ""
 }
 
 private let param_text(p Param) String = {
@@ -94,14 +94,14 @@ private let type_text(t TypeNode) String = {
         .Identifier(name) then {
             return name
         },
-        .Reference(inner, mutable) then {
-            return if mutable then "ref mutable \(type_text(*inner))" else "ref \(type_text(*inner))"
+        .Reference(inner, is_mutable) then {
+            return if is_mutable then "ref mutable \(type_text(*inner))" else "ref \(type_text(*inner))"
         },
-        .Pointer(inner, mutable) then {
-            return if mutable then "ptr mutable \(type_text(*inner))" else "ptr \(type_text(*inner))"
+        .Pointer(inner, is_mutable) then {
+            return if is_mutable then "ptr mutable \(type_text(*inner))" else "ptr \(type_text(*inner))"
         },
-        .WeakReference(inner, mutable) then {
-            return if mutable then "weakref mutable \(type_text(*inner))" else "weakref \(type_text(*inner))"
+        .WeakReference(inner, is_mutable) then {
+            return if is_mutable then "weakref mutable \(type_text(*inner))" else "weakref \(type_text(*inner))"
         },
         .Generic(base, args) then {
             let mutable out = "\(base)["
@@ -136,8 +136,8 @@ private let type_text(t TypeNode) String = {
             out.push_string("]")
             return out
         },
-        .BorrowedReference(inner, mutable) then {
-            return if mutable then "*mutable \(type_text(*inner))" else "* \(type_text(*inner))"
+        .BorrowedReference(inner, is_mutable) then {
+            return if is_mutable then "*mutable \(type_text(*inner))" else "* \(type_text(*inner))"
         },
     }
 }
@@ -213,7 +213,7 @@ private let compound_assignment_op_text(op CompoundAssignmentOperator) String = 
 private let pattern_text(p PatternNode) String = {
     return when p in {
         .Wildcard(_) then "_",
-        .Variable(name, mutable, _) then if mutable then "mutable \(name)" else name,
+        .Variable(name, is_mutable, _) then if is_mutable then "mutable \(name)" else name,
         .BoolLiteral(v, _) then "\(v)",
         .IntegerLiteral(v, _) then v,
         .NegativeIntegerLiteral(v, _) then "-\(v)",
@@ -301,7 +301,7 @@ private let print_expr(expr Expr, level UInt) Void = {
             println("\(pad)  Operand:")
             print_expr(*operand, level + 2)
         },
-        .RefExpr(operand, mutable, _) then {
+        .RefExpr(operand, is_mutable, _) then {
             println("\(pad)RefExpr:")
             print_expr(*operand, level + 1)
         },
@@ -581,9 +581,9 @@ private let print_expr(expr Expr, level UInt) Void = {
 private let print_stmt(stmt Statement, level UInt) Void = {
     let pad = indent(level)
     when stmt in {
-        .LetStmt(name, mutable, type_name, value, _) then {
+        .LetStmt(name, is_mutable, type_name, value, _) then {
             let type_note = if type_name is .Some(t) then " : \(type_text(t))" else ""
-            println("\(pad)LetStmt: \(name)\(type_note) (mutable=\(mutable))")
+            println("\(pad)LetStmt: \(name)\(type_note) (is_mutable=\(is_mutable))")
             print_expr(*value, level + 1)
         },
         .PairLetStmt(first, second, value, _) then {
@@ -630,7 +630,7 @@ private let pair_binding_text(binding PairBindingElement) String = {
     if binding.is_discard then {
         return "_"
     }
-    let mut_part = if binding.mutable then "mutable " else ""
+    let mut_part = if binding.is_mutable then "mutable " else ""
     let type_part = if binding.type_name is .Some(t) then " : \(type_text(t))" else ""
     return "\(mut_part)\(binding.name)\(type_part)"
 }
@@ -638,10 +638,10 @@ private let pair_binding_text(binding PairBindingElement) String = {
 private let print_decl(decl Decl, level UInt) Void = {
     let pad = indent(level)
     when decl in {
-        .LetDecl(access, name, mutable, type_name, initializer, _) then {
+        .LetDecl(access, name, is_mutable, type_name, initializer, _) then {
             let prefix = access_modifier_text(access)
             let type_note = " : \(type_text(type_name))"
-            println("\(pad)LetDecl: \(prefix)\(name)\(type_note) (mutable=\(mutable))")
+            println("\(pad)LetDecl: \(prefix)\(name)\(type_note) (is_mutable=\(is_mutable))")
             print_expr(*initializer, level + 1)
         },
         .FunctionDecl(access, name, type_params, params, return_type, body, _) then {
@@ -671,13 +671,13 @@ private let print_decl(decl Decl, level UInt) Void = {
                 println("\(pad)  Param: \(param_prefix(p))\(p.name): \(type_text(p.type_name))")
             }
         },
-        .ForeignLetDecl(access, name, mutable, type_name, _) then {
-            println("\(pad)ForeignLetDecl: \(access_modifier_text(access))\(name): \(type_text(type_name)) (mutable=\(mutable))")
+        .ForeignLetDecl(access, name, is_mutable, type_name, _) then {
+            println("\(pad)ForeignLetDecl: \(access_modifier_text(access))\(name): \(type_text(type_name)) (is_mutable=\(is_mutable))")
         },
         .TypeStructDecl(access, name, type_params, fields, _) then {
             println("\(pad)TypeStructDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))")
             for f in fields then {
-                let mut_note = if f.mutable then "mutable " else ""
+                let mut_note = if f.is_mutable then "mutable " else ""
                 println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
             }
         },
@@ -701,7 +701,7 @@ private let print_decl(decl Decl, level UInt) Void = {
             println("\(pad)ForeignTypeDecl: \(access_modifier_text(access))\(name)\(cnote)")
             if fields is .Some(field_list) then {
                 for f in field_list then {
-                    let mut_note = if f.mutable then "mutable " else ""
+                    let mut_note = if f.is_mutable then "mutable " else ""
                     println("\(pad)  Field: \(access_modifier_text(f.access))\(mut_note)\(f.name): \(type_text(f.type_name))")
                 }
             }

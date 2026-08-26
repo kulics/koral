@@ -3,7 +3,7 @@ private type BuiltinSubscriptKind {
     List(element Type),
     Deque(element Type),
     Dict(key Type, value Type),
-    Pointer(element Type, mutable Bool),
+    Pointer(element Type, is_mutable Bool),
 }
 
 given TypeChecker {
@@ -225,11 +225,11 @@ given TypeChecker {
         return self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr)
     }
 
-    protected resolve_builtin_subscript_as_reference(self, base TypedExpr, args List[* TypedExpr], mutable Bool) TypedExpr = {
+    protected resolve_builtin_subscript_as_reference(self, base TypedExpr, args List[* TypedExpr], is_mutable Bool) TypedExpr = {
         return when self.resolve_builtin_subscript_kind(base.expr_type) in {
             .Some(kind) then when kind in {
                 .String() then {
-                    if mutable then {
+                    if is_mutable then {
                         self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(base)))
                         break make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown())
                     }
@@ -246,7 +246,7 @@ given TypeChecker {
                     break self.adapt_expr_to_expected_type(deref_expr, Option[Type].Some(Type.ReferenceType(box(Type.UInt8Type()))))
                 },
                 .Dict(_, _) or .List(_) or .Deque(_) then {
-                    let helper_name = if mutable then "__index_mut_ref" else "__index_ref"
+                    let helper_name = if is_mutable then "__index_mut_ref" else "__index_ref"
                     break self.build_builtin_subscript_helper_call(base, args, helper_name)
                 },
                 .Pointer(element_type, _) then {
@@ -266,7 +266,7 @@ given TypeChecker {
                         pointer_base_type,
                     )
                     let deref_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
-                    let expected_ref_type = if mutable
+                    let expected_ref_type = if is_mutable
                         then Option[Type].Some(Type.MutableReferenceType(box(element_type)))
                         else Option[Type].Some(Type.ReferenceType(box(element_type)))
                     break self.adapt_expr_to_expected_type(deref_expr, expected_ref_type)
@@ -1084,7 +1084,7 @@ given TypeChecker {
                         typed_params.push(
                             TypedParam(
                                 param.name,
-                                param.mutable,
+                                param.is_mutable,
                                 self.resolve_template_type_node_with_bindings(param.param_type, bindings),
                                 param.named,
                             )
@@ -1441,7 +1441,7 @@ given TypeChecker {
                             let mutable typed_params = List[TypedParam].new()
                             for param in member.params then {
                                 let bound_param = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(param.param_type, method_bindings), receiver_type), trait_name, receiver_type)
-                                typed_params.push(TypedParam(param.name, param.mutable, bound_param, param.named))
+                                typed_params.push(TypedParam(param.name, param.is_mutable, bound_param, param.named))
                             }
                             let bound_return = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(member.return_type, method_bindings), receiver_type), trait_name, receiver_type)
                             return Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, bound_return))
@@ -1526,7 +1526,7 @@ given TypeChecker {
                 typed_params.push(
                     TypedParam(
                         param.name,
-                        param.mutable,
+                        param.is_mutable,
                         self.resolve_template_type_node_with_bindings(param.param_type, bindings),
                         param.named,
                     )
@@ -1603,7 +1603,7 @@ given TypeChecker {
                             let mutable typed_params = List[TypedParam].new()
                             for param in member.params then {
                                 let bound_param = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(param.param_type, method_bindings), receiver_type), trait_name, receiver_type)
-                                typed_params.push(TypedParam(param.name, param.mutable, bound_param, param.named))
+                                typed_params.push(TypedParam(param.name, param.is_mutable, bound_param, param.named))
                             }
                             let bound_return = self.bind_conformance_trait_self_type(self.apply_trait_self_binding(self.apply_type_bindings(member.return_type, method_bindings), receiver_type), trait_name, receiver_type)
                             return Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, bound_return))
@@ -1806,7 +1806,7 @@ given TypeChecker {
                     let mutable typed_params = List[TypedParam].new()
                     for p in member.params then {
                         let resolved_param_type = self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(p.param_type, bindings)))
-                        typed_params.push(TypedParam(p.name, p.mutable, resolved_param_type, p.named))
+                        typed_params.push(TypedParam(p.name, p.is_mutable, resolved_param_type, p.named))
                     }
                     let resolved_return_type = self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(member.return_type, bindings)))
                     break Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, resolved_return_type))
@@ -1966,7 +1966,7 @@ given TypeChecker {
                                 typed_params.push(
                                     TypedParam(
                                         param.name,
-                                        param.mutable,
+                                        param.is_mutable,
                                         self.resolve_template_type_node_with_bindings(param.param_type, bindings),
                                         param.named,
                                     )
@@ -2407,7 +2407,7 @@ given TypeChecker {
                         if methods.get(method_name) is .Some(member) then {
                             let mutable typed_params = List[TypedParam].new()
                             for p in member.params then {
-                                typed_params.push(TypedParam(p.name, p.mutable, p.param_type, p.named))
+                                typed_params.push(TypedParam(p.name, p.is_mutable, p.param_type, p.named))
                             }
                             return Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, member.return_type))
                         }
