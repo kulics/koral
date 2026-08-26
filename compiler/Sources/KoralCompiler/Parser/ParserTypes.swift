@@ -42,17 +42,25 @@ extension Parser {
         prefixes.append(.weakReference(mutable: mutable))
         continue
       }
+      if currentToken === .unsafeKeyword {
+        try match(.unsafeKeyword)
+        guard currentToken === .multiply else {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "'*' after 'unsafe'"
+          )
+        }
+        try match(.multiply)
+        let mutable = currentToken === .mutableKeyword
+        if mutable {
+          try match(.mutableKeyword)
+        }
+        prefixes.append(.pointer(mutable: mutable))
+        continue
+      }
       if currentToken === .multiply {
         try match(.multiply)
-        if currentToken === .bang {
-          try match(.bang)
-          let mutable = currentToken === .mutableKeyword
-          if mutable {
-            try match(.mutableKeyword)
-          }
-          prefixes.append(.pointer(mutable: mutable))
-          continue
-        }
         let mutable = currentToken === .mutableKeyword
         if mutable {
           try match(.mutableKeyword)

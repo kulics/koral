@@ -157,7 +157,7 @@ Rules:
 ```koral
 type Result[T Any] {
     Ok(value T),
-    Error(error ref Error),
+    Error(error *Error),
 }
 
 let parse_int(s String) Result[Int] =
@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
-- Reference types: `*` (managed read-only), `*mutable` (managed mutable), `*!` (read-only), `*! mutable` (mutable), `?*` (read-only weak), `?*mutable` (mutable weak)
+- Reference types: `*` (managed read-only), `*mutable` (managed mutable), `unsafe *` (read-only), `unsafe * mutable` (mutable), `?*` (read-only weak), `?*mutable` (mutable weak)
 
 ### Control Flow
 
@@ -245,11 +245,11 @@ Reference creation rules:
 - Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mutable Trait` can call both `*mutable self` and `*self` requirements.
 - Method receiver forms: `self` (managed value), `*self` / `*mutable self` (managed receivers, auto-ref allowed), Auto-ref and auto-deref apply only to `self` and `*self` forms.
 - `*T` is read-only: `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
-- `*! T` is read-only: `*expr` dereference read only. `*! mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- `unsafe * T` is read-only: `*expr` dereference read only. `unsafe * mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
 - Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mutable T`.
 - `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
 - Ordinary parameter `mutable` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
-- `Drop` uses `drop(source *! mutable Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
+- `Drop` uses `drop(source unsafe * mutable Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
 
 Weak reference rules:
 - `downgrade(*T)` produces `?*T`; `downgrade_mut(*mutable T)` produces `?*mutable T`.

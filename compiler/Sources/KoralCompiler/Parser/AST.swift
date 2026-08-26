@@ -89,7 +89,7 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .reference(let inner, let mutable):
       return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable):
-      return mutable ? "*! mutable \(inner)" : "*! \(inner)"
+      return mutable ? "unsafe * mutable \(inner)" : "unsafe * \(inner)"
     case .weakReference(let inner, let mutable):
       return mutable ? "?*mutable \(inner)" : "?*\(inner)"
     case .generic(let base, let args):

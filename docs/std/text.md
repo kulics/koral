@@ -25,7 +25,7 @@ public trait Formattable ToString {
 ```koral
 public type RegexFlag(value UInt)
 
-public type Regex(storage ref RegexStorage)
+public type Regex(storage *RegexStorage)
 
 public type Match
 

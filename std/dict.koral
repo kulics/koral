@@ -8,7 +8,7 @@
 // Dict Storage and Type Definition
 // ============================================================================
 // DictBucket uses a struct+tag layout (not enum) so that key/value fields are
-// directly addressable by pointer — enabling */*! subscript helpers.
+// directly addressable by pointer — enabling */unsafe * subscript helpers.
 // Only Occupied buckets have initialized key/value. Empty and Deleted buckets
 // have raw (uninitialized) key/value memory; only the tag is valid.
 protected type DictBucket[K Hash, V Any](
@@ -20,14 +20,14 @@ protected type DictBucket[K Hash, V Any](
 // Bucket tag constants (inlined as 0(UInt), 1(UInt), 2(UInt))
 
 protected type DictStorage[K Hash, V Any](
-    mutable buckets *! mutable DictBucket[K, V],
+    mutable buckets unsafe * mutable DictBucket[K, V],
     mutable count UInt,
     mutable capacity UInt,
 )
 
 given[K Hash, V Any] DictStorage[K, V] as Drop {
 
-    drop(source *! mutable Self) Void = {
+    drop(source unsafe * mutable Self) Void = {
         for i in 0..<source.capacity then {
             if (source.buckets + i).tag == 1(UInt) then {
                 deinit_memory(source.buckets + i)
@@ -69,10 +69,10 @@ given[K Hash, V Any] Dict[K, V] {
 
     public count(*self) UInt = self.storage.count
 
-    public borrow_ptr(*self) *! DictBucket[K, V] = self.storage.buckets
+    public borrow_ptr(*self) unsafe * DictBucket[K, V] = self.storage.buckets
 
     private ensure_unique(*mutable self) Void = {
-        if not is_unique_mutable(&! self.storage) then {
+        if not is_unique_mutable(unsafe & self.storage) then {
             let old = self.storage
             let new_buckets = alloc_memory[DictBucket[K, V]](old.capacity)
             for i in 0..<old.capacity then {
@@ -334,17 +334,17 @@ given[K Hash, V Any] Dict[K, V] {
         init_memory(bucket_ptr, DictBucket[K, V](1(UInt), key, value))
     }
 
-    private __index_ptr(*self, key K) *! V = {
+    private __index_ptr(*self, key K) unsafe * V = {
         let idx = when self.find_slot(key) in {
             .None then { panic("Dict key not found") },
             .Some(i) then i,
         }
-        // self.storage.buckets is *! mutable DictBucket; +idx gives *! to bucket[idx]
+        // self.storage.buckets is unsafe * mutable DictBucket; +idx gives unsafe * to bucket[idx]
         let bucket_ptr = self.storage.buckets + idx
-        return &! (*bucket_ptr).value
+        return unsafe & (*bucket_ptr).value
     }
 
-    private __index_mut_ptr(*mutable self, key K) *! mutable V = {
+    private __index_mut_ptr(*mutable self, key K) unsafe * mutable V = {
         let idx = when self.find_slot(key) in {
             .None then { panic("Dict key not found") },
             .Some(i) then i,
@@ -355,7 +355,7 @@ given[K Hash, V Any] Dict[K, V] {
             .Some(i) then i,
         }
         let bucket_ptr = self.storage.buckets + final_idx
-        return &! (*bucket_ptr).value
+        return unsafe & (*bucket_ptr).value
     }
 
     private __index_ref(*self, key K) * V = {
@@ -364,7 +364,7 @@ given[K Hash, V Any] Dict[K, V] {
             .Some(i) then i,
         }
         let bucket_ptr = self.storage.buckets + idx
-        return make_ref[V, DictStorage[K, V]](&! (*bucket_ptr).value, self.storage)
+        return make_ref[V, DictStorage[K, V]](unsafe & (*bucket_ptr).value, self.storage)
     }
 
     private __index_mut_ref(*mutable self, key K) *mutable V = {
@@ -378,7 +378,7 @@ given[K Hash, V Any] Dict[K, V] {
             .Some(i) then i,
         }
         let bucket_ptr = self.storage.buckets + final_idx
-        return make_mut_ref[V, DictStorage[K, V]](&! (*bucket_ptr).value, self.storage)
+        return make_mut_ref[V, DictStorage[K, V]](unsafe & (*bucket_ptr).value, self.storage)
     }
 }
 

@@ -7,11 +7,11 @@
 // ============================================================================
 // List Storage and Type Definition
 // ============================================================================
-protected type ListStorage[T Any](mutable source *! mutable T, mutable len UInt, mutable cap UInt)
+protected type ListStorage[T Any](mutable source unsafe * mutable T, mutable len UInt, mutable cap UInt)
 
 given[T Deref] ListStorage[T] as Drop {
 
-    drop(source *! mutable Self) Void = {
+    drop(source unsafe * mutable Self) Void = {
         for i in 0..<source.len then {
             deinit_memory(source.source + i)
         }
@@ -49,7 +49,7 @@ given[T Deref] List[T] {
     }
 
     private ensure_unique(*mutable self) Void = {
-        if not is_unique_mutable[T](&! self.storage) then {
+        if not is_unique_mutable[T](unsafe & self.storage) then {
             let old = self.storage
             let new_cap = old.cap
             let new_source = alloc_memory[T](new_cap)
@@ -70,7 +70,7 @@ given[T Deref] List[T] {
             }
             let new_source = alloc_memory[T](new_cap)
             let old_len = self.storage.len
-            if is_unique_mutable[T](&! self.storage) then {
+            if is_unique_mutable[T](unsafe & self.storage) then {
                 let old_source = self.storage.source
                 move_memory(new_source, old_source, old_len)
                 dealloc_memory(old_source)
@@ -218,14 +218,14 @@ given[T Deref] List[T] {
         self.storage.source[key] = value
     }
 
-    private __index_ptr(*self, key UInt) *! T = {
+    private __index_ptr(*self, key UInt) unsafe * T = {
         if key >= self.storage.len then {
             panic("List index out of bounds")
         }
         return self.storage.source + key
     }
 
-    private __index_mut_ptr(*mutable self, key UInt) *! mutable T = {
+    private __index_mut_ptr(*mutable self, key UInt) unsafe * mutable T = {
         if key >= self.storage.len then {
             panic("List index out of bounds")
         }
@@ -303,9 +303,9 @@ given[T Deref] List[T] {
         }
     }
 
-    public borrow_ptr(*self) *! T = self.storage.source
+    public borrow_ptr(*self) unsafe * T = self.storage.source
 
-    public borrow_mut_ptr(*mutable self) *! mutable T = {
+    public borrow_mut_ptr(*mutable self) unsafe * mutable T = {
         self.ensure_unique()
         return self.storage.source
     }

@@ -22,7 +22,7 @@ extension TypeChecker {
   ) throws {
     guard params.count == 1 else {
       throw SemanticError.invalidOperation(
-        op: "drop must have exactly one parameter of type '*! mutable Self'", type1: "", type2: "")
+        op: "drop must have exactly one parameter of type 'unsafe * mutable Self'", type1: "", type2: "")
     }
     let expectedParamType = Type.mutablePointer(element: selfType)
     guard params[0].type == expectedParamType else {

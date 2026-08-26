@@ -106,6 +106,7 @@ public enum Token: CustomStringConvertible {
   case bang // "!" symbol
   case deferKeyword // 'defer' keyword
   case itKeyword // 'it' keyword
+  case unsafeKeyword // 'unsafe' keyword
 
   /// Whether this token is one of the narrow line-join tokens allowed after a newline.
   /// These are limited to grammar join keywords and structural connectors.
@@ -192,6 +193,8 @@ public enum Token: CustomStringConvertible {
     case (.deferKeyword, .deferKeyword):
       return true
     case (.itKeyword, .itKeyword):
+      return true
+    case (.unsafeKeyword, .unsafeKeyword):
       return true
     case (.bof, .bof), (.eof, .eof):
       return true
@@ -371,6 +374,8 @@ public enum Token: CustomStringConvertible {
       return "defer"
     case .itKeyword:
       return "it"
+    case .unsafeKeyword:
+      return "unsafe"
     }
   }
 }
@@ -1546,6 +1551,7 @@ public class Lexer {
       // raw is no longer a keyword; use '!' for raw pointers
       case "defer": .deferKeyword
       case "it": .itKeyword
+      case "unsafe": .unsafeKeyword
       default: .identifier(id)
       }
     default:

@@ -198,7 +198,7 @@ Koral uses reference types to refer to another value rather than holding it:
 
 - Plain `&` may take either an lvalue or an rvalue. Rvalues are materialized into managed storage as needed.
 - `&mutable` requires a writable lvalue.
-- `&!` / `&! mutable` require addressable storage, so literals and temporary values are rejected.
+- `unsafe &` / `unsafe & mutable` require addressable storage, so literals and temporary values are rejected.
 - `&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
 - `box(expr)` is explicit managed construction, returning `*mutable T`.
 
@@ -225,7 +225,7 @@ let owned *mutable Int = box(42) // box() returns *mutable T
 let temp *Int = &42          // OK: managed & may materialize rvalues
 
 // let bad = &mutable 42      // error: &mutable still requires a writable lvalue
-// let raw_bad = &! 42  // error: raw address-of needs addressable storage
+// let raw_bad = unsafe & 42  // error: raw address-of needs addressable storage
 
 // No implicit managed-ref promotion for function arguments:
 let takes_ref(r * Int) Int = *r
@@ -532,9 +532,9 @@ let owned *mutable Int = &mutable n
 
 Pointer types follow the same read-only / mutable distinction:
 
-- `*! T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
-- `*! mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
-- `*! mutable T` implicitly converts to `*! T`. The reverse is not allowed.
+- `unsafe * T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
+- `unsafe * mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
+- `unsafe * mutable T` implicitly converts to `unsafe * T`. The reverse is not allowed.
 
 #### Weak References
 
@@ -560,7 +560,7 @@ let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
 
 - **Value Semantics**: By default, types in Koral (such as `Int`, structs) have value semantics. Data is copied during assignment or parameter passing.
-- **References**: `*` / `*mutable` are managed references. Plain `&` may form managed references from lvalues or rvalues; `&mutable` still requires a writable lvalue. `&!` / `&! mutable` form raw pointers only from addressable storage. The compiler uses escape analysis to decide stack vs heap allocation for managed references, and `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call, while `*mutable self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
+- **References**: `*` / `*mutable` are managed references. Plain `&` may form managed references from lvalues or rvalues; `&mutable` still requires a writable lvalue. `unsafe &` / `unsafe & mutable` form raw pointers only from addressable storage. The compiler uses escape analysis to decide stack vs heap allocation for managed references, and `box(expr)` is explicit managed construction. Implicit ref promotion (`T` → `*T`) is not allowed for function arguments — callers must use `&` explicitly. Auto-deref (`*T` → `T`) is not allowed for regular function arguments — callers must use `*expr` explicitly. These implicit conversions only apply to method receivers (`self`). Method/subscript receiver adjustment also allows `*self` calls on rvalue receivers by materializing a stable temporary for the duration of the call, while `*mutable self` still requires a writable lvalue. Koral uses ownership analysis and escape analysis to decide stack-safe borrowing vs heap-backed reference counting, preventing dangling pointers and memory leaks.
 - **Move Semantics**: For variables that haven't been copied, assignment and parameter passing result in ownership transfer (Move). Once ownership is transferred, the original variable can no longer be used.
 
 ## Operators
@@ -720,10 +720,10 @@ let ordered = Vec2(1, 0) < Vec2(2, 0)
 
 Builtin subscript rules:
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `*! T`, and `*! mutable T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `unsafe * T`, and `unsafe * mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `*` / `*mutable` contexts.
-- `*! T` supports reads only. `*! mutable T` supports both reads and writes.
+- `unsafe * T` supports reads only. `unsafe * mutable T` supports both reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
@@ -734,7 +734,7 @@ list[1] = 99
 let text = "abc"
 let b UInt8 = text[1]
 
-let p *! mutable Int = alloc_memory[Int](2)
+let p unsafe * mutable Int = alloc_memory[Int](2)
 p[0] = list[0]
 let first = p[0]
 dealloc_memory(p)
@@ -780,7 +780,7 @@ It must be used inside a function whose return kind matches the propagated value
 Operator precedence from high to low:
 
 1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified/generic method suffixes
-2. Prefix: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mutable`, `&!`, `&!mutable`
+2. Prefix: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mutable`, `unsafe &`, `unsafe &mutable`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
@@ -1645,11 +1645,11 @@ The most commonly used core traits are:
 - `ToString`: conversion to string.
 - `Iterator[T]`: iteration protocol (`next(*mutable self) Option[T]`).
 - `Error`: error message interface (`message(*self) String`).
-- `Drop`: destructor hook (`drop(source *! mutable Self) Void`).
+- `Drop`: destructor hook (`drop(source unsafe * mutable Self) Void`).
 
 Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
-`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source *! mutable Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
+`Drop.drop` is a compiler-only destructor entry point. It receives the storage address of an already-owned value as `source unsafe * mutable Self`; it is not called as an ordinary user method. `Drop` implementations are allowed to contain composite fields.
 
 ### Method Receiver Forms
 
@@ -1833,7 +1833,7 @@ let read_number(path String) Result[Int] = {
     parse_int(text)
 }
 
-// Result (error side is ref Error)
+// Result (error side is *Error)
 let ok = Result[Int].Ok(42)
 let err = Result[Int].Error(box("failed"))
 ```

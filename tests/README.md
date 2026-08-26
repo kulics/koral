@@ -78,7 +78,7 @@ Use this bucket when changing declaration parsing, package visibility, import ru
 - `generic_template_requires_import_error_test`
 - `generic_template_import_test`
 
-### New reference surface (`*T`, `?*T`, `*! T`)
+### New reference surface (`*T`, `?*T`, `unsafe * T`)
 
 Use this bucket when changing managed reference, weak reference, or raw-pointer syntax/semantics.
 
@@ -116,7 +116,7 @@ Use this bucket when changing receiver auto-ref/auto-deref, managed receiver ret
 - `self_mut_ref_rvalue_receiver_error`
 - `value_semantics_self_ref_on_immutable_base_error`
 
-Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mutable self`, `&`, `&mutable`, `&!`, `*`).
+Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mutable self`, `&`, `&mutable`, `unsafe &`, `*`).
 
 ## Rerun a bucket
 
