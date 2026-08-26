@@ -217,7 +217,7 @@ let result = list.iterator()
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)
-- Duration suffix literals: `10s`, `250ms`, `30min`, `2h`, `150us`, `42ns`
+- Duration suffix literals: `10s`, `250ms`, `150us`, `42ns`
 - Pair literal: `(a, b)` (equivalent to `Pair(a, b)`)
 - Pair destructuring: `let (a, b) = pair` (binds Pair fields to separate variables)
 - Collection literals:

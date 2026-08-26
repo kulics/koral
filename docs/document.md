@@ -357,13 +357,11 @@ Duration literals are supported with integer suffixes:
 ```koral
 let a = 10s
 let b = 250ms
-let c = 30min
-let d = 2h
 let e = 150us
 let f = 42ns
 ```
 
-Supported suffixes are `h`, `min`, `s`, `ms`, `us`, `ns`.
+Supported suffixes are `s`, `ms`, `us`, `ns`.
 Duration literals are lowered to `Duration.new(seconds: ..., nanoseconds: ...)`.
 Negative durations keep unary-minus semantics (for example `-5s` is parsed as unary `-` applied to `5s`).
 

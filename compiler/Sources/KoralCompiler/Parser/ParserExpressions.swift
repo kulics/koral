@@ -1238,12 +1238,6 @@ extension Parser {
     let nanos: Int64
 
     switch unit {
-    case "h":
-      secs = raw * 3600
-      nanos = 0
-    case "min":
-      secs = raw * 60
-      nanos = 0
     case "s":
       secs = raw
       nanos = 0
@@ -1260,7 +1254,7 @@ extension Parser {
       throw ParserError.unexpectedToken(
         span: span,
         got: "\(value)\(unit)",
-        expected: "supported duration suffix (h|min|s|ms|us|ns)"
+        expected: "supported duration suffix (s|ms|us|ns)"
       )
     }
 

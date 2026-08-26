@@ -608,9 +608,9 @@ public class Lexer {
   }
 
   /// Attempt to consume a duration suffix immediately after an integer literal.
-  /// Supported suffixes: h, min, s, ms, us, ns.
+  /// Supported suffixes: s, ms, us, ns.
   private func readDurationSuffixIfPresent() -> String? {
-    let allowed: Set<String> = ["h", "min", "s", "ms", "us", "ns"]
+    let allowed: Set<String> = ["s", "ms", "us", "ns"]
 
     guard let first = getNextChar() else { return nil }
     guard first.isLetter else {

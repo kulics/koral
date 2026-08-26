@@ -381,13 +381,11 @@ Duration 支持整数字面量后缀：
 ```koral
 let a = 10s
 let b = 250ms
-let c = 30min
-let d = 2h
 let e = 150us
 let f = 42ns
 ```
 
-支持的后缀为 `h`、`min`、`s`、`ms`、`us`、`ns`。
+支持的后缀为 `s`、`ms`、`us`、`ns`。
 Duration 字面量会被降糖为 `Duration.new(seconds: ..., nanoseconds: ...)`。
 负值保持一元负号语义（例如 `-5s` 会被解析为对 `5s` 应用一元 `-`）。
 
