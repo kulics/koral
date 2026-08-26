@@ -1,4 +1,4 @@
-# fmt tests (Go)
+# fmt tests
 
 该目录用于 `koralfmt` 的稳定回归测试，避免再使用临时文件做手工验证。
 
@@ -10,22 +10,14 @@
 
 ## 运行方式
 
-```bash
-cd toolchain/koralfmt/test
-go run ./cmd/preparefmt
-go test ./...
-```
-
-单用例调试：
+使用 koral 编译器编译并运行 `test_fmt.koral`：
 
 ```bash
-go test ./... -run TestFmtCaseValidGivenWhen
+# 编译
+compiler/.build/debug/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
+
+# 运行测试
+toolchain/koralfmt/build/test_fmt.exe
 ```
 
-说明：测试不会自动构建 `koralfmt`，执行前需要先运行 `go run ./cmd/preparefmt`。
-
-`preparefmt` 默认检测到 `bin/koralfmt(.exe)` 已存在时会直接跳过；如需强制重建，使用：
-
-```bash
-go run ./cmd/preparefmt --force
-```
+所有测试通过 koral 自身的测试框架（`test_fmt.koral`）运行，无需 Go 环境。

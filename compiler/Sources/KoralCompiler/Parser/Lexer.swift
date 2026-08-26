@@ -23,7 +23,7 @@ public enum Token: CustomStringConvertible {
   case bof  // Beginning of file marker
   case eof  // End of file marker
   case integer(String)  // Integer literal as string, e.g.: "42"
-  case durationLiteral(value: String, unit: String)  // Duration literal, e.g.: "10s", "30min"
+  case durationLiteral(value: String, unit: String)  // Duration literal, e.g.: "10s", "250ms"
   case float(String)  // Float literal as string, e.g.: "3.14"
   case string(String)  // String literal, e.g.: "hello"
   case rune(String)    // Rune literal, e.g.: 'A', '\n'

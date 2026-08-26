@@ -330,107 +330,75 @@ given[T ToString and Hash] Set[T] as ToString {
 given Duration as ToString {
 
     public to_string(*self) String = {
-        if self.secs >= 86400 then {
-            let days = self.secs / 86400
-            let remaining_secs = self.secs % 86400
-            if remaining_secs >= 3600 then {
-                let hours = remaining_secs / 3600
-                let mutable result = String.new()
-                result.push_string(days.to_string())
-                result.push_string("d")
-                result.push_string(hours.to_string())
-                result.push_string("h")
-                return result
-            } else if remaining_secs >= 60 then {
-                let mins = remaining_secs / 60
-                let mutable result = String.new()
-                result.push_string(days.to_string())
-                result.push_string("d")
-                result.push_string(mins.to_string())
-                result.push_string("min")
-                return result
-            } else if remaining_secs > 0 then {
-                let mutable result = String.new()
-                result.push_string(days.to_string())
-                result.push_string("d")
-                result.push_string(remaining_secs.to_string())
-                result.push_string("s")
-                return result
+        if self.secs == 0 and self.nanos == 0 then {
+            return "0s"
+        }
+        let total_ns = self.as_nanoseconds()
+        let is_neg = total_ns < 0
+        let abs_ns = if is_neg then 0 - total_ns else total_ns
+        let mutable secs = abs_ns / 1_000_000_000
+        let nanos = abs_ns % 1_000_000_000
+        let mutable result = String.new()
+
+        if is_neg then {
+            result.push_string("-")
+        }
+
+        // Sub-second durations: show as ms, us, or ns
+        if secs == 0 then {
+            if nanos % 1_000_000 == 0 then {
+                result.push_string((nanos / 1_000_000).to_string())
+                result.push_string("ms")
+            } else if nanos % 1_000 == 0 then {
+                result.push_string((nanos / 1_000).to_string())
+                result.push_string("us")
             } else {
-                let mutable result = String.new()
-                result.push_string(days.to_string())
-                result.push_string("d")
-                return result
-            }
-        } else if self.secs >= 3600 then {
-            let hours = self.secs / 3600
-            let remaining_secs = self.secs % 3600
-            if remaining_secs >= 60 then {
-                let mins = remaining_secs / 60
-                let mutable result = String.new()
-                result.push_string(hours.to_string())
-                result.push_string("h")
-                result.push_string(mins.to_string())
-                result.push_string("min")
-                return result
-            } else if remaining_secs > 0 then {
-                let mutable result = String.new()
-                result.push_string(hours.to_string())
-                result.push_string("h")
-                result.push_string(remaining_secs.to_string())
-                result.push_string("s")
-                return result
-            } else {
-                let mutable result = String.new()
-                result.push_string(hours.to_string())
-                result.push_string("h")
-                return result
-            }
-        } else if self.secs >= 60 then {
-            let mins = self.secs / 60
-            let remaining_secs = self.secs % 60
-            if remaining_secs > 0 then {
-                let mutable result = String.new()
-                result.push_string(mins.to_string())
-                result.push_string("min")
-                result.push_string(remaining_secs.to_string())
-                result.push_string("s")
-                return result
-            } else {
-                let mutable result = String.new()
-                result.push_string(mins.to_string())
-                result.push_string("min")
-                return result
-            }
-        } else if self.secs > 0 then {
-            if self.nanos > 0 then {
-                let mutable result = String.new()
-                result.push_string(self.secs.to_string())
-                result.push_string("s")
-                result.push_string(self.nanos.to_string())
+                result.push_string(nanos.to_string())
                 result.push_string("ns")
-                return result
-            } else {
-                let mutable result = String.new()
-                result.push_string(self.secs.to_string())
-                result.push_string("s")
-                return result
             }
-        } else if self.nanos >= 1_000_000 then {
-            let mutable result = String.new()
-            result.push_string((self.nanos / 1_000_000).to_string())
-            result.push_string("ms")
-            return result
-        } else if self.nanos >= 1_000 then {
-            let mutable result = String.new()
-            result.push_string((self.nanos / 1_000).to_string())
-            result.push_string("us")
-            return result
-        } else {
-            let mutable result = String.new()
-            result.push_string(self.nanos.to_string())
-            result.push_string("ns")
             return result
         }
+
+        // >= 1 second: use h/m/s with fractional seconds for sub-second part
+        if secs >= 3600 then {
+            result.push_string((secs / 3600).to_string())
+            result.push_string("h")
+            secs = secs % 3600
+        }
+
+        if secs >= 60 then {
+            result.push_string((secs / 60).to_string())
+            result.push_string("m")
+            secs = secs % 60
+        }
+
+        // Seconds with optional fractional part
+        if nanos > 0 then {
+            result.push_string(secs.to_string())
+            result.push_string(".")
+            // Format nanos as 9-digit fractional, trim trailing zeros
+            let nanos_str = nanos.to_string()
+            let nanos_len = nanos_str.count()
+            let mutable frac = String.new()
+            let mutable i = nanos_len
+            while i < 9 then {
+                frac.push_byte('0')
+                i += 1
+            }
+            frac.push_string(nanos_str)
+            // Trim trailing zeros
+            let mutable end = frac.count()
+            while end > 0 and frac[end - 1] == '0' then {
+                end -= 1
+            }
+            frac = frac.substring(0..<end)
+            result.push_string(frac)
+            result.push_string("s")
+        } else {
+            result.push_string(secs.to_string())
+            result.push_string("s")
+        }
+
+        return result
     }
 }
