@@ -1416,7 +1416,12 @@ final class MIRFunctionCodeEmitter {
     case .local(let local):
       return MIRValueEmission(expression: localName(for: local), cleanups: [])
     case .function(let symbol):
-      return MIRValueEmission(expression: codeGen.qualifiedName(for: symbol), cleanups: [])
+      let funcName = codeGen.qualifiedName(for: symbol)
+      let closureExpr = codeGen.nextTempWithInit(
+        cType: "struct __koral_Closure",
+        initExpr: "{ .fn = (void*)\(funcName), .env = NULL, .drop = NULL }"
+      )
+      return MIRValueEmission(expression: closureExpr, cleanups: cleanupForTemporaryResult(expression: closureExpr, type: symbol.type))
     case .constant(let constant):
       switch constant {
       case .integer(let value, _):
