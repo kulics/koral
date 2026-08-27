@@ -71,7 +71,7 @@ Semicolon insertion follows these rules:
 
 - A statement may end with an explicit semicolon `;`.
 - A newline terminates the current statement by default.
-- The global ASI whitelist contains only a narrow set of explicit join tokens: `and`, `or`, `then`, `else`, `.`, and `->`.
+- The global ASI whitelist contains only a narrow set of explicit join tokens: `and`, `or`, `is`, `then`, `else`, `.`, and `->`.
 - Forms such as `and then`, `or else`, and `or return` remain valid across newlines because they begin with the whitelisted `and` or `or` token and are then consumed by the surrounding grammar.
 - Keywords such as `in` and `as` are not general ASI join tokens; whether they may continue across a newline is decided by the specific construct that owns them, such as `for ... in ...`, `when ... in ...`, or `given Type as Trait`.
 - Separately, multiline expressions may keep parsing while the parser is still inside an unclosed `()` or `[]` expression group.
@@ -555,6 +555,28 @@ let ro_weak = downgrade(ro)         // *T → ?*T
 let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 ```
 
+
+#### Self Type
+
+`Self` is a built-in type keyword that refers to the implementing type inside `trait` definitions, `given` blocks, and their method signatures. It is not a standalone type alias — it is resolved by the compiler to the concrete type that is implementing the trait.
+
+- Inside a `trait` definition, `Self` represents the future implementing type.
+- Inside a `given Type as Trait` block, `Self` is equivalent to `Type`.
+- `Self` can appear in method parameter types, return types, and field types within trait/given contexts.
+
+```koral
+trait Eq {
+    equals(self, other Self) Bool
+}
+
+type Point(x Int, y Int)
+
+given Point as Eq {
+    // Here Self resolves to Point, so  is the same as .
+    equals(self, other Point) Bool = self.x == other.x and self.y == other.y
+}
+```
+
 ### Memory Management
 
 Koral aims to provide efficient and safe memory management, combining automatic memory management with manual control.
@@ -936,6 +958,17 @@ for i in 0..5 then {
 }
 ```
 
+The loop variable position accepts a full pattern, so you can destructure elements directly:
+
+```koral
+type Point(x Int, y Int)
+let points List[Point] = [Point(1, 2), Point(3, 4)]
+
+for Point(x, y) in points then {
+    println("x=" + to_string(x) + " y=" + to_string(y))
+}
+```
+
 ### defer Statement
 
 The `defer` statement declares a cleanup expression to be executed when the current block scope exits. The deferred expression runs regardless of whether the scope exits normally or early via `return`, `break`, or `continue`.
@@ -1028,7 +1061,7 @@ let label = when score in {
 Supported patterns include:
 
 - Wildcard pattern: `_` (matches any value)
-- Literal patterns: `1`, `"abc"`, `'a'`, `true`
+- Literal patterns: `1`, `-5`, `"abc"`, `'a'`, `true` (negative integer literals such as `-5` are supported)
 - Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`

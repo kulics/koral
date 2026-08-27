@@ -71,7 +71,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 - 语句可以显式使用分号 `;` 结束。
 - 默认情况下，换行会结束当前语句。
-- 全局 ASI 白名单只包含少数明确的接续 token：`and`、`or`、`then`、`else`、`.`、`->`。
+- 全局 ASI 白名单只包含少数明确的接续 token：`and`、`or`、`is`、`then`、`else`、`.`、`->`。
 - 因此像 `and then`、`or else`、`or return` 这类组合之所以能跨行成立，本质上仍然是因为它们分别以 `and` 或 `or` 开头，并在后续语法里继续归属于同一个结构。
 - `in`、`as` 这类关键字不属于通用 ASI 接续 token；它们是否可以跨行归属，应由 `for ... in ...`、`when ... in ...`、`given Type as Trait` 这类具体语法各自决定。
 - 另外，当 parser 仍处于未闭合的 `()`、`[]` 表达式分组内部时，多行表达式仍然可以继续解析。
@@ -581,6 +581,28 @@ let ro_weak = downgrade(ro)         // *T → ?*T
 let ro_upgraded = upgrade(ro_weak)  // ?*T → Option[*T]
 ```
 
+
+#### Self 类型
+
+`Self` 是一个内置类型关键字，用于在 `trait` 定义、`given` 块及其方法签名中引用实现类型。它不是独立的类型别名——由编译器解析为正在实现 trait 的具体类型。
+
+- 在 `trait` 定义内部，`Self` 代表未来的实现类型。
+- 在 `given Type as Trait` 块内部，`Self` 等价于 `Type`。
+- `Self` 可以出现在 trait/given 上下文中的方法参数类型、返回类型和字段类型中。
+
+```koral
+trait Eq {
+    equals(self, other Self) Bool
+}
+
+type Point(x Int, y Int)
+
+given Point as Eq {
+    // 此处 Self 解析为 Point，因此 `other Self` 等同于 `other Point`。
+    equals(self, other Point) Bool = self.x == other.x and self.y == other.y
+}
+```
+
 ### 内存管理
 
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
@@ -976,6 +998,17 @@ for i in 0..5 then {
 }
 ```
 
+循环变量位置接受完整模式，可以直接解构元素：
+
+```koral
+type Point(x Int, y Int)
+let points List[Point] = [Point(1, 2), Point(3, 4)]
+
+for Point(x, y) in points then {
+    println("x=" + to_string(x) + " y=" + to_string(y))
+}
+```
+
 ### defer 语句
 
 `defer` 语句用于声明在当前块作用域退出时执行的清理表达式。无论作用域是正常退出还是通过 `return`、`break`、`continue` 提前退出，`defer` 表达式都会被执行。
@@ -1068,7 +1101,7 @@ let label = when score in {
 支持的模式包括：
 
 - 通配符模式：`_`（匹配任意值）
-- 字面量模式：`1`, `"abc"`, `'a'`, `true`
+- 字面量模式：`1`、`-5`、`"abc"`、`'a'`、`true`（支持负整数字面量模式如 `-5`）
 - 变量绑定模式：`x`（匹配任意值并绑定到 x），`mutable x`（可变绑定）
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
 - 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
