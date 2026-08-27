@@ -245,6 +245,9 @@ public let instantiate_function(mono * Monomorphizer, template * GenericFunction
     // k. If body exists, substitute generic params with concrete types.
     when body_opt in {
         .Some(body) then {
+            if env("KORAL_DEBUG_SUBST_CONTEXT") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+                println("[mono-subst] function \(mangled_name)")
+            }
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
             let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
             let mutable context = mono.storage.context
@@ -1243,7 +1246,7 @@ public let instantiate_extension_method(
     // instantiate any other extension method. This covers flows where a
     // concrete generic type is only seen through method calls (e.g. Box[T].is_empty)
     // and never receives an explicit struct/enum instantiation request.
-    if resolved_template.method.name <> "drop" then {
+    if resolved_template.method.name <> "drop" and mono.storage.extension_body_resolution_depth == 0 then {
         when mono.storage.generic_templates.lookup_extension_methods(effective_template_name) in {
             .Some(ext_list) then {
                 for ext_ref in ext_list then {
@@ -1384,10 +1387,8 @@ public let instantiate_extension_method_from_entry(
         }
     }
 
-    let should_block_invalid_pair_constraint_instantiation = effective_template_name == "Pair"
-        and (resolved_template.method.name == "hash" or resolved_template.method.name == "equals")
-        and not extension_type_args_satisfy_constraints(mono, resolved_template, type_args)
-    if should_block_invalid_pair_constraint_instantiation then {
+    let owner_constraints_satisfied = extension_type_args_satisfy_constraints(mono, resolved_template, type_args)
+    if not owner_constraints_satisfied then {
         return Symbol(DefId(0(UInt)), Type.Unknown(), SymbolKind.Function())
     }
 
@@ -1650,10 +1651,35 @@ public let instantiate_extension_method_from_entry(
     // h. Emit the declaration node.
     when lookup_extension_template_checked_body(mono, resolved_template) in {
         .Some(body) then {
+            if mono.storage.extension_body_resolution_depth > 0 then {
+                let deferred_req = InstantiationRequest(
+                    InstantiationKind.ExtensionMethod(
+                        effective_template_name,
+                        base_type,
+                        resolved_template,
+                        type_args,
+                        method_type_args,
+                    ),
+                    0,
+                    "",
+                )
+                let deferred_key = deferred_req.deduplication_key()
+                if not mono.storage.processed_request_keys.contains(deferred_key)
+                    and not mono.storage.pending_request_keys.contains(deferred_key)
+                then {
+                    mono.storage.pending_request_keys.insert(deferred_key)
+                    mono.storage.pending_requests.push(deferred_req)
+                }
+                mono.storage.current_self_type = saved_self_type
+                return result_symbol
+            }
             // Substitute generic params with concrete types and emit a FunctionDecl.
             mono.storage.extension_body_resolution_depth += 1
             let saved_self_type = mono.storage.current_self_type
             mono.storage.current_self_type = Option[Type].Some(base_type)
+            if env("KORAL_DEBUG_SUBST_CONTEXT") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
+                println("[mono-subst] method \(mangled_name)")
+            }
             let concrete_body = mono.substitute_types_in_expression_impl(body, substitution)
             let resolved_concrete_body = resolve_types_in_expression(mono, concrete_body)
             mono.storage.current_self_type = saved_self_type
@@ -2023,7 +2049,114 @@ private let type_satisfies_trait_constraint(
     }
 
     let parameterized_actual_type = resolve_parameterized_type(mono, actual_type)
+    if trait_name == "Deref" then {
+        return when parameterized_actual_type in {
+            .TraitObject(_, _) then false,
+            .OpaqueType(_) then false,
+            .GenericParameter(_) then false,
+            .StructureType(def_id) then not mono.storage.context.is_not_deref(def_id),
+            .EnumType(def_id) then not mono.storage.context.is_not_deref(def_id),
+            _ then true,
+        }
+    }
+
     let primitive_name_opt = primitive_extension_template_name(parameterized_actual_type)
+
+    let actual_template_match = when parameterized_actual_type in {
+        .GenericStruct(template_name, args) then Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]](template_name, args)),
+        .GenericEnum(template_name, args) then Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]](template_name, args)),
+        .ReferenceType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("Ref", args))
+        },
+        .MutableReferenceType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("MutRef", args))
+        },
+        .BorrowedReferenceType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("Ref", args))
+        },
+        .MutableBorrowedReferenceType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("MutRef", args))
+        },
+        .WeakReferenceType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("WeakRef", args))
+        },
+        .MutableWeakReferenceType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("MutWeakRef", args))
+        },
+        .PointerType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("Ptr", args))
+        },
+        .MutablePointerType(inner) then {
+            let mutable args = List[* Type].new()
+            args.push(box(resolve_parameterized_type(mono, *inner)))
+            break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]]("MutPtr", args))
+        },
+        .StructureType(def_id) then when resolve_template_name_and_args(mono, def_id) in {
+            .Some(info) then {
+                let mutable arg_refs = List[* Type].new()
+                for arg in info.second then {
+                    arg_refs.push(box(resolve_parameterized_type(mono, arg)))
+                }
+                break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]](info.first, arg_refs))
+            },
+            .None() then Option[Pair[String, List[* Type]]].None(),
+        },
+        .EnumType(def_id) then when resolve_template_name_and_args(mono, def_id) in {
+            .Some(info) then {
+                let mutable arg_refs = List[* Type].new()
+                for arg in info.second then {
+                    arg_refs.push(box(resolve_parameterized_type(mono, arg)))
+                }
+                break Option[Pair[String, List[* Type]]].Some(Pair[String, List[* Type]](info.first, arg_refs))
+            },
+            .None() then Option[Pair[String, List[* Type]]].None(),
+        },
+        _ then Option[Pair[String, List[* Type]]].None(),
+    }
+
+    when actual_template_match in {
+        .Some(info) then {
+            let template_name = info.first
+            let template_args = info.second
+            let matching_templates = mono.storage.generic_templates.lookup_extension_methods(template_name) or else List[* GenericExtensionMethodTemplate].new()
+            let mutable saw_matching_template = false
+            for template_ref in matching_templates then {
+                when template_ref.conformance_trait_name in {
+                    .Some(conformance_trait_name) then {
+                        if not trait_name_matches(conformance_trait_name, trait_name) then {
+                            continue
+                        }
+                    },
+                    .None() then { continue },
+                }
+                if template_ref.type_params.count() <> template_args.count() then {
+                    continue
+                }
+                saw_matching_template = true
+                if extension_type_args_satisfy_constraints(mono, template_ref, template_args) then {
+                    return true
+                }
+            }
+            if saw_matching_template then {
+                return false
+            }
+        },
+        .None() then {},
+    }
 
     for node_ref in mono.storage.source_given_decls then {
         when node_ref in {

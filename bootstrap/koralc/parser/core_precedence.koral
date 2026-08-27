@@ -359,7 +359,7 @@ given Parser {
 
         while self.current().kind is .KwAnd() then {
             if self.should_break_binary_at_current_token() then { break }
-            let is_and_then = when self.peek_kind() in { .Some(.KwThen()) then true, _ then false }
+            let is_and_then = self.next_is_then()
             if not is_and_then then {
                 break
             }
@@ -377,7 +377,8 @@ given Parser {
 
         while self.current().kind is .KwAnd() then {
             if self.should_break_binary_at_current_token() then { break }
-            if self.peek_kind() is .Some(.KwThen()) then {
+            let next_is_then = self.next_is_then()
+            if next_is_then then {
                 break
             }
             self.advance()
@@ -394,12 +395,18 @@ given Parser {
 
         while self.current().kind is .KwOr() then {
             if self.should_break_binary_at_current_token() then { break }
-            let is_or_else = when self.peek_kind() in { .Some(.KwElse()) then true, _ then false }
+            let mutable next_text = "<none>"
+            if self.index + 1 < self.tokens.count() then {
+                next_text = token_text(self.tokens[self.index + 1])
+            }
+            let is_or_else = self.next_is_else()
+            self.parse_debug("parse_or_else saw or token=\(token_text(self.current())) next=\(next_text) is_or_else=\(is_or_else)")
             if not is_or_else then {
                 break
             }
             self.advance()
             self.advance()
+            self.parse_debug("parse_or_else consumed or/else current=\(token_text(self.current()))")
             let rhs = self.parse_and() or return
             expr = box(Expr.OrElseExpr(box(*expr), box(*rhs), self.span_from_expr_start(expr)))
         }
@@ -412,10 +419,17 @@ given Parser {
 
         while self.current().kind is .KwOr() then {
             if self.should_break_binary_at_current_token() then { break }
-            if self.peek_kind() is .Some(.KwElse()) then {
+            let mutable next_text = "<none>"
+            if self.index + 1 < self.tokens.count() then {
+                next_text = token_text(self.tokens[self.index + 1])
+            }
+            let next_is_else = self.next_is_else()
+            let next_is_return = self.next_is_return()
+            self.parse_debug("parse_or saw or token=\(token_text(self.current())) next=\(next_text) next_is_else=\(next_is_else) next_is_return=\(next_is_return)")
+            if next_is_else then {
                 break
             }
-            if self.peek_kind() is .Some(.KwReturn()) then {
+            if next_is_return then {
                 break
             }
             self.advance()
@@ -432,7 +446,7 @@ given Parser {
 
         while self.current().kind is .KwOr() then {
             if self.should_break_binary_at_current_token() then { break }
-            let is_or_return = when self.peek_kind() in { .Some(.KwReturn()) then true, _ then false }
+            let is_or_return = self.next_is_return()
             if not is_or_return then {
                 break
             }

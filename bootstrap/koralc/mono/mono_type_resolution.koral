@@ -6344,6 +6344,7 @@ private let resolve_expr_kind(mono * Monomorphizer, expr * TypedExpr) * TypedExp
                 } else if should_preserve_resolved_method_reference(mono, method, adjusted_base.expr_type) then {
                     new_method = resolve_symbol_type(mono, method)
                 } else {
+                    let logical_method_name = get_semantic_method_name(mono, *method)
                     let mutable rebound_method = bind_receiver_method_symbol(
                         mono,
                         binding_receiver_type,
@@ -6356,7 +6357,6 @@ private let resolve_expr_kind(mono * Monomorphizer, expr * TypedExpr) * TypedExp
                         new_method = resolved_rebound_method
                         resolved_expression_type = resolve_parameterized_type(mono, resolved_rebound_method.symbol_type)
                     } else {
-                        let logical_method_name = get_semantic_method_name(mono, *method)
                         when lookup_instantiated_extension_method_symbol(
                             mono,
                             adjusted_base.expr_type,
@@ -6370,7 +6370,30 @@ private let resolve_expr_kind(mono * Monomorphizer, expr * TypedExpr) * TypedExp
                                 new_method = resolved_concrete_method
                                 resolved_expression_type = resolve_parameterized_type(mono, resolved_concrete_method.symbol_type)
                             },
-                            .None() then {},
+                            .None() then {
+                                if new_method.def_id.id == 0 and logical_method_name <> "" then {
+                                    let expected_return_type = when resolved_method_type in {
+                                        .FunctionType(_, ret) then resolve_parameterized_type(mono, *ret),
+                                        _ then Type.Unknown(),
+                                    }
+                                    when try_bind_generic_method_call_by_name(
+                                        mono,
+                                        binding_receiver_type,
+                                        logical_method_name,
+                                        List[* TypedExpr].new(),
+                                        expected_return_type,
+                                    ) in {
+                                        .Some(bound_by_name) then {
+                                            let mutable rebound_by_name = bound_by_name
+                                            let resolved_rebound_by_name = resolve_symbol_type(mono, &mutable rebound_by_name)
+                                            adjusted_base = align_method_reference_base_for_bound_method(mono, adjusted_base, resolved_rebound_by_name)
+                                            new_method = resolved_rebound_by_name
+                                            resolved_expression_type = resolve_parameterized_type(mono, resolved_rebound_by_name.symbol_type)
+                                        },
+                                        .None() then {},
+                                    }
+                                }
+                            },
                         }
                     }
                 }

@@ -63,28 +63,62 @@ given Scope {
     }
 
     public lookup(self, name String) Option[Symbol] = {
-        if self.storage.entries.get(name) is .Some(s) then {
-            return .Some(s)
+        let mutable current_opt = Option[Scope].Some(self)
+        let mutable traversed UInt = 0
+
+        while current_opt is .Some(_) then {
+            let current = when current_opt in {
+                .Some(scope) then scope,
+                .None() then self,
+            }
+
+            when current.storage.entries.get(name) in {
+                .Some(symbol) then { return .Some(symbol) },
+                .None() then {},
+            }
+
+            traversed += 1
+            if traversed > 4096(UInt) then {
+                return .None()
+            }
+
+            current_opt = current.storage.parent
         }
-        return when self.storage.parent in {
-            .Some(p) then p.lookup(name),
-            .None() then .None(),
-        }
+
+        return .None()
     }
 
     public lookup_type(self, name String) Option[Type] = {
-        // Generic params have highest priority (matches Swift's genericParameters check)
-        if self.storage.generic_params.contains(name) then {
-            if self.storage.type_entries.get(name) is .Some(t) then {
-                return .Some(t)
+        let mutable current_opt = Option[Scope].Some(self)
+        let mutable traversed UInt = 0
+
+        while current_opt is .Some(_) then {
+            let current = when current_opt in {
+                .Some(scope) then scope,
+                .None() then self,
             }
+
+            // Generic params have highest priority (matches Swift's genericParameters check)
+            if current.storage.generic_params.contains(name) then {
+                when current.storage.type_entries.get(name) in {
+                    .Some(t) then { return .Some(t) },
+                    .None() then {},
+                }
+            }
+
+            when current.storage.type_entries.get(name) in {
+                .Some(t) then { return .Some(t) },
+                .None() then {},
+            }
+
+            traversed += 1
+            if traversed > 4096(UInt) then {
+                return .None()
+            }
+
+            current_opt = current.storage.parent
         }
-        if self.storage.type_entries.get(name) is .Some(t) then {
-            return .Some(t)
-        }
-        if self.storage.parent is .Some(p) then {
-            return p.lookup_type(name)
-        }
+
         return .None()
     }
 

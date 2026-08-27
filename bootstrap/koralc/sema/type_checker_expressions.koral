@@ -11,16 +11,34 @@
 given TypeChecker {
     protected lookup_non_global_scope_symbol(self, scope Scope, name String) Option[Symbol] = {
         let _ = self
-        when scope.lookup_local(name) in {
-            .Some(symbol) then { return Option[Symbol].Some(symbol) },
-            .None() then {},
+        let mutable current_opt = Option[Scope].Some(scope)
+        let mutable traversed UInt = 0
+
+        while current_opt is .Some(_) then {
+            let current = when current_opt in {
+                .Some(found_scope) then found_scope,
+                .None() then scope,
+            }
+
+            when current.lookup_local(name) in {
+                .Some(symbol) then { return Option[Symbol].Some(symbol) },
+                .None() then {},
+            }
+
+            traversed += 1
+            if traversed > 4096(UInt) then {
+                return Option[Symbol].None()
+            }
+
+            current_opt = when current.parent_scope() in {
+                .Some(parent) then if parent.parent_scope() is .None()
+                    then Option[Scope].None()
+                    else Option[Scope].Some(parent),
+                .None() then Option[Scope].None(),
+            }
         }
-        return when scope.parent_scope() in {
-            .Some(parent) then if parent.parent_scope() is .None()
-                then Option[Symbol].None()
-                else self.lookup_non_global_scope_symbol(parent, name),
-            .None() then Option[Symbol].None(),
-        }
+
+        return Option[Symbol].None()
     }
 
     protected report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointer_type Type, pointee Type, member String) Void = {

@@ -4,6 +4,8 @@
 // to their concrete instantiated counterparts.
 //
 
+using std::os { env }
+
 // ── substitute_types_in_expression ───────────────────────────────────────────
 
 // Recursively substitute generic type parameters in a TypedExpr tree.
@@ -19,6 +21,16 @@ public let substitute_types_in_expression(
     expr * TypedExpr,
     substitution Dict[String, Type],
 ) * TypedExpr = {
+    mono.storage.current_recursion_depth += 1
+    if mono.storage.current_recursion_depth >= 180
+        and env("KORAL_DEBUG_SUBST_TRACE") is .Some(trace_value)
+        and (trace_value == "1" or trace_value == "true" or trace_value == "TRUE")
+    then {
+        println("[subst-depth] \(mono.storage.current_recursion_depth.to_string()) \(substitution_debug_expr_kind(expr.expr_kind)) :: \(layout_key(expr.expr_type))")
+    }
+    if mono.storage.current_recursion_depth > 200 then {
+        panic("substitute_types_in_expression recursion depth exceeded: kind=\(substitution_debug_expr_kind(expr.expr_kind)) type=\(layout_key(expr.expr_type)) subst=\(substitution.count().to_string())")
+    }
     let new_type = when expr.expr_kind in {
         .CastExpr(target_type, _) then when target_type in {
             .TraitObject(original_trait_name, original_type_args) then {
@@ -37,7 +49,47 @@ public let substitute_types_in_expression(
         .Unknown() then recover_unknown_expr_type(mono, new_kind, new_type),
         _ then new_type,
     }
+    mono.storage.current_recursion_depth -= 1
     return box(TypedExpr(new_kind, final_type))
+}
+
+private let substitution_debug_expr_kind(kind * TypedExprKind) String = {
+    return when kind in {
+        .Call(_, args) then "Call(args=\(args.count().to_string()))",
+        .MethodReference(_, _, method, _, method_type_args, _) then "MethodReference(def=\(method.def_id.id.to_string()),margs=\(method_type_args.count().to_string()))",
+        .StaticMethodCall(_, method_name, method, type_args, method_type_args, args) then "StaticMethodCall(name=\(method_name),def=\(method.def_id.id.to_string()),targs=\(type_args.count().to_string()),margs=\(method_type_args.count().to_string()),args=\(args.count().to_string()))",
+        .TraitMethodPlaceholder(_, _, method, method_type_args, _) then "TraitMethodPlaceholder(def=\(method.def_id.id.to_string()),margs=\(method_type_args.count().to_string()))",
+        .TraitMethodCall(_, _, method_name, _, args) then "TraitMethodCall(name=\(method_name),args=\(args.count().to_string()))",
+        .Block(statements) then "Block(stmts=\(statements.count().to_string()))",
+        .WhenExpr(_, arms) then "WhenExpr(arms=\(arms.count().to_string()))",
+        .LambdaExpr(params, _, _) then "LambdaExpr(params=\(params.count().to_string()))",
+        .MemberPath(_, path) then "MemberPath(path=\(path.count().to_string()))",
+        .RefExpr(_) then "RefExpr",
+        .PtrExpr(_) then "PtrExpr",
+        .DerefExpr(_) then "DerefExpr",
+        .TypeConstruction(identifier, type_args, args) then "TypeConstruction(def=\(identifier.def_id.id.to_string()),targs=\(type_args.count().to_string()),args=\(args.count().to_string()))",
+        .EnumConstruction(_, case_name, args) then "EnumConstruction(case=\(case_name),args=\(args.count().to_string()))",
+        .IntrinsicCall(_) then "IntrinsicCall",
+        .IfExpr(_, _, _) then "IfExpr",
+        .GenericCall(function_symbol, type_args, args) then "GenericCall(def=\(function_symbol.def_id.id.to_string()),targs=\(type_args.count().to_string()),args=\(args.count().to_string()))",
+        .GenericInstantiation(_, type_args) then "GenericInstantiation(targs=\(type_args.count().to_string()))",
+        .ArithmeticExpr(_, _, _) then "ArithmeticExpr",
+        .WrappingArithmeticExpr(_, _, _) then "WrappingArithmeticExpr",
+        .WrappingShiftExpr(_, _, _) then "WrappingShiftExpr",
+        .ComparisonExpr(_, _, _) then "ComparisonExpr",
+        .BitwiseExpr(_, _, _) then "BitwiseExpr",
+        .AndExpr(_, _) then "AndExpr",
+        .OrExpr(_, _) then "OrExpr",
+        .IsExpr(_, _, _) then "IsExpr",
+        .CastExpr(_, _) then "CastExpr",
+        .TraitObjectConversion(_, _, _) then "TraitObjectConversion",
+        .Unary(_, _) then "Unary",
+        .Variable(symbol) then "Variable(def=\(symbol.def_id.id.to_string()))",
+        .IntegerLiteral(_) then "IntegerLiteral",
+        .FloatLiteral(_) then "FloatLiteral",
+        .StringLiteral(_) then "StringLiteral",
+        .BoolLiteral(_) then "BoolLiteral",
+    }
 }
 
 private let recover_unknown_expr_type(
@@ -2768,7 +2820,7 @@ let bind_receiver_method_symbol(
                             method,
                             expected_method_type,
                         )
-                        break if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else try_bind_generic_method_call(
+                        break if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else *try_bind_generic_method_call(
                             mono,
                             resolved_receiver_type,
                             method,
@@ -2776,7 +2828,7 @@ let bind_receiver_method_symbol(
                             expected_return_type,
                                                 )
                     },
-                    .None() then try_bind_generic_method_call(
+                    .None() then *try_bind_generic_method_call(
                         mono,
                         resolved_receiver_type,
                         method,
@@ -2819,7 +2871,7 @@ let bind_receiver_method_symbol(
                 let shared_weakref_type = Type.WeakReferenceType(box(resolve_parameterized_type(mono, *inner)))
                 break when lookup_exact_receiver_method_symbol(mono, shared_weakref_type, method, expected_method_type_opt) in {
                     .Some(bound) then bound,
-                    .None() then try_bind_generic_method_call(
+                    .None() then *try_bind_generic_method_call(
                         mono,
                         shared_weakref_type,
                         method,
@@ -2840,7 +2892,7 @@ let bind_receiver_method_symbol(
                             method,
                             expected_method_type,
                         )
-                        break if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else try_bind_generic_method_call(
+                        break if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else *try_bind_generic_method_call(
                             mono,
                             resolved_receiver_type,
                             method,
@@ -2848,7 +2900,7 @@ let bind_receiver_method_symbol(
                             expected_return_type,
                                                 )
                     },
-                    .None() then try_bind_generic_method_call(
+                    .None() then *try_bind_generic_method_call(
                         mono,
                         resolved_receiver_type,
                         method,

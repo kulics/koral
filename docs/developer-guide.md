@@ -224,6 +224,107 @@ let temp *Int = &42            // OK: managed & may materialize rvalues
 - The parameter is raw owned storage, so `Drop` should not rely on ref-style escape distinctions such as borrow-vs-owned checks.
 - Do not impose a primitive-field whitelist on `Drop` implementors. Composite-field types are valid; the important restriction is destructor behavior, not field shape.
 
+## Bootstrap Self-Hosting Repair Notes
+
+The current bootstrap compiler has been repaired back to a stable self-hosting chain. This section records the root causes that mattered, the Swift-architecture alignments that fixed them, and the validation flow that should be reused when similar regressions return.
+
+### Root Causes That Actually Mattered
+
+- Several bootstrap hot paths were relying on mutable local values that the current bootstrap compiler lowered as temporary boxed copies when passed through `&mut`-style method calls. The symptom was not immediate type failure; it showed up later as use-after-free, malformed generated C, or corrupted codegen state.
+- The most important instances were:
+    - `CodeGen` lifecycle in `generate_c_from_mir`: separate phase calls were mutating different effective `CodeGen` objects instead of one stable instance.
+    - `MIRFunctionCodeEmitter` nested-definition flow: body emission could mutate emitter-owned strings and then later read from a moved-from local emitter value.
+    - `RecursiveTypeChecker.detect_cycles`: local `Dict` / `List` working state passed into DFS was lowered through transient boxed copies and then reused after release.
+- Generic struct/enum instantiation in bootstrap mono resolved template type nodes, but did not consistently re-run nested parameterized type concretization the way Swift does. This showed up as wrong concrete type layers in generated C for cases such as `Option[List[*T]]`.
+- Pattern variable lowering in bootstrap MIR builder was over-eagerly materializing copied locals for enum payload matches. For `Option[*T]` payloads this regressed ref-like semantics and produced value/ref mismatches.
+
+### Swift Alignments That Fixed The Bugs
+
+- Treat the codegen driver as operating on one stable mutable object. In bootstrap, `generate_c_from_mir` should keep a single boxed `CodeGen` and mutate that one instance through prelude, body emission, finalization, and string extraction.
+- Avoid by-value `CodeGen` receivers on codegen hot paths. Swift effectively has reference semantics here; bootstrap needed the same practical behavior via `*self` to stop copying internal state such as caches and output buffers.
+- When bootstrap MIR/codegen needs mutable helper state that survives across multiple calls, prefer one stable boxed object over repeatedly passing stack locals through `&mut`-style calls.
+- Align generic type instantiation with Swift's two-step approach:
+    1. substitute template parameters
+    2. immediately resolve nested parameterized types to concrete instantiated types
+- Align MIR pattern-variable binding with Swift's place-based binding strategy. Do not always materialize a copied local for a variable pattern; preserve the matched place when the binding is semantically a reference-like payload.
+- Align local-name lookup in MIR codegen with Swift's `localNameByID` model instead of assuming `MIRLocalID.raw_value == locals` array index everywhere.
+
+### Bounded Self-Host Validation Flow
+
+For late bootstrap failures, do not trust long shell chains that interleave generation, clang, and the next-stage run. Use isolated stages.
+
+Recommended flow:
+
+```bash
+# 1) Build the host bootstrap compiler with the Swift compiler
+compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+
+# 2) Generate stage2 C
+./bin/bootstrap/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage2
+
+# 3) Compile stage2
+clang bin/bootstrap-stage2/koralc.c std/koral_runtime.c -I std -o bin/bootstrap-stage2/koralc -Wno-everything -O1
+
+# 4) Generate later stages one step at a time
+./bin/bootstrap-stage2/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage3
+clang bin/bootstrap-stage3/koralc.c std/koral_runtime.c -I std -o bin/bootstrap-stage3/koralc -Wno-everything -O1
+./bin/bootstrap-stage3/koralc emit-c --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap-stage4
+```
+
+Operational rules:
+
+- Keep per-case runner timeout enabled (`--timeout 120` is the current stable baseline).
+- Wrap long self-host or suite runs in an outer memory / CPU cap. On this macOS setup, a CPU cap remains useful, but Python's `resource.setrlimit` for `RLIMIT_AS` / `RLIMIT_DATA` may reject updates even when the shell reports unlimited limits. If that happens, keep `--timeout` enabled, apply the CPU cap, and reduce runner parallelism instead of assuming address/data limits can always be enforced from Python.
+- Prefer ASan over ad hoc logging once a failure is reproducible. In this repair, ASan was decisive for identifying UAFs in `CodeGen`, `MIRFunctionCodeEmitter`, and `RecursiveTypeChecker` working-state handling.
+
+### Cleanup Rules After Bootstrap Debugging
+
+- Remove temporary codegen probe logging after the failing boundary is identified. Keeping those probes in-tree can change ownership/lifetime lowering and create misleading secondary failures.
+- Clean out stale stage directories under `bin/` once a repair is validated. Keep only actively useful entrypoints such as `bin/bootstrap/`, `bin/compiler-test-runner/`, and current user-facing tool outputs.
+- If a bootstrap fix touches parser, MIR lowering, mono, or codegen, rerun both self-host validation and focused semantic buckets before trusting a full-suite green result.
+
+### Named-Parameter Guardrail
+
+Named-parameter behavior is an active compatibility surface and must not regress as a side effect of bootstrap repairs.
+
+Do not keep positional-call workarounds in `std/` once named-parameter handling is repaired. Those edits can hide real regressions by making the standard library avoid the affected call paths.
+
+High-signal cases to rerun when parser, sema call lowering, MIR lowering, or codegen call paths change:
+
+- `named_params_basic`
+- `named_params_struct`
+- `named_params_trait`
+- `named_params_generics`
+- `named_params_pattern`
+- `named_params_errors`
+- `named_params_mismatch_error`
+- `named_params_pattern_error`
+- `named_params_unexpected_label_error`
+- `named_params_foreign_error`
+- `named_params_lambda_error`
+
+Suggested focused rerun loop:
+
+```bash
+cases=(
+    named_params_basic
+    named_params_struct
+    named_params_trait
+    named_params_generics
+    named_params_pattern
+    named_params_errors
+    named_params_mismatch_error
+    named_params_pattern_error
+    named_params_unexpected_label_error
+    named_params_foreign_error
+    named_params_lambda_error
+)
+
+for case_name in "${cases[@]}"; do
+    ./bin/compiler-test-runner/main --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc --filter "$case_name" --timeout 120
+done
+```
+
 ## Standard Library Receiver Design
 
 When designing standard-library APIs, choose method receivers by ownership semantics first and implementation convenience second.

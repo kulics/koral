@@ -14,6 +14,7 @@ type MIRLocalLifetimePlan(
 
 type MIRFunctionEmitPlan(
     local_names List[String],
+    local_names_by_id *mutable Dict[UInt, String],
     non_owning_local_ids * Dict[UInt, Bool],
     tracked_init_locals * Dict[UInt, Bool],
     lifetime_plan * MIRLocalLifetimePlan,
@@ -63,9 +64,16 @@ private let compute_non_owning_mir_locals(function * MIRFunction) * Dict[UInt, B
                     .Local(local_id) then {
                         saw_assignment_by_local.insert(local_id.raw_value, true)
                         let already_all_non_owning = all_non_owning_by_local.get(local_id.raw_value) or else true
+                        let mutable target_type = Type.Unknown()
+                        for local in function.locals then {
+                            if local.id.raw_value == local_id.raw_value then {
+                                target_type = local.local_type
+                                break
+                            }
+                        }
                         all_non_owning_by_local.insert(
                             local_id.raw_value,
-                            already_all_non_owning and is_non_owning_local_value(value, function.locals[local_id.raw_value].local_type),
+                            already_all_non_owning and is_non_owning_local_value(value, target_type),
                         )
                     },
                     _ then {},
@@ -319,6 +327,7 @@ type MIRFunctionCodeEmitter(
     codegen *mutable CodeGen,
     function * MIRFunction,
     mutable local_names List[String],
+    mutable local_names_by_id *mutable Dict[UInt, String],
     mutable non_owning_local_ids * Dict[UInt, Bool],
     mutable tracked_init_locals * Dict[UInt, Bool],
     mutable lifetime_plan * MIRLocalLifetimePlan,
@@ -334,6 +343,7 @@ private let build_mir_function_emit_plan(
     function * MIRFunction,
 ) * MIRFunctionEmitPlan = {
     let mutable local_names = List[String].new()
+    let mutable local_names_by_id = Dict[UInt, String].new()
     let mutable non_owning_local_ids = compute_non_owning_mir_locals(function)
     let mutable tracked_init_locals = Dict[UInt, Bool].new()
 
@@ -354,6 +364,7 @@ private let build_mir_function_emit_plan(
             .None() then false,
         }
         local_names.push(name)
+        local_names_by_id.insert(local.id.raw_value, name)
         if local.storage is not .Capture() and not codegen.type_is_void_or_never(local.local_type) and codegen.needs_drop(local.local_type) and not is_non_owning then {
             tracked_init_locals.insert(local.id.raw_value, true)
         }
@@ -362,6 +373,7 @@ private let build_mir_function_emit_plan(
     let lifetime_plan = build_mir_lifetime_plan(function, codegen, tracked_init_locals)
     return box(MIRFunctionEmitPlan(
         local_names,
+        box(local_names_by_id),
         non_owning_local_ids,
         box(tracked_init_locals),
         lifetime_plan,
@@ -374,6 +386,7 @@ given MIRFunctionCodeEmitter {
             codegen,
             function,
             plan.local_names,
+            plan.local_names_by_id,
             plan.non_owning_local_ids,
             plan.tracked_init_locals,
             plan.lifetime_plan,
@@ -393,6 +406,11 @@ given MIRFunctionCodeEmitter {
         for block in self.function.blocks then {
             self.emit_block(block)
         }
+    }
+
+    public emit_body_and_get_nested_definitions(*mutable self) String = {
+        self.emit_body()
+        return self.get_nested_definitions()
     }
 
     public get_nested_definitions(*self) String = {
@@ -431,8 +449,10 @@ given MIRFunctionCodeEmitter {
     }
 
     protected local_info(*self, local_id MIRLocalID) Option[* MIRLocal] = {
-        if local_id.raw_value < self.function.locals.count() then {
-            return Option[* MIRLocal].Some(self.function.locals[local_id.raw_value])
+        for local in self.function.locals then {
+            if local.id.raw_value == local_id.raw_value then {
+                return Option[* MIRLocal].Some(local)
+            }
         }
         return Option[* MIRLocal].None()
     }
@@ -2141,7 +2161,7 @@ given MIRFunctionCodeEmitter {
         let mutable parameter_local_names = List[String].new()
         for local in mir_function.locals then {
             if local.storage is .Parameter() and parameter_local_names.count() < params.count() then {
-                parameter_local_names.push(plan.local_names[local.id.raw_value])
+                parameter_local_names.push(plan.local_names_by_id.get(local.id.raw_value) or else plan.local_names[parameter_local_names.count()])
             }
         }
         // Build parameter list
@@ -2161,11 +2181,10 @@ given MIRFunctionCodeEmitter {
         self.codegen.indent = "    "
         let mutable body_emitter = MIRFunctionCodeEmitter.new(self.codegen, mir_function, plan)
         let saved_buffer = self.codegen.buffer
-        self.codegen.buffer = box(CodegenBuffer.new())
-        (&mutable body_emitter).emit_body()
+        self.codegen.buffer = CodegenBuffer.new()
+        let inner_nested = (&mutable body_emitter).emit_body_and_get_nested_definitions()
         let body_text = self.codegen.buffer.into_string()
         self.codegen.buffer = saved_buffer
-        let inner_nested = body_emitter.nested_definitions
         self.codegen.indent = saved_indent
 
         self.nested_definitions.push_string(inner_nested)
@@ -2179,7 +2198,7 @@ given MIRFunctionCodeEmitter {
         let mutable parameter_local_names = List[String].new()
         for local in mir_function.locals then {
             if local.storage is .Parameter() and parameter_local_names.count() < params.count() then {
-                parameter_local_names.push(plan.local_names[local.id.raw_value])
+                parameter_local_names.push(plan.local_names_by_id.get(local.id.raw_value) or else plan.local_names[parameter_local_names.count()])
             }
         }
         // Build parameter list with void* __env first
@@ -2200,7 +2219,7 @@ given MIRFunctionCodeEmitter {
         self.codegen.indent = "    "
         let mutable body_emitter = MIRFunctionCodeEmitter.new(self.codegen, mir_function, plan)
         let saved_buffer = self.codegen.buffer
-        self.codegen.buffer = box(CodegenBuffer.new())
+        self.codegen.buffer = CodegenBuffer.new()
         // Override local names for captured variables
         for capture in captures then {
             let capture_name = "__captured->\(self.capture_field_name(*capture))"
@@ -2208,17 +2227,16 @@ given MIRFunctionCodeEmitter {
                 when local.symbol in {
                     .Some(symbol) then {
                         if symbol.def_id.id == capture.def_id.id and local.storage is .Capture() then {
-                            body_emitter.local_names[local.id.raw_value] = capture_name
+                            body_emitter.local_names_by_id.insert(local.id.raw_value, capture_name)
                         }
                     },
                     .None() then {},
                 }
             }
         }
-        (&mutable body_emitter).emit_body()
+        let inner_nested = (&mutable body_emitter).emit_body_and_get_nested_definitions()
         let body_text = self.codegen.buffer.into_string()
         self.codegen.buffer = saved_buffer
-        let inner_nested = body_emitter.nested_definitions
         self.codegen.indent = saved_indent
 
         self.nested_definitions.push_string(inner_nested)
@@ -2246,7 +2264,7 @@ given MIRFunctionCodeEmitter {
             let field_name = self.capture_field_name(*capture)
             if self.codegen.needs_drop(capture.symbol_type) then {
                 let saved_buffer = self.codegen.buffer
-                self.codegen.buffer = box(CodegenBuffer.new())
+                self.codegen.buffer = CodegenBuffer.new()
                 self.codegen.add_indent()
                 self.codegen.append_drop_statement(capture.symbol_type, "env->\(field_name)")
                 self.nested_definitions.push_string(self.codegen.buffer.into_string())
@@ -2442,7 +2460,7 @@ given MIRFunctionCodeEmitter {
 
     protected local_target_id(*self, place MIRPlace) Option[MIRLocalID] = when place in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() }
     protected local_id_from_operand(*self, operand MIROperand) Option[MIRLocalID] = when operand in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() }
-    protected local_name(*self, local MIRLocalID) String = if local.raw_value < self.local_names.count() then self.local_names[local.raw_value] else "__mir_local_\(local.raw_value)"
+    protected local_name(*self, local MIRLocalID) String = self.local_names_by_id.get(local.raw_value) or else "__mir_local_\(local.raw_value)"
     protected block_label(*self, block MIRBlockID) String = "__mir_bb_\(block.raw_value)"
 
     protected is_parameter_operand(*self, operand MIROperand) Bool = {
@@ -3129,24 +3147,21 @@ given CodeGen {
         }
     }
 
-    public emit_mir_function_body(*mutable self, function * MIRFunction) * CodegenBuffer = {
+    public emit_mir_function_body(*mutable self, function * MIRFunction) String = {
         let saved_indent = self.indent
         self.indent = "    "
         let plan = build_mir_function_emit_plan(self, function)
         let mutable emitter = MIRFunctionCodeEmitter.new(self, function, plan)
-        // Redirect body emission into a temporary buffer
         let saved_buffer = self.buffer
-        self.buffer = box(CodegenBuffer.new())
-        (&mutable emitter).emit_body()
-        let body_buffer = self.buffer
+        self.buffer = CodegenBuffer.new()
+        let nested = (&mutable emitter).emit_body_and_get_nested_definitions()
+        let body_text = self.buffer.into_string()
         self.buffer = saved_buffer
-        // Collect nested definitions (lambda env structs, nested functions)
-        let nested = emitter.get_nested_definitions()
         if not nested.is_empty() then {
             self.nested_function_definitions.push_string(nested)
         }
         self.indent = saved_indent
-        return body_buffer
+        return body_text
     }
 
     public emit_mir_global_function(*mutable self, function * MIRFunction) Void = {
@@ -3169,7 +3184,7 @@ given CodeGen {
             let return_c_type = self.c_type_name(concrete_return_type)
             let params_str = self.build_param_list(function.params)
             // Generate the function body and collect nested definitions
-            let body_buffer = self.emit_mir_function_body(function)
+            let body_text = self.emit_mir_function_body(function)
 
             // Emit nested definitions (lambda functions, env structs) before the function
             if not self.nested_function_definitions.is_empty() then {
@@ -3183,7 +3198,7 @@ given CodeGen {
             self.buffer.push_string("(")
             self.buffer.push_string(params_str)
             self.buffer.push_string(") {\n")
-            self.buffer.push_buffer(body_buffer)
+            self.buffer.push_string(body_text)
             self.buffer.push_string("}\n")
         }
 

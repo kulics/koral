@@ -37,6 +37,8 @@ type MIRFunctionBuilder(
     mutable pattern_subject_operand Option[MIROperand],
     mutable pattern_subject_tag Option[MIROperand],
     mutable pattern_comparison_local Option[MIRLocalID],
+    mutable temporary_value_source_locations Dict[UInt, MIRTemporaryValueSourceLocation],
+    mutable ambiguous_temporary_value_source_locals Set[UInt],
 )
 
 given MIRFunctionBuilder {
@@ -77,6 +79,8 @@ given MIRFunctionBuilder {
             Option[MIROperand].None(),
             Option[MIROperand].None(),
             Option[MIRLocalID].None(),
+            Dict[UInt, MIRTemporaryValueSourceLocation].new(),
+            Set[UInt].new(),
         )
     }
 
@@ -109,6 +113,7 @@ given MIRFunctionBuilder {
             MIRBlockID(0(UInt)),
             self.boxed_locals(),
             self.boxed_blocks(),
+            self.temporary_value_source_locations,
         ))
     }
 
@@ -150,8 +155,41 @@ given MIRFunctionBuilder {
     }
 
     private append_statement_to_block(*mutable self, block * mutable MIRBasicBlock, statement MIRStatement) Void = {
-        let _ = self
+        self.record_temporary_value_source(block, statement)
         block.statements.push(box(statement))
+    }
+
+    private local_is_temporary(*self, local_id MIRLocalID) Bool = {
+        if local_id.raw_value < self.locals.count() then {
+            return self.locals[local_id.raw_value].storage is .Temporary()
+        }
+        return false
+    }
+
+    private record_temporary_value_source(*mutable self, block * mutable MIRBasicBlock, statement MIRStatement) Void = {
+        when statement in {
+            .Assign(place, _) then when place in {
+                .Local(local_id) then {
+                    if not self.local_is_temporary(local_id) then {
+                        return
+                    }
+                    if self.ambiguous_temporary_value_source_locals.contains(local_id.raw_value) then {
+                        return
+                    }
+                    when self.temporary_value_source_locations.get(local_id.raw_value) in {
+                        .Some(_) then {
+                            let _ = self.temporary_value_source_locations.remove(local_id.raw_value)
+                            self.ambiguous_temporary_value_source_locals.insert(local_id.raw_value)
+                        },
+                        .None() then {
+                            self.temporary_value_source_locations.insert(local_id.raw_value, MIRTemporaryValueSourceLocation(self.current_block_index, block.statements.count()))
+                        },
+                    }
+                },
+                _ then {},
+            },
+            _ then {},
+        }
     }
 
     private set_block_terminator(*mutable self, block * mutable MIRBasicBlock, terminator MIRTerminator) Void = {
@@ -1671,19 +1709,8 @@ given MIRFunctionBuilder {
                 if binding_type is not .VoidType() then {
                     let source_place = if binding_type == subject_type then subject_place else matched_place
                     let binding_name = self.context.symbol_name(*symbol)
-                    let local = self.make_local(
-                        binding_name,
-                        binding_type,
-                        if symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable(),
-                        MIRStorage.Local(),
-                        Option[* Symbol].Some(symbol),
-                    )
-                    self.local_by_def_id.insert(symbol.def_id.id, local.id)
-                    self.append_statement(MIRStatement.Declare(local.id))
-                    self.append_statement(MIRStatement.Assign(MIRPlace.Local(local.id), MIRValue.PlaceRead(source_place, MIROwnershipUse.Copy())))
-                    let place = MIRPlace.Local(local.id)
-                    self.pattern_place_by_def_id.insert(symbol.def_id.id, place)
-                    self.pattern_place_by_name.insert(binding_name, place)
+                    self.pattern_place_by_def_id.insert(symbol.def_id.id, source_place)
+                    self.pattern_place_by_name.insert(binding_name, source_place)
                 }
             },
             .EnumCase(case_name, tag_index, elements) then {
@@ -2416,7 +2443,10 @@ given MIRFunctionBuilder {
 
         return when self.lookup_concrete_method_symbol(effective_receiver_type, method_name, concrete_type) in {
             .Some(symbol) then Option[Symbol].Some(symbol),
-            .None() then Option[Symbol].Some(Symbol(method.def_id, concrete_type, method.kind)),
+            .None() then if method.def_id.id == 0 or method_name.is_empty() then when self.lookup_concrete_method_symbol_by_shape(effective_receiver_type, concrete_type) in {
+                .Some(symbol) then Option[Symbol].Some(symbol),
+                .None() then Option[Symbol].None(),
+            } else Option[Symbol].Some(Symbol(method.def_id, concrete_type, method.kind)),
         }
     }
 
@@ -2494,14 +2524,72 @@ given MIRFunctionBuilder {
                             if self.method_owner_matches_receiver(owner_type, receiver_type) then {
                                 return Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
                             }
+                            if self.full_method_signature_matches_call(function_type, expected_type) then {
+                                return Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
+                            }
                         },
                         .None() then {},
+                    }
+                },
+                .None() then when self.context.get_function_type(def_id) in {
+                    .Some(function_type) then {
+                        if self.full_method_signature_matches_call(function_type, expected_type) then {
+                            return Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
+                        }
+                    },
+                    .None() then {},
+                },
+            }
+        }
+        return Option[Symbol].None()
+    }
+
+    private lookup_concrete_method_symbol_by_shape(*self, receiver_type Type, expected_type Type) Option[Symbol] = {
+        if receiver_type is .Unknown() then {
+            return Option[Symbol].None()
+        }
+        let mutable candidate = Option[Symbol].None()
+        let mutable candidate_count UInt = 0
+        let mutable seen_def_ids = Set[UInt].new()
+        for entry in self.program.static_method_by_key.iterator() then {
+            let def_id = entry.second
+            if seen_def_ids.contains(def_id.id) then {
+                continue
+            }
+            when self.context.get_function_type(def_id) in {
+                .Some(function_type) then {
+                    if self.full_method_signature_matches_call(function_type, expected_type) then {
+                        seen_def_ids.insert(def_id.id)
+                        candidate = Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
+                        candidate_count += 1(UInt)
+                        if candidate_count > 1(UInt) then {
+                            return Option[Symbol].None()
+                        }
                     }
                 },
                 .None() then {},
             }
         }
-        return Option[Symbol].None()
+        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+            let def_id = entry.first
+            if seen_def_ids.contains(def_id.id) then {
+                continue
+            }
+            when self.context.get_function_type(def_id) in {
+                .Some(function_type) then {
+                    if self.full_method_signature_matches_call(function_type, expected_type) then {
+                        seen_def_ids.insert(def_id.id)
+                        candidate = Option[Symbol].Some(Symbol(def_id, function_type, SymbolKind.Function()))
+                        candidate_count += 1(UInt)
+                        if candidate_count > 1(UInt) then {
+                            return Option[Symbol].None()
+                        }
+                    }
+                },
+                .None() then {},
+            }
+        }
+        return if candidate_count == 1(UInt) then candidate else Option[Symbol].None()
     }
 
     private ref_like_base_layout_key(*self, t Type) Option[String] = {
@@ -2538,6 +2626,33 @@ given MIRFunctionBuilder {
                         return false
                     }
                     let mutable idx UInt = 1
+                    while idx < actual_params.count() then {
+                        let actual_param_type = (*actual_params[idx]).param_type
+                        let expected_param_type = (*expected_params[idx]).param_type
+                        if not self.call_param_types_match(actual_param_type, expected_param_type) then {
+                            return false
+                        }
+                        idx += 1
+                    }
+                    break true
+                },
+                _ then false,
+            },
+            _ then false,
+        }
+    }
+
+    private full_method_signature_matches_call(*self, function_type Type, expected_type Type) Bool = {
+        return when function_type in {
+            .FunctionType(actual_params, actual_return) then when expected_type in {
+                .FunctionType(expected_params, expected_return) then {
+                    if actual_params.count() <> expected_params.count() then {
+                        return false
+                    }
+                    if self.concrete_layout_key_for_type(*actual_return) <> self.concrete_layout_key_for_type(*expected_return) then {
+                        return false
+                    }
+                    let mutable idx UInt = 0
                     while idx < actual_params.count() then {
                         let actual_param_type = (*actual_params[idx]).param_type
                         let expected_param_type = (*expected_params[idx]).param_type

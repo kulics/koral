@@ -313,6 +313,8 @@ given TypeChecker {
         let mutable effective_type_name = ""
         let mutable receiver_type_args = List[Type].new()
         let mutable resolved_receiver_type = receiver_type
+        let mutable static_sig_opt = Option[Symbol].None()
+        let mutable static_bindings = Dict[String, Type].new()
         when receiver_type in {
             .GenericStruct(template, type_args) then {
                 effective_type_name = template
@@ -367,15 +369,15 @@ given TypeChecker {
             break self.resolve_method_return_type(receiver_type, method_name)
         } else {
             let declared_receiver_type = self.resolve_static_declared_receiver_type(effective_type_name, receiver_type_args)
-            let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
+            static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
             resolved_method_type_args = when static_sig_opt in {
                 .Some(sig) then self.resolve_static_method_type_args_for_call(effective_type_name, receiver_type_args, sig, args, List[Type].new(), Option[Type].Some(fallback_return_type)),
                 .None() then List[Type].new(),
             }
             resolved_receiver_type = when static_sig_opt in {
                 .Some(sig) then {
-                    let bindings = self.resolve_static_call_type_bindings(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, Option[Type].Some(fallback_return_type))
-                    break self.apply_type_bindings(declared_receiver_type, bindings)
+                    static_bindings = self.resolve_static_call_type_bindings(effective_type_name, receiver_type_args, sig, args, resolved_method_type_args, Option[Type].Some(fallback_return_type))
+                    break self.apply_type_bindings(declared_receiver_type, static_bindings)
                 },
                 .None() then declared_receiver_type,
             }
@@ -389,7 +391,10 @@ given TypeChecker {
             break self.apply_static_method_type_bindings(effective_type_name, receiver_type_arg_refs, raw_return_type)
         }
         let return_type = if self.is_unresolved_expr_type(resolved_return_type) then fallback_return_type else resolved_return_type
-        let method_symbol = self.make_method_symbol(method_name, return_type)
+        let method_symbol = when static_sig_opt in {
+            .Some(sig) then self.bind_method_symbol_type(sig, static_bindings),
+            .None() then self.make_method_symbol(method_name, return_type),
+        }
         return make_typed_expr(
             TypedExprKind.StaticMethodCall(
                 resolved_receiver_type,
@@ -427,7 +432,11 @@ given TypeChecker {
     }
 
     protected lower_receiver_method_call_expr(self, receiver TypedExpr, method_name String, args List[* TypedExpr]) TypedExpr = {
-        let expected_self_type = self.resolve_method_self_type(receiver.expr_type, method_name)
+        let initial_method_opt = self.resolve_method_signature(receiver.expr_type, method_name)
+        let expected_self_type = when initial_method_opt in {
+            .Some(method) then self.resolve_bound_method_self_type(receiver.expr_type, method),
+            .None() then self.resolve_method_self_type(receiver.expr_type, method_name),
+        }
         let prepared_receiver = self.prepare_call_receiver(receiver, expected_self_type)
         let adapted_receiver = self.adapt_receiver_to_expected_self_type_for_method(prepared_receiver.first, expected_self_type, method_name)
         let normalized_receiver_type = when receiver.expr_type in {
@@ -440,13 +449,30 @@ given TypeChecker {
             _ then receiver.expr_type,
         }
         self.maybe_record_extension_method_instantiation(normalized_receiver_type, method_name, List[Type].new())
-        let return_type = self.resolve_method_return_type(adapted_receiver.expr_type, method_name)
-        let method_symbol = self.make_method_symbol(method_name, return_type)
+        let method_symbol = when self.resolve_method_signature(adapted_receiver.expr_type, method_name) in {
+            .Some(method) then method,
+            .None() then when initial_method_opt in {
+                .Some(method) then method,
+                .None() then self.make_method_symbol(method_name, self.resolve_method_return_type(adapted_receiver.expr_type, method_name)),
+            },
+        }
+        let param_types = self.resolve_method_param_types_with_method_type_args(adapted_receiver.expr_type, method_name, List[Type].new())
+        let mutable typed_args = List[* TypedExpr].new()
+        let mutable arg_index UInt = 0
+        for arg_ref in args then {
+            let expected_arg_type = when param_types.get(arg_index) in {
+                .Some(param_type) then Option[Type].Some(param_type),
+                .None() then Option[Type].None(),
+            }
+            typed_args.push(box(self.adapt_expr_to_expected_type(*arg_ref, expected_arg_type)))
+            arg_index += 1(UInt)
+        }
+        let return_type = self.resolve_method_return_type_for_call(adapted_receiver.expr_type, method_symbol, typed_args, List[Type].new())
         let callee = make_typed_expr(
             TypedExprKind.MethodReference(box(adapted_receiver), adapted_receiver.expr_type, box(method_symbol), List[Type].new(), List[Type].new(), .None()),
             method_symbol.symbol_type,
         )
-        let call_expr = make_typed_expr(TypedExprKind.Call(box(callee), args), return_type)
+        let call_expr = make_typed_expr(TypedExprKind.Call(box(callee), typed_args), return_type)
         return self.wrap_receiver_materialized_call(prepared_receiver.second, receiver, call_expr)
     }
 
