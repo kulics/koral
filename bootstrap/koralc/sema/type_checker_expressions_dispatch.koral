@@ -1811,34 +1811,22 @@ given TypeChecker {
                     },
                     .None() then {},
                 }
-                let should_produce_mutable = self.can_take_ref_of_expr(typed_inner_ref)
-                if expected_mutable and not should_produce_mutable and self.is_implicit_ref_candidate_shape(typed_inner_ref) then {
-                    if is_mutable then {
-                        let value_name = self.ref_target_expr_name(inner)
-                        self.storage.diagnostics.push(
-                            make_diagnostic_at(
-                                DiagnosticStage.Semantic(),
-                                self.storage.file_path,
-                                "Cannot take '&mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or unsafe * links) can use '&mutable'.",
-                                self.ast_expr_span(inner)
-                            )
+                let can_take_mutable = self.can_take_ref_of_expr(typed_inner_ref)
+                if is_mutable and not can_take_mutable and self.is_implicit_ref_candidate_shape(typed_inner_ref) then {
+                    let value_name = self.ref_target_expr_name(inner)
+                    self.storage.diagnostics.push(
+                        make_diagnostic_at(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot take '&mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or unsafe * links) can use '&mutable'.",
+                            self.ast_expr_span(inner)
                         )
-                        break self.empty_typed_block(Type.Unknown())
-                    }
+                    )
+                    break self.empty_typed_block(Type.Unknown())
                 }
-                let ref_type = when expected in {
-                    .Some(et) then when et in {
-                        .ReferenceType(_) or .MutableReferenceType(_) then if should_produce_mutable
-                            then Type.MutableReferenceType(box(typed_inner.expr_type))
-                            else Type.ReferenceType(box(typed_inner.expr_type)),
-                        _ then if should_produce_mutable
-                            then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type))
-                            else Type.BorrowedReferenceType(box(typed_inner.expr_type)),
-                    },
-                    .None() then if should_produce_mutable
-                        then Type.MutableBorrowedReferenceType(box(typed_inner.expr_type))
-                        else Type.BorrowedReferenceType(box(typed_inner.expr_type)),
-                }
+                let ref_type = if is_mutable
+                    then Type.MutableReferenceType(box(typed_inner.expr_type))
+                    else Type.ReferenceType(box(typed_inner.expr_type))
                 break make_typed_expr(TypedExprKind.RefExpr(typed_inner_ref), ref_type)
             },
             _ then self.empty_typed_block(Type.Unknown()),
