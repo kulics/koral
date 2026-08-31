@@ -687,7 +687,38 @@ given TypeChecker {
                 let param_types = self.implicit_member_param_types(implicit_static_receiver_opt, implicit_static_type_name, expected, member_name)
                 let mutable args_copy = args
                 let typed_args = self.check_implicit_member_args(&mutable args_copy, param_types, scope)
-                break self.lower_implicit_member_expr_from_typed_args(implicit_static_receiver_opt, member_name, typed_args, expected)
+                let lowered = self.lower_implicit_member_expr_from_typed_args(implicit_static_receiver_opt, member_name, typed_args, expected)
+                if lowered.expr_type is .Unknown() then {
+                    when expected in {
+                        .Some(expected_type) then when expected_type in {
+                            .EnumType(_) then {
+                                if not self.is_upper_first_char(member_name) then {
+                                    self.storage.diagnostics.push(
+                                        make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Enum case name '\(member_name)' must start with an uppercase letter"
+                                        )
+                                    )
+                                }
+                            },
+                            .GenericEnum(_, _) then {
+                                if not self.is_upper_first_char(member_name) then {
+                                    self.storage.diagnostics.push(
+                                        make_diagnostic(
+                                            DiagnosticStage.Semantic(),
+                                            self.storage.file_path,
+                                            "Enum case name '\(member_name)' must start with an uppercase letter"
+                                        )
+                                    )
+                                }
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    }
+                }
+                break lowered
             },
             .NamedArgument(_, inner, _) then self.check_expr_scoped_ref(inner, expected, scope),
             _ then self.empty_typed_block(Type.Unknown()),

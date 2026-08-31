@@ -71,11 +71,6 @@ extension Parser {
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
-
-      if !isValidVariableName(name) {
-        throw ParserError.invalidVariableName(span: currentSpan, name: name)
-      }
-
       try match(.identifier(name))
 
       let typePrams = try parseTypeParameters()
@@ -86,6 +81,9 @@ extension Parser {
 
       // If mutable keyword was detected, it must be a variable declaration
       if mutable {
+        if !isValidVariableName(name) {
+          throw ParserError.invalidVariableName(span: currentSpan, name: name)
+        }
         if isForeign {
           if currentToken === .leftParen {
             throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
@@ -101,6 +99,9 @@ extension Parser {
 
       // Otherwise check for left paren to determine if it's a function or variable
       if currentToken === .leftParen {
+        if !isValidVariableName(name) {
+          throw ParserError.invalidFunctionName(span: currentSpan, name: name)
+        }
         if isForeign {
           return try foreignFunctionDeclaration(name: name, access: access, span: startSpan)
         }
@@ -108,6 +109,9 @@ extension Parser {
           name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
           span: startSpan)
       } else {
+        if !isValidVariableName(name) {
+          throw ParserError.invalidVariableName(span: currentSpan, name: name)
+        }
         if isForeign {
           return try foreignLetDeclaration(name: name, mutable: false, access: access, span: startSpan)
         }
@@ -227,6 +231,9 @@ extension Parser {
       guard case .identifier(let methodName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidVariableName(methodName) {
+        throw ParserError.invalidFunctionName(span: currentSpan, name: methodName)
+      }
       try match(.identifier(methodName))
 
       let methodTypeParams = try parseTypeParameters()
@@ -251,6 +258,9 @@ extension Parser {
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
+        }
+        if !isValidVariableName(pname) {
+          throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
         var isNamed = false
@@ -321,6 +331,9 @@ extension Parser {
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidVariableName(name) {
+        throw ParserError.invalidFunctionName(span: currentSpan, name: name)
+      }
       try match(.identifier(name))
 
       let methodTypeParams = try parseTypeParameters()
@@ -345,6 +358,9 @@ extension Parser {
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
+        }
+        if !isValidVariableName(pname) {
+          throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
         var isNamed = false
@@ -418,6 +434,9 @@ extension Parser {
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidVariableName(name) {
+        throw ParserError.invalidFunctionName(span: currentSpan, name: name)
+      }
       try match(.identifier(name))
 
       let typeParams = try parseTypeParameters()
@@ -442,6 +461,9 @@ extension Parser {
         guard case .identifier(let pname) = currentToken else {
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
+        }
+        if !isValidVariableName(pname) {
+          throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
         var isNamed = false
@@ -619,6 +641,9 @@ extension Parser {
       guard case .identifier(let pname) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidVariableName(pname) {
+        throw ParserError.invalidParameterName(span: currentSpan, name: pname)
+      }
       try match(.identifier(pname))
       var isNamed = false
       if currentToken === .colon {
@@ -681,6 +706,9 @@ extension Parser {
       }
       guard case .identifier(let pname) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      if !isValidVariableName(pname) {
+        throw ParserError.invalidParameterName(span: currentSpan, name: pname)
       }
       try match(.identifier(pname))
       var isNamed = false
@@ -805,6 +833,9 @@ extension Parser {
       guard case .identifier(let paramName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidVariableName(paramName) {
+        throw ParserError.invalidFieldName(span: currentSpan, name: paramName)
+      }
       try match(.identifier(paramName))
       var isNamed = false
       if currentToken === .colon {
@@ -845,6 +876,9 @@ extension Parser {
       guard case .identifier(let caseName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidTypeName(caseName) {
+        throw ParserError.invalidEnumCaseName(span: currentSpan, name: caseName)
+      }
       try match(.identifier(caseName))
 
       var parameters: [(name: String, type: TypeNode, named: Bool)] = []
@@ -854,6 +888,9 @@ extension Parser {
         guard case .identifier(let paramName) = currentToken else {
           throw ParserError.expectedIdentifier(
             span: currentSpan, got: currentToken.description)
+        }
+        if !isValidVariableName(paramName) {
+          throw ParserError.invalidParameterName(span: currentSpan, name: paramName)
         }
         try match(.identifier(paramName))
         var isNamed = false
@@ -975,6 +1012,9 @@ extension Parser {
     guard case .identifier(let firstSegment) = currentToken else {
       throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
     }
+    if !isValidModuleName(firstSegment) {
+      throw ParserError.invalidModuleName(span: currentSpan, name: firstSegment)
+    }
     pathSegments.append(moduleFileNameToIdentifier(firstSegment))
     try match(currentToken)
 
@@ -982,6 +1022,9 @@ extension Parser {
       try match(.doubleColon)
       guard case .identifier(let segment) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      if !isValidModuleName(segment) {
+        throw ParserError.invalidModuleName(span: currentSpan, name: segment)
       }
       pathSegments.append(moduleFileNameToIdentifier(segment))
       try match(currentToken)

@@ -1409,13 +1409,35 @@ given MIRReferenceAllocationFunctionPromoter {
                 break all_indices
             },
         }
+        let returning_params = when callee in {
+            .Function(symbol) then {
+                let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
+                break summary.returning_parameter_indices
+            },
+            _ then Set[UInt].new(),
+        }
         let mutable promoted = List[* MIRValue].new()
         let mutable index = 0(UInt)
         while index < arguments.count() then {
             let argument = (*arguments[index])
-            let param_type = if index < params.count()
+            let mutable param_type = if index < params.count()
                 then Option[Type].Some(self.promotion_destination_type_for_param(*params[index]))
                 else Option[Type].None()
+            let preserve_returned_stack_borrow = if returning_params.contains(index) and not direct_ref_escaping.contains(index)
+                then when self.resolve_temporary_ref_source(argument) in {
+                    .Ref(_, _, allocation) then when allocation in {
+                        .StackBorrow() then when param_type in {
+                            .Some(dt) then self.type_requires_owned_reference_storage(dt),
+                            .None() then false,
+                        },
+                        .HeapOwned() then false,
+                    },
+                    _ then false,
+                }
+                else false
+            if preserve_returned_stack_borrow then {
+                param_type = Option[Type].None()
+            }
             let mutable arg_promoted = self.promote_value(argument, param_type)
             if direct_ref_escaping.contains(index) then {
                 arg_promoted = self.promote_direct_references(arg_promoted)

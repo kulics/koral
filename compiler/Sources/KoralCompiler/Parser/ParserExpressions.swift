@@ -1151,6 +1151,9 @@ extension Parser {
           // Not a valid lambda parameter, restore and parse as expression
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
         }
+        if !isValidVariableName(paramName) {
+          throw ParserError.invalidParameterName(span: currentSpan, name: paramName)
+        }
         try match(.identifier(paramName))
         
         // Check for named parameter syntax in lambda - not allowed

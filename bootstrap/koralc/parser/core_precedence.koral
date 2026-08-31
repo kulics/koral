@@ -491,6 +491,9 @@ given Parser {
         let name = self.expect_identifier("trait member") or else {
             return .Error(box("parse trait member error"))
         }
+        if not self.is_valid_value_name(name) then {
+            return .Error(box(self.invalid_function_name_error(name)))
+        }
         let type_params = self.parse_type_parameters() or else {
             return .Error(box("parse trait member type parameter error"))
         }
@@ -525,6 +528,9 @@ given Parser {
         let access = self.parse_access_modifier(AccessModifier.Protected())
         let name = self.expect_identifier("given member") or else {
             return .Error(box("parse given member error"))
+        }
+        if not self.is_valid_value_name(name) then {
+            return .Error(box(self.invalid_function_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or else {
             return .Error(box("parse given member type parameter error"))
@@ -738,11 +744,14 @@ given Parser {
                 return .Error(box("Unexpected token: Self"))
             },
             .Identifier(name) then {
-                path_segments.push(module_file_name_to_identifier(name))
                 self.advance()
                 if self.current().kind is not .DoubleColon() and self.current().kind is not .LBrace() then {
                     return .Error(box("Unexpected token: Identifier(\(name))"))
                 }
+                if not self.is_valid_module_segment_name(name) then {
+                    return .Error(box(self.invalid_module_name_error(name)))
+                }
+                path_segments.push(module_file_name_to_identifier(name))
             },
             _ then {
                 return .Error(box("using declaration requires a module path like std::io { Reader }"))
@@ -753,6 +762,9 @@ given Parser {
             self.advance()
             let segment = self.expect_identifier("module path segment") or else {
                 return .Error(box("parse declaration error"))
+            }
+            if not self.is_valid_module_segment_name(segment) then {
+                return .Error(box(self.invalid_module_name_error(segment)))
             }
             path_segments.push(module_file_name_to_identifier(segment))
         }
@@ -766,6 +778,9 @@ given Parser {
         let start = self.current()
         self.advance()
         let name = self.expect_identifier("trait declaration") or return
+        if not self.is_upper_first(name) then {
+            return .Error(box(self.invalid_type_name_error(name)))
+        }
         let type_params = self.parse_type_parameters() or else {
             return .Error(box("parse trait type parameter error"))
         }
@@ -811,6 +826,9 @@ given Parser {
         if self.current().kind is .KwNot() then {
             self.advance()
             let trait_name = self.expect_identifier("given not trait declaration") or return
+            if not self.is_upper_first(trait_name) then {
+                return .Error(box(self.invalid_type_name_error(trait_name)))
+            }
             self.consume_semicolon()
             let base = Decl.GivenNotTraitDecl(target_type, type_params, trait_name, self.span_from_start(start))
             return self.wrap_decl(access, is_foreign, is_intrinsic, base)

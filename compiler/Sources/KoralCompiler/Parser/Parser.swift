@@ -368,4 +368,19 @@ public class Parser {
   func isValidTypeName(_ name: String) -> Bool {
     identifierStyle(of: name) == .type
   }
+
+  func isValidModuleName(_ name: String) -> Bool {
+    guard !name.isEmpty, let first = name.first, isASCIILowercase(first) else {
+      return false
+    }
+
+    for char in name {
+      let isDigit = char >= "0" && char <= "9"
+      if isASCIILowercase(char) || isDigit || char == "_" {
+        continue
+      }
+      return false
+    }
+    return true
+  }
 }

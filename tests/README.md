@@ -78,6 +78,20 @@ Use this bucket when changing declaration parsing, package visibility, import ru
 - `generic_template_requires_import_error_test`
 - `generic_template_import_test`
 
+### Identifier case discipline
+
+Use this bucket when changing identifier parsing or naming-rule enforcement for types, enum constructors, variables, functions, fields, parameters, or module paths.
+
+- `identifier_case_variable_error`
+- `identifier_case_function_error`
+- `identifier_case_field_error`
+- `identifier_case_parameter_error`
+- `identifier_case_type_error`
+- `identifier_case_enum_case_decl_error`
+- `identifier_case_enum_ctor_use_error`
+- `identifier_case_pattern_enum_ctor_error`
+- `identifier_case_module_error`
+
 ### New reference surface (`*T`, `?*T`, `unsafe * T`)
 
 Use this bucket when changing managed reference, weak reference, or raw-pointer syntax/semantics.

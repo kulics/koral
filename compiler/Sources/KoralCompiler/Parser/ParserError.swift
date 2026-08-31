@@ -55,6 +55,10 @@ public enum ParserError: Error {
   case invalidVariableName(span: SourceSpan, name: String)
   case invalidFunctionName(span: SourceSpan, name: String)
   case invalidTypeName(span: SourceSpan, name: String)
+  case invalidFieldName(span: SourceSpan, name: String)
+  case invalidParameterName(span: SourceSpan, name: String)
+  case invalidEnumCaseName(span: SourceSpan, name: String)
+  case invalidModuleName(span: SourceSpan, name: String)
   // Module system errors
   case usingAfterDeclaration(span: SourceSpan)
   case invalidUsingAliasCase(span: SourceSpan, alias: String, referenced: String, expectedUppercase: Bool)
@@ -83,6 +87,10 @@ public enum ParserError: Error {
     case .invalidVariableName(let span, _): return span
     case .invalidFunctionName(let span, _): return span
     case .invalidTypeName(let span, _): return span
+    case .invalidFieldName(let span, _): return span
+    case .invalidParameterName(let span, _): return span
+    case .invalidEnumCaseName(let span, _): return span
+    case .invalidModuleName(let span, _): return span
     case .usingAfterDeclaration(let span): return span
     case .invalidUsingAliasCase(let span, _, _, _): return span
     case .invalidFunctionType(let span, _): return span
@@ -125,6 +133,14 @@ public enum ParserError: Error {
       return "Function name '\(name)' must start with a lowercase letter"
     case .invalidTypeName(_, let name):
       return "Type name '\(name)' must start with an uppercase letter"
+    case .invalidFieldName(_, let name):
+      return "Field name '\(name)' must start with a lowercase letter"
+    case .invalidParameterName(_, let name):
+      return "Parameter name '\(name)' must start with a lowercase letter"
+    case .invalidEnumCaseName(_, let name):
+      return "Enum case name '\(name)' must start with an uppercase letter"
+    case .invalidModuleName(_, let name):
+      return "Module name '\(name)' must start with a lowercase letter"
     case .usingAfterDeclaration:
       return "Using declarations must appear before other declarations"
     case .invalidUsingAliasCase(_, let alias, let referenced, let expectedUppercase):

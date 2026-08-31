@@ -2726,6 +2726,18 @@ extension TypeChecker {
     ) {
       return result
     }
+
+    switch expected {
+    case .enum, .genericEnum:
+      if !isASCIITypeStyleIdentifier(memberName) {
+        throw SemanticError(
+          .generic("Enum case name '\(memberName)' must start with an uppercase letter"),
+          span: span
+        )
+      }
+    default:
+      break
+    }
     
     // 4. Neither worked - report error
     throw SemanticError(
@@ -3735,49 +3747,6 @@ extension TypeChecker {
       if let intrinsicNode = try checkIntrinsicCall(name: name, arguments: arguments) {
         return intrinsicNode
       }
-
-      if arguments.count == 1 {
-        let typedArg = try inferTypedExpression(arguments[0])
-        if name == "downgrade" {
-          switch typedArg.type {
-          case .reference(let innerType):
-            let weakType: Type = .weakReference(inner: innerType)
-            return .intrinsicCall(.downgradeRef(val: typedArg, resultType: weakType))
-          default:
-            throw SemanticError(.generic("'downgrade' expects a managed reference (*T), got \(typedArg.type)"), span: currentSpan)
-          }
-        }
-
-        if name == "downgrade_mut" {
-          switch typedArg.type {
-          case .mutableReference(let innerType):
-            let weakType: Type = .mutableWeakReference(inner: innerType)
-            return .intrinsicCall(.downgradeMutRef(val: typedArg, resultType: weakType))
-          default:
-            throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(typedArg.type)"), span: currentSpan)
-          }
-        }
-
-        if name == "upgrade" {
-          switch typedArg.type {
-          case .weakReference(let innerType):
-            let resultType: Type = .genericEnum(template: "Option", args: [.reference(inner: innerType)])
-            return .intrinsicCall(.upgradeRef(val: typedArg, resultType: resultType))
-          default:
-            throw SemanticError(.generic("'upgrade' expects a weak reference (?*T), got \(typedArg.type)"), span: currentSpan)
-          }
-        }
-
-        if name == "upgrade_mut" {
-          switch typedArg.type {
-          case .mutableWeakReference(let innerType):
-            let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
-            return .intrinsicCall(.upgradeMutRef(val: typedArg, resultType: resultType))
-          default:
-            throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(typedArg.type)"), span: currentSpan)
-          }
-        }
-      }
     }
 
     var typedCallee = try inferTypedExpression(callee)
@@ -4214,6 +4183,78 @@ extension TypeChecker {
         return .intrinsicCall(.refCount(ref: refArg))
       }
 
+      if base == "downgrade" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let refArg = try inferArgumentExpression(arguments[0], expectedType: .reference(inner: resolvedArgs[0]))
+        guard case .reference(let innerType) = refArg.type else {
+          throw SemanticError(.generic("'downgrade' expects a managed reference (*T), got \(refArg.type)"), span: currentSpan)
+        }
+        let resultType: Type = .weakReference(inner: innerType)
+        return .intrinsicCall(.downgradeRef(val: refArg, resultType: resultType))
+      }
+
+      if base == "downgrade_mut" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let refArg = try inferArgumentExpression(arguments[0], expectedType: .mutableReference(inner: resolvedArgs[0]))
+        guard case .mutableReference(let innerType) = refArg.type else {
+          throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(refArg.type)"), span: currentSpan)
+        }
+        let resultType: Type = .mutableWeakReference(inner: innerType)
+        return .intrinsicCall(.downgradeMutRef(val: refArg, resultType: resultType))
+      }
+
+      if base == "upgrade" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let weakArg = try inferArgumentExpression(arguments[0], expectedType: .weakReference(inner: resolvedArgs[0]))
+        guard case .weakReference(let innerType) = weakArg.type else {
+          throw SemanticError(.generic("'upgrade' expects a weak reference (?*T), got \(weakArg.type)"), span: currentSpan)
+        }
+        let resultType: Type = .genericEnum(template: "Option", args: [.reference(inner: innerType)])
+        return .intrinsicCall(.upgradeRef(val: weakArg, resultType: resultType))
+      }
+
+      if base == "upgrade_mut" {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let weakArg = try inferArgumentExpression(arguments[0], expectedType: .mutableWeakReference(inner: resolvedArgs[0]))
+        guard case .mutableWeakReference(let innerType) = weakArg.type else {
+          throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(weakArg.type)"), span: currentSpan)
+        }
+        let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
+        return .intrinsicCall(.upgradeMutRef(val: weakArg, resultType: resultType))
+      }
+
       if base == "make_ref" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 2 else {
@@ -4406,6 +4447,50 @@ extension TypeChecker {
       )
     }
 
+    if arguments.count == 1 {
+      let typedArgument = try inferTypedExpression(arguments[0])
+
+      if name == "downgrade" {
+        switch typedArgument.type {
+        case .reference(let innerType):
+          let resultType: Type = .weakReference(inner: innerType)
+          return .intrinsicCall(.downgradeRef(val: typedArgument, resultType: resultType))
+        default:
+          throw SemanticError(.generic("'downgrade' expects a managed reference (*T), got \(typedArgument.type)"), span: currentSpan)
+        }
+      }
+
+      if name == "downgrade_mut" {
+        switch typedArgument.type {
+        case .mutableReference(let innerType):
+          let resultType: Type = .mutableWeakReference(inner: innerType)
+          return .intrinsicCall(.downgradeMutRef(val: typedArgument, resultType: resultType))
+        default:
+          throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(typedArgument.type)"), span: currentSpan)
+        }
+      }
+
+      if name == "upgrade" {
+        switch typedArgument.type {
+        case .weakReference(let innerType):
+          let resultType: Type = .genericEnum(template: "Option", args: [.reference(inner: innerType)])
+          return .intrinsicCall(.upgradeRef(val: typedArgument, resultType: resultType))
+        default:
+          throw SemanticError(.generic("'upgrade' expects a weak reference (?*T), got \(typedArgument.type)"), span: currentSpan)
+        }
+      }
+
+      if name == "upgrade_mut" {
+        switch typedArgument.type {
+        case .mutableWeakReference(let innerType):
+          let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
+          return .intrinsicCall(.upgradeMutRef(val: typedArgument, resultType: resultType))
+        default:
+          throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(typedArgument.type)"), span: currentSpan)
+        }
+      }
+    }
+
     var typedArguments: [TypedExpressionNode] = []
     for (argExpr, param) in zip(arguments, template.parameters) {
       let expectedType = try resolveTemplateTypeNode(param.type, inferredBindings: inferred)
@@ -4504,6 +4589,42 @@ extension TypeChecker {
 
     if templateName == "ref_count" {
       return .intrinsicCall(.refCount(ref: typedArguments[0]))
+    }
+
+    if templateName == "downgrade" {
+      let refValue = typedArguments[0]
+      guard case .reference(let innerType) = refValue.type else {
+        throw SemanticError(.generic("'downgrade' expects a managed reference (*T), got \(refValue.type)"), span: currentSpan)
+      }
+      let resultType: Type = .weakReference(inner: innerType)
+      return .intrinsicCall(.downgradeRef(val: refValue, resultType: resultType))
+    }
+
+    if templateName == "downgrade_mut" {
+      let refValue = typedArguments[0]
+      guard case .mutableReference(let innerType) = refValue.type else {
+        throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(refValue.type)"), span: currentSpan)
+      }
+      let resultType: Type = .mutableWeakReference(inner: innerType)
+      return .intrinsicCall(.downgradeMutRef(val: refValue, resultType: resultType))
+    }
+
+    if templateName == "upgrade" {
+      let weakValue = typedArguments[0]
+      guard case .weakReference(let innerType) = weakValue.type else {
+        throw SemanticError(.generic("'upgrade' expects a weak reference (?*T), got \(weakValue.type)"), span: currentSpan)
+      }
+      let resultType: Type = .genericEnum(template: "Option", args: [.reference(inner: innerType)])
+      return .intrinsicCall(.upgradeRef(val: weakValue, resultType: resultType))
+    }
+
+    if templateName == "upgrade_mut" {
+      let weakValue = typedArguments[0]
+      guard case .mutableWeakReference(let innerType) = weakValue.type else {
+        throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(weakValue.type)"), span: currentSpan)
+      }
+      let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
+      return .intrinsicCall(.upgradeMutRef(val: weakValue, resultType: resultType))
     }
 
     if templateName == "make_ref" {

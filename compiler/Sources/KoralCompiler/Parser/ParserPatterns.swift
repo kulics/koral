@@ -189,6 +189,10 @@ extension Parser {
         try match(.rightParen)
         return .structPattern(typeName: name, elements: args, span: startSpan)
       }
+
+      if !isValidVariableName(name) {
+        throw ParserError.invalidVariableName(span: startSpan, name: name)
+      }
       
       return .variable(name: name, mutable: false, span: startSpan)
     }
@@ -211,6 +215,9 @@ extension Parser {
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
       }
+      if !isValidVariableName(name) {
+        throw ParserError.invalidVariableName(span: currentSpan, name: name)
+      }
       try match(.identifier(name))
       return .variable(name: name, mutable: true, span: startSpan)
     }
@@ -220,6 +227,9 @@ extension Parser {
       try match(.dot)
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+      }
+      if !isValidTypeName(name) {
+        throw ParserError.invalidEnumCaseName(span: currentSpan, name: name)
       }
       try match(.identifier(name))
       var args: [PatternArg] = []

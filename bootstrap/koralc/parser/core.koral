@@ -304,11 +304,73 @@ given Parser {
     // 检查当前位置是否是泛型类型表达式 [T, U]TypeName
     // 判断字符串首字母是否大写（用于区分类型名和变量名）
     protected is_upper_first(self, s String) Bool = {
+        let runes = s.to_runes()
+        if runes.is_empty() then { return false }
+        let mutable i UInt = 0
+        while i < runes.count() then {
+            let ch = runes[i]
+            if ch == '_' then {
+                i += 1
+                continue
+            }
+            return ch.is_ascii_uppercase()
+        }
+        return false
+    }
+
+    protected is_lower_first(self, s String) Bool = {
+        let runes = s.to_runes()
+        if runes.is_empty() then { return false }
+        let mutable i UInt = 0
+        while i < runes.count() then {
+            let ch = runes[i]
+            if ch == '_' then {
+                i += 1
+                continue
+            }
+            return ch.is_ascii_lowercase()
+        }
+        return false
+    }
+
+    protected is_valid_value_name(self, s String) Bool = {
         if s.is_empty() then { return false }
         let runes = s.to_runes()
         if runes.is_empty() then { return false }
-        return runes[0].is_ascii_uppercase()
+        let mutable all_underscore = true
+        for ch in runes then {
+            if ch <> '_' then {
+                all_underscore = false
+                break
+            }
+        }
+        return all_underscore or self.is_lower_first(s)
     }
+
+    protected is_valid_module_segment_name(self, s String) Bool = {
+        if s.is_empty() then { return false }
+        let runes = s.to_runes()
+        if runes.is_empty() then { return false }
+        let first = runes[0]
+        if not first.is_ascii_lowercase() then { return false }
+        let mutable i UInt = 1
+        while i < runes.count() then {
+            let ch = runes[i]
+            if not ch.is_ascii_lowercase() and not ch.is_ascii_digit() and ch <> '_' then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
+    protected invalid_variable_name_error(self, name String) String = "Variable name '\(name)' must start with a lowercase letter"
+    protected invalid_function_name_error(self, name String) String = "Function name '\(name)' must start with a lowercase letter"
+    protected invalid_type_name_error(self, name String) String = "Type name '\(name)' must start with an uppercase letter"
+    protected invalid_field_name_error(self, name String) String = "Field name '\(name)' must start with a lowercase letter"
+    protected invalid_parameter_name_error(self, name String) String = "Parameter name '\(name)' must start with a lowercase letter"
+    protected invalid_enum_case_name_error(self, name String) String = "Enum case name '\(name)' must start with an uppercase letter"
+    protected invalid_module_name_error(self, name String) String = "Module name '\(name)' must start with a lowercase letter"
 
     // 通过 lookahead 检查 [...] 后面是否跟着标识符
     protected is_generic_type_expr(self) Bool = {
@@ -824,6 +886,9 @@ given Parser {
                 let name = self.expect_identifier("parameter") or else {
                     return .Error(box("parse parameter error"))
                 }
+                if not self.is_valid_value_name(name) then {
+                    return .Error(box(self.invalid_parameter_name_error(name)))
+                }
 
                 let mutable is_named = false
                 if self.current().kind is .Colon() then {
@@ -871,6 +936,13 @@ given Parser {
         }
 
         let name = self.expect_identifier("let declaration") or return
+        if self.current().kind is .LParen() then {
+            if not self.is_valid_value_name(name) then {
+                return .Error(box(self.invalid_function_name_error(name)))
+            }
+        } else if not self.is_valid_value_name(name) then {
+            return .Error(box(self.invalid_variable_name_error(name)))
+        }
         let type_params = self.parse_type_parameters() or return
 
         if self.current().kind is .LParen() then {
@@ -994,10 +1066,7 @@ given Parser {
 
         let name = self.expect_identifier("type declaration") or return
         if not self.is_upper_first(name) then {
-            let mutable message = "Type name '"
-            message.push_string(name)
-            message.push_string("' must start with an uppercase letter")
-            return .Error(box(message))
+            return .Error(box(self.invalid_type_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or return
 
@@ -1032,6 +1101,9 @@ given Parser {
                             }
 
                             let field_name = self.expect_identifier("field name") or return
+                            if not self.is_valid_value_name(field_name) then {
+                                return .Error(box(self.invalid_field_name_error(field_name)))
+                            }
                             let mutable field_named = false
                             if self.current().kind is .Colon() then {
                                 field_named = true
@@ -1079,6 +1151,9 @@ given Parser {
                         },
                         _ then {
                             let case_name = self.expect_identifier("enum case") or return
+                            if not self.is_upper_first(case_name) then {
+                                return .Error(box(self.invalid_enum_case_name_error(case_name)))
+                            }
                             let mutable case_fields = List[EnumCaseField].new()
 
                             if self.current().kind is .LParen() then {
@@ -1094,6 +1169,9 @@ given Parser {
                                         },
                                         _ then {
                                             let payload_name = self.expect_identifier("enum payload name") or return
+                                            if not self.is_valid_value_name(payload_name) then {
+                                                return .Error(box(self.invalid_parameter_name_error(payload_name)))
+                                            }
                                             let mutable payload_named = false
                                             if self.current().kind is .Colon() then {
                                                 payload_named = true
@@ -1165,6 +1243,9 @@ given Parser {
         }
 
         let name = self.expect_identifier("let statement") or return
+        if not self.is_valid_value_name(name) then {
+            return .Error(box(self.invalid_variable_name_error(name)))
+        }
 
         let mutable type_name = Option[TypeNode].None()
         if self.is_type_start() then {
@@ -1230,6 +1311,9 @@ given Parser {
         }
 
         let name = self.expect_identifier("pair let binding") or return
+        if not self.is_valid_value_name(name) then {
+            return .Error(box(self.invalid_variable_name_error(name)))
+        }
 
         let mutable type_name = Option[TypeNode].None()
         when self.current().kind in {
