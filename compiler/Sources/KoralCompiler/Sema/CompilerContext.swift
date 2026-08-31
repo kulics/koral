@@ -289,7 +289,7 @@ public final class CompilerContext: @unchecked Sendable {
         case .never: return "Never"
         case .function(let params, let returns):
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
-            return "(\(paramStr)) -> \(getDebugName(returns))"
+            return "Func(\(paramStr)) \(getDebugName(returns))"
         case .reference(let inner): return "*\(getDebugName(inner))"
         case .mutableReference(let inner): return "*mutable \(getDebugName(inner))"
         case .borrowedReference(let inner): return "ref *\(getDebugName(inner))"

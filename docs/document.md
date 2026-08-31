@@ -1197,7 +1197,7 @@ Mutable parameters use the `mutable` keyword:
 let increment(mutable x Int) Int = { x += 1; return x }
 ```
 
-For ordinary parameters, `mutable` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the `Func[...]` type, and is ignored when checking trait/given method compatibility.
+For ordinary parameters, `mutable` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the function type, and is ignored when checking trait/given method compatibility.
 
 #### Named Parameters
 
@@ -1258,7 +1258,7 @@ given MyType as Drawable {
 Function types (`Func`) do not carry named parameter labels, and lambda parameters always use positional syntax:
 
 ```koral
-let f Func[String, Int, Void] = (host String, port Int) -> {
+let f Func(String, Int) Void = (host String, port Int) -> {
     connect(host: host, port: port)
 }
 f("localhost", 8080)
@@ -1268,11 +1268,11 @@ Foreign declarations (`foreign let`, `foreign type`) do not support named parame
 
 ### Function Types
 
-In Koral, functions are also a type. Function types are declared using `Func[T1, T2, ..., R]` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
+In Koral, functions are also a type. Function types are declared using `Func(T1, T2, ...) R` syntax, where `T1, T2, ...` are parameter types and `R` is the return type.
 
 ```koral
-let sqrt(x Int) Int = x * x          // Func[Int, Int]
-let f Func[Int, Int] = sqrt
+let sqrt(x Int) Int = x * x          // Func(Int) Int
+let f Func(Int) Int = sqrt
 let a = f(2)                      // a == 4
 ```
 
@@ -1280,8 +1280,8 @@ We can also define function type parameters or return values:
 
 ```koral
 let hello() Void = println("Hello, world!")
-let run(f Func[Void]) Void = f()
-let toRun() Func[Func[Void], Void] = run
+let run(f Func() Void) Void = f()
+let toRun() Func(Func() Void) Void = run
 
 let main() Void = toRun()(hello)
 ```
@@ -1291,15 +1291,15 @@ let main() Void = toRun()(hello)
 Lambda expressions are very similar to function definitions, except that `=` is replaced by `->`, and there is no function name or `let` keyword.
 
 ```koral
-let f1(x Int) Int = x + 1            // Func[Int, Int]
-let f2 = (x Int) Int -> x + 1        // Func[Int, Int]
+let f1(x Int) Int = x + 1            // Func(Int) Int
+let f2 = (x Int) Int -> x + 1        // Func(Int) Int
 let a = f1(1) + f2(1)                // a == 4
 ```
 
 When the type of lambda can be inferred from context, parameter types and return type can be omitted:
 
 ```koral
-let f Func[Int, Int] = (x) -> x + 1
+let f Func(Int) Int = (x) -> x + 1
 ```
 
 Lambda supports multiple forms:
@@ -1318,7 +1318,7 @@ Lambda supports multiple forms:
 Lambda expressions can capture variables from their surrounding scope. This is called a closure.
 
 ```koral
-let make_adder(base Int) Func[Int, Int] = {
+let make_adder(base Int) Func(Int) Int = {
     return (x) -> base + x
 }
 
@@ -1345,7 +1345,7 @@ increment()
 Closures enable currying:
 
 ```koral
-let add Func[Int, Func[Int, Int]] = (x) -> (y) -> x + y
+let add Func(Int) Func(Int) Int = (x) -> (y) -> x + y
 
 let add10 = add(10)
 let result = add10(32)  // result == 42
@@ -1838,7 +1838,7 @@ let consume[I Iterator[Int]](iter I) Void = {}
 
 ```koral
 given[T Any] Option[T] {
-    public map[U Any](self, f Func[T, U]) Option[U] = self and then f(it)
+    public map[U Any](self, f Func(T) U) Option[U] = self and then f(it)
 }
 ```
 

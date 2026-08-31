@@ -21,7 +21,7 @@ public trait Iterable[T Any, R Iterator[T]] {
 // FilterIterator - filters elements based on predicate
 public type FilterIterator[T Any, R Iterator[T]](
     protected mutable iter R,
-    protected predicate Func[T, Bool],
+    protected predicate Func(T) Bool,
 )
 
 given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
@@ -37,7 +37,7 @@ given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
 }
 
 // MapIterator - transforms elements using mapper function
-public type MapIterator[T Any, U Any, R Iterator[T]](protected mutable iter R, protected mapper Func[T, U])
+public type MapIterator[T Any, U Any, R Iterator[T]](protected mutable iter R, protected mapper Func(T) U)
 
 given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
 
@@ -47,7 +47,7 @@ given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
 // FilterMapIterator - filters and transforms in one operation
 public type FilterMapIterator[T Any, U Any, R Iterator[T]](
     protected mutable iter R,
-    protected mapper Func[T, Option[U]],
+    protected mapper Func(T) Option[U],
 )
 
 given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
@@ -136,7 +136,7 @@ given[T Any, R Iterator[T]] EnumerateIterator[T, R] as Iterator[Pair[UInt, T]] {
 }
 
 // InspectIterator - executes side effect without modifying elements
-public type InspectIterator[T Any, R Iterator[T]](protected mutable iter R, protected action Func[T, Void])
+public type InspectIterator[T Any, R Iterator[T]](protected mutable iter R, protected action Func(T) Void)
 
 given[T Any, R Iterator[T]] InspectIterator[T, R] as Iterator[T] {
 
@@ -209,7 +209,7 @@ given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
 // TakeWhileIterator - takes elements while predicate is true
 public type TakeWhileIterator[T Any, R Iterator[T]](
     protected mutable iter R,
-    protected predicate Func[T, Bool],
+    protected predicate Func(T) Bool,
     protected mutable done Bool,
 )
 
@@ -238,7 +238,7 @@ given[T Any, R Iterator[T]] TakeWhileIterator[T, R] as Iterator[T] {
 // SkipWhileIterator - skips elements while predicate is true
 public type SkipWhileIterator[T Any, R Iterator[T]](
     protected mutable iter R,
-    protected predicate Func[T, Bool],
+    protected predicate Func(T) Bool,
     protected mutable skipping Bool,
 )
 
@@ -301,7 +301,7 @@ given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as
 // FlatMapIterator - flattens nested iterators (fully lazy)
 public type FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]](
     protected mutable outer R,
-    protected mapper Func[T, InnerR],
+    protected mapper Func(T) InnerR,
     protected mutable current_inner Option[InnerR],
 )
 
@@ -348,15 +348,15 @@ given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, 
 given[T Any] Iterator[T] {
 
     // Filter - returns iterator with elements matching predicate
-    public filter(self, fn Func[T, Bool]) FilterIterator[T, Self] =
+    public filter(self, fn Func(T) Bool) FilterIterator[T, Self] =
         FilterIterator[T, Self](self, fn)
 
     // Map - transforms each element
-    public map[U Any](self, fn Func[T, U]) MapIterator[T, U, Self] =
+    public map[U Any](self, fn Func(T) U) MapIterator[T, U, Self] =
         MapIterator[T, U, Self](self, fn)
 
     // FilterMap - filter and transform in one operation
-    public filter_map[U Any](self, fn Func[T, Option[U]]) FilterMapIterator[T, U, Self] =
+    public filter_map[U Any](self, fn Func(T) Option[U]) FilterMapIterator[T, U, Self] =
         FilterMapIterator[T, U, Self](self, fn)
 
     // Take - take first n elements
@@ -380,7 +380,7 @@ given[T Any] Iterator[T] {
         EnumerateIterator[T, Self](self, 0)
 
     // Inspect - execute side effect without modifying elements
-    public inspect(self, fn Func[T, Void]) InspectIterator[T, Self] =
+    public inspect(self, fn Func(T) Void) InspectIterator[T, Self] =
         InspectIterator[T, Self](self, fn)
 
     // Intersperse - insert separator between elements
@@ -388,11 +388,11 @@ given[T Any] Iterator[T] {
         IntersperseIterator[T, Self](self, v, false, Option[T].None())
 
     // TakeWhile - take elements while predicate is true
-    public take_while(self, fn Func[T, Bool]) TakeWhileIterator[T, Self] =
+    public take_while(self, fn Func(T) Bool) TakeWhileIterator[T, Self] =
         TakeWhileIterator[T, Self](self, fn, false)
 
     // SkipWhile - skip elements while predicate is true
-    public skip_while(self, fn Func[T, Bool]) SkipWhileIterator[T, Self] =
+    public skip_while(self, fn Func(T) Bool) SkipWhileIterator[T, Self] =
         SkipWhileIterator[T, Self](self, fn, true)
 
     // Chain - chain with another iterator of the same element type
@@ -404,7 +404,7 @@ given[T Any] Iterator[T] {
         ZipIterator[T, U, Self, R2](self, other)
 
     // FlatMap - map each element to an iterator and flatten results
-    public flat_map[U Any, InnerR Iterator[U]](self, fn Func[T, InnerR]) FlatMapIterator[T, U, Self, InnerR] =
+    public flat_map[U Any, InnerR Iterator[U]](self, fn Func(T) InnerR) FlatMapIterator[T, U, Self, InnerR] =
         FlatMapIterator[T, U, Self, InnerR](self, fn, Option[InnerR].None())
 }
 
@@ -414,7 +414,7 @@ given[T Any] Iterator[T] {
 given[T Any] Iterator[T] {
 
     // Fold - reduce with initial value
-    public fold[U Any](self, initial U, fn Func[U, T, U]) U = {
+    public fold[U Any](self, initial U, fn Func(U, T) U) U = {
         let mutable acc = initial
         let mutable iter = self
         while iter.next() is .Some(v) then {
@@ -424,7 +424,7 @@ given[T Any] Iterator[T] {
     }
 
     // Reduce - reduce without initial value
-    public reduce(self, fn Func[T, T, T]) Option[T] = {
+    public reduce(self, fn Func(T, T) T) Option[T] = {
         let mutable iter = self
         when iter.next() in {
             .None then {
@@ -451,7 +451,7 @@ given[T Any] Iterator[T] {
     }
 
     // ForEach - execute side effect for each element
-    public for_each(self, fn Func[T, Void]) Void = {
+    public for_each(self, fn Func(T) Void) Void = {
         let mutable iter = self
         while iter.next() is .Some(v) then {
             fn(v);
@@ -498,7 +498,7 @@ given[T Any] Iterator[T] {
     }
 
     // Position - find index of first element matching predicate
-    public position(self, fn Func[T, Bool]) Option[UInt] = {
+    public position(self, fn Func(T) Bool) Option[UInt] = {
         let mutable iter = self
         let mutable i UInt = 0
         while iter.next() is .Some(v) then {
@@ -511,7 +511,7 @@ given[T Any] Iterator[T] {
     }
 
     // Find - find first element matching predicate
-    public find(self, fn Func[T, Bool]) Option[T] = {
+    public find(self, fn Func(T) Bool) Option[T] = {
         let mutable iter = self
         while iter.next() is .Some(v) then {
             if fn(v) then {
@@ -522,7 +522,7 @@ given[T Any] Iterator[T] {
     }
 
     // FindMap - find first element that maps to Some
-    public find_map[U Any](self, fn Func[T, Option[U]]) Option[U] = {
+    public find_map[U Any](self, fn Func(T) Option[U]) Option[U] = {
         let mutable iter = self
         while iter.next() is .Some(v) then {
             when fn(v) in {
@@ -536,7 +536,7 @@ given[T Any] Iterator[T] {
     }
 
     // Any - check if any element matches predicate
-    public any(self, fn Func[T, Bool]) Bool = {
+    public any(self, fn Func(T) Bool) Bool = {
         let mutable iter = self
         while iter.next() is .Some(v) then {
             if fn(v) then {
@@ -547,7 +547,7 @@ given[T Any] Iterator[T] {
     }
 
     // All - check if all elements match predicate
-    public all(self, fn Func[T, Bool]) Bool = {
+    public all(self, fn Func(T) Bool) Bool = {
         let mutable iter = self
         while iter.next() is .Some(v) then {
             if not fn(v) then {
@@ -564,7 +564,7 @@ given[T Any] Iterator[T] {
     }
 
     // MaxBy - find element with maximum key
-    public max_by[K Ord](self, fn Func[T, K]) Option[T] = {
+    public max_by[K Ord](self, fn Func(T) K) Option[T] = {
         let mutable iter = self
         when iter.next() in {
             .None then {
@@ -586,7 +586,7 @@ given[T Any] Iterator[T] {
     }
 
     // MinBy - find element with minimum key
-    public min_by[K Ord](self, fn Func[T, K]) Option[T] = {
+    public min_by[K Ord](self, fn Func(T) K) Option[T] = {
         let mutable iter = self
         when iter.next() in {
             .None then {

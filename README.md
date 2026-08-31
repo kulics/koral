@@ -183,7 +183,7 @@ let result = list.iterator()
 - Enums (sum types / tagged enums): `type Shape { Circle(r Float64), Rectangle(w Float64, h Float64) }`
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
-- Function types: `Func[Int, Int, Int]` — `(Int, Int) -> Int`
+- Function types: `Func(Int, Int) Int` — `(Int, Int) -> Int`
 - Reference types: `*` (managed read-only), `*mutable` (managed mutable), `unsafe *` (read-only), `unsafe * mutable` (mutable), `?*` (read-only weak), `?*mutable` (mutable weak)
 
 ### Control Flow

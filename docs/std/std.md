@@ -889,7 +889,7 @@ given[T Deref] Deque[T] {
     public get(*self, index UInt) Option[T]
     public clear(*mutable self) Void
     public reverse(*mutable self) Void
-    public retain(*mutable self, predicate Func[T, Bool]) Void
+    public retain(*mutable self, predicate Func(T) Bool) Void
 }
 
 given[T Eq and Deref] Deque[T] {
@@ -919,7 +919,7 @@ given[K Hash, V Any] Dict[K, V] {
     public take(*mutable self, key K) Option[V]
     public is_empty(*self) Bool
     public clear(*mutable self) Void
-    public retain(*mutable self, predicate Func[K, V, Bool]) Void
+    public retain(*mutable self, predicate Func(K, V) Bool) Void
 }
 
 given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
@@ -944,7 +944,7 @@ given[K Hash, V Any] Dict[K, V] as Iterable[Pair[K, V], DictIterator[K, V]] {
 }
 
 given[T Deref] List[T] {
-    public group_by[K Hash](*self, key Func[T, K]) Dict[K, List[T]]
+    public group_by[K Hash](*self, key Func(T) K) Dict[K, List[T]]
 }
 
 given Duration {
@@ -1023,39 +1023,39 @@ given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, 
 }
 
 given[T Any] Iterator[T] {
-    public filter(self, fn Func[T, Bool]) FilterIterator[T, Self]
-    public map[U Any](self, fn Func[T, U]) MapIterator[T, U, Self]
-    public filter_map[U Any](self, fn Func[T, Option[U]]) FilterMapIterator[T, U, Self]
+    public filter(self, fn Func(T) Bool) FilterIterator[T, Self]
+    public map[U Any](self, fn Func(T) U) MapIterator[T, U, Self]
+    public filter_map[U Any](self, fn Func(T) Option[U]) FilterMapIterator[T, U, Self]
     public take(self, n UInt) TakeIterator[T, Self]
     public skip(self, n UInt) SkipIterator[T, Self]
     public step_by(self, n UInt) StepIterator[T, Self]
     public enumerate(self) EnumerateIterator[T, Self]
-    public inspect(self, fn Func[T, Void]) InspectIterator[T, Self]
+    public inspect(self, fn Func(T) Void) InspectIterator[T, Self]
     public intersperse(self, v T) IntersperseIterator[T, Self]
-    public take_while(self, fn Func[T, Bool]) TakeWhileIterator[T, Self]
-    public skip_while(self, fn Func[T, Bool]) SkipWhileIterator[T, Self]
+    public take_while(self, fn Func(T) Bool) TakeWhileIterator[T, Self]
+    public skip_while(self, fn Func(T) Bool) SkipWhileIterator[T, Self]
     public chain[R2 Iterator[T]](self, other R2) ChainIterator[T, Self, R2]
     public zip[U Any, R2 Iterator[U]](self, other R2) ZipIterator[T, U, Self, R2]
-    public flat_map[U Any, InnerR Iterator[U]](self, fn Func[T, InnerR]) FlatMapIterator[T, U, Self, InnerR]
+    public flat_map[U Any, InnerR Iterator[U]](self, fn Func(T) InnerR) FlatMapIterator[T, U, Self, InnerR]
 }
 
 given[T Any] Iterator[T] {
-    public fold[U Any](self, initial U, fn Func[U, T, U]) U
-    public reduce(self, fn Func[T, T, T]) Option[T]
+    public fold[U Any](self, initial U, fn Func(U, T) U) U
+    public reduce(self, fn Func(T, T) T) Option[T]
     public into_list(self) List[T]
-    public for_each(self, fn Func[T, Void]) Void
+    public for_each(self, fn Func(T) Void) Void
     public count(self) UInt
     public first(self) Option[T]
     public last(self) Option[T]
     public nth(self, n UInt) Option[T]
-    public position(self, fn Func[T, Bool]) Option[UInt]
-    public find(self, fn Func[T, Bool]) Option[T]
-    public find_map[U Any](self, fn Func[T, Option[U]]) Option[U]
-    public any(self, fn Func[T, Bool]) Bool
-    public all(self, fn Func[T, Bool]) Bool
+    public position(self, fn Func(T) Bool) Option[UInt]
+    public find(self, fn Func(T) Bool) Option[T]
+    public find_map[U Any](self, fn Func(T) Option[U]) Option[U]
+    public any(self, fn Func(T) Bool) Bool
+    public all(self, fn Func(T) Bool) Bool
     public is_empty(self) Bool
-    public max_by[K Ord](self, fn Func[T, K]) Option[T]
-    public min_by[K Ord](self, fn Func[T, K]) Option[T]
+    public max_by[K Ord](self, fn Func(T) K) Option[T]
+    public min_by[K Ord](self, fn Func(T) K) Option[T]
 }
 
 given[T Eq] Iterator[T] {
@@ -1103,16 +1103,16 @@ given[T Deref] List[T] {
     public is_empty(*self) Bool
     public clear(*mutable self) Void
     public fill(*mutable self, value T) Void
-    public map[U Deref](*self, fn Func[T, U]) List[U]
+    public map[U Deref](*self, fn Func(T) U) List[U]
     public reverse(*mutable self) Void
     public borrow_ptr(*self) unsafe * T
     public borrow_mut_ptr(*mutable self) unsafe * mutable T
     public slice_spec(*self, range Range[UInt]) SliceSpec
     public sublist(*self, range Range[UInt]) List[T]
     public enumerate(*self) EnumerateIterator[T, ListIterator[T]]
-    public retain(*mutable self, predicate Func[T, Bool]) Void
-    public sort_by[K Ord](*mutable self, key Func[T, K]) Void
-    public binary_search_by[K Ord](*self, key Func[T, K], target K) Pair[UInt, Bool]
+    public retain(*mutable self, predicate Func(T) Bool) Void
+    public sort_by[K Ord](*mutable self, key Func(T) K) Void
+    public binary_search_by[K Ord](*self, key Func(T) K, target K) Pair[UInt, Bool]
 }
 
 given[T Eq and Deref] List[T] as Eq {
@@ -1143,8 +1143,8 @@ given[T Any] Option[T] {
     public unwrap(self) T
     public expect(self, message String) T
     public unwrap_or(self, default T) T
-    public map[U Any](self, f Func[T, U]) Option[U]
-    public filter(self, predicate Func[T, Bool]) Option[T]
+    public map[U Any](self, f Func(T) U) Option[U]
+    public filter(self, predicate Func(T) Bool) Option[T]
 }
 
 given[T Eq] Option[T] as Eq {
@@ -1429,7 +1429,7 @@ given[T Any] Result[T] {
     public expect(self, message String) T
     public unwrap_error(self) *Error
     public unwrap_or(self, default T) T
-    public map[U Any](self, f Func[T, U]) Result[U]
+    public map[U Any](self, f Func(T) U) Result[U]
 }
 
 given Rune {
@@ -1481,7 +1481,7 @@ given[T Hash] Set[T] {
     public is_subset_of(*self, other Set[T]) Bool
     public is_superset_of(*self, other Set[T]) Bool
     public clear(*mutable self) Void
-    public retain(*mutable self, predicate Func[T, Bool]) Void
+    public retain(*mutable self, predicate Func(T) Bool) Void
     public union(*self, other Set[T]) Set[T]
     public intersection(*self, other Set[T]) Set[T]
     public difference(*self, other Set[T]) Set[T]

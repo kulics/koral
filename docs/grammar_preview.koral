@@ -208,16 +208,16 @@ let max[T Eq and Ord](a T, b T) T =
 
 // 函数类型
 let fn_types() Void = {
-    let f Func[Int, Int, Int] = (x Int, y Int) Int -> x + y
-    let g Func[Int, Int]      = (x) -> x * 2
-    let h Func[Void]          = () -> {}
+    let f Func(Int, Int) Int = (x Int, y Int) Int -> x + y
+    let g Func(Int) Int      = (x) -> x * 2
+    let h Func() Void          = () -> {}
 
     // 柯里化
     let add = (x Int) -> (y Int) -> x + y
     let v = add(1)(2)
 
     // 作为参数传递
-    let apply = (f Func[Int, Int], x Int) Int -> f(x)
+    let apply = (f Func(Int) Int, x Int) Int -> f(x)
     apply((x) -> x + 1, 5)
     apply((x Int) Int -> x * 2, 5)
 
@@ -295,7 +295,7 @@ given Sprite as Drawable {
 
 // 函数类型不携带命名参数标签；lambda 参数始终使用位置参数
 let named_func_type() Void = {
-    let f Func[String, Int, Void] = (host String, port Int) -> {
+    let f Func(String, Int) Void = (host String, port Int) -> {
         connect(host: host, port: port)
     }
     f("localhost", 8080)
@@ -380,7 +380,7 @@ let control_flow() Void = {
     }
 
     // return / break / continue
-    let early Func[Int, Int] = (x Int) Int ->
+    let early Func(Int) Int = (x Int) Int ->
         if x > 0 then 1 else 2
 
     while i < 10 then {
@@ -389,21 +389,8 @@ let control_flow() Void = {
         if i == 8 then { break }
     }
 
-    // loop 里的 break value：指向外层 if / when 分支表达式
-    let first_even = when list.count() in {
-        0 then { break -1 },
-        _ then {
-            let mutable i = 0
-            while i < list.count() then {
-                if list[i] % 2 == 0 then { break list[i] }
-                i += 1
-            }
-            break -1
-        },
-    }
-
     // defer（LIFO 顺序，作用域退出前执行）
-    let with_defer Func[Void] = () -> {
+    let with_defer Func() Void = () -> {
         defer println("C")  // 最后执行
         defer println("B")
         defer println("A")  // 最先执行
@@ -611,7 +598,7 @@ let type_modifiers() Void = {
     let d ?*mutable Int = downgrade_mut(owned)          // *mutable T → ?*mutable T
 
     // 类型注解中使用
-    let f Func[*Int, Void] = (x) -> println(*x)
+    let f Func(*Int) Void = (x) -> println(*x)
 }
 
 // ============================================================
@@ -841,7 +828,7 @@ let trait_object_example() Void = {
     println(ms.area())
 
     // 接受 trait * 参数的函数值
-    let print_area Func[*Shape, Void] = (shape *Shape) -> println(shape.area())
+    let print_area Func(*Shape) Void = (shape *Shape) -> println(shape.area())
     print_area(s)
 }
 
@@ -873,7 +860,7 @@ type MyBox[T Any](value T)
 
 given[T Any] MyBox[T] {
     // [U Any] 是方法自己的类型参数
-    public transform[U Any](self, f Func[T, U]) U = f(self.value)
+    public transform[U Any](self, f Func(T) U) U = f(self.value)
 }
 
 let generic_method_call() Void = {
@@ -923,7 +910,7 @@ let option_chaining() Void = {
     let value2 = none or else 0   // 0
 
     // or else + 提前返回（自定义错误处理）
-    let default_option Func[Option[Int], Int] = (o Option[Int]) Int -> {
+    let default_option Func(Option[Int]) Int = (o Option[Int]) Int -> {
         let v = o or else { return -1 }
         return v * 2
     }
@@ -933,12 +920,12 @@ let option_chaining() Void = {
     let chained = opt and then it + 1 and then it * 3  // Some(129)
 
     // and then + 自动 flatten（monadic bind）
-    let safe_div Func[Int, Int, Option[Int]] = (x Int, y Int) Option[Int] ->
+    let safe_div Func(Int, Int) Option[Int] = (x Int, y Int) Option[Int] ->
         if y == 0 then .None() else .Some(x / y)
     let result = opt and then safe_div(it, 10)     // Option[Option[T]] -> Option[T]
 
     // Result 的 or else 错误传播
-    let double_result Func[Result[Int], Result[Int]] = (res Result[Int]) Result[Int] -> {
+    let double_result Func(Result[Int]) Result[Int] = (res Result[Int]) Result[Int] -> {
         let value = res or else { return .Error(it) }
         return .Ok(value * 2)
     }

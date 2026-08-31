@@ -78,8 +78,7 @@ public indirect enum TypeNode: CustomStringConvertible {
   case weakReference(TypeNode, mutable: Bool)
   case generic(base: String, args: [TypeNode])
   case inferredSelf
-  /// Function type: Func[ParamType1, ParamType2, ..., ReturnType]
-  /// The last type in args is the return type, all others are parameter types
+  /// Function type: Func(ParamType1, ParamType2, ...) ReturnType
   case functionType(paramTypes: [TypeNode], returnType: TypeNode)
   
   public var description: String {
@@ -98,9 +97,8 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .inferredSelf:
       return "Self"
     case .functionType(let paramTypes, let returnType):
-      let allTypes = paramTypes + [returnType]
-      let typesStr = allTypes.map { $0.description }.joined(separator: ", ")
-      return "Func[\(typesStr)]"
+      let paramsStr = paramTypes.map { $0.description }.joined(separator: ", ")
+      return "Func(\(paramsStr)) \(returnType)"
     }
   }
 }

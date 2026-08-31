@@ -1237,7 +1237,7 @@ let a = add(1, 2) // a == 3
 let increment(mutable x Int) Int = { x += 1; return x }
 ```
 
-对于普通参数，`mutable` 只表示函数体内部这个形参绑定可重新赋值。它不是函数签名的一部分，不改变 `Func[...]` 类型，也不会参与 trait/given 方法满足性的判断。
+对于普通参数，`mutable` 只表示函数体内部这个形参绑定可重新赋值。它不是函数签名的一部分，不会改变函数类型，也不会参与 trait/given 方法满足性的判断。
 
 #### 命名参数
 
@@ -1298,7 +1298,7 @@ given MyType as Drawable {
 函数类型（`Func`）不携带命名参数标签，lambda 参数始终使用位置参数语法：
 
 ```koral
-let f Func[String, Int, Void] = (host String, port Int) -> {
+let f Func(String, Int) Void = (host String, port Int) -> {
     connect(host: host, port: port)
 }
 f("localhost", 8080)
@@ -1308,11 +1308,11 @@ Foreign 声明（`foreign let`、`foreign type`）不支持命名参数。
 
 ### 函数类型
 
-在 Koral 中，函数也是一种类型。函数的类型使用 `Func[T1, T2, ..., R]` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
+在 Koral 中，函数也是一种类型。函数的类型使用 `Func(T1, T2, ...) R` 语法声明，其中 `T1, T2, ...` 是参数类型，`R` 是返回类型。
 
 ```koral
-let sqrt(x Int) Int = x * x          // Func[Int, Int]
-let f Func[Int, Int] = sqrt
+let sqrt(x Int) Int = x * x          // Func(Int) Int
+let f Func(Int) Int = sqrt
 let a = f(2)                      // a == 4
 ```
 
@@ -1320,8 +1320,8 @@ let a = f(2)                      // a == 4
 
 ```koral
 let hello() Void = println("Hello, world!")
-let run(f Func[Void]) Void = f()
-let toRun() Func[Func[Void], Void] = run
+let run(f Func() Void) Void = f()
+let toRun() Func(Func() Void) Void = run
 
 let main() Void = toRun()(hello)
 ```
@@ -1331,15 +1331,15 @@ let main() Void = toRun()(hello)
 Lambda 表达式与函数定义很相似，只是 `=` 换成了 `->`，并且没有函数名和 let 关键字。
 
 ```koral
-let f1(x Int) Int = x + 1            // Func[Int, Int]
-let f2 = (x Int) Int -> x + 1        // Func[Int, Int]
+let f1(x Int) Int = x + 1            // Func(Int) Int
+let f2 = (x Int) Int -> x + 1        // Func(Int) Int
 let a = f1(1) + f2(1)                // a == 4
 ```
 
 在上下文中可以得知 lambda 的类型时，可以省略参数类型和返回类型：
 
 ```koral
-let f Func[Int, Int] = (x) -> x + 1
+let f Func(Int) Int = (x) -> x + 1
 ```
 
 Lambda 支持多种形式：
@@ -1358,7 +1358,7 @@ Lambda 支持多种形式：
 Lambda 表达式可以捕获其周围作用域中的变量，这被称为闭包。
 
 ```koral
-let make_adder(base Int) Func[Int, Int] = {
+let make_adder(base Int) Func(Int) Int = {
     return (x) -> base + x
 }
 
@@ -1385,7 +1385,7 @@ increment()
 闭包使柯里化成为可能：
 
 ```koral
-let add Func[Int, Func[Int, Int]] = (x) -> (y) -> x + y
+let add Func(Int) Func(Int) Int = (x) -> (y) -> x + y
 
 let add10 = add(10)
 let result = add10(32)  // result == 42
@@ -1877,7 +1877,7 @@ let consume[I Iterator[Int]](iter I) Void = {}
 
 ```koral
 given[T Any] Option[T] {
-    public map[U Any](self, f Func[T, U]) Option[U] = self and then f(it)
+    public map[U Any](self, f Func(T) U) Option[U] = self and then f(it)
 }
 ```
 

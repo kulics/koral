@@ -674,6 +674,37 @@ given Parser {
         return .Ok(args)
     }
 
+    protected parse_function_type_param_list(*mutable self) Result[List[* TypeNode]] = {
+        when self.current().kind in {
+            .LParen() then { self.advance() },
+            _ then { return .Error(box("Expected '(' to start function type parameter list")) },
+        }
+
+        let mutable params = List[* TypeNode].new()
+        while true then {
+            if self.current().kind is .RParen() then {
+                self.advance()
+                break
+            }
+            let param_type = self.parse_type() or else {
+                return .Error(box("parse type error"))
+            }
+            params.push(box(param_type))
+
+            when self.current().kind in {
+                .Comma() then {
+                    self.advance()
+                },
+                .RParen() then {},
+                _ then {
+                    return .Error(box("Expected ',' or ')' in function type parameter list"))
+                },
+            }
+        }
+
+        return .Ok(params)
+    }
+
     protected parse_type(*mutable self) Result[TypeNode] = {
         when self.current().kind in {
             .QuestionMark() then {
@@ -728,27 +759,21 @@ given Parser {
             .Identifier(module_or_name) then {
                 self.advance()
 
-                if module_or_name == "Func" and self.current().kind is .LBracket() then {
-                    let args = self.parse_type_arg_list() or else {
-                        return .Error(box("parse type error"))
-                    }
-                    if args.is_empty() then {
-                        return .Error(box("Function type must include a return type"))
-                    }
-                    let mutable param_types = List[* TypeNode].new()
-                    let mutable return_type_opt = Option[* TypeNode].None()
-                    let mutable i UInt = 0
-                    for arg in args then {
-                        if i + 1 < args.count() then {
-                            param_types.push(arg)
-                        } else {
-                            return_type_opt = Option[* TypeNode].Some(arg)
+                if module_or_name == "Func" then {
+                    if self.current().kind is .LParen() then {
+                        let param_types = self.parse_function_type_param_list() or else {
+                            return .Error(box("parse type error"))
                         }
-                        i += 1
+                        if not self.is_type_start() then {
+                            return .Error(box("Function type must include a return type, e.g. Func(Int, String) Bool"))
+                        }
+                        let return_type = self.parse_type() or else {
+                            return .Error(box("parse type error"))
+                        }
+                        return .Ok(TypeNode.FunctionType(param_types, box(return_type)))
                     }
-                    return when return_type_opt in {
-                        .Some(return_type) then .Ok(TypeNode.FunctionType(param_types, return_type)),
-                        .None() then .Error(box("Function type must include a return type")),
+                    if self.current().kind is .LBracket() then {
+                        return .Error(box("Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"))
                     }
                 }
 

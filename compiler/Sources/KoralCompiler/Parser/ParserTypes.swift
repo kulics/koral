@@ -10,6 +10,15 @@ extension Parser {
     case weakReference(mutable: Bool)
   }
 
+
+  private func isTypeStart(_ token: Token) -> Bool {
+    switch token {
+    case .selfTypeKeyword, .questionMark, .unsafeKeyword, .multiply, .identifier:
+      return true
+    default:
+      return false
+    }
+  }
   private func wrapType(_ base: TypeNode, with prefix: TypeModifierPrefix) -> TypeNode {
     switch prefix {
     case .reference(let mutable):
@@ -87,6 +96,37 @@ extension Parser {
     return args
   }
 
+  private func parseTypeListInParens() throws -> [TypeNode] {
+    try match(.leftParen)
+    var args: [TypeNode] = []
+    while currentToken !== .rightParen {
+      args.append(try parseType())
+      if currentToken === .comma {
+        try match(.comma)
+      } else if currentToken !== .rightParen {
+        throw ParserError.unexpectedToken(
+          span: currentSpan,
+          got: currentToken.description,
+          expected: "',' or ')'"
+        )
+      }
+    }
+    try match(.rightParen)
+    return args
+  }
+
+  private func parseFunctionTypeAfterFuncKeyword() throws -> TypeNode {
+    let paramTypes = try parseTypeListInParens()
+    guard isTypeStart(currentToken) else {
+      throw ParserError.invalidFunctionType(
+        span: currentSpan,
+        message: "Function type must include a return type, e.g. Func(Int) String"
+      )
+    }
+    let returnType = try parseType()
+    return .functionType(paramTypes: paramTypes, returnType: returnType)
+  }
+
   private func parseTypeAtom() throws -> TypeNode {
     if currentToken === .selfTypeKeyword {
       try match(.selfTypeKeyword)
@@ -99,15 +139,16 @@ extension Parser {
     }
     try match(.identifier(name))
 
-    if name == "Func", currentToken === .leftBracket {
-      let args = try parseTypeListInBrackets()
-      guard !args.isEmpty else {
-        throw ParserError.invalidFunctionType(
-          span: currentSpan, message: "Function type must have at least a return type")
+    if name == "Func" {
+      if currentToken === .leftParen {
+        return try parseFunctionTypeAfterFuncKeyword()
       }
-      let returnType = args.last!
-      let paramTypes = Array(args.dropLast())
-      return .functionType(paramTypes: paramTypes, returnType: returnType)
+      if currentToken === .leftBracket {
+        throw ParserError.invalidFunctionType(
+          span: currentSpan,
+          message: "Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"
+        )
+      }
     }
 
     if !isValidTypeName(name) {
@@ -128,7 +169,7 @@ extension Parser {
   /// Supports:
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
-  /// - Function types: Func[ParamType1, ParamType2, ReturnType]
+  /// - Function types: Func(ParamType1, ParamType2) ReturnType
   /// - U2 reference types: *T, *mutable T, ?*T, *raw T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]

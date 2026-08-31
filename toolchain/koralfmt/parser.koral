@@ -14,6 +14,7 @@ public type CstType {
     SelfType(kw Token),
     Mutable(inner * CstType, kw Token),
     Generic(lbracket Token, args List[CstTypeArg], rbracket Token, base Token),
+    Function(func_kw Token, lparen Token, args List[CstTypeArg], rparen Token, return_type * CstType),
     Ref(inner * CstType, kw Token),
     Ptr(inner * CstType, kw Token),
     Weakref(inner * CstType, kw Token),
@@ -619,6 +620,35 @@ given CstParser {
                     if first < 65 or first > 90 then {
                         return .Error(box("Parse error: type name must start with uppercase, got '\(n)'"))
                     }
+                }
+
+                if n == "Func" and self.check(.LParen()) then {
+                    let lp = self.eat()
+                    let mutable args = List[CstTypeArg].new()
+                    while not self.check(.RParen()) and not self.is_eof() then {
+                        let inner = when self.parse_type_node() in {
+                            .Ok(parsed_type) then parsed_type,
+                            .Error(e) then { return .Error(e) },
+                        }
+                        let comma = self.eat_comma()
+                        args.push(CstTypeArg(box(inner), comma))
+                    }
+                    let rp = when self.expect(.RParen(), "')'") in {
+                        .Ok(tok) then tok,
+                        .Error(e) then { return .Error(e) },
+                    }
+                    if not self.is_type_start(self.peek()) then {
+                        return .Error(box("Parse error: function type must include a return type, e.g. Func(Int, String) Bool"))
+                    }
+                    let return_type = when self.parse_type_node() in {
+                        .Ok(parsed_type) then parsed_type,
+                        .Error(e) then { return .Error(e) },
+                    }
+                    return .Ok(.Function(name, lp, args, rp, box(return_type)))
+                }
+
+                if n == "Func" and self.check(.LBracket()) then {
+                    return .Error(box("Parse error: use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"))
                 }
             },
             _ then {},
