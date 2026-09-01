@@ -366,6 +366,15 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
+    case .unsafeDerefExpression(let operand, let type):
+      print("\(indent)UnsafeDerefExpression: : \(type)")
+      withIndent {
+        print("\(indent)Operand:")
+        withIndent {
+          printTypedExpression(operand)
+        }
+      }
+
     case .ptrExpression(let operand, let type):
       print("\(indent)PtrExpression: : \(type)")
       withIndent {

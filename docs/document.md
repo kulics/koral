@@ -532,22 +532,22 @@ let owned *mutable Int = &mutable n
 
 Pointer types follow the same read-only / mutable distinction:
 
-- `unsafe * T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
-- `unsafe * mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
+- `unsafe * T` — read-only pointer. Supports `unsafe *expr` dereference read but NOT `unsafe *expr` assignment or `p[i]` assignment.
+- `unsafe * mutable T` — mutable pointer. Supports `unsafe *expr` dereference read, `unsafe *expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
 - `unsafe * mutable T` implicitly converts to `unsafe * T`. The reverse is not allowed.
 
 #### Weak References
 
 Weak references don't increase the reference count, used to break reference cycles. Like `*`/`*mutable`, weak references also distinguish mutability: `?*T` (read-only) and `?*mutable T` (mutable).
 
-Use `downgrade(*T)` to create `?*T` (or `downgrade_mut(*mutable T)` for `?*mutable T`), and `upgrade(?*T)` to attempt upgrading back to `Option[*T]` (or `upgrade_mut(?*mutable T)` for `Option[*mutable T]`).
+Use `downgrade(*T)` to create `?*T` (or `downgrade_mutable(*mutable T)` for `?*mutable T`), and `upgrade(?*T)` to attempt upgrading back to `Option[*T]` (or `upgrade_mutable(?*mutable T)` for `Option[*mutable T]`).
 
 ```koral
 let strong *mutable Int = box(42)
 
 // Mutable path: *mutable → ?*mutable → Option[*mutable T]
-let weak = downgrade_mut(strong)              // *mutable T → ?*mutable T
-let upgraded = upgrade_mut(weak)           // ?*mutable T → Option[*mutable T]
+let weak = downgrade_mutable(strong)              // *mutable T → ?*mutable T
+let upgraded = upgrade_mutable(weak)           // ?*mutable T → Option[*mutable T]
 
 // Read-only path: * → ?* → Option[*T]
 let ro *Int = strong                // implicit widening
@@ -745,7 +745,7 @@ Builtin subscript rules:
 - `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `unsafe * T`, and `unsafe * mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` support value reads, assignment, nested place updates, and explicit/implicit `*` / `*mutable` contexts.
-- `unsafe * T` supports reads only. `unsafe * mutable T` supports both reads and writes.
+- `unsafe * T` supports `unsafe *expr` reads only. `unsafe * mutable T` supports both `unsafe *expr` reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
 ```koral
@@ -1625,12 +1625,13 @@ Tool methods are available in:
 
 When multiple candidates conflict, use explicit qualified calls:
 
-- Instance method: `object.(TraitName)method(...)`
-- Static method: `Type.(TraitName)method(value, ...)`
-- Generic instance method: `object.(TraitName)method[TypeArgs...](...)`
-- Generic static method: `Type.(TraitName)method[TypeArgs...](value, ...)`
+- Instance method: `(object as TraitName).method(...)`
+- Static method: `(Type as TraitName).method(value, ...)`
+- Generic instance trait: `(object as TraitName[Args...]).method(...)`
+- Generic static trait: `(Type as TraitName[Args...]).method(value, ...)`
+- Generic method type args still appear on the method: `(object as TraitName).method[TypeArgs...](...)`
 
-For generic methods, the trait qualifier must appear before method type arguments.
+For generic methods, the trait qualification wraps the receiver before method type arguments.
 
 #### Override and conflict rules
 

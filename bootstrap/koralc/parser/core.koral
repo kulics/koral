@@ -818,7 +818,7 @@ given Parser {
             let param_name = when self.current().kind in {
                 .Identifier(name) then {
                     self.advance()
-                    break name
+                    yield name
                 },
                 _ then {
                     return .Error(box(self.format_context_position_error("Expected identifier for ", "type parameter", self.current())))
@@ -1441,7 +1441,7 @@ given Parser {
                 let mutable path = List[String].new()
                 path.push(member_name)
                 let callee = box(Expr.MemberPath(base, path, span))
-                break Result[* Expr].Ok(box(Expr.Call(callee, args, span)))
+                yield Result[* Expr].Ok(box(Expr.Call(callee, args, span)))
             },
             _ then Result[* Expr].Error(box("Expected postfix continuation expression")),
         }
@@ -1455,11 +1455,11 @@ given Parser {
             current = when current in {
                 .LetStmt(name, is_mutable, type_name, value, span) then {
                     let updated = self.apply_statement_postfix_continuation(value, continuation) or return
-                    break Statement.LetStmt(name, is_mutable, type_name, updated, span)
+                    yield Statement.LetStmt(name, is_mutable, type_name, updated, span)
                 },
                 .ExprStmt(expr, span) then {
                     let updated = self.apply_statement_postfix_continuation(expr, continuation) or return
-                    break Statement.ExprStmt(updated, span)
+                    yield Statement.ExprStmt(updated, span)
                 },
                 _ then { return .Ok(current) },
             }
@@ -1485,15 +1485,19 @@ given Parser {
                 self.consume_semicolon()
                 return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)))
             },
+            .KwYield() then {
+                self.advance()
+                let value = self.parse_expression_checked("yield statement value") or return
+                self.consume_semicolon()
+                return .Ok(Statement.YieldStmt(value, self.span_from_start(start)))
+            },
             .KwBreak() then {
                 self.advance()
                 if self.should_terminate_statement() then {
                     self.consume_semicolon()
                     return .Ok(Statement.BreakStmt(Option[* Expr].None(), self.span_from_start(start)))
                 }
-                let value = self.parse_expression_checked("break statement value") or return
-                self.consume_semicolon()
-                return .Ok(Statement.BreakStmt(.Some(value), self.span_from_start(start)))
+                return .Error(box("Expected statement terminator after 'break'"))
             },
             .KwContinue() then {
                 self.advance()

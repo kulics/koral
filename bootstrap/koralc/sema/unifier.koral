@@ -23,14 +23,14 @@ given UnificationError as Error {
                 out.push_string(unification_type_summary(lhs))
                 out.push_string(" vs ")
                 out.push_string(unification_type_summary(rhs))
-                break out
+                yield out
             },
             .OccursCheck(tv, t, _) then {
                 let mutable out = "OccursCheck: type variable "
                 out.push_string(tv.display())
                 out.push_string(" occurs in ")
                 out.push_string(unification_type_summary(t))
-                break out
+                yield out
             },
             .ArityMismatch(_, _, _) then "ArityMismatch: function types have different parameter counts",
             .TemplateMismatch(expected, got, _) then {
@@ -38,7 +38,7 @@ given UnificationError as Error {
                 out.push_string(expected)
                 out.push_string(", got ")
                 out.push_string(got)
-                break out
+                yield out
             },
         }
     }
@@ -61,27 +61,27 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
             .GenericStruct(template, _) then {
                 let mutable out = template
                 out.push_string("[...]")
-                break out
+                yield out
             },
             .GenericEnum(template, _) then {
                 let mutable out = template
                 out.push_string("[...]")
-                break out
+                yield out
             },
             .StructureType(def_id) then {
                 let mutable out = "struct#"
                 out.push_string(def_id.id.to_string())
-                break out
+                yield out
             },
             .EnumType(def_id) then {
                 let mutable out = "enum#"
                 out.push_string(def_id.id.to_string())
-                break out
+                yield out
             },
             .OpaqueType(def_id) then {
                 let mutable out = "opaque#"
                 out.push_string(def_id.id.to_string())
-                break out
+                yield out
             },
             .TraitObject(trait_name, _) then trait_name,
             .TypeVar(tv_ref) then (*tv_ref).display(),
@@ -117,62 +117,62 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
             out.push_byte(')')
             out.push_byte(' ')
             out.push_string(unification_type_summary_with_depth(*ret, depth + 1(UInt)))
-            break out
+            yield out
         },
         .StructureType(def_id) then {
             let mutable out = "struct#"
             out.push_string(def_id.id.to_string())
-            break out
+            yield out
         },
         .EnumType(def_id) then {
             let mutable out = "enum#"
             out.push_string(def_id.id.to_string())
-            break out
+            yield out
         },
         .ReferenceType(inner) then {
             let mutable out = "* "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .MutableReferenceType(inner) then {
             let mutable out = "*mutable "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .PointerType(inner) then {
             let mutable out = "unsafe * "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .MutablePointerType(inner) then {
             let mutable out = "unsafe * mutable "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .WeakReferenceType(inner) then {
             let mutable out = "?* "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .MutableWeakReferenceType(inner) then {
             let mutable out = "?*mutable "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .BorrowedReferenceType(inner) then {
             let mutable out = "ref "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .MutableBorrowedReferenceType(inner) then {
             let mutable out = "ref mutable "
             out.push_string(unification_type_summary_with_depth(*inner, depth + 1(UInt)))
-            break out
+            yield out
         },
         .OpaqueType(def_id) then {
             let mutable out = "opaque#"
             out.push_string(def_id.id.to_string())
-            break out
+            yield out
         },
         .GenericParameter(name) then name,
         .GenericStruct(template, args) then {
@@ -185,7 +185,7 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
                 first = false
             }
             out.push_byte(']')
-            break out
+            yield out
         },
         .GenericEnum(template, args) then {
             let mutable out = template
@@ -197,10 +197,10 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
                 first = false
             }
             out.push_byte(']')
-            break out
+            yield out
         },
         .ModuleType(info) then {
-            break if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
+            yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
         },
         .TraitObject(trait_name, _) then trait_name,
         .TypeVar(tv_ref) then (*tv_ref).display(),
@@ -395,10 +395,10 @@ given Unifier {
             .TypeVar(tv_ref) then {
                 let tv = *tv_ref
                 let resolved = self.union_find.resolve_tv(tv.id)
-                break when resolved in {
+                yield when resolved in {
                     .Unknown() then t,
                     .TypeVar(inner_ref) then {
-                        break if (*inner_ref).id == tv.id then t
+                        yield if (*inner_ref).id == tv.id then t
                         else self.resolve(resolved)
                     },
                     _ then self.resolve(resolved),
@@ -416,7 +416,7 @@ given Unifier {
                 let original_ret = *ret
                 let resolved_ret = self.resolve(original_ret)
                 if original_ret <> resolved_ret then { changed = true }
-                break if changed then Type.FunctionType(types_to_param_entries(new_params), box(resolved_ret)) else t
+                yield if changed then Type.FunctionType(types_to_param_entries(new_params), box(resolved_ret)) else t
             },
             .GenericStruct(template, args) then {
                 let mutable changed = false
@@ -427,7 +427,7 @@ given Unifier {
                     if original <> resolved then { changed = true }
                     new_args.push(box(resolved))
                 }
-                break if changed then Type.GenericStruct(template, new_args) else t
+                yield if changed then Type.GenericStruct(template, new_args) else t
             },
             .GenericEnum(template, args) then {
                 let mutable changed = false
@@ -438,31 +438,31 @@ given Unifier {
                     if original <> resolved then { changed = true }
                     new_args.push(box(resolved))
                 }
-                break if changed then Type.GenericEnum(template, new_args) else t
+                yield if changed then Type.GenericEnum(template, new_args) else t
             },
             .ReferenceType(inner) then {
                 let resolved = self.resolve(*inner)
-                break if *inner == resolved then t else Type.ReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.ReferenceType(box(resolved))
             },
             .MutableReferenceType(inner) then {
                 let resolved = self.resolve(*inner)
-                break if *inner == resolved then t else Type.MutableReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.MutableReferenceType(box(resolved))
             },
             .PointerType(inner) then {
                 let resolved = self.resolve(*inner)
-                break if *inner == resolved then t else Type.PointerType(box(resolved))
+                yield if *inner == resolved then t else Type.PointerType(box(resolved))
             },
             .MutablePointerType(inner) then {
                 let resolved = self.resolve(*inner)
-                break if *inner == resolved then t else Type.MutablePointerType(box(resolved))
+                yield if *inner == resolved then t else Type.MutablePointerType(box(resolved))
             },
             .WeakReferenceType(inner) then {
                 let resolved = self.resolve(*inner)
-                break if *inner == resolved then t else Type.WeakReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.WeakReferenceType(box(resolved))
             },
             .MutableWeakReferenceType(inner) then {
                 let resolved = self.resolve(*inner)
-                break if *inner == resolved then t else Type.MutableWeakReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.MutableWeakReferenceType(box(resolved))
             },
             _ then t,
         }
@@ -479,10 +479,10 @@ given Unifier {
             .TypeVar(tv_ref) then {
                 let tv = *tv_ref
                 let resolved = self.union_find.resolve_tv(tv.id)
-                break when resolved in {
+                yield when resolved in {
                     .Unknown() then t,
                     .TypeVar(inner_ref) then {
-                        break if (*inner_ref).id == tv.id then t
+                        yield if (*inner_ref).id == tv.id then t
                         else self.resolve_deep(resolved)
                     },
                     _ then self.resolve_deep(resolved),
@@ -500,31 +500,31 @@ given Unifier {
                 let original_ret = *ret
                 let resolved_ret = self.resolve_deep(original_ret)
                 if original_ret <> resolved_ret then { changed = true }
-                break if changed then Type.FunctionType(types_to_param_entries(new_params), box(resolved_ret)) else t
+                yield if changed then Type.FunctionType(types_to_param_entries(new_params), box(resolved_ret)) else t
             },
             .ReferenceType(inner) then {
                 let resolved = self.resolve_deep(*inner)
-                break if *inner == resolved then t else Type.ReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.ReferenceType(box(resolved))
             },
             .MutableReferenceType(inner) then {
                 let resolved = self.resolve_deep(*inner)
-                break if *inner == resolved then t else Type.MutableReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.MutableReferenceType(box(resolved))
             },
             .PointerType(inner) then {
                 let resolved = self.resolve_deep(*inner)
-                break if *inner == resolved then t else Type.PointerType(box(resolved))
+                yield if *inner == resolved then t else Type.PointerType(box(resolved))
             },
             .MutablePointerType(inner) then {
                 let resolved = self.resolve_deep(*inner)
-                break if *inner == resolved then t else Type.MutablePointerType(box(resolved))
+                yield if *inner == resolved then t else Type.MutablePointerType(box(resolved))
             },
             .WeakReferenceType(inner) then {
                 let resolved = self.resolve_deep(*inner)
-                break if *inner == resolved then t else Type.WeakReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.WeakReferenceType(box(resolved))
             },
             .MutableWeakReferenceType(inner) then {
                 let resolved = self.resolve_deep(*inner)
-                break if *inner == resolved then t else Type.MutableWeakReferenceType(box(resolved))
+                yield if *inner == resolved then t else Type.MutableWeakReferenceType(box(resolved))
             },
             .GenericStruct(template, args) then {
                 let mutable changed = false
@@ -535,7 +535,7 @@ given Unifier {
                     if original <> resolved then { changed = true }
                     new_args.push(box(resolved))
                 }
-                break if changed then Type.GenericStruct(template, new_args) else t
+                yield if changed then Type.GenericStruct(template, new_args) else t
             },
             .GenericEnum(template, args) then {
                 let mutable changed = false
@@ -546,7 +546,7 @@ given Unifier {
                     if original <> resolved then { changed = true }
                     new_args.push(box(resolved))
                 }
-                break if changed then Type.GenericEnum(template, new_args) else t
+                yield if changed then Type.GenericEnum(template, new_args) else t
             },
             _ then t,
         }
@@ -617,60 +617,60 @@ given Unifier {
 // 辅助函数：判断两个类型是否结构相等（不解析类型变量）。
 private let types_equal(lhs Type, rhs Type) Bool = {
     return when lhs in {
-        .IntType() then { break when rhs in { .IntType() then true, _ then false } },
-        .Int8Type() then { break when rhs in { .Int8Type() then true, _ then false } },
-        .Int16Type() then { break when rhs in { .Int16Type() then true, _ then false } },
-        .Int32Type() then { break when rhs in { .Int32Type() then true, _ then false } },
-        .Int64Type() then { break when rhs in { .Int64Type() then true, _ then false } },
-        .UIntType() then { break when rhs in { .UIntType() then true, _ then false } },
-        .UInt8Type() then { break when rhs in { .UInt8Type() then true, _ then false } },
-        .UInt16Type() then { break when rhs in { .UInt16Type() then true, _ then false } },
-        .UInt32Type() then { break when rhs in { .UInt32Type() then true, _ then false } },
-        .UInt64Type() then { break when rhs in { .UInt64Type() then true, _ then false } },
-        .Float32Type() then { break when rhs in { .Float32Type() then true, _ then false } },
-        .Float64Type() then { break when rhs in { .Float64Type() then true, _ then false } },
-        .BoolType() then { break when rhs in { .BoolType() then true, _ then false } },
-        .VoidType() then { break when rhs in { .VoidType() then true, _ then false } },
-        .NeverType() then { break when rhs in { .NeverType() then true, _ then false } },
-        .Unknown() then { break when rhs in { .Unknown() then true, _ then false } },
+        .IntType() then { yield when rhs in { .IntType() then true, _ then false } },
+        .Int8Type() then { yield when rhs in { .Int8Type() then true, _ then false } },
+        .Int16Type() then { yield when rhs in { .Int16Type() then true, _ then false } },
+        .Int32Type() then { yield when rhs in { .Int32Type() then true, _ then false } },
+        .Int64Type() then { yield when rhs in { .Int64Type() then true, _ then false } },
+        .UIntType() then { yield when rhs in { .UIntType() then true, _ then false } },
+        .UInt8Type() then { yield when rhs in { .UInt8Type() then true, _ then false } },
+        .UInt16Type() then { yield when rhs in { .UInt16Type() then true, _ then false } },
+        .UInt32Type() then { yield when rhs in { .UInt32Type() then true, _ then false } },
+        .UInt64Type() then { yield when rhs in { .UInt64Type() then true, _ then false } },
+        .Float32Type() then { yield when rhs in { .Float32Type() then true, _ then false } },
+        .Float64Type() then { yield when rhs in { .Float64Type() then true, _ then false } },
+        .BoolType() then { yield when rhs in { .BoolType() then true, _ then false } },
+        .VoidType() then { yield when rhs in { .VoidType() then true, _ then false } },
+        .NeverType() then { yield when rhs in { .NeverType() then true, _ then false } },
+        .Unknown() then { yield when rhs in { .Unknown() then true, _ then false } },
         .StructureType(lhs_id) then {
-            break when rhs in {
+            yield when rhs in {
                 .StructureType(rhs_id) then lhs_id.id == rhs_id.id,
                 _ then false,
             }
         },
         .EnumType(lhs_id) then {
-            break when rhs in {
+            yield when rhs in {
                 .EnumType(rhs_id) then lhs_id.id == rhs_id.id,
                 _ then false,
             }
         },
         .OpaqueType(lhs_id) then {
-            break when rhs in {
+            yield when rhs in {
                 .OpaqueType(rhs_id) then lhs_id.id == rhs_id.id,
                 _ then false,
             }
         },
         .TypeVar(lhs_tv) then {
-            break when rhs in {
+            yield when rhs in {
                 .TypeVar(rhs_tv) then (*lhs_tv).id == (*rhs_tv).id,
                 _ then false,
             }
         },
         .GenericParameter(lhs_name) then {
-            break when rhs in {
+            yield when rhs in {
                 .GenericParameter(rhs_name) then lhs_name == rhs_name,
                 _ then false,
             }
         },
         .TraitObject(lhs_name, _) then {
-            break when rhs in {
+            yield when rhs in {
                 .TraitObject(rhs_name, _) then lhs_name == rhs_name,
                 _ then false,
             }
         },
         .MutableWeakReferenceType(lhs_inner) then {
-            break when rhs in {
+            yield when rhs in {
                 .MutableWeakReferenceType(rhs_inner) then types_equal(*lhs_inner, *rhs_inner),
                 _ then false,
             }

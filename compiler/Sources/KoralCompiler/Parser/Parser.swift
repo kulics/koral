@@ -123,16 +123,13 @@ public class Parser {
 
   // Parse statement
   func statement() throws -> StatementNode {
-    // Record the span at the start of the statement
     let startSpan = currentSpan
-    
+
     switch currentToken {
     case .letKeyword:
       return try variableDeclaration()
     case .returnKeyword:
       try match(.returnKeyword)
-      // return; or return <expr>;
-      // Also check for automatic statement termination (newline before a non-join token)
       if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
         return .return(value: nil, span: startSpan)
       }
@@ -143,8 +140,15 @@ public class Parser {
       if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
         return .break(value: nil, span: startSpan)
       }
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "statement terminator after 'break'"
+      )
+    case .yieldKeyword:
+      try match(.yieldKeyword)
       let value = try expression()
-      return .break(value: value, span: startSpan)
+      return .yield(value: value, span: startSpan)
     case .continueKeyword:
       try match(.continueKeyword)
       return .continue(span: startSpan)

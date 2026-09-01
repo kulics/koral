@@ -8,7 +8,7 @@ given TypeChecker {
                 if self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) is .Some(template) then {
                     return Option[* GenericFunctionTemplate].Some(template)
                 }
-                break self.storage.generic_templates.lookup_function_by_def_id(sym.def_id)
+                yield self.storage.generic_templates.lookup_function_by_def_id(sym.def_id)
             },
             _ then Option[* GenericFunctionTemplate].None(),
         }
@@ -24,7 +24,7 @@ given TypeChecker {
                 for type_arg in type_args then {
                     resolved.push(self.resolve_type_in_scope(*type_arg, scope))
                 }
-                break resolved
+                yield resolved
             },
             _ then List[Type].new(),
         }
@@ -79,7 +79,7 @@ given TypeChecker {
                     for field in fields then {
                         types.push(field.field_type)
                     }
-                    break types
+                    yield types
                 },
                 .None() then List[Type].new(),
             },
@@ -100,7 +100,7 @@ given TypeChecker {
                         for field in fields then {
                             types.push(self.apply_type_bindings(field.field_type, bindings))
                         }
-                        break types
+                        yield types
                     },
                     .None() then List[Type].new(),
                 },
@@ -140,14 +140,14 @@ given TypeChecker {
                 for type_arg in type_args then {
                     resolved_args.push(box(self.resolve_type_in_scope(*type_arg, scope)))
                 }
-                break when resolved_base in {
+                yield when resolved_base in {
                     .StructureType(def_id) then {
                         let template_name = self.context().get_template_name(def_id) or else base
-                        break Type.GenericStruct(template_name, resolved_args)
+                        yield Type.GenericStruct(template_name, resolved_args)
                     },
                     .EnumType(def_id) then {
                         let template_name = self.context().get_template_name(def_id) or else base
-                        break Type.GenericEnum(template_name, resolved_args)
+                        yield Type.GenericEnum(template_name, resolved_args)
                     },
                     .GenericStruct(template_name, _) then Type.GenericStruct(template_name, resolved_args),
                     .GenericEnum(template_name, _) then Type.GenericEnum(template_name, resolved_args),
@@ -352,7 +352,7 @@ given TypeChecker {
                 if sym.is_mutable() then {
                     return true
                 }
-                break when sym.symbol_type in {
+                yield when sym.symbol_type in {
                     .ReferenceType(_) then true,
                     .MutableReferenceType(_) then true,
                     .BorrowedReferenceType(_) then true,
@@ -380,9 +380,18 @@ given TypeChecker {
                     current = segment_type
                     idx += 1
                 }
-                break can_take
+                yield can_take
             },
             .DerefExpr(inner) then when inner.expr_type in {
+                .ReferenceType(_) then true,
+                .MutableReferenceType(_) then true,
+                .BorrowedReferenceType(_) then true,
+                .MutableBorrowedReferenceType(_) then true,
+                .PointerType(_) then true,
+                .MutablePointerType(_) then true,
+                _ then false,
+            },
+            .UnsafeDerefExpr(inner) then when inner.expr_type in {
                 .ReferenceType(_) then true,
                 .MutableReferenceType(_) then true,
                 .BorrowedReferenceType(_) then true,
@@ -407,9 +416,9 @@ given TypeChecker {
                 for part in path then {
                     out = out + "." + part
                 }
-                break Option[String].Some(out)
+                yield Option[String].Some(out)
             } else {
-                break Option[String].None()
+                yield Option[String].None()
             },
             _ then Option[String].None(),
         }
@@ -535,7 +544,7 @@ given TypeChecker {
                 for _ in param_types then {
                     specs.push(FunctionParamSpec("", false, false))
                 }
-                break specs
+                yield specs
             },
             _ then List[FunctionParamSpec].new(),
         }
@@ -572,7 +581,7 @@ given TypeChecker {
                     for field in fields then {
                         specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named))
                     }
-                    break specs
+                    yield specs
                 },
                 .None() then List[FunctionParamSpec].new(),
             },
@@ -583,7 +592,7 @@ given TypeChecker {
                         for field in fields then {
                             specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named))
                         }
-                        break specs
+                        yield specs
                     },
                     .None() then List[FunctionParamSpec].new(),
                 },
@@ -685,7 +694,7 @@ given TypeChecker {
                     if not constructor_specs.is_empty() then {
                         return constructor_specs
                     }
-                    break self.positional_param_specs_for_function_type(sym.symbol_type)
+                    yield self.positional_param_specs_for_function_type(sym.symbol_type)
                 },
                 _ then when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
                     .Some(constructor_type) then self.struct_constructor_param_specs(constructor_type),
@@ -699,21 +708,21 @@ given TypeChecker {
             .MemberPath(_, _, _) then when typed_callee.expr_kind in {
                 .MethodReference(base, _, method, _, _, _) then {
                     let _ = base
-                    break self.drop_receiver_param_specs(*method)
+                    yield self.drop_receiver_param_specs(*method)
                 },
                 .MemberPath(base, path) then if not path.is_empty() then {
-                    break when self.resolve_method_signature(base.expr_type, path[path.count() - 1]) in {
+                    yield when self.resolve_method_signature(base.expr_type, path[path.count() - 1]) in {
                         .Some(sig) then self.drop_receiver_param_specs(sig),
                         .None() then List[FunctionParamSpec].new(),
                     }
                 } else self.positional_param_specs_for_function_type(typed_callee.expr_type),
                 _ then self.positional_param_specs_for_function_type(typed_callee.expr_type),
             },
-            .QualifiedMethodCall(_, trait_name, method_name, _, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
-            .QualifiedGenericMethodCall(_, trait_name, _, method_name, _, _) then self.resolve_qualified_method_param_specs(trait_name, method_name),
+            .QualifiedMethodCall(_, trait_type_node, method_name, _, _) then self.resolve_qualified_method_param_specs(self.type_node_name(trait_type_node), method_name),
+            .QualifiedGenericMethodCall(_, trait_type_node, _, method_name, _, _) then self.resolve_qualified_method_param_specs(self.type_node_name(trait_type_node), method_name),
             .StaticMethodCall(type_name, _, method_name, _, _) then when typed_callee.expr_kind in {
                 .StaticMethodCall(_, _, method, _, _, _) then {
-                    break when self.context().get_param_specs(method.def_id) in {
+                    yield when self.context().get_param_specs(method.def_id) in {
                         .Some(specs) then specs,
                         .None() then self.positional_param_specs_for_function_type(method.symbol_type),
                     }

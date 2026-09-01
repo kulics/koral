@@ -306,20 +306,20 @@ let named_func_type() Void = {
 foreign let fclose(file unsafe *FILE) Int32          // 正确：位置参数
 
 // ============================================================
-// break value（仅用于 if / when 分支表达式的分支 body）
+// yield value（仅用于 if / when 分支表达式的分支 body）
 // ============================================================
 
 let value = if ready() then {
-    break 42
+    yield 42
 } else {
-    break 0
+    yield 0
 }
 
-// early break value：在分支 body 内提前产出当前分支表达式的值
+// early yield value：在分支 body 内提前产出当前分支表达式的值
 let classify(score Int) String =
     if score >= 90 then {
-        if score == 100 then { break "perfect" }
-        break "A"
+        if score == 100 then { yield "perfect" }
+        yield "A"
     } else {
         break "other"
     }
@@ -572,30 +572,30 @@ let type_modifiers() Void = {
 
     // unsafe *：只读原始指针
     // - 通过 unsafe & 在可取地址存储上形成
-    // - 支持 *expr 读取，但不支持 *expr 赋值
+    // - 支持 unsafe *expr 读取，但不支持 unsafe *expr 赋值
     // - 支持下标读取 p[i]，但不支持下标赋值
     // - 支持指针算术（+ / -）
     // - 支持直接字段访问 p.field，但不做隐式 pointee 方法查找
     let b unsafe *Int = unsafe &a
-    let value = *b       // *expr 读取
-    // *b = 99           // 错误：unsafe * 不支持 *expr 赋值
+    let value = unsafe *b       // unsafe *expr 读取
+    // unsafe *b = 99           // 错误：unsafe * 不支持 unsafe *expr 赋值
     let v0 = b[0]           // 下标读取（等价于 *(b + 0)）
     // b[1] = 200           // 错误：unsafe * 不支持下标赋值
 
     // unsafe * mutable：可变原始指针
     // - 可通过 unsafe & mutable 在可取地址存储上形成
-    // - 支持 *expr 读取和 *expr = value 赋值
+    // - 支持 unsafe *expr 读取和 unsafe *expr = value 赋值
     // - 支持下标读取和下标赋值（指针偏移语义）
     // - 支持指针算术（+ / -）
     let mp unsafe *mutable Int = alloc_memory[Int](2)
-    *mp = 99             // *expr 赋值
+    unsafe *mp = 99             // unsafe *expr 赋值
     mp[0] = 111             // 下标赋值（等价于 *(mp + 0) = 111）
     mp[1] = 222             // 下标赋值（等价于 *(mp + 1) = 222）
 
     // ?* / ?*mutable：弱引用（不增加引用计数）
     // ?*T 是只读弱引用，?*mutable T 是可变弱引用
     let c ?*Int = downgrade(a)                  // *T → ?*T
-    let d ?*mutable Int = downgrade_mut(owned)          // *mutable T → ?*mutable T
+    let d ?*mutable Int = downgrade_mutable(owned)          // *mutable T → ?*mutable T
 
     // 类型注解中使用
     let f Func(*Int) Void = (x) -> println(*x)
@@ -622,10 +622,10 @@ let weakref_example() Void = {
     let strong *mutable Int = box(42)
 
     // 降级为可变弱引用（*mutable → ?*mutable）
-    let weak ?*mutable Int = downgrade_mut(strong)
+    let weak ?*mutable Int = downgrade_mutable(strong)
 
     // 升级回可变强引用（?*mutable T → Option[*mutable T]）
-    when upgrade_mut(weak) in {
+    when upgrade_mutable(weak) in {
         .Some(r) then {
             println(*r)
             *r = 100       // *mutable 支持赋值
@@ -650,12 +650,12 @@ let pointer_ops() Void = {
     let p unsafe *mutable Int = alloc_memory[Int](2)  // 分配 2 个 Int 的内存，返回 unsafe *mutable
 
     init_memory(p, 100)           // 初始化（要求 unsafe *mutable）
-    let value = *p             // 解引用读取
+    let value = unsafe *p             // 解引用读取
 
     let p2 = p + 1                // 指针偏移
     init_memory(p2, 200)
 
-    *p = 999                   // 解引用赋值（unsafe *mutable 支持）
+    unsafe *p = 999                   // 解引用赋值（unsafe *mutable 支持）
 
     // 下标访问（指针偏移 + 解引用）
     let v0 = p[0]                 // 等价于 *(p + 0)
@@ -890,10 +890,10 @@ given Num as Tag {
 
 let qualified_call_example() Void = {
     let n = Num(7)
-    // obj.(TraitName)method() — 实例限定调用
-    println(n.(Tag)plus_ten())
+    // (obj as TraitName).method() — 实例限定调用
+    println((n as Tag).plus_ten())
     // 对类型名同样可以使用限定调用形式
-    println(Num.(Tag)plus_ten(n))
+    println((Num as Tag).plus_ten(n))
 }
 
 

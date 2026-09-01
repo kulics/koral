@@ -100,6 +100,7 @@ public enum Token: CustomStringConvertible {
   case selfTypeKeyword // 'Self' keyword
   case returnKeyword // 'return' keyword
   case breakKeyword // 'break' keyword
+  case yieldKeyword // 'yield' keyword
   case continueKeyword // 'continue' keyword
   case forKeyword // 'for' keyword
   case usingKeyword // 'using' keyword
@@ -182,7 +183,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.selfTypeKeyword, .selfTypeKeyword):
       return true
-    case (.returnKeyword, .returnKeyword), (.breakKeyword, .breakKeyword), (.continueKeyword, .continueKeyword):
+    case (.returnKeyword, .returnKeyword), (.breakKeyword, .breakKeyword), (.yieldKeyword, .yieldKeyword), (.continueKeyword, .continueKeyword):
       return true
     case (.forKeyword, .forKeyword):
       return true
@@ -301,6 +302,7 @@ public enum Token: CustomStringConvertible {
     case .selfTypeKeyword: return "Self"
     case .returnKeyword: return "return"
     case .breakKeyword: return "break"
+    case .yieldKeyword: return "yield"
     case .continueKeyword: return "continue"
     case .forKeyword: return "for"
     case .usingKeyword: return "using"
@@ -1546,6 +1548,7 @@ public class Lexer {
       case "using": .usingKeyword
       case "return": .returnKeyword
       case "break": .breakKeyword
+      case "yield": .yieldKeyword
       case "continue": .continueKeyword
       case "for": .forKeyword
       // raw is no longer a keyword; use '!' for raw pointers

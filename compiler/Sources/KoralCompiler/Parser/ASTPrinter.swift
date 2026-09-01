@@ -278,6 +278,12 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
+    case .yield(let value, _):
+      print("\(indent)Yield")
+      withIndent {
+        printExpression(value)
+      }
+
     case .continue:
       print("\(indent)Continue")
 
@@ -542,10 +548,23 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
+    case .unsafeDerefExpression(let expr):
+      print("\(indent)UnsafeDerefExpression:")
+      withIndent {
+        printExpression(expr)
+      }
+
     case .ptrExpression(let expr):
       print("\(indent)PtrExpression:")
       withIndent {
         printExpression(expr)
+      }
+
+    case .traitQualificationExpression(let base, let trait):
+      print("\(indent)TraitQualificationExpression: as \(trait)")
+      print("\(indent)  Base:")
+      withIndent {
+        printExpression(base)
       }
 
     case .genericMethodCall(let base, let methodTypeArgs, let methodName, let arguments):
@@ -564,8 +583,8 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .qualifiedMethodCall(let base, let traitName, let methodName, let arguments):
-      print("\(indent)QualifiedMethodCall: .(\(traitName))\(methodName)")
+    case .qualifiedMethodCall(let base, let trait, let methodName, let arguments):
+      print("\(indent)QualifiedMethodCall: (base as \(trait)).\(methodName)")
       print("\(indent)  Base:")
       withIndent {
         printExpression(base)
@@ -579,9 +598,9 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .qualifiedGenericMethodCall(let base, let traitName, let methodTypeArgs, let methodName, let arguments):
+    case .qualifiedGenericMethodCall(let base, let trait, let methodTypeArgs, let methodName, let arguments):
       let typeArgsStr = methodTypeArgs.map { "\($0)" }.joined(separator: ", ")
-      print("\(indent)QualifiedGenericMethodCall: .(\(traitName))[\(typeArgsStr)]\(methodName)")
+      print("\(indent)QualifiedGenericMethodCall: (base as \(trait)).\(methodName)[\(typeArgsStr)]")
       print("\(indent)  Base:")
       withIndent {
         printExpression(base)

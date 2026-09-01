@@ -144,7 +144,7 @@ given TypeChecker {
                         params.push(TypedParam(spec.name, spec.is_mutable, entry.param_type, spec.named))
                         idx += 1(UInt)
                     }
-                    break Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, *return_type_ref))
+                    yield Option[ReusedGivenMemberSignature].Some(ReusedGivenMemberSignature(method_symbol.def_id, params, *return_type_ref))
                 },
                 _ then Option[ReusedGivenMemberSignature].None(),
             },
@@ -160,7 +160,7 @@ given TypeChecker {
                 if self.storage.global_scope.lookup_type(member_name) is .Some(t) then {
                     return Option[Type].Some(t)
                 }
-                break self.try_resolve_named_type_without_diag(member_name)
+                yield self.try_resolve_named_type_without_diag(member_name)
             } else Option[Type].None(),
             .Variable(sym) then {
                 if not self.is_unresolved_expr_type(sym.symbol_type) then {
@@ -277,25 +277,25 @@ given TypeChecker {
                     if self.storage.current_scope.lookup_type(name) is .Some(t) then {
                         return self.canonicalize_alias_type(t)
                     }
-                    break self.resolve_named_type(name)
+                    yield self.resolve_named_type(name)
                 },
             },
             .Reference(inner, is_mutable) then {
                 let trait_ref_override = when *inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
-                        break Option[Type].Some(if is_mutable
+                        yield Option[Type].Some(if is_mutable
                             then self.resolve_mutable_reference_type(trait_ref_inner)
                             else self.resolve_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        break if self.storage.trait_registry.get(base) is .Some(_) then {
+                        yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new()
                             for arg in args then {
                                 resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings))
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                            break Option[Type].Some(if is_mutable
+                            yield Option[Type].Some(if is_mutable
                                 then self.resolve_mutable_reference_type(trait_ref_inner)
                                 else self.resolve_reference_type(trait_ref_inner))
                         } else Option[Type].None()
@@ -303,41 +303,41 @@ given TypeChecker {
                     _ then Option[Type].None(),
                 }
                 when trait_ref_override in {
-                    .Some(resolved_trait_ref) then { break resolved_trait_ref },
+                    .Some(resolved_trait_ref) then { yield resolved_trait_ref },
                     .None() then {},
                 }
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if is_mutable
+                yield if is_mutable
                     then self.resolve_mutable_reference_type(resolved_inner)
                     else self.resolve_reference_type(resolved_inner)
             },
             .BorrowedReference(inner, is_mutable) then {
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if is_mutable
+                yield if is_mutable
                     then Type.MutableBorrowedReferenceType(box(resolved_inner))
                     else Type.BorrowedReferenceType(box(resolved_inner))
             },
             .Pointer(inner, is_mutable) then {
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
             },
             .WeakReference(inner, is_mutable) then {
                 // Check if inner is a trait name → trait object weakref
                 let trait_ref_override = when *inner in {
                     .Identifier(name) then if bindings.get(name) is .None() and self.storage.trait_registry.get(name) is .Some(_) then {
                         let trait_ref_inner = self.canonical_trait_object_type(name)
-                        break Option[Type].Some(if is_mutable
+                        yield Option[Type].Some(if is_mutable
                             then self.resolve_mutable_weak_reference_type(trait_ref_inner)
                             else self.resolve_weak_reference_type(trait_ref_inner))
                     } else Option[Type].None(),
                     .Generic(base, args) then {
-                        break if self.storage.trait_registry.get(base) is .Some(_) then {
+                        yield if self.storage.trait_registry.get(base) is .Some(_) then {
                             let mutable resolved_args = List[Type].new()
                             for arg in args then {
                                 resolved_args.push(self.resolve_type_with_self_and_bindings(*arg, self_type, bindings))
                             }
                             let trait_ref_inner = Type.TraitObject(base, self.to_type_ref_list_in_resolution(resolved_args))
-                            break Option[Type].Some(if is_mutable
+                            yield Option[Type].Some(if is_mutable
                                 then self.resolve_mutable_weak_reference_type(trait_ref_inner)
                                 else self.resolve_weak_reference_type(trait_ref_inner))
                         } else Option[Type].None()
@@ -345,11 +345,11 @@ given TypeChecker {
                     _ then Option[Type].None(),
                 }
                 when trait_ref_override in {
-                    .Some(resolved_trait_ref) then { break resolved_trait_ref },
+                    .Some(resolved_trait_ref) then { yield resolved_trait_ref },
                     .None() then {},
                 }
                 let resolved_inner = self.resolve_type_with_self_and_bindings(*inner, self_type, bindings)
-                break if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
+                yield if is_mutable then self.resolve_mutable_weak_reference_type(resolved_inner) else self.resolve_weak_reference_type(resolved_inner)
             },
             .Generic(base, args) then {
                 let mutable resolved_args = List[* Type].new()
@@ -596,7 +596,7 @@ given TypeChecker {
                     .Some(existing) then {
                         let mutable copied = List[GenericConstraintBound].with_capacity(existing.count())
                         for constraint in existing then { copied.push(constraint) }
-                        break Option[List[GenericConstraintBound]].Some(copied)
+                        yield Option[List[GenericConstraintBound]].Some(copied)
                     },
                     .None() then Option[List[GenericConstraintBound]].None(),
                 }
@@ -605,7 +605,7 @@ given TypeChecker {
                 let mutable constraints = List[GenericConstraintBound].new()
                 constraints.push(GenericConstraintBound(trait_name, args))
                 self.storage.generic_param_constraints.insert("Self", constraints)
-                break previous
+                yield previous
             },
             _ then Option[List[GenericConstraintBound]].None(),
         }
@@ -637,7 +637,7 @@ given TypeChecker {
                 and m.type_params.is_empty()
             let reused_signature = if can_reuse_registered_signature then {
                 let type_key = self.extension_template_key(target_type)
-                break when self.lookup_method_signature(type_key, m.name) in {
+                yield when self.lookup_method_signature(type_key, m.name) in {
                     .Some(method_symbol) then self.reused_given_member_signature(method_symbol),
                     .None() then Option[ReusedGivenMemberSignature].None(),
                 }
@@ -653,7 +653,7 @@ given TypeChecker {
             let typed_body = when m.body in {
                 .Some(b) then {
                     if self.skip_given_body_debug_enabled() then {
-                        break Option[* TypedExpr].None()
+                        yield Option[* TypedExpr].None()
                     }
                     // Enter function context for body checking (Swift: withNewScope)
                     let prev_function_return_context = self.storage.function_return_context
@@ -687,17 +687,17 @@ given TypeChecker {
                     self.storage.current_scope = method_scope
                     defer { self.storage.current_scope = prev_scope }
                     let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope)
-                    break if should_store_checked_body then Option[* TypedExpr].Some(box(result)) else Option[* TypedExpr].None()
+                    yield if should_store_checked_body then Option[* TypedExpr].Some(box(result)) else Option[* TypedExpr].None()
                 },
                 .None() then {
                     self.storage.current_scope = prev_scope
-                    break Option[* TypedExpr].None()
+                    yield Option[* TypedExpr].None()
                 },
             }
             let mutable template_body = if should_retain_template_body then {
-                break typed_body
+                yield typed_body
             } else {
-                break self.template_checked_body(typed_body, retain_checked_template_bodies)
+                yield self.template_checked_body(typed_body, retain_checked_template_bodies)
             }
             let method_name = "\(m.name)"
             let template_ret = if should_retain_template_body
@@ -763,7 +763,7 @@ given TypeChecker {
                 .Some(signature) then signature.method_def_id,
                 .None() then if conformance_trait_name is .None() and m.type_params.is_empty() then {
                 let type_key = self.extension_template_key(target_type)
-                break when self.lookup_method_signature(type_key, method_name) in {
+                yield when self.lookup_method_signature(type_key, method_name) in {
                     .Some(existing_symbol) then existing_symbol.def_id,
                     .None() then context.allocate(method_name, DefKind.Function()),
                 }
@@ -864,7 +864,7 @@ given TypeChecker {
             .Ok(subst) then {
                 let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, box(result))
                 self.storage.constraint_solver.clear_debug_state()
-                break resolved
+                yield resolved
             },
             .Error(e) then {
                 self.storage.constraint_solver.clear_debug_state()
@@ -922,7 +922,7 @@ given TypeChecker {
             .Ok(subst) then {
                 let resolved = if subst.mapping.is_empty() then result else self.apply_subst_to_expr(subst, box(result))
                 self.storage.constraint_solver.clear_debug_state()
-                break resolved
+                yield resolved
             },
             .Error(e) then {
                 self.storage.constraint_solver.clear_debug_state()

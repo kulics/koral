@@ -19,7 +19,7 @@ given TypeChecker {
     protected inferred_self_value_binding_type(self, expr TypedExpr) Option[Type] = {
         return when expr.expr_kind in {
             .Variable(symbol) then if self.context().symbol_name(*symbol) == "self" then {
-                break when expr.expr_type in {
+                yield when expr.expr_type in {
                     .ReferenceType(inner) then Option[Type].Some(*inner),
                     .MutableReferenceType(inner) then Option[Type].Some(*inner),
                     .WeakReferenceType(inner) then Option[Type].Some(*inner),
@@ -37,7 +37,7 @@ given TypeChecker {
                 then Option[Type].None()
                 else {
                     let tail_stmt = statements[statements.count() - 1(UInt)]
-                    break self.typed_statement_branch_result_type(tail_stmt)
+                    yield self.typed_statement_branch_result_type(tail_stmt)
                 },
             _ then if expr.expr_type is .NeverType()
                 then Option[Type].Some(Type.NeverType())
@@ -142,7 +142,7 @@ given TypeChecker {
                     merged = self.merge_statement_branch_result_types(merged, self.typed_expr_branch_result_type(arms[i].body))
                     i += 1
                 }
-                break merged
+                yield merged
             },
             _ then Option[Type].None(),
         }
@@ -166,9 +166,9 @@ given TypeChecker {
             .Block(statements) then {
                 let has_branch_result = if statements.is_empty() then false else {
                     let tail_stmt = statements[statements.count() - 1(UInt)]
-                    break self.typed_statement_branch_result_type(tail_stmt) is .Some(_)
+                    yield self.typed_statement_branch_result_type(tail_stmt) is .Some(_)
                 }
-                break if not statements.is_empty() and has_branch_result then Type.NeverType() else Type.VoidType()
+                yield if not statements.is_empty() and has_branch_result then Type.NeverType() else Type.VoidType()
             },
             _ then if expr.expr_type is .NeverType()
                 then Type.NeverType()
@@ -212,10 +212,12 @@ given TypeChecker {
             .RefExpr(inner, _, _) then self.source_expr_is_obviously_pure_statement(inner),
             .PtrExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .DerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .UnsafeDerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .NamedArgument(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .MemberPath(base, _, _) then self.source_expr_is_obviously_pure_statement(base),
+            .TraitQualificationExpr(base, _, _) then self.source_expr_is_obviously_pure_statement(base),
             .SubscriptExpr(base, args, _) then {
-                if not self.source_expr_is_obviously_pure_statement(base) then { break false }
+                if not self.source_expr_is_obviously_pure_statement(base) then { yield false }
                 let mutable pure = true
                 for arg in args then {
                     if not self.source_expr_is_obviously_pure_statement(arg) then {
@@ -223,7 +225,7 @@ given TypeChecker {
                         break
                     }
                 }
-                break pure
+                yield pure
             },
             .ArithmeticExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
             .ComparisonExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(left) and self.source_expr_is_obviously_pure_statement(right),
@@ -240,7 +242,7 @@ given TypeChecker {
                     .Some(right_ref) then self.source_expr_is_obviously_pure_statement(right_ref),
                     .None() then true,
                 }
-                break left_pure and right_pure
+                yield left_pure and right_pure
             },
             .IsExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(subject),
             .IsNotExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(subject),
@@ -271,6 +273,7 @@ given TypeChecker {
             .RefExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
             .PtrExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
             .DerefExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .UnsafeDerefExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
             .MemberPath(base, _) then self.typed_expr_has_observable_statement_effect(base),
             .IsExpr(subject, _, _) then self.typed_expr_has_observable_statement_effect(subject),
             .ArithmeticExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(left) or self.typed_expr_has_observable_statement_effect(right),
@@ -311,18 +314,18 @@ given TypeChecker {
                     .Some(lowered) then self.check_while_statement_expr(lowered, expr_span(expr), scope),
                     .None() then self.check_while_statement_expr(expr, expr_span(expr), scope),
                 }
-                break self.wrap_statement_as_block_expr(stmt)
+                yield self.wrap_statement_as_block_expr(stmt)
             },
             .ForExpr(_, _, _, _) then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
                 self.require_effectful_statement_expression(expr, box(typed_expr), expr_span(expr))
-                break typed_expr
+                yield typed_expr
             },
             .Block(statements, _) then self.check_block(statements, .None(), scope),
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
                 self.require_effectful_statement_expression(expr, box(typed_expr), expr_span(expr))
-                break typed_expr
+                yield typed_expr
             },
         }
         return self.normalize_statement_body_expr(raw_expr)
@@ -415,12 +418,12 @@ given TypeChecker {
                     .Error(e) then self.push_diagnostic_at_span(e.message(), span),
                     .Ok(_) then {},
                 }
-                break TypedStatement.WhenStmt(box(typed_subj), typed_arms, span)
+                yield TypedStatement.WhenStmt(box(typed_subj), typed_arms, span)
             },
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
                 self.require_effectful_statement_expression(expr, box(typed_expr), span)
-                break TypedStatement.ExprStmt(box(typed_expr), span)
+                yield TypedStatement.ExprStmt(box(typed_expr), span)
             },
         }
     }
@@ -442,12 +445,12 @@ given TypeChecker {
                 if not self.storage.exitable_construct_stack.is_empty() then {
                     let _ = self.storage.exitable_construct_stack.pop()
                 }
-                break TypedStatement.WhileStmt(box(typed_cond), box(typed_body), span)
+                yield TypedStatement.WhileStmt(box(typed_cond), box(typed_body), span)
             },
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
                 self.require_effectful_statement_expression(expr, box(typed_expr), span)
-                break TypedStatement.ExprStmt(box(typed_expr), span)
+                yield TypedStatement.ExprStmt(box(typed_expr), span)
             },
         }
     }
@@ -458,7 +461,7 @@ given TypeChecker {
             .WhenExpr(_, _, _) then self.check_when_statement_expr(expr, span, scope),
             .WhileExpr(condition, body, _) then {
                 let lowered_opt = self.lower_while_condition_with_bindings(condition, body, span)
-                break when lowered_opt in {
+                yield when lowered_opt in {
                     .Some(lowered) then self.check_while_statement_expr(lowered, span, scope),
                     .None() then self.check_while_statement_expr(expr, span, scope),
                 }
@@ -466,7 +469,7 @@ given TypeChecker {
             _ then {
                 let typed_expr = self.check_expr_core_ref(expr, .None(), scope)
                 self.require_effectful_statement_expression(expr, box(typed_expr), span)
-                break TypedStatement.ExprStmt(box(typed_expr), span)
+                yield TypedStatement.ExprStmt(box(typed_expr), span)
             },
         }
     }
@@ -496,7 +499,7 @@ given TypeChecker {
                     .Some(kind) then when kind in {
                         .String() then {
                             self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(typed_outer_base)))
-                            break self.empty_typed_block(Type.Unknown())
+                            yield self.empty_typed_block(Type.Unknown())
                         },
                         .Dict(_, _) or .List(_) or .Deque(_) then {
                             let param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "__index_mut_ptr")
@@ -510,14 +513,14 @@ given TypeChecker {
                                 arg_idx += 1
                             }
                             let ptr_expr = self.build_builtin_subscript_helper_call(typed_outer_base, typed_outer_args, "__index_mut_ptr")
-                            break when ptr_expr.expr_type in {
+                            yield when ptr_expr.expr_type in {
                                 .MutablePointerType(inner) then make_typed_expr(TypedExprKind.DerefExpr(box(ptr_expr)), *inner),
                                 _ then {
                                     self.push_diagnostic_at_span(
                                         "Type mismatch: expected unsafe * mutable return, got \(self.display_type_name(ptr_expr.expr_type))",
                                         self.typed_expr_span(box(ptr_expr))
                                     )
-                                    break self.empty_typed_block(Type.Unknown())
+                                    yield self.empty_typed_block(Type.Unknown())
                                 },
                             }
                         },
@@ -534,7 +537,7 @@ given TypeChecker {
                                 TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
                                 pointer_base_type,
                             )
-                            break make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                            yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
                         },
                     },
                     .None() then {
@@ -542,7 +545,7 @@ given TypeChecker {
                             "subscript is only supported for String, List, Deque, Dict, and pointer types",
                             self.typed_expr_span(box(typed_outer_base))
                         )
-                        break self.empty_typed_block(Type.Unknown())
+                        yield self.empty_typed_block(Type.Unknown())
                     },
                 }
             },
@@ -578,7 +581,7 @@ given TypeChecker {
                     let lowered_value = when op in {
                         .Some(compound_op) then {
                             let typed_rhs = self.check_expr_scoped_ref(value, .Some(element_type), scope)
-                            break when compound_op in {
+                            yield when compound_op in {
                                 .AddAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Add(), box(typed_rhs)), element_type),
                                 .SubtractAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Subtract(), box(typed_rhs)), element_type),
                                 .MultiplyAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lvalue_expr), ArithmeticOperator.Multiply(), box(typed_rhs)), element_type),
@@ -651,7 +654,7 @@ given TypeChecker {
                 let rhs_symbol = self.push_assignment_temp_decl("__sub_rhs", typed_rhs, VariableKind.Value(), &mutable block_statements)
                 let lhs_var = make_typed_expr(TypedExprKind.Variable(old_symbol), old_symbol.symbol_type)
                 let rhs_var = make_typed_expr(TypedExprKind.Variable(rhs_symbol), rhs_symbol.symbol_type)
-                break when compound_op in {
+                yield when compound_op in {
                     .AddAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Add(), box(rhs_var)), typed_target.expr_type),
                     .SubtractAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Subtract(), box(rhs_var)), typed_target.expr_type),
                     .MultiplyAssign() then make_typed_expr(TypedExprKind.ArithmeticExpr(box(lhs_var), ArithmeticOperator.Multiply(), box(rhs_var)), typed_target.expr_type),
@@ -693,7 +696,7 @@ given TypeChecker {
                 and stmt_idx <> statements_count(Int) - 1
                 and self.current_branch_break_target() is .Some(_)
             then {
-                self.push_statement_diagnostic(stmt, "break with value must be the last statement in a block expression")
+                self.push_statement_diagnostic(stmt, "yield must be the last statement in a block expression")
             }
             let diagnostic_count_before = self.storage.diagnostics.count()
             let ts = self.check_statement(stmt, expected, scope)
@@ -823,7 +826,7 @@ given TypeChecker {
                             .MethodReference(base, _, method, _, _, _) then when self.resolve_method_signature(base.expr_type, self.context().symbol_name(*method)) in {
                                 .Some(sig) then {
                                     let refined_type = self.resolve_method_return_type_for_call(base.expr_type, sig, args, List[Type].new())
-                                    break if not self.is_unresolved_expr_type(refined_type) and not self.contains_generic_parameter(refined_type)
+                                    yield if not self.is_unresolved_expr_type(refined_type) and not self.contains_generic_parameter(refined_type)
                                         then make_typed_expr_ref(typed_val.expr_kind, refined_type)
                                         else typed_val
                                 },
@@ -930,7 +933,7 @@ given TypeChecker {
                             .LeftShiftAssign() then TypedExprKind.BitwiseExpr(box(typed_target), BitwiseOperator.LeftShift(), box(typed_rhs)),
                             .RightShiftAssign() then TypedExprKind.BitwiseExpr(box(typed_target), BitwiseOperator.RightShift(), box(typed_rhs)),
                         }
-                        break TypedExpr(box(combined_kind), typed_target.expr_type)
+                        yield TypedExpr(box(combined_kind), typed_target.expr_type)
                     },
                     .None() then self.check_expr_scoped_ref(value, .Some(typed_target.expr_type), scope),
                 }
@@ -963,10 +966,10 @@ given TypeChecker {
                             else self.storage.function_return_context.inferred_return_type
                         let raw_checked = when v in {
                             .StaticMethodCall(type_name, type_args, method_name, args, _) then {
-                                break self.check_static_method_call_ref(type_name, type_args, method_name, args, value_expected, scope)
+                                yield self.check_static_method_call_ref(type_name, type_args, method_name, args, value_expected, scope)
                             },
                             .Call(callee, args, _) then {
-                                break self.check_call_expr_ref(callee, args, value_expected, scope)
+                                yield self.check_call_expr_ref(callee, args, value_expected, scope)
                             },
                             _ then self.check_expr_scoped_ref(v, value_expected, scope),
                         }
@@ -992,7 +995,7 @@ given TypeChecker {
                                 }
                             },
                         }
-                        break Option[* TypedExpr].Some(box(checked))
+                        yield Option[* TypedExpr].Some(box(checked))
                     },
                     .None() then {
                         let should_note_void = when expected_return in {
@@ -1002,10 +1005,33 @@ given TypeChecker {
                         if should_note_void then {
                             self.note_inferred_void_return(span)
                         }
-                        break Option[* TypedExpr].None()
+                        yield Option[* TypedExpr].None()
                     },
                 }
                 return TypedStatement.ReturnStmt(typed_val, span)
+            },
+            .YieldStmt(expr, span) then {
+                if self.storage.in_defer then {
+                    self.push_diagnostic_at_span("control flow statement 'yield' is not allowed in defer expression", span)
+                } else if self.storage.branch_break_targets.is_empty() then {
+                    self.push_diagnostic_at_span("yield outside of branch expression body", span)
+                } else {
+                    when self.current_branch_break_target() in {
+                        .Some(target) then {
+                            if self.storage.exitable_construct_stack.count() > target.construct_stack_depth_at_creation then {
+                                let last = self.storage.exitable_construct_stack[self.storage.exitable_construct_stack.count() - 1(UInt)]
+                                if last.kind is .Branch() then {
+                                    self.push_diagnostic_at_span("yield cannot penetrate through branch boundary", span)
+                                } else {
+                                    self.push_diagnostic_at_span("yield cannot penetrate through loop boundary", span)
+                                }
+                            }
+                            target.did_explicit_branch_break = true
+                        },
+                        .None() then {},
+                    }
+                }
+                return TypedStatement.BranchBreakStmt(box(self.check_expr_scoped_ref(expr, expected, scope)), span)
             },
             .BreakStmt(value_opt, span) then {
                 when value_opt in {
@@ -1013,17 +1039,17 @@ given TypeChecker {
                         if self.storage.in_defer then {
                             self.push_diagnostic_at_span("control flow statement 'break' is not allowed in defer expression", span)
                         } else if self.storage.branch_break_targets.is_empty() then {
-                            self.push_diagnostic_at_span("break with value outside of branch expression body", span)
+                            self.push_diagnostic_at_span("yield outside of branch expression body", span)
                         } else {
-                            // Check if there are intervening constructs between the break and the branch target
+                            // Check if there are intervening constructs between the yield and the branch target
                             when self.current_branch_break_target() in {
                                 .Some(target) then {
                                     if self.storage.exitable_construct_stack.count() > target.construct_stack_depth_at_creation then {
                                         let last = self.storage.exitable_construct_stack[self.storage.exitable_construct_stack.count() - 1(UInt)]
                                         if last.kind is .Branch() then {
-                                            self.push_diagnostic_at_span("break with value cannot penetrate through branch boundary", span)
+                                            self.push_diagnostic_at_span("yield cannot penetrate through branch boundary", span)
                                         } else {
-                                            self.push_diagnostic_at_span("break with value cannot penetrate through loop boundary", span)
+                                            self.push_diagnostic_at_span("yield cannot penetrate through loop boundary", span)
                                         }
                                     }
                                     target.did_explicit_branch_break = true
@@ -1041,7 +1067,7 @@ given TypeChecker {
                         if not self.storage.exitable_construct_stack.is_empty() then {
                             let last = self.storage.exitable_construct_stack[self.storage.exitable_construct_stack.count() - 1(UInt)]
                             if last.kind is .Branch() then {
-                                self.push_diagnostic_at_span("break cannot penetrate through branch boundary", span)
+                                self.push_diagnostic_at_span("yield cannot penetrate through branch boundary", span)
                             }
                         }
                         if not self.storage.in_loop then {
@@ -1102,6 +1128,7 @@ given TypeChecker {
             .MemberPath(base, _, _) then self.assignment_target_root_identifier(base),
             .SubscriptExpr(base, _, _) then self.assignment_target_root_identifier(base),
             .DerefExpr(_, _) then Option[String].None(),
+            .UnsafeDerefExpr(_, _) then Option[String].None(),
             _ then Option[String].None(),
         }
     }
@@ -1131,9 +1158,10 @@ given TypeChecker {
                     current = segment_type
                     idx += 1
                 }
-                break false
+                yield false
             },
             .DerefExpr(_) then true,
+            .UnsafeDerefExpr(_) then true,
             _ then false,
         }
     }
@@ -1146,6 +1174,7 @@ given TypeChecker {
             .Variable(sym) then sym.is_mutable(),
             .MemberPath(base, _) then self.assignment_target_root_is_mutable_typed(base),
             .DerefExpr(_) then true,
+            .UnsafeDerefExpr(_) then true,
             _ then false,
         }
     }
@@ -1171,29 +1200,47 @@ given TypeChecker {
                 let result_type = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) then *inner_ref,
                     .MutableBorrowedReferenceType(inner_ref) then *inner_ref,
-                    .MutablePointerType(inner_ref) then *inner_ref,
                     .ReferenceType(inner_ref) then {
                         self.push_diagnostic_at_span("Cannot assign through read-only reference of type '\(type_to_string(typed_inner.expr_type))'", span)
-                        break *inner_ref
+                        yield *inner_ref
                     },
                     .BorrowedReferenceType(inner_ref) then {
                         self.push_diagnostic_at_span("Cannot assign through read-only reference of type '\(type_to_string(typed_inner.expr_type))'", span)
-                        break *inner_ref
+                        yield *inner_ref
                     },
                     .PointerType(inner_ref) then {
                         self.push_diagnostic_at_span("Cannot assign through read-only pointer of type '\(type_to_string(typed_inner.expr_type))'", span)
-                        break *inner_ref
+                        yield *inner_ref
                     },
                     _ then {
                         let actual = when typed_inner.expr_type in {
                             .TypeVar(_) then "Int",
                             _ then type_to_string(typed_inner.expr_type),
                         }
-                        self.push_diagnostic_at_span("Type mismatch: expected Mutable reference or mutable pointer type, got \(actual)", span)
-                        break Type.Unknown()
+                        self.push_diagnostic_at_span("Type mismatch: expected Mutable reference type, got \(actual)", span)
+                        yield Type.Unknown()
                     },
                 }
                 return make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), result_type)
+            },
+            .UnsafeDerefExpr(inner, span) then {
+                let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
+                let result_type = when typed_inner.expr_type in {
+                    .MutablePointerType(inner_ref) then *inner_ref,
+                    .PointerType(inner_ref) then {
+                        self.push_diagnostic_at_span("Cannot assign through read-only pointer of type '\(type_to_string(typed_inner.expr_type))'", span)
+                        yield *inner_ref
+                    },
+                    _ then {
+                        let actual = when typed_inner.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_inner.expr_type),
+                        }
+                        self.push_diagnostic_at_span("Type mismatch: expected Mutable pointer type, got \(actual)", span)
+                        yield Type.Unknown()
+                    },
+                }
+                return make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), result_type)
             },
             .MemberPath(base, path, span) then {
                 // For member path assignment targets like `list[0][1].field = value`,
@@ -1204,6 +1251,7 @@ given TypeChecker {
                 // Peel auto-deref for lvalue resolution (matches Swift behavior)
                 let typed_base = when inferred_base.expr_kind in {
                     .DerefExpr(inner_ref) then make_typed_expr_ref(inner_ref.expr_kind, inner_ref.expr_type),
+                    .UnsafeDerefExpr(inner_ref) then make_typed_expr_ref(inner_ref.expr_kind, inner_ref.expr_type),
                     _ then inferred_base,
                 }
                 // Resolve member path on the writable base, computing field types
@@ -1222,7 +1270,7 @@ given TypeChecker {
                     }
                     current_type = self.resolve_member_type(inner_type, member)
                 }
-                break make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
+                yield make_typed_expr(TypedExprKind.MemberPath(box(typed_base), path), current_type)
             },
             _ then self.check_expr_scoped_ref(target, .None(), scope),
         }
@@ -1238,7 +1286,7 @@ given TypeChecker {
                     .Some(kind) then when kind in {
                         .String() then {
                             self.push_diagnostic_at_span("String subscript is not addressable", self.typed_expr_span(box(typed_outer_base)))
-                            break self.empty_typed_block(Type.Unknown())
+                            yield self.empty_typed_block(Type.Unknown())
                         },
                         .Dict(_, _) or .List(_) or .Deque(_) then {
                             let param_types = self.resolve_method_param_types(typed_outer_base.expr_type, "__index_mut_ptr")
@@ -1250,7 +1298,7 @@ given TypeChecker {
                                 arg_idx += 1
                             }
                             let ptr_expr = self.build_builtin_subscript_helper_call(typed_outer_base, typed_outer_args, "__index_mut_ptr")
-                            break when ptr_expr.expr_type in {
+                            yield when ptr_expr.expr_type in {
                                 .MutablePointerType(inner) then make_typed_expr(TypedExprKind.DerefExpr(box(ptr_expr)), *inner),
                                 _ then self.empty_typed_block(Type.Unknown()),
                             }
@@ -1268,7 +1316,7 @@ given TypeChecker {
                                 TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
                                 pointer_base_type,
                             )
-                            break make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                            yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
                         },
                     },
                     .None() then {
@@ -1276,7 +1324,7 @@ given TypeChecker {
                             "subscript is only supported for String, List, Deque, Dict, and pointer types",
                             self.typed_expr_span(box(typed_outer_base))
                         )
-                        break self.empty_typed_block(Type.Unknown())
+                        yield self.empty_typed_block(Type.Unknown())
                     },
                 }
             },
@@ -1311,7 +1359,7 @@ given TypeChecker {
                 if self.context().is_foreign_struct(def_id) then {
                     return true
                 }
-                break when self.context().get_struct_fields(def_id) in {
+                yield when self.context().get_struct_fields(def_id) in {
                     .Some(fields) then {
                         let mutable found = false
                         for f in fields then {
@@ -1320,7 +1368,7 @@ given TypeChecker {
                                 return f.is_mutable
                             }
                         }
-                        break not found
+                        yield not found
                     },
                     .None() then true,
                 }
@@ -1335,7 +1383,7 @@ given TypeChecker {
                                 return f.is_mutable
                             }
                         }
-                        break not found
+                        yield not found
                     },
                     .None() then true,
                 },

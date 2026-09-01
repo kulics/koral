@@ -258,6 +258,7 @@ extension TypeChecker {
        .unaryMinusExpression(let inner),
        .addressOfExpression(let inner, _),
        .derefExpression(let inner),
+       .unsafeDerefExpression(let inner),
         .ptrExpression(let inner):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       
@@ -273,6 +274,9 @@ extension TypeChecker {
       try collectCapturedVariables(expr: body, paramNames: paramNames, captures: &captures)
       
     case .memberPath(let base, _):
+      try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
+
+    case .traitQualificationExpression(let base, _):
       try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
       
     case .subscriptExpression(let base, let arguments):
@@ -398,6 +402,8 @@ extension TypeChecker {
       if let value {
         try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
       }
+    case .yield(let value, _):
+      try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     case .continue:
       break
     case .deferStatement(let expression, _):

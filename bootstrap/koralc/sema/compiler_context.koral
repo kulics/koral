@@ -204,7 +204,7 @@ given CompilerContext {
             .Function() then DefKind.Function(),
             .Variable(_) then DefKind.Variable(),
             .TypeSymbol() then {
-                break when symbol_type in {
+                yield when symbol_type in {
                     .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
                     _ then DefKind.TypeDef(TypeDefKind.Structure()),
                 }
@@ -245,7 +245,7 @@ given CompilerContext {
             .Function() then DefKind.Function(),
             .Variable(_) then DefKind.Variable(),
             .TypeSymbol() then {
-                break when symbol_type in {
+                yield when symbol_type in {
                     .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
                     _ then DefKind.TypeDef(TypeDefKind.Structure()),
                 }
@@ -407,7 +407,7 @@ given CompilerContext {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
                 .FunctionType(params, _) then {
-                    break if arg_index < params.count()
+                    yield if arg_index < params.count()
                     then Option[Type].Some((*params[arg_index]).param_type)
                     else Option[Type].None()
                 },
@@ -476,14 +476,14 @@ given CompilerContext {
                     for arg in args then {
                         unpacked.push(*arg)
                     }
-                    break Option[List[Type]].Some(unpacked)
+                    yield Option[List[Type]].Some(unpacked)
                 },
                 .GenericEnum(_, args) then {
                     let mutable unpacked = List[Type].new()
                     for arg in args then {
                         unpacked.push(*arg)
                     }
-                    break Option[List[Type]].Some(unpacked)
+                    yield Option[List[Type]].Some(unpacked)
                 },
                 _ then Option[List[Type]].None(),
             },
@@ -586,25 +586,25 @@ given CompilerContext {
     public get_type_name(*self, t Type) String = {
         return when t in {
             .StructureType(def_id) then {
-                break when self.def_id_map.get_name(def_id) in {
+                yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "<unknown>",
                 }
             },
             .EnumType(def_id) then {
-                break when self.def_id_map.get_name(def_id) in {
+                yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "<unknown>",
                 }
             },
             .OpaqueType(def_id) then {
-                break when self.def_id_map.get_name(def_id) in {
+                yield when self.def_id_map.get_name(def_id) in {
                     .Some(name) then name,
                     .None() then "<unknown>",
                 }
             },
             .ModuleType(info) then {
-                break if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
+                yield if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
             },
             _ then type_to_string(t),
         }
@@ -638,7 +638,7 @@ given CompilerContext {
                 out.push_byte(')')
                 out.push_byte(' ')
                 out.push_string(self.get_debug_name(*ret))
-                break out
+                yield out
             },
             .ReferenceType(inner) then "*\(self.get_debug_name(*inner))",
             .BorrowedReferenceType(inner) then "*\(self.get_debug_name(*inner))",
@@ -653,13 +653,13 @@ given CompilerContext {
                     .Some(n) then n,
                     .None() then "<unknown>",
                 }
-                break when self.def_id_map.get_type_arguments(def_id) in {
+                yield when self.def_id_map.get_type_arguments(def_id) in {
                     .Some(args) then if not args.is_empty() then {
                         let mutable arg_parts = List[String].new()
                         for a in args then {
                             arg_parts.push(self.get_debug_name(a))
                         }
-                        break "\(base_name)[\(join_strings(arg_parts, ", "))]"
+                        yield "\(base_name)[\(join_strings(arg_parts, ", "))]"
                     } else base_name,
                     .None() then base_name,
                 }
@@ -669,25 +669,25 @@ given CompilerContext {
                     .Some(n) then n,
                     .None() then "<unknown>",
                 }
-                break when self.def_id_map.get_type_arguments(def_id) in {
+                yield when self.def_id_map.get_type_arguments(def_id) in {
                     .Some(args) then if not args.is_empty() then {
                         let mutable arg_parts = List[String].new()
                         for a in args then {
                             arg_parts.push(self.get_debug_name(a))
                         }
-                        break "\(base_name)[\(join_strings(arg_parts, ", "))]"
+                        yield "\(base_name)[\(join_strings(arg_parts, ", "))]"
                     } else base_name,
                     .None() then base_name,
                 }
             },
             .OpaqueType(def_id) then {
-                break when self.def_id_map.get_name(def_id) in {
+                yield when self.def_id_map.get_name(def_id) in {
                     .Some(n) then n,
                     .None() then "<unknown>",
                 }
             },
             .ModuleType(info) then {
-                break if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
+                yield if info.module_path.is_empty() then "<module>" else join_strings(info.module_path, ".")
             },
             .GenericParameter(name) then name,
             .GenericStruct(template, args) then {
@@ -695,14 +695,14 @@ given CompilerContext {
                 for a in args then {
                     arg_parts.push(self.get_debug_name(*a))
                 }
-                break "\(template)[\(join_strings(arg_parts, ", "))]"
+                yield "\(template)[\(join_strings(arg_parts, ", "))]"
             },
             .GenericEnum(template, args) then {
                 let mutable arg_parts = List[String].new()
                 for a in args then {
                     arg_parts.push(self.get_debug_name(*a))
                 }
-                break "\(template)[\(join_strings(arg_parts, ", "))]"
+                yield "\(template)[\(join_strings(arg_parts, ", "))]"
             },
             .TraitObject(name, _) then name,
             .TypeVar(tv) then "?\((*tv).id)",
@@ -721,7 +721,7 @@ given CompilerContext {
                 for entry in params then {
                     if self.contains_type_variable(entry.param_type) then { return true }
                 }
-                break false
+                yield false
             },
             .ReferenceType(inner) then self.contains_type_variable(*inner),
             .MutableReferenceType(inner) then self.contains_type_variable(*inner),
@@ -733,13 +733,13 @@ given CompilerContext {
                 for a in args then {
                     if self.contains_type_variable(*a) then { return true }
                 }
-                break false
+                yield false
             },
             .GenericEnum(_, args) then {
                 for a in args then {
                     if self.contains_type_variable(*a) then { return true }
                 }
-                break false
+                yield false
             },
             _ then false,
         }
@@ -793,19 +793,19 @@ given CompilerContext {
                 for a in args then {
                     arg_keys.push(self.get_layout_key(*a))
                 }
-                break "\(template)_\(join_strings(arg_keys, "_"))"
+                yield "\(template)_\(join_strings(arg_keys, "_"))"
             },
             .GenericEnum(template, args) then {
                 let mutable arg_keys = List[String].new()
                 for a in args then {
                     arg_keys.push(self.get_layout_key(*a))
                 }
-                break "\(template)_\(join_strings(arg_keys, "_"))"
+                yield "\(template)_\(join_strings(arg_keys, "_"))"
             },
             .TraitObject(name, _) then "TO_\(name)",
             .ModuleType(info) then {
                 let path_key = if info.module_path.is_empty() then "root" else join_strings(info.module_path, "_")
-                break "M_\(path_key)"
+                yield "M_\(path_key)"
             },
             .TypeVar(tv) then "TV_\((*tv).id)",
             .Unknown() then "Unknown",

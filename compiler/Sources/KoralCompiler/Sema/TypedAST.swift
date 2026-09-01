@@ -228,6 +228,7 @@ public indirect enum TypedExpressionNode {
     left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
   case bitwiseNotExpression(expression: TypedExpressionNode, type: Type)
   case derefExpression(expression: TypedExpressionNode, type: Type)
+  case unsafeDerefExpression(expression: TypedExpressionNode, type: Type)
   case referenceExpression(expression: TypedExpressionNode, type: Type)
   case ptrExpression(expression: TypedExpressionNode, type: Type)
   case variable(identifier: Symbol)
@@ -463,6 +464,7 @@ extension TypedExpressionNode {
       .bitwiseExpression(_, _, _, let type),
       .bitwiseNotExpression(_, let type),
       .derefExpression(_, let type),
+      .unsafeDerefExpression(_, let type),
       .referenceExpression(_, let type),
       .ptrExpression(_, let type),
       .blockExpression(_, let type),
@@ -502,6 +504,8 @@ extension TypedExpressionNode {
       // member access is lvalue if the source is lvalue
       return source.valueCategory
     case .derefExpression:
+      return .lvalue
+    case .unsafeDerefExpression:
       return .lvalue
     case .referenceExpression:
 

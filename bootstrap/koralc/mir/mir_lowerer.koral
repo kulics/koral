@@ -181,7 +181,7 @@ given MIRLowerer {
                                 let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
                                 let resolved = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
-                                break resolved
+                                yield resolved
                             },
                             .None() then body,
                         },
@@ -385,7 +385,7 @@ given MIRLowerer {
                 for param in member.params then {
                     param_types.push(box(param.param_type))
                 }
-                break Type.FunctionType(types_to_param_entries(param_types), box(member.return_type))
+                yield Type.FunctionType(types_to_param_entries(param_types), box(member.return_type))
             },
         }
         return box(Symbol(member.def_id, function_type, SymbolKind.Function()))
@@ -486,22 +486,22 @@ given MIRLowerer {
                 for param in params then {
                     bound_params.push(box(self.apply_type_bindings(param.param_type, bindings)))
                 }
-                break make_function_type(bound_params, self.apply_type_bindings(*return_type, bindings))
+                yield make_function_type(bound_params, self.apply_type_bindings(*return_type, bindings))
             },
             .GenericStruct(template, args) then {
                 let mutable bound_args = List[* Type].new()
                 for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
-                break Type.GenericStruct(template, bound_args)
+                yield Type.GenericStruct(template, bound_args)
             },
             .GenericEnum(template, args) then {
                 let mutable bound_args = List[* Type].new()
                 for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
-                break Type.GenericEnum(template, bound_args)
+                yield Type.GenericEnum(template, bound_args)
             },
             .TraitObject(trait_name, args) then {
                 let mutable bound_args = List[* Type].new()
                 for arg in args then { bound_args.push(box(self.apply_type_bindings(*arg, bindings))) }
-                break Type.TraitObject(trait_name, bound_args)
+                yield Type.TraitObject(trait_name, bound_args)
             },
             _ then t,
         }
@@ -1032,7 +1032,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
                     return true
                 }
             }
-            break false
+            yield false
         },
         .Aggregate(aggregate) then {
             for field in aggregate.fields then {
@@ -1040,7 +1040,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
                     return true
                 }
             }
-            break false
+            yield false
         },
         .EnumCase(construction) then {
             for argument in construction.arguments then {
@@ -1048,7 +1048,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
                     return true
                 }
             }
-            break false
+            yield false
         },
         .TraitObjectConversion(conversion) then mir_value_contains_stack_borrow_ref(*(conversion.inner)),
         .TraitMethodCall(call) then {
@@ -1060,7 +1060,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
                     return true
                 }
             }
-            break false
+            yield false
         },
         .EnumTag(tag) then mir_value_contains_stack_borrow_ref(*(tag.subject)),
         .Intrinsic(node) then when node in {
@@ -1290,11 +1290,11 @@ given MIRReferenceAllocationFunctionPromoter {
         return when statement in {
             .Assign(place, value) then {
                 let destination_type = self.destination_type_for_place(place)
-                break MIRStatement.Assign(place, self.promote_value_with_place(value, destination_type, Option[MIRPlace].Some(place)))
+                yield MIRStatement.Assign(place, self.promote_value_with_place(value, destination_type, Option[MIRPlace].Some(place)))
             },
             .CompoundAssign(assignment) then {
                 let destination_type = self.destination_type_for_place(assignment.target)
-                break MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, self.promote_value(assignment.value, destination_type)))
+                yield MIRStatement.CompoundAssign(MIRCompoundAssignment(assignment.target, assignment.operator_kind, self.promote_value(assignment.value, destination_type)))
             },
             .Evaluate(value) then MIRStatement.Evaluate(self.promote_value(value, Option[Type].None())),
             .Retain(value) then MIRStatement.Retain(self.promote_value(value, Option[Type].None())),
@@ -1331,14 +1331,14 @@ given MIRReferenceAllocationFunctionPromoter {
                 for field in aggregate.fields then {
                     fields.push(box(self.promote_value(*field, Option[Type].None())))
                 }
-                break MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
             },
             .EnumCase(construction) then {
                 let mutable args = List[* MIRValue].new()
                 for arg in construction.arguments then {
                     args.push(box(self.promote_value(*arg, Option[Type].None())))
                 }
-                break MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
             },
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_value(*(conversion.inner), Option[Type].None())), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
@@ -1346,7 +1346,7 @@ given MIRReferenceAllocationFunctionPromoter {
                 for arg in call.arguments then {
                     args.push(box(self.promote_value(*arg, Option[Type].None())))
                 }
-                break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(*(tag.subject), Option[Type].None())), tag.enum_type)),
             .Ref(place, kind, .StackBorrow()) then {
@@ -1363,7 +1363,7 @@ given MIRReferenceAllocationFunctionPromoter {
                 if keep_stack_borrow then {
                     return value
                 }
-                break value
+                yield value
             },
             _ then value,
         }
@@ -1397,7 +1397,7 @@ given MIRReferenceAllocationFunctionPromoter {
         let direct_ref_escaping = when callee in {
             .Function(symbol) then {
                 let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                break summary.direct_reference_escaping_parameter_indices
+                yield summary.direct_reference_escaping_parameter_indices
             },
             _ then {
                 let mutable all_indices = Set[UInt].new()
@@ -1406,13 +1406,13 @@ given MIRReferenceAllocationFunctionPromoter {
                     all_indices.insert(i)
                     i += 1
                 }
-                break all_indices
+                yield all_indices
             },
         }
         let returning_params = when callee in {
             .Function(symbol) then {
                 let summary = self.escape_summaries_by_def_id.get(symbol.def_id.id) or else MIREscapeSummary(Set[UInt].new(), Set[UInt].new())
-                break summary.returning_parameter_indices
+                yield summary.returning_parameter_indices
             },
             _ then Set[UInt].new(),
         }
@@ -1531,7 +1531,7 @@ given MIRReferenceAllocationFunctionPromoter {
                     for field in fields then {
                         if self.type_requires_owned_reference_storage(field.field_type) then { return true }
                     }
-                    break false
+                    yield false
                 },
                 .None() then false,
             },
@@ -1542,7 +1542,7 @@ given MIRReferenceAllocationFunctionPromoter {
                             if self.type_requires_owned_reference_storage(param.param_type) then { return true }
                         }
                     }
-                    break false
+                    yield false
                 },
                 .None() then false,
             },
@@ -1550,13 +1550,13 @@ given MIRReferenceAllocationFunctionPromoter {
                 for arg in args then {
                     if self.type_requires_owned_reference_storage(*arg) then { return true }
                 }
-                break false
+                yield false
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
                     if self.type_requires_owned_reference_storage(*arg) then { return true }
                 }
-                break false
+                yield false
             },
             _ then false,
         }
@@ -1606,14 +1606,14 @@ given MIRReferenceAllocationFunctionPromoter {
                 for field in aggregate.fields then {
                     fields.push(box(self.promote_direct_references(*field)))
                 }
-                break MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
             },
             .EnumCase(construction) then {
                 let mutable args = List[* MIRValue].new()
                 for arg in construction.arguments then {
                     args.push(box(self.promote_direct_references(*arg)))
                 }
-                break MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
             },
             .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.promote_direct_references(*(conversion.inner))), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
             .TraitMethodCall(call) then {
@@ -1621,7 +1621,7 @@ given MIRReferenceAllocationFunctionPromoter {
                 for arg in call.arguments then {
                     args.push(box(self.promote_direct_references(*arg)))
                 }
-                break MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(*(call.receiver))), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_direct_references(*(call.receiver))), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_direct_references(*(tag.subject))), tag.enum_type)),
             _ then resolved,

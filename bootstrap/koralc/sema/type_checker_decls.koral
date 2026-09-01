@@ -61,11 +61,11 @@ given TypeChecker {
                     let mutable context = self.context()
                     let placeholder_id = self.get_or_allocate_top_level_def_id(name, DefKind.Variable(), access, span)
                     context.set_concrete_global_initializer(placeholder_id, box(typed_init))
-                    break box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved))
+                    yield box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved))
                 } else box(typed_init)
                 let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
                 let sym = box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable))
-                break TypedDecl.LetDecl(access, name, is_mutable, resolved, stable_initializer, span, sym)
+                yield TypedDecl.LetDecl(access, name, is_mutable, resolved, stable_initializer, span, sym)
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {
                 // Enter function context — cleanup via defer (Swift: withNewScope pattern)
@@ -129,9 +129,9 @@ given TypeChecker {
                             fn_sym.def_id,
                             ConcreteExprSource(body, self.storage.file_path, self.storage.package_id, self.storage.module_path)
                         )
-                        break box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), stable_ret))
+                        yield box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), stable_ret))
                     } else box(typed_body)
-                    break TypedDecl.FunctionDecl(
+                    yield TypedDecl.FunctionDecl(
                         access,
                         name,
                         stable_params,
@@ -193,13 +193,13 @@ given TypeChecker {
                     if self.template_retain_debug_enabled() then {
                         println("[template-retain] generic-fn registered file=\(self.storage.file_path) name=\(name)")
                     }
-                    break TypedDecl.GenericFunctionDecl(
+                    yield TypedDecl.GenericFunctionDecl(
                         access,
                         name,
                         span,
                     )
                 }
-                break result
+                yield result
             },
             .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
@@ -228,7 +228,7 @@ given TypeChecker {
                     param_refs.push(box(param.param_type))
                 }
                 let fn_type = make_function_type(param_refs, resolved_ret)
-                break TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
             },
             .ForeignFunctionDecl(access, name, params, return_type, span) then {
                 let resolved_ret = self.resolve_type(return_type)
@@ -264,7 +264,7 @@ given TypeChecker {
                     param_refs.push(box(param.param_type))
                 }
                 let fn_type = make_function_type(param_refs, resolved_ret)
-                break TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
+                yield TypedDecl.ForeignFunctionDecl(access, name, typed_params, resolved_ret, span, box(self.make_top_level_symbol(name, fn_type, SymbolKind.Function(), access, span, false)))
             },
             .ForeignLetDecl(access, name, is_mutable, type_name, span) then {
                 let resolved = self.resolve_type(type_name)
@@ -279,17 +279,17 @@ given TypeChecker {
                     )
                 }
                 let variable_kind = if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
-                break TypedDecl.ForeignLetDecl(access, name, is_mutable, resolved, span, box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable)))
+                yield TypedDecl.ForeignLetDecl(access, name, is_mutable, resolved, span, box(self.make_top_level_symbol(name, resolved, SymbolKind.Variable(variable_kind), access, span, is_mutable)))
             },
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 let typed_fields = if type_params.is_empty() then {
-                    break self.check_fields(fields)
+                    yield self.check_fields(fields)
                 } else {
                     let mutable type_scope = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
                         type_scope.define_generic_param(tp.name)
                     }
-                    break self.check_fields_in_scope(fields, type_scope)
+                    yield self.check_fields_in_scope(fields, type_scope)
                 }
                 for field in typed_fields then {
                     if self.contains_borrowed_reference_type(field.field_type) then {
@@ -302,7 +302,7 @@ given TypeChecker {
                         )
                     }
                 }
-                break if type_params.is_empty() then {
+                yield if type_params.is_empty() then {
                     let fallback_type = Type.StructureType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Structure()), access, span))
                     let type_sym = box(self.make_top_level_type_symbol(
                         name,
@@ -311,19 +311,19 @@ given TypeChecker {
                         access,
                         span,
                     ))
-                    break TypedDecl.TypeStructDecl(access, name, typed_fields, span, type_sym)
+                    yield TypedDecl.TypeStructDecl(access, name, typed_fields, span, type_sym)
                 }
                 else TypedDecl.GenericTypeStructDecl(access, name, span)
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
                 let typed_cases = if type_params.is_empty() then {
-                    break self.check_enum_cases(cases)
+                    yield self.check_enum_cases(cases)
                 } else {
                     let mutable type_scope = Scope.new_child(self.storage.global_scope)
                     for tp in type_params then {
                         type_scope.define_generic_param(tp.name)
                     }
-                    break self.check_enum_cases_in_scope(cases, type_scope)
+                    yield self.check_enum_cases_in_scope(cases, type_scope)
                 }
                 for enum_case in typed_cases then {
                     for field in enum_case.fields then {
@@ -338,7 +338,7 @@ given TypeChecker {
                         }
                     }
                 }
-                break if type_params.is_empty() then {
+                yield if type_params.is_empty() then {
                     let fallback_type = Type.EnumType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(TypeDefKind.Enum()), access, span))
                     let type_sym = box(self.make_top_level_type_symbol(
                         name,
@@ -347,7 +347,7 @@ given TypeChecker {
                         access,
                         span,
                     ))
-                    break TypedDecl.TypeEnumDecl(access, name, typed_cases, span, type_sym)
+                    yield TypedDecl.TypeEnumDecl(access, name, typed_cases, span, type_sym)
                 }
                 else TypedDecl.GenericTypeEnumDecl(access, name, span)
             },
@@ -363,10 +363,10 @@ given TypeChecker {
                     resolved_target = Type.Unknown()
                 }
                 self.storage.global_scope.define_type(name, resolved_target)
-                break TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
+                yield TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
             },
             .IntrinsicTypeDecl(access, name, type_params, span) then {
-                break TypedDecl.IntrinsicTypeDecl(access, name, span)
+                yield TypedDecl.IntrinsicTypeDecl(access, name, span)
             },
             .ForeignTypeDecl(access, name, cname, fields, span) then {
                 let typed_fields = when fields in {
@@ -375,7 +375,7 @@ given TypeChecker {
                         for f in raw_fields then {
                             out.push(TypedField(f.access, f.name, true, self.resolve_type(f.type_name), f.named))
                         }
-                        break Option[List[TypedField]].Some(out)
+                        yield Option[List[TypedField]].Some(out)
                     },
                     .None() then Option[List[TypedField]].None(),
                 }
@@ -389,15 +389,15 @@ given TypeChecker {
                     _ then Type.OpaqueType(self.get_or_allocate_top_level_def_id(name, DefKind.TypeDef(type_kind), access, span)),
                 }
                 let symbol_type = self.lookup_current_file_type_symbol(name) or else fallback_type
-                break TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, box(self.make_top_level_type_symbol(name, type_kind, symbol_type, access, span)))
+                yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, box(self.make_top_level_type_symbol(name, type_kind, symbol_type, access, span)))
             },
             .ModuleUsingDecl(path_segments, items, span) then {
-                break TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
+                yield TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
             },
             .FileUsingDecl(file_name, span) then {
                 let mutable path_segments = List[String].new()
                 path_segments.push(file_name)
-                break TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
+                yield TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
@@ -420,7 +420,7 @@ given TypeChecker {
                             for arg in args then {
                                 nodes.push(*arg)
                             }
-                            break nodes
+                            yield nodes
                         },
                         _ then List[TypeNode].new(),
                     }
@@ -429,10 +429,10 @@ given TypeChecker {
                 let typed_members = self.check_trait_members(members, type_params)
                 self.register_trait_metadata(name, type_params, parent_constraints, members, typed_members)
                 self.restore_generic_constraints(generic_constraint_snapshot)
-                break TypedDecl.TraitDecl(access, name, typed_members, span)
+                yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
             .GivenDecl(target_type, type_params, members, span) then {
-                break if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
                 then TypedDecl.GivenDecl(Type.Unknown(), List[* TypedGivenMember].new(), span)
                 else {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
@@ -458,11 +458,11 @@ given TypeChecker {
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members)
                     self.restore_generic_constraints(generic_constraint_snapshot)
-                    break TypedDecl.GivenDecl(resolved_target, typed_members, span)
+                    yield TypedDecl.GivenDecl(resolved_target, typed_members, span)
                 }
             },
             .GivenTraitDecl(target_type, type_params, trait_type, members, span) then {
-                break if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
                 then TypedDecl.GivenTraitDecl(Type.Unknown(), self.type_node_name(trait_type), List[Type].new(), List[* TypedGivenMember].new(), span)
                 else {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
@@ -562,11 +562,11 @@ given TypeChecker {
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].Some(trait_name), typed_members)
                     self.restore_generic_constraints(generic_constraint_snapshot)
-                    break TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span)
+                    yield TypedDecl.GivenTraitDecl(resolved_target, trait_name, resolved_trait_args, typed_members, span)
                 }
             },
             .IntrinsicGivenDecl(target_type, type_params, members, span) then {
-                break if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
+                yield if self.reject_concrete_type_modifier_given_if_needed(target_type, type_params)
                 then TypedDecl.IntrinsicGivenDecl(Type.Unknown(), List[* TypedGivenMember].new(), span)
                 else {
                     let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
@@ -581,12 +581,12 @@ given TypeChecker {
                     }
                     self.register_receiver_dispatch_for_given_members(resolved_target, Option[String].None(), typed_members)
                     self.restore_generic_constraints(generic_constraint_snapshot)
-                    break TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
+                    yield TypedDecl.IntrinsicGivenDecl(resolved_target, typed_members, span)
                 }
             },
             .GivenNotTraitDecl(_, _, _, span) then {
                 // Reached only if a not-Deref declaration was not filtered by the pass driver.
-                break TypedDecl.UsingDecl(AccessModifier.Private(), List[String].new(), span)
+                yield TypedDecl.UsingDecl(AccessModifier.Private(), List[String].new(), span)
             },
         }
     }

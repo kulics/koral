@@ -127,7 +127,7 @@ private let type_display_with_depth(t Type, type_names Dict[UInt, String], depth
             out.push_byte(')')
             out.push_byte(' ')
             out.push_string(type_display_with_depth(*return_type, type_names, depth + 1))
-            break out
+            yield out
         },
         .StructureType(def_id) then when type_names.get(def_id.id) in {
             .Some(name) then name,
@@ -156,7 +156,7 @@ private let type_display_with_depth(t Type, type_names Dict[UInt, String], depth
                 first = false
             }
             out.push_byte(']')
-            break out
+            yield out
         },
         .GenericEnum(template, args) then {
             let mutable out = "\(template)["
@@ -167,10 +167,10 @@ private let type_display_with_depth(t Type, type_names Dict[UInt, String], depth
                 first = false
             }
             out.push_byte(']')
-            break out
+            yield out
         },
         .ModuleType(info) then {
-            break if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
+            yield if info.module_path.is_empty() then "Module" else info.module_path.join_to_string(".")
         },
         .TraitObject(trait_name, _) then trait_name,
         .TypeVar(tv) then (*tv).display(),
@@ -346,6 +346,10 @@ private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names Dict
             println("\(prefix)Deref\(type_ann)")
             print_typed_expr_named(inner, level + 1, type_names)
         },
+        .UnsafeDerefExpr(inner) then {
+            println("\(prefix)UnsafeDeref\(type_ann)")
+            print_typed_expr_named(inner, level + 1, type_names)
+        },
         .ArithmeticExpr(left, op, right) then {
             println("\(prefix)Arithmetic\(type_ann)")
             print_typed_expr_named(left, level + 1, type_names)
@@ -419,7 +423,7 @@ private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names Dict
                     print_typed_expr_named(ref_expr, level + 1, type_names)
                 },
                 .DowngradeMutRef(ref_expr, result_type) then {
-                    println("\(prefix)Intrinsic.downgrade_mut_ref -> \(type_display(result_type, type_names))\(type_ann)")
+                    println("\(prefix)Intrinsic.downgrade_mutable_ref -> \(type_display(result_type, type_names))\(type_ann)")
                     print_typed_expr_named(ref_expr, level + 1, type_names)
                 },
                 .UpgradeRef(weak_expr, result_type) then {
@@ -427,7 +431,7 @@ private let print_typed_expr_named(expr * TypedExpr, level UInt, type_names Dict
                     print_typed_expr_named(weak_expr, level + 1, type_names)
                 },
                 .UpgradeMutRef(weak_expr, result_type) then {
-                    println("\(prefix)Intrinsic.upgrade_mut_ref -> \(type_display(result_type, type_names))\(type_ann)")
+                    println("\(prefix)Intrinsic.upgrade_mutable_ref -> \(type_display(result_type, type_names))\(type_ann)")
                     print_typed_expr_named(weak_expr, level + 1, type_names)
                 },
                 .SpawnThread(out_handle, out_tid, closure, stack_size) then {
@@ -625,7 +629,7 @@ private let print_typed_stmt_named(stmt * TypedStatement, level UInt, type_names
             print_typed_expr_named(expr, level + 1, type_names)
         },
         .BranchBreakStmt(expr, span) then {
-            println("\(prefix)break")
+            println("\(prefix)yield")
             print_typed_expr_named(expr, level + 1, type_names)
         },
     }
@@ -635,7 +639,7 @@ private let typed_pair_binding_text(binding Option[* Symbol], type_names Dict[UI
     return when binding in {
         .Some(symbol) then {
             let mut_kw = if symbol.is_mutable() then "mutable " else ""
-            break "\(mut_kw)\(printed_symbol_name(*symbol)) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))"
+            yield "\(mut_kw)\(printed_symbol_name(*symbol)) #\(symbol.def_id.id): \(type_display(symbol.symbol_type, type_names))"
         },
         .None() then "_",
     }

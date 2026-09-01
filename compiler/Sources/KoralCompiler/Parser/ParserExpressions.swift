@@ -589,11 +589,16 @@ extension Parser {
     }
     if currentToken === .unsafeKeyword {
       try match(.unsafeKeyword)
+      if currentToken === .multiply {
+        try match(.multiply)
+        let expr = try parsePrefixExpression()
+        return .unsafeDerefExpression(expr)
+      }
       guard currentToken === .ampersand else {
         throw ParserError.unexpectedToken(
           span: currentSpan,
           got: currentToken.description,
-          expected: "'&' after 'unsafe'"
+          expected: "'&' or '*' after 'unsafe'"
         )
       }
       try match(.ampersand)
@@ -634,59 +639,6 @@ extension Parser {
       
       if currentToken === .dot {
         try match(.dot)
-
-        // Qualified disambiguation call:
-        // - base.(TraitName)method(...)
-        // - base.(TraitName)method[T](...)
-        if currentToken === .leftParen {
-          try match(.leftParen)
-          guard case .identifier(let traitName) = currentToken else {
-            throw ParserError.expectedIdentifier(
-              span: currentSpan,
-              got: currentToken.description
-            )
-          }
-          try match(.identifier(traitName))
-          try match(.rightParen)
-
-          guard case .identifier(let methodName) = currentToken else {
-            throw ParserError.expectedIdentifier(
-              span: currentSpan,
-              got: currentToken.description
-            )
-          }
-          try match(.identifier(methodName))
-
-          let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
-
-          guard currentToken === .leftParen else {
-            throw ParserError.unexpectedToken(
-              span: currentSpan,
-              got: currentToken.description,
-              expected: "("
-            )
-          }
-
-          let arguments = try parseCallArgumentsList()
-
-          if methodTypeArgs.isEmpty {
-            expr = .qualifiedMethodCall(
-              base: expr,
-              traitName: traitName,
-              methodName: methodName,
-              arguments: arguments
-            )
-          } else {
-            expr = .qualifiedGenericMethodCall(
-              base: expr,
-              traitName: traitName,
-              methodTypeArgs: methodTypeArgs,
-              methodName: methodName,
-              arguments: arguments
-            )
-          }
-          continue
-        }
         
         guard case .identifier(let member) = currentToken else {
           throw ParserError.expectedIdentifier(
@@ -695,6 +647,34 @@ extension Parser {
         try match(.identifier(member))
 
         let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
+
+        if case .traitQualificationExpression(let qualifiedBase, let traitType) = expr {
+          guard currentToken === .leftParen else {
+            throw ParserError.unexpectedToken(
+              span: currentSpan,
+              got: currentToken.description,
+              expected: "("
+            )
+          }
+          let arguments = try parseCallArgumentsList()
+          if methodTypeArgs.isEmpty {
+            expr = .qualifiedMethodCall(
+              base: qualifiedBase,
+              trait: traitType,
+              methodName: member,
+              arguments: arguments
+            )
+          } else {
+            expr = .qualifiedGenericMethodCall(
+              base: qualifiedBase,
+              trait: traitType,
+              methodTypeArgs: methodTypeArgs,
+              methodName: member,
+              arguments: arguments
+            )
+          }
+          continue
+        }
         
         // Check if this is a static method call: TypeName.methodName(...)
         // TypeName starts with uppercase, methodName starts with lowercase
@@ -1221,6 +1201,12 @@ extension Parser {
           let second = try expression()
           try match(.rightParen)
           return .call(callee: .identifier("Pair"), arguments: [CallArg(label: nil, expression: first), CallArg(label: nil, expression: second)])
+        }
+        if currentToken === .asKeyword {
+          try match(.asKeyword)
+          let trait = try parseType()
+          try match(.rightParen)
+          return .traitQualificationExpression(base: first, trait: trait)
         }
         try match(.rightParen)
         return first

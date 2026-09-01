@@ -51,6 +51,7 @@ public type CstExpr {
     TypeCast(lparen Token, cast_type * CstType, rparen Token, operand * CstExpr),
     Paren(lparen Token, inner * CstExpr, rparen Token),
     PairExpr(lparen Token, first * CstExpr, comma Token, second * CstExpr, rparen Token),
+    TraitQualification(lparen Token, base * CstExpr, as_kw Token, trait_type * CstType, rparen Token),
 
     // Access and calls
     FieldAccess(base * CstExpr, dot Token, field Token),
@@ -403,7 +404,7 @@ given CstParser {
             let runes = name.to_runes()
             if runes.count() == 0 then { return false }
             let first = runes[0].to_uint32()
-            break first >= 65 and first <= 90
+            yield first >= 65 and first <= 90
         },
         _ then false,
     }
@@ -1275,6 +1276,14 @@ given CstParser {
         // Address-of: &, &mutable, unsafe &, unsafe & mutable
         if self.check(.KwUnsafe()) then {
             let unsafe_kw = self.eat()
+            if self.check(.Star()) then {
+                let star = self.eat()
+                let operand = when self.parse_prefix() in {
+                    .Ok(e) then e,
+                    .Error(e) then { return .Error(e) },
+                }
+                return .Ok(.PrefixKw(unsafe_kw, box(CstExpr.Deref(star, box(operand)))))
+            }
             if self.check(.Amp()) then {
                 let op = self.eat()
                 let raw_kw = Option[Token].Some(unsafe_kw)
@@ -1288,7 +1297,7 @@ given CstParser {
                 }
                 return .Ok(.AddressOf(op, raw_kw, mut_kw, box(operand)))
             }
-            return .Error(box("Expected '&' after 'unsafe' in expression"))
+            return .Error(box("Expected '&' or '*' after 'unsafe' in expression"))
         }
         if self.check(.Amp()) then {
             let op = self.eat()
@@ -1325,36 +1334,6 @@ given CstParser {
             // Field access: expr.field
             if self.check(.Dot()) then {
                 let dot = self.eat()
-
-                if self.check(.LParen()) then {
-                    let trait_lp = self.eat()
-                    let trait_name = when self.expect_ident("trait name") in {
-                        .Ok(t) then t,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    let trait_rp = when self.expect(.RParen(), "')'") in {
-                        .Ok(t) then t,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    let method_name = when self.expect_ident("method name") in {
-                        .Ok(t) then t,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    let lp = when self.expect(.LParen(), "'('") in {
-                        .Ok(t) then t,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    let args = when self.parse_call_args() in {
-                        .Ok(a) then a,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    let rp = when self.expect(.RParen(), "')'") in {
-                        .Ok(t) then t,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    expr = .QualifiedCall(box(expr), dot, trait_lp, trait_name, trait_rp, method_name, lp, args, rp)
-                    continue
-                }
 
                 let field = when self.expect_ident("field name") in {
                     .Ok(t) then t,
@@ -1771,6 +1750,25 @@ given CstParser {
             self.leave_line_join_grouping()
             return .Ok(.PairExpr(lp, box(inner), comma, box(second), rp))
         }
+        if self.check(.KwAs()) then {
+            let as_kw = self.eat()
+            let trait_type = when self.parse_type_node() in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    self.leave_line_join_grouping()
+                    return .Error(e)
+                },
+            }
+            let rp = when self.expect(.RParen(), "')'") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    self.leave_line_join_grouping()
+                    return .Error(e)
+                },
+            }
+            self.leave_line_join_grouping()
+            return .Ok(.TraitQualification(lp, box(inner), as_kw, box(trait_type), rp))
+        }
         let rp = when self.expect(.RParen(), "')'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -1890,12 +1888,12 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         let body = if self.check(.LBrace()) then {
-            break when self.parse_block_expr() in {
+            yield when self.parse_block_expr() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
         } else {
-            break when self.parse_expr_node() in {
+            yield when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -1982,12 +1980,12 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         let body = if self.check(.LBrace()) then {
-            break when self.parse_block_expr() in {
+            yield when self.parse_block_expr() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
         } else {
-            break when self.parse_expr_node() in {
+            yield when self.parse_expr_node() in {
                 .Ok(e) then e,
                 .Error(e) then { return .Error(e) },
             }
@@ -2251,16 +2249,16 @@ given CstParser {
                 if self.check(.RBrace()) then {
                     return .Ok(.Break(kw, .None()))
                 }
-                if self.peek() is .Semi() then { self.eat() }
-                else {
-                    let value = when self.parse_expr_node() in {
-                        .Ok(e) then e,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    if self.peek() is .Semi() then { self.eat() }
-                    return .Ok(.Break(kw, .Some(box(value))))
+                return .Error(box("Parse error: expected statement terminator after 'break'"))
+            },
+            .KwYield() then {
+                let kw = self.eat()
+                let value = when self.parse_expr_node() in {
+                    .Ok(e) then e,
+                    .Error(e) then { return .Error(e) },
                 }
-                return .Ok(.Break(kw, .None()))
+                if self.peek() is .Semi() then { self.eat() }
+                return .Ok(.Break(kw, .Some(box(value))))
             },
             .KwContinue() then {
                 let kw = self.eat()
@@ -2655,7 +2653,7 @@ given CstParser {
                     let c = self.eat()
                     let prev_is_field =
                         if items.count() > 0 then {
-                            break when *items[items.count() - 1] in { .Field(_) then true, _ then false }
+                            yield when *items[items.count() - 1] in { .Field(_) then true, _ then false }
                         } else false
                     if nl_count == 0 and prev_is_field then {
                         items.push(box(CstStructBodyItem.TrailingComment(c)))

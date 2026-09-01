@@ -197,7 +197,7 @@ Koral distinguishes managed references (`*T`, `*mutable T`) from raw pointers (`
 - **No implicit managed-ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must pass `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** A `*self` method can be called on a value (auto-ref); a `self` method can be called on `*T`/`*mutable T` (auto-deref, following Go's pointer receiver behavior).
 - `*T` supports `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
-- `unsafe * T` supports `*expr` dereference read only. `unsafe * mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
+- `unsafe * T` supports `unsafe *expr` dereference read only. `unsafe * mutable T` supports `unsafe *expr` dereference read, `unsafe *expr = value`, and `p[i] = value`.
 - Raw pointers support direct field access sugar (`p.field`) but do not do implicit pointee method lookup.
 - `box(expr)` returns `*mutable T` — an escaping managed reference from temporaries/literals.
 - `box` should be understood as binding its parameter locally and returning `*mutable T`; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.

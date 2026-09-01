@@ -558,22 +558,22 @@ let owned *mutable Int = &mutable n
 
 指针类型同样区分只读和可变：
 
-- `unsafe * T` — 只读指针。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值和 `p[i]` 赋值。
-- `unsafe * mutable T` — 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
+- `unsafe * T` — 只读指针。支持 `unsafe *expr` 解引用读取，但不支持 `unsafe *expr` 赋值和 `p[i]` 赋值。
+- `unsafe * mutable T` — 可变指针。支持 `unsafe *expr` 解引用读取、`unsafe *expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
 - `unsafe * mutable T` 可隐式转换为 `unsafe * T`。反向转换不允许。
 
 #### 弱引用
 
 弱引用不会增加引用计数，用于打破循环引用。与 `*`/`*mutable` 一样，弱引用也区分可变性：`?*T`（只读）和 `?*mutable T`（可变）。
 
-使用 `downgrade(*T)` 创建 `?*T`（或 `downgrade_mut(*mutable T)` 创建 `?*mutable T`），使用 `upgrade(?*T)` 尝试升级回 `Option[*T]`（或 `upgrade_mut(?*mutable T)` 返回 `Option[*mutable T]`）。
+使用 `downgrade(*T)` 创建 `?*T`（或 `downgrade_mutable(*mutable T)` 创建 `?*mutable T`），使用 `upgrade(?*T)` 尝试升级回 `Option[*T]`（或 `upgrade_mutable(?*mutable T)` 返回 `Option[*mutable T]`）。
 
 ```koral
 let strong *mutable Int = box(42)
 
 // 可变路径：*mutable → ?*mutable → Option[*mutable T]
-let weak = downgrade_mut(strong)     // *mutable T → ?*mutable T
-let upgraded = upgrade_mut(weak)     // ?*mutable T → Option[*mutable T]
+let weak = downgrade_mutable(strong)     // *mutable T → ?*mutable T
+let upgraded = upgrade_mutable(weak)     // ?*mutable T → Option[*mutable T]
 
 // 只读路径：* → ?* → Option[*T]
 let ro *Int = strong                // 隐式宽化
@@ -791,7 +791,7 @@ dealloc_memory(p)
 - `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`unsafe * T`、`unsafe * mutable T`。
 - `String[key]` 返回 `UInt8` 字节值，只读且不可取地址。
 - `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `*` / `*mutable` 上下文。
-- `unsafe * T` 只支持读取；`unsafe * mutable T` 同时支持读取和写入。
+- `unsafe * T` 只支持 `unsafe *expr` 读取；`unsafe * mutable T` 同时支持 `unsafe *expr` 读取和写入。
 - 用户自定义类型不能通过 Trait 获得 `[]` 能力，泛型约束也不能为类型添加下标能力。
 
 ### 值合并与可选链
@@ -1665,12 +1665,13 @@ given[T Ord] Iterator[T] {
 
 当出现同名候选冲突时，可使用限定调用：
 
-- 实例方法：`object.(TraitName)method(...)`
-- 静态方法：`Type.(TraitName)method(value, ...)`
-- 泛型实例方法：`object.(TraitName)method[TypeArgs...](...)`
-- 泛型静态方法：`Type.(TraitName)method[TypeArgs...](value, ...)`
+- 实例方法：`(object as TraitName).method(...)`
+- 静态方法：`(Type as TraitName).method(value, ...)`
+- 泛型 trait 实例方法：`(object as TraitName[Args...]).method(...)`
+- 泛型 trait 静态方法：`(Type as TraitName[Args...]).method(value, ...)`
+- 泛型方法类型参数仍写在方法名后：`(object as TraitName).method[TypeArgs...](...)`
 
-其中泛型方法要求 trait 限定写在方法类型参数之前。
+其中泛型方法要求先写 trait 限定，再写方法类型参数。
 
 #### 覆盖与冲突规则
 

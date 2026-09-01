@@ -339,6 +339,10 @@ extension Monomorphizer {
         if context.containsGenericParameter(functionType) {
             return ("", functionType)
         }
+
+        if input.genericTemplates.intrinsicGenericFunctions.contains(templateName) {
+            return (mangledName, functionType)
+        }
         
         // Cache early to support recursion
         instantiatedFunctions[key] = (mangledName, functionType)
@@ -355,14 +359,8 @@ extension Monomorphizer {
             fatalError("Monomorphizer invariant violated: missing checkedBody for generic function template '\(templateName)' (defId=\(resolvedTemplate.defId.id))")
         }
         
-        // Skip intrinsic functions
-        let intrinsicNames = [
-            "alloc_memory", "dealloc_memory", "copy_memory", "move_memory", "is_unique_mutable",
-            "init_memory", "deinit_memory", "take_memory", "null_ptr",
-        ]
-        
         // Generate global function if not already generated
-        if !generatedLayouts.contains(mangledName) && !intrinsicNames.contains(templateName) {
+        if !generatedLayouts.contains(mangledName) {
             generatedLayouts.insert(mangledName)
             
             let functionNode = TypedGlobalNode.globalFunction(

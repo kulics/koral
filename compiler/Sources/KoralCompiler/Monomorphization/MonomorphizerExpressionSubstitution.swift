@@ -164,6 +164,12 @@ extension Monomorphizer {
                 expression: substituteTypesInExpression(expression, substitution: substitution),
                 type: substituteType(type, substitution: substitution)
             )
+
+        case .unsafeDerefExpression(let expression, let type):
+            return .unsafeDerefExpression(
+                expression: substituteTypesInExpression(expression, substitution: substitution),
+                type: substituteType(type, substitution: substitution)
+            )
             
         case .referenceExpression(let expression, let type):
             return .referenceExpression(
@@ -242,7 +248,9 @@ extension Monomorphizer {
                         newName = "\(identifierName)_\(argLayoutKeys)"
                         
                         // Ensure the function is instantiated
-                        if !generatedLayouts.contains(newName) && !typeArgs.contains(where: { context.containsGenericParameter($0) }) {
+                        if !input.genericTemplates.intrinsicGenericFunctions.contains(identifierName)
+                            && !generatedLayouts.contains(newName)
+                            && !typeArgs.contains(where: { context.containsGenericParameter($0) }) {
                             pendingRequests.append(InstantiationRequest(
                                 kind: .function(template: template, args: typeArgs),
                                 sourceLine: currentLine,
@@ -544,7 +552,8 @@ extension Monomorphizer {
             if let template = input.genericTemplates.functionTemplates[functionName] {
                 // Ensure the function is instantiated
                 let key = InstantiationKey.function(templateDefId: template.defId, args: substitutedTypeArgs)
-                if !processedRequestKeys.contains(key) {
+                if !input.genericTemplates.intrinsicGenericFunctions.contains(functionName)
+                    && !processedRequestKeys.contains(key) {
                     pendingRequests.append(InstantiationRequest(
                         kind: .function(template: template, args: substitutedTypeArgs),
                         sourceLine: currentLine,

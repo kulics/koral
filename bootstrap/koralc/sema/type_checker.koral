@@ -528,20 +528,20 @@ given TypeChecker {
             .OrExpr(left, _) then self.typed_expr_span(left),
             .IsExpr(subject, _, _) then {
                 let subject_span = self.typed_expr_span(subject)
-                break if is_known_span(subject_span) then subject_span else unknown_span()
+                yield if is_known_span(subject_span) then subject_span else unknown_span()
             },
             .Call(callee, _) then self.typed_expr_span(callee),
             .GenericCall(function_symbol, _, args) then {
                 let function_span = self.context().get_span(function_symbol.def_id) or else unknown_span()
-                break if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else {
+                yield if is_known_span(function_span) then function_span else if args.is_empty() then unknown_span() else {
                     let first_arg = (*args[0(UInt)])
-                    break self.typed_expr_span(box(first_arg))
+                    yield self.typed_expr_span(box(first_arg))
                 }
             },
             .MemberPath(base, _) then self.typed_expr_span(base),
             .MethodReference(base, _, method, _, _, _) then {
                 let base_span = self.typed_expr_span(base)
-                break if is_known_span(base_span) then base_span else self.context().get_span(method.def_id) or else unknown_span()
+                yield if is_known_span(base_span) then base_span else self.context().get_span(method.def_id) or else unknown_span()
             },
             .Block(statements) then if statements.is_empty() then unknown_span() else when statements[0(UInt)] in {
                 .LetStmt(_, _, span) then span,
@@ -562,25 +562,25 @@ given TypeChecker {
             .LambdaExpr(_, _, body) then self.typed_expr_span(body),
             .StaticMethodCall(_, _, method, _, _, args) then {
                 let method_span = self.context().get_span(method.def_id) or else unknown_span()
-                break if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else {
+                yield if is_known_span(method_span) then method_span else if args.is_empty() then unknown_span() else {
                     let first_arg = (*args[0(UInt)])
-                    break self.typed_expr_span(box(first_arg))
+                    yield self.typed_expr_span(box(first_arg))
                 }
             },
             .TypeConstruction(identifier, _, args) then {
                 let type_span = self.context().get_span(identifier.def_id) or else unknown_span()
-                break if is_known_span(type_span) then type_span else if args.is_empty() then unknown_span() else {
+                yield if is_known_span(type_span) then type_span else if args.is_empty() then unknown_span() else {
                     let first_arg = (*args[0(UInt)])
-                    break self.typed_expr_span(box(first_arg))
+                    yield self.typed_expr_span(box(first_arg))
                 }
             },
             .EnumConstruction(_, _, args) then if args.is_empty() then unknown_span() else {
                 let first_arg = (*args[0(UInt)])
-                break self.typed_expr_span(box(first_arg))
+                yield self.typed_expr_span(box(first_arg))
             },
             .TraitMethodPlaceholder(base, _, method, _, _) then {
                 let base_span = self.typed_expr_span(base)
-                break if is_known_span(base_span) then base_span else self.context().get_span(method.def_id) or else unknown_span()
+                yield if is_known_span(base_span) then base_span else self.context().get_span(method.def_id) or else unknown_span()
             },
             .TraitObjectConversion(inner, _, _) then self.typed_expr_span(inner),
             .TraitMethodCall(receiver, _, _, _, _) then self.typed_expr_span(receiver),
@@ -606,6 +606,7 @@ given TypeChecker {
             .ExprStmt(_, span) then span,
             .ReturnStmt(_, span) then span,
             .BreakStmt(_, span) then span,
+            .YieldStmt(_, span) then span,
             .ContinueStmt(span) then span,
             .DeferStmt(_, span) then span,
         }
@@ -619,7 +620,7 @@ given TypeChecker {
         return when self.storage.global_scope.lookup_type(trait_name) in {
             .Some(resolved_type) then when resolved_type in {
                 .TraitObject(existing_trait_name, existing_args) then {
-                    break if existing_trait_name == trait_name
+                    yield if existing_trait_name == trait_name
                         then Type.TraitObject(existing_trait_name, existing_args)
                         else Type.TraitObject(trait_name, List[* Type].new())
                 },
@@ -682,7 +683,7 @@ given TypeChecker {
                         return true
                     }
                 }
-                break self.contains_borrowed_reference_type(*return_type)
+                yield self.contains_borrowed_reference_type(*return_type)
             },
             .GenericStruct(_, args) then {
                 for arg in args then {
@@ -690,7 +691,7 @@ given TypeChecker {
                         return true
                     }
                 }
-                break false
+                yield false
             },
             .GenericEnum(_, args) then {
                 for arg in args then {
@@ -698,7 +699,7 @@ given TypeChecker {
                         return true
                     }
                 }
-                break false
+                yield false
             },
             .TraitObject(_, args) then {
                 for arg in args then {
@@ -706,7 +707,7 @@ given TypeChecker {
                         return true
                     }
                 }
-                break false
+                yield false
             },
             _ then false,
         }
@@ -773,7 +774,7 @@ given TypeChecker {
                     resolved_params.push(intern_type(self.canonicalize_alias_type(*pt)))
                 }
                 let resolved_ret = self.canonicalize_alias_type(*return_type)
-                break make_function_type(resolved_params, resolved_ret)
+                yield make_function_type(resolved_params, resolved_ret)
             },
             _ then t,
         }
@@ -801,21 +802,21 @@ given TypeChecker {
                 for pt in param_types then {
                     resolved_params.push(box(self.concretize_default_literal_type(*pt)))
                 }
-                break Type.FunctionType(types_to_param_entries(resolved_params), box(self.concretize_default_literal_type(*return_type)))
+                yield Type.FunctionType(types_to_param_entries(resolved_params), box(self.concretize_default_literal_type(*return_type)))
             },
             .GenericStruct(template, args) then {
                 let mutable resolved_args = List[* Type].new()
                 for arg in args then {
                     resolved_args.push(box(self.concretize_default_literal_type(*arg)))
                 }
-                break Type.GenericStruct(template, resolved_args)
+                yield Type.GenericStruct(template, resolved_args)
             },
             .GenericEnum(template, args) then {
                 let mutable resolved_args = List[* Type].new()
                 for arg in args then {
                     resolved_args.push(box(self.concretize_default_literal_type(*arg)))
                 }
-                break Type.GenericEnum(template, resolved_args)
+                yield Type.GenericEnum(template, resolved_args)
             },
             _ then resolved,
         }
@@ -851,32 +852,32 @@ given TypeChecker {
             .ReferenceType(inner) then {
                 let mutable out = "*"
                 out.push_string(self.display_type_name(*inner))
-                break out
+                yield out
             },
             .MutableReferenceType(inner) then {
                 let mutable out = "*mutable "
                 out.push_string(self.display_type_name(*inner))
-                break out
+                yield out
             },
             .PointerType(inner) then {
                 let mutable out = "unsafe * "
                 out.push_string(self.display_type_name(*inner))
-                break out
+                yield out
             },
             .MutablePointerType(inner) then {
                 let mutable out = "unsafe * mutable "
                 out.push_string(self.display_type_name(*inner))
-                break out
+                yield out
             },
             .WeakReferenceType(inner) then {
                 let mutable out = "?*"
                 out.push_string(self.display_type_name(*inner))
-                break out
+                yield out
             },
             .MutableWeakReferenceType(inner) then {
                 let mutable out = "?*mutable "
                 out.push_string(self.display_type_name(*inner))
-                break out
+                yield out
             },
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params)
@@ -890,7 +891,7 @@ given TypeChecker {
                 out.push_byte(')')
                 out.push_byte(' ')
                 out.push_string(self.display_type_name(*return_type))
-                break out
+                yield out
             },
             .GenericStruct(template, args) then {
                 let mutable out = template
@@ -902,7 +903,7 @@ given TypeChecker {
                     first = false
                 }
                 out.push_byte(']')
-                break out
+                yield out
             },
             .GenericEnum(template, args) then {
                 let mutable out = template
@@ -914,7 +915,7 @@ given TypeChecker {
                     first = false
                 }
                 out.push_byte(']')
-                break out
+                yield out
             },
             _ then type_to_string(resolved),
         }
@@ -1065,40 +1066,40 @@ given TypeChecker {
     protected retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
         return when typed_decl in {
             .FunctionDecl(access, name, _, _, body, span, id) then {
-                break TypedDecl.FunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), body, span, id)
+                yield TypedDecl.FunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), body, span, id)
             },
             .IntrinsicFunctionDecl(access, name, _, _, span, id) then {
-                break TypedDecl.IntrinsicFunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), span, id)
+                yield TypedDecl.IntrinsicFunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), span, id)
             },
             .ForeignFunctionDecl(access, name, _, _, span, id) then {
-                break TypedDecl.ForeignFunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), span, id)
+                yield TypedDecl.ForeignFunctionDecl(access, name, List[TypedParam].new(), Type.Unknown(), span, id)
             },
             .TypeStructDecl(access, name, _, span, id) then {
-                break TypedDecl.TypeStructDecl(access, name, List[TypedField].new(), span, id)
+                yield TypedDecl.TypeStructDecl(access, name, List[TypedField].new(), span, id)
             },
             .TypeEnumDecl(access, name, _, span, id) then {
-                break TypedDecl.TypeEnumDecl(access, name, List[TypedEnumCase].new(), span, id)
+                yield TypedDecl.TypeEnumDecl(access, name, List[TypedEnumCase].new(), span, id)
             },
             .GivenDecl(target_type, members, span) then {
                 let mutable skeleton_members = List[* TypedGivenMember].new()
                 for member_ref in members then {
                     skeleton_members.push(self.retained_given_member_skeleton(member_ref))
                 }
-                break TypedDecl.GivenDecl(target_type, skeleton_members, span)
+                yield TypedDecl.GivenDecl(target_type, skeleton_members, span)
             },
             .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
                 let mutable skeleton_members = List[* TypedGivenMember].new()
                 for member_ref in members then {
                     skeleton_members.push(self.retained_given_member_skeleton(member_ref))
                 }
-                break TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, skeleton_members, span)
+                yield TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, skeleton_members, span)
             },
             .IntrinsicGivenDecl(target_type, members, span) then {
                 let mutable skeleton_members = List[* TypedGivenMember].new()
                 for member_ref in members then {
                     skeleton_members.push(self.retained_given_member_skeleton(member_ref))
                 }
-                break TypedDecl.IntrinsicGivenDecl(target_type, skeleton_members, span)
+                yield TypedDecl.IntrinsicGivenDecl(target_type, skeleton_members, span)
             },
             _ then typed_decl,
         }
@@ -1118,7 +1119,7 @@ given TypeChecker {
                         return false
                     }
                 }
-                break true
+                yield true
             },
             .GivenTraitDecl(_, type_params, _, members, _) then {
                 if not type_params.is_empty() then {
@@ -1129,7 +1130,7 @@ given TypeChecker {
                         return false
                     }
                 }
-                break true
+                yield true
             },
             .IntrinsicGivenDecl(_, type_params, members, _) then {
                 if not type_params.is_empty() then {
@@ -1140,7 +1141,7 @@ given TypeChecker {
                         return false
                     }
                 }
-                break true
+                yield true
             },
             _ then false,
         }
@@ -1297,12 +1298,12 @@ given TypeChecker {
                         if not subst.mapping.is_empty() then {
                             self.refresh_concrete_stored_exprs(subst, td)
                         }
-                        break if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(subst, td))
+                        yield if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(subst, td))
                     },
                     .None() then Option[TypedDecl].None(),
                 }
                 self.storage.constraint_solver.clear_debug_state()
-                break resolved_decl
+                yield resolved_decl
             },
             .Error(e) then {
                 let partial_bindings = self.storage.constraint_solver.unifier.current_bindings()
@@ -1316,13 +1317,13 @@ given TypeChecker {
                         if not partial_subst.mapping.is_empty() then {
                             self.refresh_concrete_stored_exprs(partial_subst, td)
                         }
-                        break if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(partial_subst, td))
+                        yield if skip_checked_decl_substitution then Option[TypedDecl].Some(td) else Option[TypedDecl].Some(self.apply_subst_to_decl(partial_subst, td))
                     },
                     .None() then Option[TypedDecl].None(),
                 }
                 self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                 self.storage.constraint_solver.clear_debug_state()
-                break resolved_decl
+                yield resolved_decl
             },
         }
     }
@@ -1499,13 +1500,13 @@ given TypeChecker {
                     for p in params then {
                         param_types.push(self.resolve_type(p.type_name))
                     }
-                    break self.resolve_type(return_type)
+                    yield self.resolve_type(return_type)
                 } else {
                     let bindings = self.generic_type_param_bindings(type_params)
                     for p in params then {
                         param_types.push(self.resolve_type_with_bindings(p.type_name, bindings))
                     }
-                    break self.resolve_type_with_bindings(return_type, bindings)
+                    yield self.resolve_type_with_bindings(return_type, bindings)
                 }
                 let mutable stable_param_types = List[Type].new()
                 for param_type in param_types then {
@@ -1838,7 +1839,7 @@ given TypeChecker {
                             for arg in args then {
                                 nodes.push(*arg)
                             }
-                            break nodes
+                            yield nodes
                         },
                         _ then List[TypeNode].new(),
                     }
@@ -2052,7 +2053,7 @@ given TypeChecker {
                 for arg in args then {
                     resolved_args.push(self.resolve_constraint_type_arg(*arg))
                 }
-                break GenericConstraintBound(base, resolved_args)
+                yield GenericConstraintBound(base, resolved_args)
             },
             _ then GenericConstraintBound("?", List[Type].new()),
         }
@@ -2100,7 +2101,7 @@ given TypeChecker {
                     for constraint in existing then {
                         copied.push(constraint)
                     }
-                    break Option[List[GenericConstraintBound]].Some(copied)
+                    yield Option[List[GenericConstraintBound]].Some(copied)
                 },
                 .None() then Option[List[GenericConstraintBound]].None(),
             }
@@ -2155,7 +2156,7 @@ given TypeChecker {
                     self.push_expr_diagnostic(expr, "Type '\(type_name)' is marked as 'not Deref' and cannot be dereferenced with '*'")
                     return false
                 }
-                break true
+                yield true
             },
             .None() then true,
         }

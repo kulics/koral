@@ -675,6 +675,12 @@ extension Monomorphizer {
                 expression: resolveTypesInExpression(expression),
                 type: resolveParameterizedType(type)
             )
+
+        case .unsafeDerefExpression(let expression, let type):
+            return .unsafeDerefExpression(
+                expression: resolveTypesInExpression(expression),
+                type: resolveParameterizedType(type)
+            )
             
         case .referenceExpression(let expression, let type):
             return .referenceExpression(
@@ -996,7 +1002,8 @@ extension Monomorphizer {
             if let template = input.genericTemplates.functionTemplates[functionName] {
                 // Ensure the function is instantiated
                 let key = InstantiationKey.function(templateDefId: template.defId, args: resolvedTypeArgs)
-                if !processedRequestKeys.contains(key) {
+                if !input.genericTemplates.intrinsicGenericFunctions.contains(functionName)
+                    && !processedRequestKeys.contains(key) {
                     pendingRequests.append(InstantiationRequest(
                         kind: .function(template: template, args: resolvedTypeArgs),
                         sourceLine: currentLine,

@@ -38,7 +38,7 @@ public let substitute_types_in_expression(
                 for original_type_arg in original_type_args then {
                     substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                 }
-                break Type.TraitObject(original_trait_name, substituted_type_args)
+                yield Type.TraitObject(original_trait_name, substituted_type_args)
             },
             _ then mono.substitute_type_impl(expr.expr_type, substitution),
         },
@@ -67,6 +67,7 @@ private let substitution_debug_expr_kind(kind * TypedExprKind) String = {
         .RefExpr(_) then "RefExpr",
         .PtrExpr(_) then "PtrExpr",
         .DerefExpr(_) then "DerefExpr",
+        .UnsafeDerefExpr(_) then "UnsafeDerefExpr",
         .TypeConstruction(identifier, type_args, args) then "TypeConstruction(def=\(identifier.def_id.id.to_string()),targs=\(type_args.count().to_string()),args=\(args.count().to_string()))",
         .EnumConstruction(_, case_name, args) then "EnumConstruction(case=\(case_name),args=\(args.count().to_string()))",
         .IntrinsicCall(_) then "IntrinsicCall",
@@ -122,7 +123,7 @@ private let recover_unknown_expr_type(
             for param in params then {
                 param_entries.push(box(make_function_param_entry(resolve_parameterized_type(mono, param.param_type))))
             }
-            break Type.FunctionType(param_entries, box(resolve_parameterized_type(mono, return_type)))
+            yield Type.FunctionType(param_entries, box(resolve_parameterized_type(mono, return_type)))
         },
         .StaticMethodCall(_, _, method, _, _, _) then recover_method_return_type(mono, method, fallback),
         .TypeConstruction(identifier, type_args, args) then recover_type_construction_type(mono, identifier, type_args, args, fallback),
@@ -246,7 +247,7 @@ private let infer_type_construction_type_from_args(
             for type_param in template.type_parameters then {
                 inferred_args.push(box(bindings.get(type_param.name) or else Type.GenericParameter(type_param.name)))
             }
-            break Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct(template.name, inferred_args)))
+            yield Option[Type].Some(resolve_parameterized_type(mono, Type.GenericStruct(template.name, inferred_args)))
         },
         .None() then Option[Type].None(),
     }
@@ -360,7 +361,7 @@ private let synthetic_args_from_expected_method_type(
             if not param_types.is_empty() then {
                 let first_param_type = resolve_parameterized_type(mono, (*param_types[0(UInt)]))
                 let receiver_matches = if layout_key(first_param_type) == layout_key(resolved_receiver_type) then {
-                    break true
+                    yield true
                 } else when first_param_type in {
                     .ReferenceType(lhs) then when resolved_receiver_type in {
                         .StructureType(_) then layout_key(resolve_parameterized_type(mono, *lhs)) == layout_key(resolved_receiver_type),
@@ -630,7 +631,7 @@ private let normalize_method_symbol_type_for_base(
                 normalized_params.push(box(make_function_param_entry(resolve_parameterized_type(mono, (*param_types[idx])))))
                 idx += 1(UInt)
             }
-            break Type.FunctionType(normalized_params, box(resolve_parameterized_type(mono, *return_type)))
+            yield Type.FunctionType(normalized_params, box(resolve_parameterized_type(mono, *return_type)))
         },
         _ then resolved_method_type,
     }
@@ -650,7 +651,7 @@ private let substitution_method_has_compatible_ref_like_receiver(
                 return false
             }
             let first_param_type = resolve_parameterized_type(mono, (*param_types[0(UInt)]))
-            break when first_param_type in {
+            yield when first_param_type in {
                 .ReferenceType(lhs) then when resolved_base_type in {
                     .ReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, *lhs)) == layout_key(resolve_parameterized_type(mono, *rhs)),
                     .MutableReferenceType(rhs) then layout_key(resolve_parameterized_type(mono, *lhs)) == layout_key(resolve_parameterized_type(mono, *rhs)),
@@ -845,11 +846,11 @@ private let substitute_expr_kind(
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(box(mono.substitute_type_impl(*original_type_arg, substitution)))
                     }
-                    break Type.TraitObject(original_trait_name, substituted_type_args)
+                    yield Type.TraitObject(original_trait_name, substituted_type_args)
                 },
                 _ then mono.substitute_type_impl(target_type, substitution),
             }
-            break box(TypedExprKind.CastExpr(new_target, substitute_types_in_expression(mono, e, substitution)))
+            yield box(TypedExprKind.CastExpr(new_target, substitute_types_in_expression(mono, e, substitution)))
         },
 
         .TraitObjectConversion(inner, trait_type, concrete_type) then {
@@ -872,74 +873,77 @@ private let substitute_expr_kind(
                 .TraitObject(trait_name, _) then collect_concrete_vtable_request(mono, new_concrete_type, trait_name),
                 _ then {},
             }
-            break box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type))
+            yield box(TypedExprKind.TraitObjectConversion(new_inner, new_trait_type, new_concrete_type))
         },
 
         // Unary: substitute inner expression.
         .Unary(op, e) then {
-            break box(TypedExprKind.Unary(op, substitute_types_in_expression(mono, e, substitution)))
+            yield box(TypedExprKind.Unary(op, substitute_types_in_expression(mono, e, substitution)))
         },
 
         // RefExpr / PtrExpr / DerefExpr: substitute inner expression.
         .RefExpr(e) then {
-            break box(TypedExprKind.RefExpr(substitute_types_in_expression(mono, e, substitution)))
+            yield box(TypedExprKind.RefExpr(substitute_types_in_expression(mono, e, substitution)))
         },
         .PtrExpr(e) then {
-            break box(TypedExprKind.PtrExpr(substitute_types_in_expression(mono, e, substitution)))
+            yield box(TypedExprKind.PtrExpr(substitute_types_in_expression(mono, e, substitution)))
         },
         .DerefExpr(e) then {
-            break box(TypedExprKind.DerefExpr(substitute_types_in_expression(mono, e, substitution)))
+            yield box(TypedExprKind.DerefExpr(substitute_types_in_expression(mono, e, substitution)))
+        },
+        .UnsafeDerefExpr(e) then {
+            yield box(TypedExprKind.UnsafeDerefExpr(substitute_types_in_expression(mono, e, substitution)))
         },
 
         // ArithmeticExpr: substitute both sides.
         .ArithmeticExpr(left, op, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.ArithmeticExpr(new_left, op, new_right))
+            yield box(TypedExprKind.ArithmeticExpr(new_left, op, new_right))
         },
 
         .WrappingArithmeticExpr(left, op, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.WrappingArithmeticExpr(new_left, op, new_right))
+            yield box(TypedExprKind.WrappingArithmeticExpr(new_left, op, new_right))
         },
 
         .WrappingShiftExpr(left, op, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.WrappingShiftExpr(new_left, op, new_right))
+            yield box(TypedExprKind.WrappingShiftExpr(new_left, op, new_right))
         },
 
         // ComparisonExpr: substitute both sides.
         .ComparisonExpr(left, op, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.ComparisonExpr(new_left, op, new_right))
+            yield box(TypedExprKind.ComparisonExpr(new_left, op, new_right))
         },
 
         // BitwiseExpr: substitute both sides.
         .BitwiseExpr(left, op, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.BitwiseExpr(new_left, op, new_right))
+            yield box(TypedExprKind.BitwiseExpr(new_left, op, new_right))
         },
 
         // AndExpr / OrExpr: substitute both sides.
         .AndExpr(left, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.AndExpr(new_left, new_right))
+            yield box(TypedExprKind.AndExpr(new_left, new_right))
         },
 
         .IsExpr(subject, pattern, negated) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
             let new_pattern = substitute_pattern(mono, pattern, substitution)
-            break box(TypedExprKind.IsExpr(new_subject, box(new_pattern), negated))
+            yield box(TypedExprKind.IsExpr(new_subject, box(new_pattern), negated))
         },
         .OrExpr(left, right) then {
             let new_left  = substitute_types_in_expression(mono, left,  substitution)
             let new_right = substitute_types_in_expression(mono, right, substitution)
-            break box(TypedExprKind.OrExpr(new_left, new_right))
+            yield box(TypedExprKind.OrExpr(new_left, new_right))
         },
 
         // Call: substitute callee and all arguments.
@@ -970,12 +974,12 @@ private let substitute_expr_kind(
                                             .None() then {},
                                         }
                                     }
-                                    break filtered
+                                    yield filtered
                                 },
                                 .None() then candidates,
                             }
                             let owner_compatible_candidates = if new_args.is_empty() then {
-                                break filtered_candidates
+                                yield filtered_candidates
                             } else {
                                 let actual_receiver_type = resolve_parameterized_type(mono, new_args[0(UInt)].expr_type)
                                 let mutable owner_filtered = List[Pair[DefId, Type]].new()
@@ -987,7 +991,7 @@ private let substitute_expr_kind(
                                             .Some(owner_type) then {
                                                 let resolved_owner_type = resolve_parameterized_type(mono, owner_type)
                                                 owner_matches_receiver = if resolved_owner_type == actual_receiver_type then {
-                                                    break true
+                                                    yield true
                                                 } else when actual_receiver_type in {
                                                     .ReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(mono, *inner),
                                                     .MutableReferenceType(inner) then resolved_owner_type == resolve_parameterized_type(mono, *inner),
@@ -1019,13 +1023,13 @@ private let substitute_expr_kind(
                                         owner_filtered.push(candidate)
                                     }
                                 }
-                                break if owner_filtered.is_empty() then when original_method_name in {
+                                yield if owner_filtered.is_empty() then when original_method_name in {
                                     .Some(_) then owner_filtered,
                                     .None() then filtered_candidates,
                                 } else owner_filtered
                             }
                             let symbol_type_filtered_candidates = if has_generic_parameter(resolve_parameterized_type(mono, identifier.symbol_type)) then {
-                                break owner_compatible_candidates
+                                yield owner_compatible_candidates
                             } else {
                                 let normalized_identifier_type = resolve_parameterized_type(mono, identifier.symbol_type)
                                 let mutable strict_filtered = List[Pair[DefId, Type]].new()
@@ -1035,7 +1039,7 @@ private let substitute_expr_kind(
                                         strict_filtered.push(candidate)
                                     }
                                 }
-                                break if strict_filtered.is_empty() then owner_compatible_candidates else strict_filtered
+                                yield if strict_filtered.is_empty() then owner_compatible_candidates else strict_filtered
                             }
                             let mutable expected_call_param_types = List[* Type].new()
                             for arg in new_args then {
@@ -1048,7 +1052,7 @@ private let substitute_expr_kind(
                             let skip_low_confidence_method_remap = when original_method_name in {
                                 .Some(_) then {
                                     let identifier_type = resolve_parameterized_type(mono, identifier.symbol_type)
-                                    break has_generic_parameter(expected_call_type) or has_generic_parameter(identifier_type)
+                                    yield has_generic_parameter(expected_call_type) or has_generic_parameter(identifier_type)
                                 },
                                 .None() then false,
                             }
@@ -1144,9 +1148,9 @@ private let substitute_expr_kind(
                                     let owner_key = layout_key(resolve_parameterized_type(mono, owner_type))
                                     let lookup_key = layout_key(resolve_parameterized_type(mono, lookup_base_type))
                                     if owner_key == lookup_key then {
-                                        break true
+                                        yield true
                                     }
-                                    break when resolve_parameterized_type(mono, lookup_base_type) in {
+                                    yield when resolve_parameterized_type(mono, lookup_base_type) in {
                                         .ReferenceType(inner) then owner_key == layout_key(resolve_parameterized_type(mono, *inner)),
                                         .MutableReferenceType(inner) then owner_key == layout_key(resolve_parameterized_type(mono, *inner)),
                                         .BorrowedReferenceType(inner) then owner_key == layout_key(resolve_parameterized_type(mono, *inner)),
@@ -1260,13 +1264,13 @@ private let substitute_expr_kind(
                             expected_types.push(expected_call_type_with_receiver)
                             expected_types.push(expected_method_type)
                             expected_types.push(expected_call_type_without_receiver)
-                            break expected_types
+                            yield expected_types
                         } else {
                             let mutable expected_types = List[Type].new()
                             expected_types.push(expected_method_type)
                             expected_types.push(expected_call_type_with_receiver)
                             expected_types.push(expected_call_type_without_receiver)
-                            break expected_types
+                            yield expected_types
                         }
                         let mutable rebound_method = *method
                         for expected_type in preferred_expected_types then {
@@ -1302,7 +1306,7 @@ private let substitute_expr_kind(
                 _ then {},
             }
 
-            break box(TypedExprKind.Call(new_callee, new_args))
+            yield box(TypedExprKind.Call(new_callee, new_args))
         },
         .GenericCall(function_symbol, type_args, args) then {
             let new_function_symbol = substitute_symbol(mono, function_symbol, substitution)
@@ -1354,7 +1358,7 @@ private let substitute_expr_kind(
                             boxed_type_args.push(box(bound))
                         }
                         if has_unresolved_param then {
-                            break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                            yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                         }
 
                         let instantiated = mono.instantiate_function_impl(found_template, boxed_type_args)
@@ -1364,17 +1368,17 @@ private let substitute_expr_kind(
                                     box(TypedExprKind.Variable(box(instantiated_symbol))),
                                     instantiated_symbol.symbol_type
                                 ))
-                                break box(TypedExprKind.Call(callee, new_args))
+                                yield box(TypedExprKind.Call(callee, new_args))
                             },
                             .None() then {
-                                break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                                yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                             },
                         } else {
-                            break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                            yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                         }
                     },
                     .None() then {
-                        break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                        yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                     },
                 }
             } else {
@@ -1395,17 +1399,17 @@ private let substitute_expr_kind(
                                     box(TypedExprKind.Variable(box(instantiated_symbol))),
                                     instantiated_symbol.symbol_type
                                 ))
-                                break box(TypedExprKind.Call(callee, new_args))
+                                yield box(TypedExprKind.Call(callee, new_args))
                             },
                             .None() then {
-                                break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                                yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                             },
                         } else {
-                            break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                            yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                         }
                     },
                     .None() then {
-                        break box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
+                        yield box(TypedExprKind.GenericCall(box(new_function_symbol), new_type_args, new_args))
                     },
                 }
             }
@@ -1413,7 +1417,7 @@ private let substitute_expr_kind(
 
         // MemberPath: substitute base.
         .MemberPath(base, path) then {
-            break box(TypedExprKind.MemberPath(substitute_types_in_expression(mono, base, substitution), path))
+            yield box(TypedExprKind.MemberPath(substitute_types_in_expression(mono, base, substitution), path))
         },
         .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
             let mutable new_base = substitute_types_in_expression(mono, base, substitution)
@@ -1471,11 +1475,11 @@ private let substitute_expr_kind(
             }
             when trait_object_type_opt in {
                 .Some(trait_object_type) then {
-                    break box(TypedExprKind.TraitMethodPlaceholder(new_base, trait_object_type, box(new_method), new_method_type_args, dispatch_callsite))
+                    yield box(TypedExprKind.TraitMethodPlaceholder(new_base, trait_object_type, box(new_method), new_method_type_args, dispatch_callsite))
                 },
                 .None() then {},
             }
-            break box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, new_method_type_args, dispatch_callsite))
+            yield box(TypedExprKind.MethodReference(new_base, new_receiver_type, box(new_method), new_type_args, new_method_type_args, dispatch_callsite))
         },
 
         // Block: substitute all statements.
@@ -1484,7 +1488,7 @@ private let substitute_expr_kind(
             for stmt_ref in statements then {
                 new_stmts.push(box(substitute_statement(mono, stmt_ref, substitution)))
             }
-            break box(TypedExprKind.Block(new_stmts))
+            yield box(TypedExprKind.Block(new_stmts))
         },
 
         // IfExpr: substitute condition, then-branch, and optional else-branch.
@@ -1493,11 +1497,11 @@ private let substitute_expr_kind(
             let new_then = substitute_types_in_expression(mono, then_branch, substitution)
             let new_else = when else_branch in {
                 .Some(e) then {
-                    break Option[* TypedExpr].Some(substitute_types_in_expression(mono, e, substitution))
+                    yield Option[* TypedExpr].Some(substitute_types_in_expression(mono, e, substitution))
                 },
                 .None() then Option[* TypedExpr].None(),
             }
-            break box(TypedExprKind.IfExpr(new_cond, new_then, new_else))
+            yield box(TypedExprKind.IfExpr(new_cond, new_then, new_else))
         },
 
         // WhenExpr: substitute subject and all arms.
@@ -1510,7 +1514,7 @@ private let substitute_expr_kind(
                 let new_arm_type = mono.substitute_type_impl(arm_ref.arm_type, substitution)
                 new_arms.push(box(TypedWhenArm(box(new_pattern), new_body, new_arm_type)))
             }
-            break box(TypedExprKind.WhenExpr(new_subject, new_arms))
+            yield box(TypedExprKind.WhenExpr(new_subject, new_arms))
         },
 
         // LambdaExpr: substitute param types, return type, and body.
@@ -1522,7 +1526,7 @@ private let substitute_expr_kind(
             }
             let new_return = mono.substitute_type_impl(return_type, substitution)
             let new_body   = substitute_types_in_expression(mono, body, substitution)
-            break box(TypedExprKind.LambdaExpr(new_params, new_return, new_body))
+            yield box(TypedExprKind.LambdaExpr(new_params, new_return, new_body))
         },
 
         // StaticMethodCall: substitute all args.
@@ -1544,7 +1548,7 @@ private let substitute_expr_kind(
             if not has_generic_parameter(new_receiver_type) then {
                 method_after_subst = bind_static_method_symbol(mono, new_receiver_type, method_after_subst)
             }
-            break box(TypedExprKind.StaticMethodCall(new_receiver_type, method_name, box(method_after_subst), new_type_args, new_method_type_args, new_args))
+            yield box(TypedExprKind.StaticMethodCall(new_receiver_type, method_name, box(method_after_subst), new_type_args, new_method_type_args, new_args))
         },
 
         .TraitMethodPlaceholder(base, trait_type, method, _, dispatch_callsite) then {
@@ -1562,7 +1566,7 @@ private let substitute_expr_kind(
             }
             let substituted_method = substitute_symbol(mono, method, substitution)
             let new_method = Symbol(substituted_method.def_id, substituted_method.symbol_type, substituted_method.kind)
-            break box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), List[Type].new(), dispatch_callsite))
+            yield box(TypedExprKind.TraitMethodPlaceholder(new_base, new_trait_type, box(new_method), List[Type].new(), dispatch_callsite))
         },
 
         .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then {
@@ -1582,7 +1586,7 @@ private let substitute_expr_kind(
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            break box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, method_name, method_index, new_args))
+            yield box(TypedExprKind.TraitMethodCall(new_receiver, new_trait_type, method_name, method_index, new_args))
         },
 
         .IntrinsicCall(node) then {
@@ -1605,7 +1609,7 @@ private let substitute_expr_kind(
                 .TakeMemory(pointer_expr, result_type) then TypedIntrinsic.TakeMemory(substitute_types_in_expression(mono, pointer_expr, substitution), mono.substitute_type_impl(result_type, substitution)),
                 .NullPtr(result_type) then TypedIntrinsic.NullPtr(mono.substitute_type_impl(result_type, substitution)),
             }
-            break box(TypedExprKind.IntrinsicCall(new_node))
+            yield box(TypedExprKind.IntrinsicCall(new_node))
         },
 
         // GenericInstantiation: substitute each type arg.
@@ -1615,7 +1619,7 @@ private let substitute_expr_kind(
             for ta in type_args then {
                 new_type_args.push(mono.substitute_type_impl(ta, substitution))
             }
-            break box(TypedExprKind.GenericInstantiation(new_base_type, new_type_args))
+            yield box(TypedExprKind.GenericInstantiation(new_base_type, new_type_args))
         },
         .TypeConstruction(identifier, type_args, args) then {
             let substituted_identifier_type = resolve_parameterized_type(
@@ -1631,14 +1635,14 @@ private let substitute_expr_kind(
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
             let new_identifier = Symbol(identifier.def_id, substituted_identifier_type, identifier.kind)
-            break box(TypedExprKind.TypeConstruction(box(new_identifier), new_type_args, new_args))
+            yield box(TypedExprKind.TypeConstruction(box(new_identifier), new_type_args, new_args))
         },
         .EnumConstruction(enum_type, case_name, args) then {
             let mutable new_args = List[* TypedExpr].new()
             for arg in args then {
                 new_args.push(substitute_types_in_expression(mono, arg, substitution))
             }
-            break box(TypedExprKind.EnumConstruction(mono.substitute_type_impl(enum_type, substitution), case_name, new_args))
+            yield box(TypedExprKind.EnumConstruction(mono.substitute_type_impl(enum_type, substitution), case_name, new_args))
         },
     }
 }
@@ -1720,7 +1724,7 @@ private let remapped_function_def_id_for_type(
                     .None() then when source_owner_type_opt in {
                         .Some(source_owner_type) then {
                             let source_owner_key = layout_key(resolve_parameterized_type(mono, source_owner_type))
-                            break when mono.concrete_callable_info(candidate.first) in {
+                            yield when mono.concrete_callable_info(candidate.first) in {
                                 .Some(candidate_info) then when candidate_info.owner_type in {
                                     .Some(candidate_owner_type) then layout_key(resolve_parameterized_type(mono, candidate_owner_type)) == source_owner_key,
                                     .None() then false,
@@ -1757,7 +1761,7 @@ private let remapped_function_def_id_for_type(
         let symbol_name = mono.storage.context.symbol_name(*symbol)
         let template_name = mono.storage.context.get_template_name(symbol.def_id) or else symbol_name
         let lookup_names = if template_name.is_empty() then {
-            break List[String].new()
+            yield List[String].new()
         } else {
             let mutable names = List[String].new()
             names.push(template_name)
@@ -1770,7 +1774,7 @@ private let remapped_function_def_id_for_type(
                 },
                 .None() then {},
             }
-            break names
+            yield names
         }
         for candidate_name in lookup_names then {
             let template_lookup = when mono.storage.generic_templates.resolve_function_name(candidate_name) in {
@@ -2456,8 +2460,8 @@ private let lookup_exact_receiver_method_symbol(
                         .Some(info) then when info.owner_type in {
                             .Some(owner_type) then {
                                 let resolved_owner_type = resolve_parameterized_type(mono, owner_type)
-                                break if layout_key(resolved_owner_type) == layout_key(resolved_receiver_type) then {
-                                    break true
+                                yield if layout_key(resolved_owner_type) == layout_key(resolved_receiver_type) then {
+                                    yield true
                                 } else when resolved_receiver_type in {
                                     .ReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, *inner)),
                                     .MutableReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, *inner)),
@@ -2507,7 +2511,7 @@ private let lookup_exact_receiver_method_symbol(
             let owner_type = concrete.owner_type or else { continue }
             let resolved_owner_type = resolve_parameterized_type(mono, owner_type)
             let owner_matches_receiver = if layout_key(resolved_owner_type) == layout_key(resolved_receiver_type) then {
-                break true
+                yield true
             } else when resolved_receiver_type in {
                 .ReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, *inner)),
                 .MutableReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, *inner)),
@@ -2545,8 +2549,8 @@ private let lookup_exact_receiver_method_symbol(
                         .Some(info) then when info.owner_type in {
                             .Some(owner_type) then {
                                 let resolved_owner_type = resolve_parameterized_type(mono, owner_type)
-                                break if layout_key(resolved_owner_type) == layout_key(resolved_receiver_type) then {
-                                    break true
+                                yield if layout_key(resolved_owner_type) == layout_key(resolved_receiver_type) then {
+                                    yield true
                                 } else when resolved_receiver_type in {
                                     .ReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, *inner)),
                                     .MutableReferenceType(inner) then layout_key(resolved_owner_type) == layout_key(resolve_parameterized_type(mono, *inner)),
@@ -2691,7 +2695,7 @@ let bind_receiver_method_symbol(
                     List[* TypedExpr].new(),
                     expected_return_type,
                                 )
-                break if rebound.def_id.id > 0
+                yield if rebound.def_id.id > 0
                     then rebound
                     else bind_receiver_method_symbol(mono, *inner, method, expected_method_type_opt)
             },
@@ -2727,7 +2731,7 @@ let bind_receiver_method_symbol(
                     return rebound
                 }
                 let shared_ref_type = Type.ReferenceType(box(resolve_parameterized_type(mono, *inner)))
-                break when lookup_exact_receiver_method_symbol(mono, shared_ref_type, method, expected_method_type_opt) in {
+                yield when lookup_exact_receiver_method_symbol(mono, shared_ref_type, method, expected_method_type_opt) in {
                     .Some(bound) then bound,
                     .None() then {
                         let shared_rebound = *try_bind_generic_method_call(
@@ -2737,7 +2741,7 @@ let bind_receiver_method_symbol(
                             List[* TypedExpr].new(),
                             expected_return_type,
                                                 )
-                        break if shared_rebound.def_id.id > 0 then shared_rebound else bind_receiver_method_symbol(mono, *inner, method, expected_method_type_opt)
+                        yield if shared_rebound.def_id.id > 0 then shared_rebound else bind_receiver_method_symbol(mono, *inner, method, expected_method_type_opt)
                     },
                 }
             },
@@ -2769,7 +2773,7 @@ let bind_receiver_method_symbol(
                     List[* TypedExpr].new(),
                     expected_return_type,
                                 )
-                break if rebound.def_id.id <> method.def_id.id
+                yield if rebound.def_id.id <> method.def_id.id
                     then rebound
                     else if strict_wrapper_dispatch then method else bind_receiver_method_symbol(mono, *inner, method, expected_method_type_opt)
             },
@@ -2804,13 +2808,13 @@ let bind_receiver_method_symbol(
                 if rebound.def_id.id <> method.def_id.id then {
                     return rebound
                 }
-                break if strict_wrapper_dispatch
+                yield if strict_wrapper_dispatch
                     then method
                     else bind_receiver_method_symbol(mono, *inner, method, expected_method_type_opt)
             },
         },
         .WeakReferenceType(_) then {
-            break when lookup_exact_receiver_method_symbol(mono, resolved_receiver_type, method, expected_method_type_opt) in {
+            yield when lookup_exact_receiver_method_symbol(mono, resolved_receiver_type, method, expected_method_type_opt) in {
                 .Some(bound) then bound,
                 .None() then when expected_method_type_opt in {
                     .Some(expected_method_type) then {
@@ -2820,7 +2824,7 @@ let bind_receiver_method_symbol(
                             method,
                             expected_method_type,
                         )
-                        break if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else *try_bind_generic_method_call(
+                        yield if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else *try_bind_generic_method_call(
                             mono,
                             resolved_receiver_type,
                             method,
@@ -2869,7 +2873,7 @@ let bind_receiver_method_symbol(
                     return rebound
                 }
                 let shared_weakref_type = Type.WeakReferenceType(box(resolve_parameterized_type(mono, *inner)))
-                break when lookup_exact_receiver_method_symbol(mono, shared_weakref_type, method, expected_method_type_opt) in {
+                yield when lookup_exact_receiver_method_symbol(mono, shared_weakref_type, method, expected_method_type_opt) in {
                     .Some(bound) then bound,
                     .None() then *try_bind_generic_method_call(
                         mono,
@@ -2882,7 +2886,7 @@ let bind_receiver_method_symbol(
             },
         },
         _ then {
-            break when lookup_exact_receiver_method_symbol(mono, resolved_receiver_type, method, expected_method_type_opt) in {
+            yield when lookup_exact_receiver_method_symbol(mono, resolved_receiver_type, method, expected_method_type_opt) in {
                 .Some(bound) then bound,
                 .None() then when expected_method_type_opt in {
                     .Some(expected_method_type) then {
@@ -2892,7 +2896,7 @@ let bind_receiver_method_symbol(
                             method,
                             expected_method_type,
                         )
-                        break if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else *try_bind_generic_method_call(
+                        yield if rebound.def_id.id <> method.def_id.id or not has_generic_parameter(resolve_parameterized_type(mono, rebound.symbol_type)) then rebound else *try_bind_generic_method_call(
                             mono,
                             resolved_receiver_type,
                             method,
@@ -3008,38 +3012,38 @@ let align_method_reference_base_for_bound_method(
     let effective_current_type = when current_expr.expr_kind in {
         .Variable(symbol) then {
             let symbol_type = resolve_parameterized_type(mono, symbol.symbol_type)
-            break when symbol_type in {
+            yield when symbol_type in {
                 .ReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .MutableReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .BorrowedReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .MutableBorrowedReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .WeakReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .MutableWeakReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .PointerType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 .MutablePointerType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
+                    yield if layout_key(inner_type) == layout_key(current_type) then current_type else symbol_type
                 },
                 _ then current_type,
             }
@@ -3049,10 +3053,10 @@ let align_method_reference_base_for_bound_method(
     let expected_self_type_opt = when resolve_parameterized_type(mono, method.symbol_type) in {
         .FunctionType(fn_params, _) then {
             let param_types = param_entry_types(fn_params)
-            break if param_types.count() == 0 then {
-                break Option[Type].None()
+            yield if param_types.count() == 0 then {
+                yield Option[Type].None()
             } else {
-                break Option[Type].Some(resolve_parameterized_type(mono, (*param_types[0(UInt)])))
+                yield Option[Type].Some(resolve_parameterized_type(mono, (*param_types[0(UInt)])))
             }
         },
         _ then Option[Type].None(),
@@ -3061,12 +3065,12 @@ let align_method_reference_base_for_bound_method(
     return when expected_self_type_opt in {
         .Some(expected_self_type) then {
             let adapted_expr = if layout_key(expected_self_type) == layout_key(effective_current_type) then {
-                break current_expr
+                yield current_expr
             } else when expected_self_type in {
                 .ReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        break when effective_current_type in {
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
+                        yield when effective_current_type in {
                             .ReferenceType(_) then box(TypedExpr(current_expr.expr_kind, expected_self_type)),
                             .MutableReferenceType(_) then box(TypedExpr(current_expr.expr_kind, expected_self_type)),
                             .BorrowedReferenceType(_) then box(TypedExpr(current_expr.expr_kind, expected_self_type)),
@@ -3080,26 +3084,26 @@ let align_method_reference_base_for_bound_method(
                     } else when effective_current_type in {
                         .MutableReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         .BorrowedReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         .MutableBorrowedReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         _ then current_expr,
@@ -3107,8 +3111,8 @@ let align_method_reference_base_for_bound_method(
                 },
                 .MutableReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        break when effective_current_type in {
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
+                        yield when effective_current_type in {
                             .ReferenceType(_) then box(TypedExpr(current_expr.expr_kind, expected_self_type)),
                             .MutableReferenceType(_) then box(TypedExpr(current_expr.expr_kind, expected_self_type)),
                             .BorrowedReferenceType(_) then box(TypedExpr(current_expr.expr_kind, expected_self_type)),
@@ -3122,18 +3126,18 @@ let align_method_reference_base_for_bound_method(
                     } else when effective_current_type in {
                         .ReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         .MutableReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         _ then current_expr,
@@ -3141,15 +3145,15 @@ let align_method_reference_base_for_bound_method(
                 },
                 .BorrowedReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        break box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
+                        yield box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
                     } else when effective_current_type in {
                         .MutableBorrowedReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         _ then current_expr,
@@ -3157,23 +3161,23 @@ let align_method_reference_base_for_bound_method(
                 },
                 .MutableBorrowedReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        break box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
+                        yield box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
                     } else {
-                        break current_expr
+                        yield current_expr
                     }
                 },
                 .WeakReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        break box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
+                        yield box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
                     } else when effective_current_type in {
                         .MutableWeakReferenceType(actual_inner) then {
                             let actual_inner_type = resolve_parameterized_type(mono, *actual_inner)
-                            break if layout_key(inner_type) == layout_key(actual_inner_type) then {
-                                break box(TypedExpr(current_expr.expr_kind, expected_self_type))
+                            yield if layout_key(inner_type) == layout_key(actual_inner_type) then {
+                                yield box(TypedExpr(current_expr.expr_kind, expected_self_type))
                             } else {
-                                break current_expr
+                                yield current_expr
                             }
                         },
                         _ then current_expr,
@@ -3181,76 +3185,76 @@ let align_method_reference_base_for_bound_method(
                 },
                 .MutableWeakReferenceType(inner) then {
                     let inner_type = resolve_parameterized_type(mono, *inner)
-                    break if layout_key(inner_type) == layout_key(effective_current_type) then {
-                        break box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
+                    yield if layout_key(inner_type) == layout_key(effective_current_type) then {
+                        yield box(TypedExpr(box(TypedExprKind.RefExpr(current_expr)), expected_self_type))
                     } else {
-                        break current_expr
+                        yield current_expr
                     }
                 },
                 _ then when effective_current_type in {
                     .ReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, *inner)
-                        break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            break box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
+                        yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                            yield box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
                         } else {
-                            break current_expr
+                            yield current_expr
                         }
                     },
                     .MutableReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, *inner)
-                        break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            break box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
+                        yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                            yield box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
                         } else {
-                            break current_expr
+                            yield current_expr
                         }
                     },
                     .BorrowedReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, *inner)
-                        break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            break box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
+                        yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                            yield box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
                         } else {
-                            break current_expr
+                            yield current_expr
                         }
                     },
                     .MutableBorrowedReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, *inner)
-                        break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            break box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
+                        yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                            yield box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
                         } else {
-                            break current_expr
+                            yield current_expr
                         }
                     },
                     .WeakReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, *inner)
-                        break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            break box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
+                        yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                            yield box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
                         } else {
-                            break current_expr
+                            yield current_expr
                         }
                     },
                     .MutableWeakReferenceType(inner) then {
                         let inner_type = resolve_parameterized_type(mono, *inner)
-                        break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                            break box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
+                        yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                            yield box(TypedExpr(box(TypedExprKind.DerefExpr(current_expr)), expected_self_type))
                         } else {
-                            break current_expr
+                            yield current_expr
                         }
                     },
                     _ then current_expr,
                 },
             }
 
-            break when adapted_expr.expr_kind in {
+            yield when adapted_expr.expr_kind in {
                 .RefExpr(inner_expr) then {
                     let inner_type = resolve_parameterized_type(mono, inner_expr.expr_type)
-                    break if layout_key(inner_type) == layout_key(expected_self_type) then {
-                        break inner_expr
+                    yield if layout_key(inner_type) == layout_key(expected_self_type) then {
+                        yield inner_expr
                     } else when inner_type in {
                         .MutableReferenceType(inner_ref) then when expected_self_type in {
                             .ReferenceType(expected_inner) then {
                                 let inner_ref_type = resolve_parameterized_type(mono, *inner_ref)
                                 let expected_inner_type = resolve_parameterized_type(mono, *expected_inner)
-                                break if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
+                                yield if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
                             },
                             _ then adapted_expr,
                         },
@@ -3258,7 +3262,7 @@ let align_method_reference_base_for_bound_method(
                             .ReferenceType(expected_inner) then {
                                 let inner_ref_type = resolve_parameterized_type(mono, *inner_ref)
                                 let expected_inner_type = resolve_parameterized_type(mono, *expected_inner)
-                                break if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
+                                yield if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
                             },
                             _ then adapted_expr,
                         },
@@ -3266,12 +3270,12 @@ let align_method_reference_base_for_bound_method(
                             .ReferenceType(expected_inner) then {
                                 let inner_ref_type = resolve_parameterized_type(mono, *inner_ref)
                                 let expected_inner_type = resolve_parameterized_type(mono, *expected_inner)
-                                break if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
+                                yield if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
                             },
                             .BorrowedReferenceType(expected_inner) then {
                                 let inner_ref_type = resolve_parameterized_type(mono, *inner_ref)
                                 let expected_inner_type = resolve_parameterized_type(mono, *expected_inner)
-                                break if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
+                                yield if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
                             },
                             _ then adapted_expr,
                         },
@@ -3279,7 +3283,7 @@ let align_method_reference_base_for_bound_method(
                             .WeakReferenceType(expected_inner) then {
                                 let inner_ref_type = resolve_parameterized_type(mono, *inner_ref)
                                 let expected_inner_type = resolve_parameterized_type(mono, *expected_inner)
-                                break if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
+                                yield if layout_key(inner_ref_type) == layout_key(expected_inner_type) then inner_expr else adapted_expr
                             },
                             _ then adapted_expr,
                         },
@@ -3306,7 +3310,7 @@ public let substitute_statement(
         .LetStmt(symbol, value, span) then {
             let new_sym = substitute_symbol(mono, symbol, substitution)
             let new_val = substitute_types_in_expression(mono, value, substitution)
-            break TypedStatement.LetStmt(box(new_sym), new_val, span)
+            yield TypedStatement.LetStmt(box(new_sym), new_val, span)
         },
 
         .PairLetStmt(pair_type, first_symbol, second_symbol, value, span) then {
@@ -3319,27 +3323,27 @@ public let substitute_statement(
                 .None() then Option[* Symbol].None(),
             }
             let new_val = substitute_types_in_expression(mono, value, substitution)
-            break TypedStatement.PairLetStmt(mono.substitute_type_impl(pair_type, substitution), new_first_symbol, new_second_symbol, new_val, span)
+            yield TypedStatement.PairLetStmt(mono.substitute_type_impl(pair_type, substitution), new_first_symbol, new_second_symbol, new_val, span)
         },
 
         // AssignmentStmt: substitute target and value expressions.
         .AssignmentStmt(target, value, span) then {
             let new_target = substitute_types_in_expression(mono, target, substitution)
             let new_value  = substitute_types_in_expression(mono, value,  substitution)
-            break TypedStatement.AssignmentStmt(new_target, new_value, span)
+            yield TypedStatement.AssignmentStmt(new_target, new_value, span)
         },
 
         // ExprStmt: substitute the expression.
         .ExprStmt(expr, span) then {
             let new_expr = substitute_types_in_expression(mono, expr, substitution)
-            break TypedStatement.ExprStmt(new_expr, span)
+            yield TypedStatement.ExprStmt(new_expr, span)
         },
         .IfStmt(condition, then_branch, else_branch, span) then {
             let new_else = when else_branch in {
                 .Some(expr) then Option[* TypedExpr].Some(substitute_types_in_expression(mono, expr, substitution)),
                 .None() then Option[* TypedExpr].None(),
             }
-            break TypedStatement.IfStmt(
+            yield TypedStatement.IfStmt(
                 substitute_types_in_expression(mono, condition, substitution),
                 substitute_types_in_expression(mono, then_branch, substitution),
                 new_else,
@@ -3350,7 +3354,7 @@ public let substitute_statement(
         .WhileStmt(condition, body, span) then {
             let new_condition = substitute_types_in_expression(mono, condition, substitution)
             let new_body = substitute_types_in_expression(mono, body, substitution)
-            break TypedStatement.WhileStmt(new_condition, new_body, span)
+            yield TypedStatement.WhileStmt(new_condition, new_body, span)
         },
         .WhenStmt(subject, arms, span) then {
             let new_subject = substitute_types_in_expression(mono, subject, substitution)
@@ -3361,18 +3365,18 @@ public let substitute_statement(
                 let new_arm_type = mono.substitute_type_impl(arm_ref.arm_type, substitution)
                 new_arms.push(box(TypedWhenArm(box(new_pattern), new_body, new_arm_type)))
             }
-            break TypedStatement.WhenStmt(new_subject, new_arms, span)
+            yield TypedStatement.WhenStmt(new_subject, new_arms, span)
         },
 
         // ReturnStmt: substitute optional return value.
         .ReturnStmt(value, span) then {
             let new_value = when value in {
                 .Some(e) then {
-                    break Option[* TypedExpr].Some(substitute_types_in_expression(mono, e, substitution))
+                    yield Option[* TypedExpr].Some(substitute_types_in_expression(mono, e, substitution))
                 },
                 .None() then Option[* TypedExpr].None(),
             }
-            break TypedStatement.ReturnStmt(new_value, span)
+            yield TypedStatement.ReturnStmt(new_value, span)
         },
 
         // BreakStmt / ContinueStmt: no sub-expressions.
@@ -3382,13 +3386,13 @@ public let substitute_statement(
         // DeferStmt: substitute the expression.
         .DeferStmt(expr, span) then {
             let new_expr = substitute_types_in_expression(mono, expr, substitution)
-            break TypedStatement.DeferStmt(new_expr, span)
+            yield TypedStatement.DeferStmt(new_expr, span)
         },
 
         // BranchBreakStmt: substitute the expression.
         .BranchBreakStmt(expr, span) then {
             let new_expr = substitute_types_in_expression(mono, expr, substitution)
-            break TypedStatement.BranchBreakStmt(new_expr, span)
+            yield TypedStatement.BranchBreakStmt(new_expr, span)
         },
     }
 }
@@ -3411,7 +3415,7 @@ public let substitute_pattern(
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
                 new_elements.push(box(TypedPatternElement(elem.label, box(new_sub))))
             }
-            break TypedPattern.StructPattern(type_name, new_elements)
+            yield TypedPattern.StructPattern(type_name, new_elements)
         },
 
         // EnumCase: recurse into each element pattern.
@@ -3421,30 +3425,30 @@ public let substitute_pattern(
                 let new_sub = substitute_pattern(mono, elem.pattern, substitution)
                 new_elements.push(box(TypedPatternElement(elem.label, box(new_sub))))
             }
-            break TypedPattern.EnumCase(case_name, tag_index, new_elements)
+            yield TypedPattern.EnumCase(case_name, tag_index, new_elements)
         },
 
         // AndPattern / OrPattern: recurse into sub-patterns.
         .AndPattern(left, right) then {
             let new_left  = substitute_pattern(mono, left,  substitution)
             let new_right = substitute_pattern(mono, right, substitution)
-            break TypedPattern.AndPattern(box(new_left), box(new_right))
+            yield TypedPattern.AndPattern(box(new_left), box(new_right))
         },
         .OrPattern(left, right) then {
             let new_left  = substitute_pattern(mono, left,  substitution)
             let new_right = substitute_pattern(mono, right, substitution)
-            break TypedPattern.OrPattern(box(new_left), box(new_right))
+            yield TypedPattern.OrPattern(box(new_left), box(new_right))
         },
         .NotPattern(inner) then {
             let new_inner = substitute_pattern(mono, inner, substitution)
-            break TypedPattern.NotPattern(box(new_inner))
+            yield TypedPattern.NotPattern(box(new_inner))
         },
 
         // All leaf patterns: no type substitution needed.
         .Wildcard()                   then TypedPattern.Wildcard(),
         .Variable(symbol)             then {
             let substituted_type = mono.substitute_type_impl(symbol.symbol_type, substitution)
-            break TypedPattern.Variable(box(Symbol(symbol.def_id, substituted_type, symbol.kind)))
+            yield TypedPattern.Variable(box(Symbol(symbol.def_id, substituted_type, symbol.kind)))
         },
         .BoolLiteral(value)           then TypedPattern.BoolLiteral(value),
         .IntegerLiteral(value)        then TypedPattern.IntegerLiteral(value),

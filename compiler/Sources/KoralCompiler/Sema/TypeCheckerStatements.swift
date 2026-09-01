@@ -43,6 +43,7 @@ extension TypeChecker {
     case .castExpression(_, let inner),
          .addressOfExpression(let inner, _),
          .derefExpression(let inner),
+          .unsafeDerefExpression(let inner),
          .ptrExpression(let inner),
          .unaryMinusExpression(let inner),
          .notExpression(let inner),
@@ -59,6 +60,8 @@ extension TypeChecker {
     case .comparisonChainExpression:
       return true
     case .memberPath(let base, _):
+      return sourceExpressionIsObviouslyPureStatement(base)
+    case .traitQualificationExpression(let base, _):
       return sourceExpressionIsObviouslyPureStatement(base)
     case .subscriptExpression(let base, let arguments):
       return sourceExpressionIsObviouslyPureStatement(base)
@@ -90,6 +93,7 @@ extension TypeChecker {
          .notExpression(let inner, _),
          .bitwiseNotExpression(let inner, _),
          .derefExpression(let inner, _),
+          .unsafeDerefExpression(let inner, _),
          .referenceExpression(let inner, _),
          .ptrExpression(let inner, _),
          .memberPath(let inner, _),
@@ -826,6 +830,44 @@ extension TypeChecker {
       }
       return .return(value: nil)
 
+    case .yield(let value, let span):
+      self.currentSpan = span
+      if insideDefer {
+        throw SemanticError(.generic(
+          "control flow statement 'yield' is not allowed in defer expression"))
+      }
+      guard let currentTarget = branchBreakTargets.last else {
+        throw SemanticError(.generic("yield outside of branch expression body"), span: span)
+      }
+      if exitableConstructStack.count > currentTarget.constructStackDepthAtCreation,
+         let penetrated = exitableConstructStack.last {
+        switch penetrated {
+        case .loop:
+          throw SemanticError(.generic(
+            "yield cannot penetrate through loop boundary"), span: span)
+        case .branch:
+          throw SemanticError(.generic(
+            "yield cannot penetrate through branch boundary"), span: span)
+        }
+      }
+      let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
+      var typedValueOpt: TypedExpressionNode?
+      for expectedType in candidateExpectedTypes {
+        do {
+          typedValueOpt = try normalizeBranchExpression(
+            try inferTypedExpression(value, expectedType: expectedType),
+            expectedType: expectedType
+          )
+          break
+        } catch {
+          continue
+        }
+      }
+      let typedValue = try typedValueOpt ?? inferTypedExpression(value)
+      markExplicitBranchBreak(on: currentTarget.id)
+      try mergeBranchBreakTargetResult(type: typedValue.type, span: span)
+      return .branchBreak(target: currentTarget.id, value: typedValue)
+
     case .break(let value, let span):
       self.currentSpan = span
       if insideDefer {
@@ -840,10 +882,10 @@ extension TypeChecker {
               switch penetrated {
               case .loop:
                 throw SemanticError(.generic(
-                  "break with value cannot penetrate through loop boundary"), span: span)
+                  "yield cannot penetrate through loop boundary"), span: span)
               case .branch:
                 throw SemanticError(.generic(
-                  "break with value cannot penetrate through branch boundary"), span: span)
+                  "yield cannot penetrate through branch boundary"), span: span)
               }
             }
           }
@@ -871,7 +913,7 @@ extension TypeChecker {
           return .branchBreak(target: currentTarget.id, value: typedValue)
         }
 
-        throw SemanticError(.generic("break with value outside of branch expression body"), span: span)
+        throw SemanticError(.generic("yield outside of branch expression body"), span: span)
       }
       // Check if the innermost exitable construct is a branch (not a loop)
       if let lastConstruct = exitableConstructStack.last, lastConstruct == .branch {

@@ -308,7 +308,8 @@ extension TypeChecker {
 
       return false
 
-    case .derefExpression(let inner, _):
+        case .derefExpression(let inner, _),
+          .unsafeDerefExpression(let inner, _):
       return isMutableRefLikeType(inner.type)
 
     default:
@@ -331,7 +332,7 @@ extension TypeChecker {
         }
       }
       return allowed
-    case .derefExpression:
+    case .derefExpression, .unsafeDerefExpression:
       return true
     default:
       return false
@@ -387,6 +388,9 @@ extension TypeChecker {
       return true
     }
     if case .derefExpression = expr {
+      return true
+    }
+    if case .unsafeDerefExpression = expr {
       return true
     }
     return false
@@ -1954,10 +1958,10 @@ extension TypeChecker {
           spelledType = typedInner.type.containsBorrowedReference ? "borrowed *" : "*"
         case (.managedReference, true):
           spelledType = typedInner.type.containsBorrowedReference ? "borrowed *mutable" : "*mutable"
-        case (.rawPointer, false):
-          spelledType = "unsafe *"
-        case (.rawPointer, true):
-          spelledType = "unsafe * mutable"
+        case (.rawPointer, _):
+          throw SemanticError(.generic(
+            "Raw pointer dereference requires 'unsafe *expr'; plain '*expr' is only for safe references"
+          ), span: currentSpan)
         case (.weakReference, false):
           spelledType = "?*"
         case (.weakReference, true):
@@ -1967,10 +1971,24 @@ extension TypeChecker {
         return .derefExpression(expression: typedInner, type: targetType)
       } else {
         throw SemanticError.typeMismatch(
-          expected: "Reference or pointer type",
+          expected: "Reference type",
           got: typedInner.type.description
         )
       }
+
+    case .unsafeDerefExpression(let inner):
+      let typedInner = try inferTypedExpression(inner)
+      guard let info = typedInner.type.indirectionCompatibilityInfo,
+            info.family == .rawPointer,
+            let targetType = dereferenceTargetType(of: typedInner.type) else {
+        throw SemanticError.typeMismatch(
+          expected: "Unsafe pointer type",
+          got: typedInner.type.description
+        )
+      }
+      let spelledType = info.mutable ? "unsafe * mutable" : "unsafe *"
+      try requireDerefablePointee(targetType, operation: "unsafe *", spelledType: spelledType)
+      return .unsafeDerefExpression(expression: typedInner, type: targetType)
 
     case .addressOfExpression(let inner, let mutable):
       let typedInner = try inferTypedExpression(inner)
@@ -2016,19 +2034,24 @@ extension TypeChecker {
         arguments: arguments.map { $0.expression }
       )
 
-    case .qualifiedMethodCall(let baseExpr, let traitName, let methodName, let arguments):
+    case .traitQualificationExpression:
+      throw SemanticError(.generic(
+        "Trait qualification must be followed by a method call"
+      ), span: currentSpan)
+
+    case .qualifiedMethodCall(let baseExpr, let traitType, let methodName, let arguments):
       return try inferQualifiedMethodCallExpression(
         baseExpr: baseExpr,
-        traitName: traitName,
+        traitType: traitType,
         methodName: methodName,
         methodTypeArgs: nil,
         arguments: arguments.map { $0.expression }
       )
 
-    case .qualifiedGenericMethodCall(let baseExpr, let traitName, let methodTypeArgs, let methodName, let arguments):
+    case .qualifiedGenericMethodCall(let baseExpr, let traitType, let methodTypeArgs, let methodName, let arguments):
       return try inferQualifiedMethodCallExpression(
         baseExpr: baseExpr,
-        traitName: traitName,
+        traitType: traitType,
         methodName: methodName,
         methodTypeArgs: methodTypeArgs,
         arguments: arguments.map { $0.expression }
@@ -3062,13 +3085,47 @@ extension TypeChecker {
 
 extension TypeChecker {
 
+  private func resolveQualifiedTraitInvocation(
+    _ traitType: TypeNode
+  ) throws -> (traitName: String, traitTypeArgs: [Type]) {
+    let traitConstraint = try SemaUtils.resolveTraitConstraint(from: traitType)
+    let traitName = traitConstraint.baseName
+
+    guard let traitInfo = traits[traitName] else {
+      throw SemanticError.undefinedType(traitName)
+    }
+
+    let traitTypeArgs: [Type]
+    switch traitConstraint {
+    case .simple:
+      traitTypeArgs = []
+    case .generic(_, let args):
+      traitTypeArgs = try args.map { try resolveTypeNode($0) }
+    }
+
+    if traitInfo.typeParameters.count != traitTypeArgs.count {
+      throw SemanticError.typeMismatch(
+        expected: "\(traitInfo.typeParameters.count) generic arguments",
+        got: "\(traitTypeArgs.count)"
+      )
+    }
+
+    if !deferGenericConstraintValidation {
+      try enforceGenericConstraints(typeParameters: traitInfo.typeParameters, args: traitTypeArgs)
+    }
+
+    return (traitName, traitTypeArgs)
+  }
+
   func inferQualifiedMethodCallExpression(
     baseExpr: ExpressionNode,
-    traitName: String,
+    traitType: TypeNode,
     methodName: String,
     methodTypeArgs: [TypeNode]?,
     arguments: [ExpressionNode]
   ) throws -> TypedExpressionNode {
+    let (traitName, traitTypeArgs) = try resolveQualifiedTraitInvocation(traitType)
+
     // Generic qualified call delegates to existing generic method-call pipeline.
     // Trait qualification is primarily a disambiguation syntax.
     if let methodTypeArgs, !methodTypeArgs.isEmpty {
@@ -3080,7 +3137,7 @@ extension TypeChecker {
       )
     }
 
-    // Static qualified call: T.(Trait)method(...)
+    // Static qualified call: (T as Trait).method(...)
     if case .identifier(let baseName) = baseExpr,
        let baseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile),
        let methodSym = extensionMethods[baseName]?[methodName] {
@@ -3109,7 +3166,7 @@ extension TypeChecker {
       return .staticMethodCall(
         baseType: baseType,
         methodName: methodName,
-        typeArgs: [],
+        typeArgs: traitTypeArgs,
         methodTypeArgs: [],
         arguments: typedArguments,
         type: returnType
@@ -4201,7 +4258,7 @@ extension TypeChecker {
         return .intrinsicCall(.downgradeRef(val: refArg, resultType: resultType))
       }
 
-      if base == "downgrade_mut" {
+      if base == "downgrade_mutable" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
           throw SemanticError.typeMismatch(
@@ -4213,7 +4270,7 @@ extension TypeChecker {
         }
         let refArg = try inferArgumentExpression(arguments[0], expectedType: .mutableReference(inner: resolvedArgs[0]))
         guard case .mutableReference(let innerType) = refArg.type else {
-          throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(refArg.type)"), span: currentSpan)
+          throw SemanticError(.generic("'downgrade_mutable' expects a mutable managed reference (*mutable T), got \(refArg.type)"), span: currentSpan)
         }
         let resultType: Type = .mutableWeakReference(inner: innerType)
         return .intrinsicCall(.downgradeMutRef(val: refArg, resultType: resultType))
@@ -4237,7 +4294,7 @@ extension TypeChecker {
         return .intrinsicCall(.upgradeRef(val: weakArg, resultType: resultType))
       }
 
-      if base == "upgrade_mut" {
+      if base == "upgrade_mutable" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
           throw SemanticError.typeMismatch(
@@ -4249,7 +4306,7 @@ extension TypeChecker {
         }
         let weakArg = try inferArgumentExpression(arguments[0], expectedType: .mutableWeakReference(inner: resolvedArgs[0]))
         guard case .mutableWeakReference(let innerType) = weakArg.type else {
-          throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(weakArg.type)"), span: currentSpan)
+          throw SemanticError(.generic("'upgrade_mutable' expects a mutable weak reference (?*mutable T), got \(weakArg.type)"), span: currentSpan)
         }
         let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
         return .intrinsicCall(.upgradeMutRef(val: weakArg, resultType: resultType))
@@ -4460,13 +4517,13 @@ extension TypeChecker {
         }
       }
 
-      if name == "downgrade_mut" {
+      if name == "downgrade_mutable" {
         switch typedArgument.type {
         case .mutableReference(let innerType):
           let resultType: Type = .mutableWeakReference(inner: innerType)
           return .intrinsicCall(.downgradeMutRef(val: typedArgument, resultType: resultType))
         default:
-          throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(typedArgument.type)"), span: currentSpan)
+          throw SemanticError(.generic("'downgrade_mutable' expects a mutable managed reference (*mutable T), got \(typedArgument.type)"), span: currentSpan)
         }
       }
 
@@ -4480,13 +4537,13 @@ extension TypeChecker {
         }
       }
 
-      if name == "upgrade_mut" {
+      if name == "upgrade_mutable" {
         switch typedArgument.type {
         case .mutableWeakReference(let innerType):
           let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
           return .intrinsicCall(.upgradeMutRef(val: typedArgument, resultType: resultType))
         default:
-          throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(typedArgument.type)"), span: currentSpan)
+          throw SemanticError(.generic("'upgrade_mutable' expects a mutable weak reference (?*mutable T), got \(typedArgument.type)"), span: currentSpan)
         }
       }
     }
@@ -4600,10 +4657,10 @@ extension TypeChecker {
       return .intrinsicCall(.downgradeRef(val: refValue, resultType: resultType))
     }
 
-    if templateName == "downgrade_mut" {
+    if templateName == "downgrade_mutable" {
       let refValue = typedArguments[0]
       guard case .mutableReference(let innerType) = refValue.type else {
-        throw SemanticError(.generic("'downgrade_mut' expects a mutable managed reference (*mutable T), got \(refValue.type)"), span: currentSpan)
+        throw SemanticError(.generic("'downgrade_mutable' expects a mutable managed reference (*mutable T), got \(refValue.type)"), span: currentSpan)
       }
       let resultType: Type = .mutableWeakReference(inner: innerType)
       return .intrinsicCall(.downgradeMutRef(val: refValue, resultType: resultType))
@@ -4618,10 +4675,10 @@ extension TypeChecker {
       return .intrinsicCall(.upgradeRef(val: weakValue, resultType: resultType))
     }
 
-    if templateName == "upgrade_mut" {
+    if templateName == "upgrade_mutable" {
       let weakValue = typedArguments[0]
       guard case .mutableWeakReference(let innerType) = weakValue.type else {
-        throw SemanticError(.generic("'upgrade_mut' expects a mutable weak reference (?*mutable T), got \(weakValue.type)"), span: currentSpan)
+        throw SemanticError(.generic("'upgrade_mutable' expects a mutable weak reference (?*mutable T), got \(weakValue.type)"), span: currentSpan)
       }
       let resultType: Type = .genericEnum(template: "Option", args: [.mutableReference(inner: innerType)])
       return .intrinsicCall(.upgradeMutRef(val: weakValue, resultType: resultType))
@@ -6983,7 +7040,7 @@ extension TypeChecker {
             guard case .mutablePointer(let valueType) = ptrExpr.type else {
               throw SemanticError.typeMismatch(expected: "unsafe * mutable return", got: ptrExpr.type.description)
             }
-            return .derefExpression(expression: ptrExpr, type: valueType)
+            return .unsafeDerefExpression(expression: ptrExpr, type: valueType)
           case .pointer:
             return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
           case .none:
@@ -7000,6 +7057,8 @@ extension TypeChecker {
       // Optimization: Peel auto-deref for lvalue resolution
       let typedBase: TypedExpressionNode
       if case .derefExpression(let inner, _) = inferredBase {
+        typedBase = inner
+      } else if case .unsafeDerefExpression(let inner, _) = inferredBase {
         typedBase = inner
       } else {
         typedBase = inferredBase
@@ -7224,12 +7283,26 @@ extension TypeChecker {
       case .mutableBorrowedReference(let innerType):
         try requireDerefablePointee(innerType, operation: "*", spelledType: "borrowed *mutable")
         return .derefExpression(expression: typedInner, type: innerType)
-      case .mutablePointer(let elementType):
-        try requireDerefablePointee(elementType, operation: "*", spelledType: "unsafe * mutable")
-        return .derefExpression(expression: typedInner, type: elementType)
       default:
         throw SemanticError.typeMismatch(
-          expected: "Mutable reference or mutable pointer type",
+          expected: "Mutable reference type",
+          got: typedInner.type.description
+        )
+      }
+
+    case .unsafeDerefExpression(let inner):
+      let typedInner = try inferTypedExpression(inner)
+      switch typedInner.type {
+      case .pointer:
+        throw SemanticError(.generic(
+          "Cannot assign through read-only pointer of type '\(typedInner.type)'"
+        ), span: currentSpan)
+      case .mutablePointer(let elementType):
+        try requireDerefablePointee(elementType, operation: "unsafe *", spelledType: "unsafe * mutable")
+        return .unsafeDerefExpression(expression: typedInner, type: elementType)
+      default:
+        throw SemanticError.typeMismatch(
+          expected: "Mutable pointer type",
           got: typedInner.type.description
         )
       }

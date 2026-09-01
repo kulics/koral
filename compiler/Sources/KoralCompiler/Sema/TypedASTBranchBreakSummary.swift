@@ -66,6 +66,7 @@ extension TypedExpressionNode {
          .bitwiseNotExpression(let inner, _),
          .castExpression(let inner, _),
          .derefExpression(let inner, _),
+          .unsafeDerefExpression(let inner, _),
          .referenceExpression(let inner, _),
          .ptrExpression(let inner, _),
          .memberPath(let inner, _),

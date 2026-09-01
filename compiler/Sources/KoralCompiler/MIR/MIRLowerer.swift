@@ -687,12 +687,15 @@ private final class MIRFunctionBuilder {
         return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
       }
       fatalError("Unsupported pointer expression reached MIR lowering")
-    case .derefExpression:
+    case .derefExpression, .unsafeDerefExpression:
       if let place = lowerPlace(expression) {
         return MIRExprResult(type: expression.type, category: .lvalue, operand: nil, place: place)
       }
       if case .derefExpression = expression {
         fatalError("Unsupported deref expression value reached MIR lowering")
+      }
+      if case .unsafeDerefExpression = expression {
+        fatalError("Unsupported unsafe deref expression value reached MIR lowering")
       }
       return nil
     case .memberPath:
@@ -3339,7 +3342,8 @@ private final class MIRFunctionBuilder {
         place = .field(base: place, field: field)
       }
       return place
-    case .derefExpression(let inner, let type):
+        case .derefExpression(let inner, let type),
+          .unsafeDerefExpression(let inner, let type):
       return .deref(base: lowerBorrowedSourceValue(inner), pointee: type)
     case .castExpression(let inner, let type):
       switch (inner.type, type) {

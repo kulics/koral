@@ -41,7 +41,7 @@ public type ConcreteCallableInfo(
 private let mono_receiver_lookup_type(context * CompilerContext, t Type) Type = {
     return when t in {
         .OpaqueType(def_id) then {
-            break when context.lookup_type(def_id) in {
+            yield when context.lookup_type(def_id) in {
                 .Some(mapped) then mono_receiver_lookup_type(context, mapped),
                 .None() then t,
             }
@@ -65,7 +65,7 @@ protected let mono_type_simple_name(context * CompilerContext, t Type) String = 
         .StructureType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
         .EnumType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
         .OpaqueType(def_id) then {
-            break when context.lookup_type(def_id) in {
+            yield when context.lookup_type(def_id) in {
                 .Some(mapped) then mono_type_simple_name(context, mapped),
                 .None() then context.get_name(def_id) or else context.type_display_name(t),
             }
@@ -228,7 +228,7 @@ private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type)
             }
             out.push_string("_")
             out.push_string(mono_concrete_layout_key_for_type(context, *return_type))
-            break out
+            yield out
         },
         .GenericStruct(template, args) then {
             let mutable out = template
@@ -236,7 +236,7 @@ private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type)
                 out.push_string("_")
                 out.push_string(mono_concrete_layout_key_for_type(context, *arg))
             }
-            break out
+            yield out
         },
         .GenericEnum(template, args) then {
             let mutable out = template
@@ -244,7 +244,7 @@ private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type)
                 out.push_string("_")
                 out.push_string(mono_concrete_layout_key_for_type(context, *arg))
             }
-            break out
+            yield out
         },
         .StructureType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
         .EnumType(def_id) then mono_concrete_layout_key_for_def_id(context, def_id) or else layout_key(t),
@@ -498,15 +498,15 @@ private let is_non_generic_decl(decl * TypedDecl) Bool = {
         .TypeEnumDecl(_, _, _, _, _)       then true,
         .GivenDecl(target_type, members, _) then {
             let _ = members
-            break not has_generic_parameter(target_type)
+            yield not has_generic_parameter(target_type)
         },
         .GivenTraitDecl(target_type, _, _, members, _) then {
             let _ = members
-            break not has_generic_parameter(target_type)
+            yield not has_generic_parameter(target_type)
         },
         .IntrinsicGivenDecl(target_type, members, _) then {
             let _ = members
-            break not has_generic_parameter(target_type)
+            yield not has_generic_parameter(target_type)
         },
         // 泛型模板主体由 GenericTemplateRegistry 持有，TypedProgram 仅保留占位。
         .GenericTypeStructDecl(_, _, _) then false,
@@ -596,7 +596,7 @@ private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
                 out.push_string("|")
                 out.push_string("\(m_ref.def_id.id)")
             }
-            break Option[String].Some(out)
+            yield Option[String].Some(out)
         },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, _) then {
             let mutable out = "given-trait:\(layout_key(target_type)):\(trait_name)"
@@ -608,7 +608,7 @@ private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
                 out.push_string("|")
                 out.push_string("\(m_ref.def_id.id)")
             }
-            break Option[String].Some(out)
+            yield Option[String].Some(out)
         },
         .IntrinsicGivenDecl(target_type, members, _) then {
             let mutable out = "intrinsic-given:\(layout_key(target_type))"
@@ -616,7 +616,7 @@ private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
                 out.push_string("|")
                 out.push_string("\(m_ref.def_id.id)")
             }
-            break Option[String].Some(out)
+            yield Option[String].Some(out)
         },
         _ then Option[String].None(),
     }
@@ -653,21 +653,21 @@ private let strip_given_decl_bodies_for_source_lookup(decl_ref * TypedDecl) * Ty
             for member_ref in members then {
                 stripped_members.push(strip_given_member_body(member_ref))
             }
-            break box(TypedDecl.GivenDecl(target_type, stripped_members, span))
+            yield box(TypedDecl.GivenDecl(target_type, stripped_members, span))
         },
         .GivenTraitDecl(target_type, trait_name, trait_args, members, span) then {
             let mutable stripped_members = List[* TypedGivenMember].new()
             for member_ref in members then {
                 stripped_members.push(strip_given_member_body(member_ref))
             }
-            break box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, stripped_members, span))
+            yield box(TypedDecl.GivenTraitDecl(target_type, trait_name, trait_args, stripped_members, span))
         },
         .IntrinsicGivenDecl(target_type, members, span) then {
             let mutable stripped_members = List[* TypedGivenMember].new()
             for member_ref in members then {
                 stripped_members.push(strip_given_member_body(member_ref))
             }
-            break box(TypedDecl.IntrinsicGivenDecl(target_type, stripped_members, span))
+            yield box(TypedDecl.IntrinsicGivenDecl(target_type, stripped_members, span))
         },
         _ then decl_ref,
     }
@@ -849,7 +849,7 @@ given Monomorphizer {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
-                break when self.storage.context.lookup_type(def_id) in {
+                yield when self.storage.context.lookup_type(def_id) in {
                     .Some(underlying) then underlying,
                     .None() then target_type,
                 }
@@ -898,14 +898,14 @@ given Monomorphizer {
                         for arg in args then {
                             unpacked.push(*arg)
                         }
-                        break unpacked
+                        yield unpacked
                     },
                     .GenericEnum(_, args) then {
                         let mutable unpacked = List[Type].new()
                         for arg in args then {
                             unpacked.push(*arg)
                         }
-                        break unpacked
+                        yield unpacked
                     },
                     _ then { return },
                 },
@@ -1596,7 +1596,7 @@ given Monomorphizer {
     private codegen_emitted_type_name(self, c_identifier_by_def_id Dict[UInt, String], type_def_ids_by_name Dict[String, List[DefId]], t Type) String = {
         return when t in {
             .StructureType(def_id) then {
-                break when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
+                yield when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                     .Some(name) then name,
                     .None() then when self.storage.context.get_name(def_id) in {
                         .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, Set[UInt].new()),
@@ -1605,7 +1605,7 @@ given Monomorphizer {
                 }
             },
             .EnumType(def_id) then {
-                break when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
+                yield when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                     .Some(name) then name,
                     .None() then when self.storage.context.get_name(def_id) in {
                         .Some(name) then self.codegen_emitted_identifier_for_def(def_id, name, Set[UInt].new()),
@@ -1615,7 +1615,7 @@ given Monomorphizer {
             },
             .GenericStruct(template, _) then {
                 let layout_name = mono_concrete_layout_key_for_type(&(self.storage.context), t)
-                break when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
+                yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
                         .None() then layout_name,
@@ -1625,7 +1625,7 @@ given Monomorphizer {
             },
             .GenericEnum(template, _) then {
                 let layout_name = mono_concrete_layout_key_for_type(&(self.storage.context), t)
-                break when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
+                yield when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
                     .Some(def_id) then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
                         .None() then layout_name,
@@ -1634,7 +1634,7 @@ given Monomorphizer {
                 }
             },
             .OpaqueType(def_id) then {
-                break when self.storage.context.lookup_type(def_id) in {
+                yield when self.storage.context.lookup_type(def_id) in {
                     .Some(mapped_type) then self.codegen_emitted_type_name(c_identifier_by_def_id, type_def_ids_by_name, mapped_type),
                     .None() then when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
                         .Some(name) then name,
@@ -1757,13 +1757,13 @@ given Monomorphizer {
 private let mono_type_name(t Type, context * CompilerContext) String = {
     return when t in {
         .StructureType(def_id) then {
-            break when context.get_name(def_id) in {
+            yield when context.get_name(def_id) in {
                 .Some(name) then name,
                 .None() then "struct#\(def_id.id)",
             }
         },
         .EnumType(def_id) then {
-            break when context.get_name(def_id) in {
+            yield when context.get_name(def_id) in {
                 .Some(name) then name,
                 .None() then "enum#\(def_id.id)",
             }
