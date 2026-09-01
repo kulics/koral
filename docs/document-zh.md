@@ -277,9 +277,9 @@ a = 2  // 合法
 - 块中可以包含零条或多条语句。
 - 普通块表达式的默认类型是 `Void`。
 - `return`、`break`、`continue` 可以让块提前结束，因此对应块类型会变成 `Never`。
-- `break <expression>` 不是通用的块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内，用于产出该分支的值并提前退出分支体。
+- `yield <expression>` 不是通用的块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内，用于产出该分支的值并提前退出分支体。
 - 不带表达式的 `break` 退出最近的 `while` 或 `for` 循环。
-- `break`（无论是否带表达式）不能穿透最内侧的可退出构造。这意味着 `break` 不能穿越循环边界（例如在分支内的 `for`/`while` 循环中）或分支边界（例如在循环内的 `if`/`when` 表达式中）到达外层目标。
+- `yield` 和 `break` 不能穿透最内侧的可退出构造。这意味着 `yield`/`break` 不能穿越循环边界（例如在分支内的 `for`/`while` 循环中）或分支边界（例如在循环内的 `if`/`when` 表达式中）到达外层目标。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
 
 通过块表达式可以组合一系列语句。
@@ -888,18 +888,18 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-当 `if`配合`else`且分支为块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `break <expression>`；这也提供了分支内的 early exit。单分支 `if` 中不允许使用 `break <expression>`。
+当 `if`配合`else`且分支为块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `yield <expression>`；这也提供了分支内的 early exit。单分支 `if` 中不允许使用 `yield <expression>`。
 
 ```koral
 let label = if score >= 90 then {
-    if score == 100 then break "perfect"
-    break "A"
+    if score == 100 then yield "perfect"
+    yield "A"
 } else {
-    break "other"
+    yield "other"
 }
 ```
 
-如果在分支 body 里再写语句形态的嵌套 `if` / `when`，其中的 `break <expression>` 仍然指向当前外层分支表达式；而嵌套的 `if` / `when` 表达式会拥有各自独立的分支结果目标。
+如果在分支 body 里再写语句形态的嵌套 `if` / `when`，其中的 `yield <expression>` 仍然指向当前外层分支表达式；而嵌套的 `if` / `when` 表达式会拥有各自独立的分支结果目标。
 
 ### if is 模式匹配
 
@@ -1060,7 +1060,7 @@ defer {
 
 #### 限制
 
-- `defer` 表达式内部不允许使用 `return`、`break`、`continue`；其中也包括用作分支产值的 `break <expression>`。
+- `defer` 表达式内部不允许使用 `return`、`break`、`continue`；其中也包括用作分支产值的 `yield <expression>`。
 - `defer` 表达式内部不允许嵌套 `defer`。
 - `defer` 不是异常栈展开机制；在 `panic/abort/exit` 等 `Never` 终止路径上不保证执行。
 - 以上限制不穿透 Lambda 边界——Lambda 内部拥有独立的作用域。
@@ -1082,19 +1082,19 @@ let result = when x in {
 }
 ```
 
-和 `if` 一样，`when` 的分支如果写成块，这个块本身仍然默认是 `Void`。要给外层 `when` 表达式产值，需要在分支 body 中使用 `break <expression>`，并且可以在分支内部提前退出。`break <expression>` 仅在 `when` 作为表达式时才有效。
+和 `if` 一样，`when` 的分支如果写成块，这个块本身仍然默认是 `Void`。要给外层 `when` 表达式产值，需要在分支 body 中使用 `yield <expression>`，并且可以在分支内部提前退出。`yield <expression>` 仅在 `when` 作为表达式时才有效。
 
 ```koral
 let label = when score in {
     100 then {
         println("bonus")
-        break "perfect"
+        yield "perfect"
     },
     >= 90 then {
-        if has_curve(score) then break "A+"
-        break "A"
+        if has_curve(score) then yield "A+"
+        yield "A"
     },
-    _ then { break "other" },
+    _ then { yield "other" },
 }
 ```
 

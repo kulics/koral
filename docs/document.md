@@ -261,9 +261,9 @@ Block rules:
 - A block contains zero or more statements.
 - A plain block's default type is `Void`.
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
-- `break <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch, where it produces the value of that branch and exits the branch body early.
+- `yield <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch, where it produces the value of that branch and exits the branch body early.
 - Plain `break` (without expression) exits the nearest enclosing `while` or `for` loop.
-- `break` (with or without expression) cannot penetrate through the innermost exitable construct. This means `break` cannot cross a loop boundary (e.g., inside a `for`/`while` inside a branch) or a branch boundary (e.g., inside an `if`/`when` expression inside a loop) to reach an outer target.
+- `yield` and `break` cannot penetrate through the innermost exitable construct. This means `yield`/`break` cannot cross a loop boundary (e.g., inside a `for`/`while` inside a branch) or a branch boundary (e.g., inside an `if`/`when` expression inside a loop) to reach an outer target.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
 
 ```koral
@@ -850,18 +850,18 @@ When we don't need to handle the `else` branch, we can omit it. In that case the
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-When an `if` with `else` uses a block branch, that block still defaults to `Void`. Use `break <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early. `break <expression>` is not valid in single-branch `if` bodies.
+When an `if` with `else` uses a block branch, that block still defaults to `Void`. Use `yield <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early. `yield <expression>` is not valid in single-branch `if` bodies.
 
 ```koral
 let label = if score >= 90 then {
-    if score == 100 then break "perfect"
-    break "A"
+    if score == 100 then yield "perfect"
+    yield "A"
 } else {
-    break "other"
+    yield "other"
 }
 ```
 
-`break <expression>` inside a statement-form nested `if` / `when` still targets the enclosing branch expression. A nested `if` / `when` expression creates its own branch-result target.
+`yield <expression>` inside a statement-form nested `if` / `when` still targets the enclosing branch expression. A nested `if` / `when` expression creates its own branch-result target.
 
 ### if is Pattern Matching
 
@@ -1020,7 +1020,7 @@ defer {
 
 #### Restrictions
 
-- `return`, `break`, and `continue` are not allowed inside a `defer` expression. This includes `break <expression>` used for branch values.
+- `return`, `break`, and `continue` are not allowed inside a `defer` expression. This includes `yield <expression>` used for branch values.
 - Nested `defer` is not allowed inside a `defer` expression.
 - `defer` is not an exception-style stack unwinding mechanism; it is not guaranteed on `panic/abort/exit` `Never` termination paths.
 - These restrictions do not cross Lambda boundaries — Lambdas have their own independent scope.
@@ -1042,19 +1042,19 @@ let result = when x in {
 }
 ```
 
-Like `if`, a block branch in `when` still defaults to `Void`. Use `break <expression>` to produce the enclosing `when` expression's value and to support early exit inside the block branch body. `break <expression>` is valid only when `when` is used as an expression.
+Like `if`, a block branch in `when` still defaults to `Void`. Use `yield <expression>` to produce the enclosing `when` expression's value and to support early exit inside the block branch body. `yield <expression>` is valid only when `when` is used as an expression.
 
 ```koral
 let label = when score in {
     100 then {
         println("bonus")
-        break "perfect"
+        yield "perfect"
     },
     >= 90 then {
-        if has_curve(score) then break "A+"
-        break "A"
+        if has_curve(score) then yield "A+"
+        yield "A"
     },
-    _ then { break "other" },
+    _ then { yield "other" },
 }
 ```
 

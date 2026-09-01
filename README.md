@@ -60,16 +60,16 @@ let label = when status in {
 }
 ```
 
-Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. In expression-form `if`/`when`, a block branch still defaults to `Void`; use `break <expression>` to produce the enclosing expression's value from inside the block.
+Blocks are also expressions, so branch bodies can stay local instead of forcing helper functions. In expression-form `if`/`when`, a block branch still defaults to `Void`; use `yield expression` to produce the enclosing expression's value from inside the block.
 
 ```koral
 let label = if score >= 90 then {
     if score == 100 then {
-        break "perfect"
+        yield "perfect"
     }
-    break "A"
+    yield "A"
 } else {
-    break "other"
+    yield "other"
 }
 ```
 
@@ -193,8 +193,8 @@ let result = list.iterator()
 - `for` statements over any `Iterable`
 - `when` expressions/statements for exhaustive pattern matching
 - `defer` for deterministic cleanup
-- `break`, `continue`, `return`
-- `break <expression>` inside `if` / `when` expression branch bodies for branch values and early branch exit
+- `break`, `continue`, `return`, `yield`
+- `yield expression` inside `if` / `when` expression branch bodies for branch values and early branch exit
 
 ### Pattern Matching
 
