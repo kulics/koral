@@ -74,6 +74,21 @@ given TypeChecker {
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
             },
+            .UnsafeDerefExpr(inner, _) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then *inner_ref,
+                    .ReferenceType(inner_ref) then *inner_ref,
+                    .MutableBorrowedReferenceType(inner_ref) then *inner_ref,
+                    .BorrowedReferenceType(inner_ref) then *inner_ref,
+                    .WeakReferenceType(inner_ref) then *inner_ref,
+                    .MutableWeakReferenceType(inner_ref) then *inner_ref,
+                    .MutablePointerType(inner_ref) then *inner_ref,
+                    .PointerType(inner_ref) then *inner_ref,
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), inner_t)
+            },
             _ then self.check_expr_core_ref(left, expected, scope),
         }
         let initial_typed_right = when right in {
@@ -95,6 +110,21 @@ given TypeChecker {
                     _ then Type.Unknown(),
                 }
                 yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), inner_t)
+            },
+            .UnsafeDerefExpr(inner, _) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then *inner_ref,
+                    .ReferenceType(inner_ref) then *inner_ref,
+                    .MutableBorrowedReferenceType(inner_ref) then *inner_ref,
+                    .BorrowedReferenceType(inner_ref) then *inner_ref,
+                    .WeakReferenceType(inner_ref) then *inner_ref,
+                    .MutableWeakReferenceType(inner_ref) then *inner_ref,
+                    .MutablePointerType(inner_ref) then *inner_ref,
+                    .PointerType(inner_ref) then *inner_ref,
+                    _ then Type.Unknown(),
+                }
+                yield make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), inner_t)
             },
             _ then self.check_expr_core_ref(right, .Some(initial_typed_left.expr_type), scope),
         }
@@ -607,6 +637,9 @@ given TypeChecker {
                 self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
             },
             .DerefExpr(inner_ref) then {
+                self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
+            },
+            .UnsafeDerefExpr(inner_ref) then {
                 self.validate_lambda_captures_in_expr(inner_ref, local_names, local_ids, reported_ids)
             },
             .CastExpr(_, inner_ref) then {

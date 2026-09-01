@@ -893,6 +893,8 @@ given TypeChecker {
             .Identifier(name, _) then name,
             .MemberPath(_, path, _) then if path.is_empty() then "member" else path[path.count() - 1],
             .SubscriptExpr(base, _, _) then self.ref_target_expr_name(base),
+            .DerefExpr(_, _) then "*e",
+            .UnsafeDerefExpr(_, _) then "unsafe *e",
             _ then self.describe_expr_shallow(expr),
         }
     }
@@ -902,6 +904,7 @@ given TypeChecker {
             .Variable(sym) then self.context().symbol_name(*sym),
             .MemberPath(_, path) then if path.is_empty() then "member" else path[path.count() - 1],
             .DerefExpr(_) then "*e",
+            .UnsafeDerefExpr(_) then "unsafe *e",
             _ then "value",
         }
     }
@@ -1234,16 +1237,10 @@ given TypeChecker {
                         _ then {},
                     }
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
-                        if self.can_take_implicit_ref_receiver(expr_ref) then {
+                        if self.can_take_mutable_ref_of_expr(expr_ref) then {
                             adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                             return adapted
                         }
-                        let value_name = self.ref_target_typed_name(expr_ref)
-                        self.push_diagnostic_at_span(
-                            "Cannot take '&' of immutable value: \(value_name). Only 'let mutable' lvalues (and lvalues reached through */unsafe * links) can use '&'.",
-                            diagnostic_span
-                        )
-                        adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                         return adapted
                     }
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) then {
@@ -1449,7 +1446,7 @@ given TypeChecker {
                         _ then {},
                     }
                     if self.type_matches_expected_pattern(expected_inner, expr.expr_type) and self.is_implicit_ref_candidate_shape(expr_ref) then {
-                        if self.can_take_implicit_ref_receiver(expr_ref) then {
+                        if self.can_take_mutable_ref_of_expr(expr_ref) then {
                             adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)
                             return adapted
                         }

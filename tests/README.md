@@ -96,6 +96,10 @@ Use this bucket when changing identifier parsing or naming-rule enforcement for 
 
 Use this bucket when changing managed reference, weak reference, or raw-pointer syntax/semantics.
 
+- `raw_deref_mutable_ref_readonly_pointer_error`
+- `raw_address_readonly_pointer_deref_error`
+- `implicit_mutable_ref_from_readonly_pointer_deref_error`
+- `implicit_mutable_ref_from_immutable_value_error`
 - `weakref_basic`
 - `weakref_lifecycle`
 - `weakref_struct`
@@ -124,6 +128,7 @@ Use this bucket when changing escape promotion, conditional branch merge logic, 
 
 Use this bucket when changing receiver auto-ref/auto-deref, managed receiver return paths, or U2 receiver syntax migration behavior.
 
+- `raw_pointer_readonly_mut_receiver_error`
 - `when_ref_in_private_fn`
 - `mut_ref_method_dispatch_widening`
 - `self_ref_receiver_temp_cleanup_unique_mutable`

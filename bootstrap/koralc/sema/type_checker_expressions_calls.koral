@@ -340,6 +340,71 @@ given TypeChecker {
         }
     }
 
+    protected is_mutable_ref_like_type(self, t Type) Bool = {
+        return when t in {
+            .MutableReferenceType(_) then true,
+            .MutableBorrowedReferenceType(_) then true,
+            .MutablePointerType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    protected is_read_only_ref_like_type(self, t Type) Bool = {
+        return when t in {
+            .ReferenceType(_) then true,
+            .BorrowedReferenceType(_) then true,
+            .PointerType(_) then true,
+            .WeakReferenceType(_) then true,
+            _ then false,
+        }
+    }
+
+    protected can_take_mutable_ref_of_expr(self, expr * TypedExpr) Bool = {
+        return when expr.expr_kind in {
+            .Variable(sym) then {
+                if self.is_mutable_ref_like_type(sym.symbol_type) then {
+                    return true
+                }
+                return sym.is_mutable()
+            },
+            .MemberPath(base, path) then {
+                let mutable current = base.expr_type
+                let mutable mutable_path = self.can_take_mutable_ref_of_expr(base)
+                let mutable idx UInt = 0
+                while idx < path.count() then {
+                    let segment = path[idx]
+                    let is_last = idx + 1(UInt) == path.count()
+                    let segment_type = self.resolve_member_type(current, segment)
+                    if self.is_mutable_ref_like_type(current) then {
+                        mutable_path = true
+                        if is_last then {
+                            return self.member_is_mutable_for_assignment(current, segment)
+                                or self.is_mutable_ref_like_type(segment_type)
+                        }
+                    } else if self.is_read_only_ref_like_type(current) then {
+                        mutable_path = false
+                        if is_last then {
+                            return false
+                        }
+                    } else if is_last then {
+                        return mutable_path and self.member_is_mutable_for_assignment(current, segment)
+                    } else if not self.member_is_mutable_for_assignment(current, segment)
+                        and not self.is_mutable_ref_like_type(segment_type)
+                    then {
+                        mutable_path = false
+                    }
+                    current = segment_type
+                    idx += 1(UInt)
+                }
+                yield false
+            },
+            .DerefExpr(inner) then self.is_mutable_ref_like_type(inner.expr_type),
+            .UnsafeDerefExpr(inner) then self.is_mutable_ref_like_type(inner.expr_type),
+            _ then false,
+        }
+    }
+
     protected can_take_ref_of_expr(self, expr * TypedExpr) Bool = {
         return when expr.expr_kind in {
             .Variable(sym) then {
