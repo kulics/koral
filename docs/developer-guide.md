@@ -230,7 +230,7 @@ The current bootstrap compiler has been repaired back to a stable self-hosting c
 
 ### Root Causes That Actually Mattered
 
-- Several bootstrap hot paths were relying on mutable local values that the current bootstrap compiler lowered as temporary boxed copies when passed through `&mut`-style method calls. The symptom was not immediate type failure; it showed up later as use-after-free, malformed generated C, or corrupted codegen state.
+- Several bootstrap hot paths were relying on mutable local values that the current bootstrap compiler lowered as temporary boxed copies when passed through `&mutable`-style method calls. The symptom was not immediate type failure; it showed up later as use-after-free, malformed generated C, or corrupted codegen state.
 - The most important instances were:
     - `CodeGen` lifecycle in `generate_c_from_mir`: separate phase calls were mutating different effective `CodeGen` objects instead of one stable instance.
     - `MIRFunctionCodeEmitter` nested-definition flow: body emission could mutate emitter-owned strings and then later read from a moved-from local emitter value.
@@ -242,7 +242,7 @@ The current bootstrap compiler has been repaired back to a stable self-hosting c
 
 - Treat the codegen driver as operating on one stable mutable object. In bootstrap, `generate_c_from_mir` should keep a single boxed `CodeGen` and mutate that one instance through prelude, body emission, finalization, and string extraction.
 - Avoid by-value `CodeGen` receivers on codegen hot paths. Swift effectively has reference semantics here; bootstrap needed the same practical behavior via `*self` to stop copying internal state such as caches and output buffers.
-- When bootstrap MIR/codegen needs mutable helper state that survives across multiple calls, prefer one stable boxed object over repeatedly passing stack locals through `&mut`-style calls.
+- When bootstrap MIR/codegen needs mutable helper state that survives across multiple calls, prefer one stable boxed object over repeatedly passing stack locals through `&mutable`-style calls.
 - Align generic type instantiation with Swift's two-step approach:
     1. substitute template parameters
     2. immediately resolve nested parameterized types to concrete instantiated types

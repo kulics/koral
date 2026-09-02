@@ -892,7 +892,9 @@ let main() Void = if 1 == 1 then println("yes")
 
 ```koral
 let label = if score >= 90 then {
-    if score == 100 then yield "perfect"
+    if score == 100 then {
+        yield "perfect"
+    }
     yield "A"
 } else {
     yield "other"
@@ -974,7 +976,9 @@ while iter.next() is .Some(item) and parse(item) is .Ok(v) then {
 ```koral
 let mutable i = 0
 while true then {
-    if i > 20 then break
+    if i > 20 then {
+        break
+    }
     if i % 2 == 0 then { i += 1; continue }
     println(i)
     i += 1
@@ -1091,7 +1095,9 @@ let label = when score in {
         yield "perfect"
     },
     >= 90 then {
-        if has_curve(score) then yield "A+"
+        if has_curve(score) then {
+            yield "A+"
+        }
         yield "A"
     },
     _ then { yield "other" },
