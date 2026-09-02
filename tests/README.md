@@ -31,6 +31,7 @@ compiler/.build/debug/koralc build --package-config bootstrap/koral.json --targe
 ## Parallel execution
 
 The shared runner supports parallel execution with `-j <N>` or `-j=<N>`.
+For bootstrap runs, effective parallelism is currently capped at `6` workers for stability; larger requested values are reduced internally.
 
 Run against the Swift compiler:
 

@@ -10,6 +10,18 @@ private type CaseWorkerEvent {
     Finished(result CaseResult),
 }
 
+private let effective_parallel_jobs(config RunnerConfig, total UInt) UInt = {
+    if total == 0 then {
+        return 0(UInt)
+    }
+    let mutable worker_count = min(config.jobs, total)
+    let bootstrap_parallel_cap UInt = 6(UInt)
+    if config.compiler_kind == "bootstrap" and worker_count > bootstrap_parallel_cap then {
+        worker_count = bootstrap_parallel_cap
+    }
+    return worker_count
+}
+
 private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UInt, memory_exceeded UInt, infra_failed UInt, start MonoTime) RunSummary = {
     let duration_ms = start.elapsed().as_milliseconds()
     let exit_code = if failed == 0 then 0 else 1
@@ -89,7 +101,7 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
         return finalize_summary(0, 0, 0, 0, 0, 0, start)
     }
 
-    let worker_count = min(config.jobs, total)
+    let worker_count = effective_parallel_jobs(config, total)
     let mutable shuffled_cases = cases
     let random = default_random()
     random.shuffle(&mutable shuffled_cases)
@@ -174,9 +186,18 @@ public let run_cases(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
         return RunSummary(0, 0, 1, 0, 0, 0, 0, 1)
     }
 
-    report_line(config, "Running " + cases.count().to_string() + " case(s) with jobs=" + config.jobs.to_string())
+    let effective_jobs = effective_parallel_jobs(config, cases.count())
+    if config.compiler_kind == "bootstrap" and effective_jobs < config.jobs then {
+        report_line(
+            config,
+            "Bootstrap parallelism capped to " + effective_jobs.to_string()
+                + " worker(s) for stability (requested " + config.jobs.to_string() + ")"
+        )
+    }
 
-    let summary = if config.jobs <= 1 then
+    report_line(config, "Running " + cases.count().to_string() + " case(s) with jobs=" + effective_jobs.to_string())
+
+    let summary = if effective_jobs <= 1 then
         run_cases_serial(config, cases)
     else
         run_cases_parallel(config, cases)
