@@ -28,8 +28,8 @@ using app::services { run_server }
 foreign type FILE {}
 foreign type Point(x Int, y Int)        // 带字段的外部类型
 
-foreign let fopen(path unsafe *UInt8, mode unsafe *UInt8) unsafe *FILE
-foreign let fclose(file unsafe *FILE) Int32
+foreign let fopen(path *unsafe UInt8, mode *unsafe UInt8) *unsafe FILE
+foreign let fclose(file *unsafe FILE) Int32
 
 
 // ============================================================
@@ -302,8 +302,8 @@ let named_func_type() Void = {
 }
 
 // Foreign 函数不支持命名参数
-// foreign let fopen(path: unsafe *UInt8) unsafe *FILE  // 错误
-foreign let fclose(file unsafe *FILE) Int32          // 正确：位置参数
+// foreign let fopen(path: *unsafe UInt8) *unsafe FILE  // 错误
+foreign let fclose(file *unsafe FILE) Int32          // 正确：位置参数
 
 // ============================================================
 // yield value（仅用于 if / when 分支表达式的分支 body）
@@ -540,7 +540,7 @@ type Table[T Any](mutable data T)
 
 
 // ============================================================
-// 类型修饰符：* / *mutable / unsafe * / unsafe *mutable / ?* / ?*mutable
+// 类型修饰符：* / *mutable / *unsafe / *unsafe mutable / ?* / ?*mutable
 // ============================================================
 
 let type_modifiers() Void = {
@@ -570,25 +570,25 @@ let type_modifiers() Void = {
     println(*owned)      // *expr 读取
     *owned = 99          // *expr 赋值（*mutable 支持）
 
-    // unsafe *：只读原始指针
-    // - 通过 unsafe & 在可取地址存储上形成
-    // - 支持 unsafe *expr 读取，但不支持 unsafe *expr 赋值
+    // *unsafe：只读原始指针
+    // - 通过 &unsafe 在可取地址存储上形成
+    // - 支持 *expr 读取，但不支持 *expr 赋值
     // - 支持下标读取 p[i]，但不支持下标赋值
     // - 支持指针算术（+ / -）
     // - 支持直接字段访问 p.field，但不做隐式 pointee 方法查找
-    let b unsafe *Int = unsafe &a
-    let value = unsafe *b       // unsafe *expr 读取
-    // unsafe *b = 99           // 错误：unsafe * 不支持 unsafe *expr 赋值
+    let b *unsafe Int = &unsafe a
+    let value = *b       // *expr 读取
+    // *b = 99           // 错误：*unsafe 不支持 *expr 赋值
     let v0 = b[0]           // 下标读取（等价于 *(b + 0)）
-    // b[1] = 200           // 错误：unsafe * 不支持下标赋值
+    // b[1] = 200           // 错误：*unsafe 不支持下标赋值
 
-    // unsafe * mutable：可变原始指针
-    // - 可通过 unsafe & mutable 在可取地址存储上形成
-    // - 支持 unsafe *expr 读取和 unsafe *expr = value 赋值
+    // *unsafe mutable：可变原始指针
+    // - 可通过 &unsafe mutable 在可取地址存储上形成
+    // - 支持 *expr 读取和 *expr = value 赋值
     // - 支持下标读取和下标赋值（指针偏移语义）
     // - 支持指针算术（+ / -）
-    let mp unsafe *mutable Int = alloc_memory[Int](2)
-    unsafe *mp = 99             // unsafe *expr 赋值
+    let mp *unsafe mutable Int = alloc_memory[Int](2)
+    *mp = 99             // *expr 赋值
     mp[0] = 111             // 下标赋值（等价于 *(mp + 0) = 111）
     mp[1] = 222             // 下标赋值（等价于 *(mp + 1) = 222）
 
@@ -647,27 +647,27 @@ let weakref_example() Void = {
 // ============================================================
 
 let pointer_ops() Void = {
-    let p unsafe *mutable Int = alloc_memory[Int](2)  // 分配 2 个 Int 的内存，返回 unsafe *mutable
+    let p *unsafe mutable Int = alloc_memory[Int](2)  // 分配 2 个 Int 的内存，返回 *unsafe mutable
 
-    init_memory(p, 100)           // 初始化（要求 unsafe *mutable）
-    let value = unsafe *p             // 解引用读取
+    init_memory(p, 100)           // 初始化（要求 *unsafe mutable）
+    let value = *p             // 解引用读取
 
     let p2 = p + 1                // 指针偏移
     init_memory(p2, 200)
 
-    unsafe *p = 999                   // 解引用赋值（unsafe *mutable 支持）
+    *p = 999                   // 解引用赋值（*unsafe mutable 支持）
 
     // 下标访问（指针偏移 + 解引用）
     let v0 = p[0]                 // 等价于 *(p + 0)
     let v1 = p[1]                 // 等价于 *(p + 1)
-    p[0] = 111                    // 下标赋值（unsafe *mutable 支持）
+    p[0] = 111                    // 下标赋值（*unsafe mutable 支持）
     p[1] = 222
 
-    deinit_memory(p)              // 析构（要求 unsafe *mutable）
+    deinit_memory(p)              // 析构（要求 *unsafe mutable）
     deinit_memory(p2)
     dealloc_memory(p)             // 释放内存
 
-    let np unsafe *Int = null_ptr()   // null 指针（返回 unsafe *T）
+    let np *unsafe Int = null_ptr()   // null 指针（返回 *unsafe T）
     println(p == null_ptr())
 }
 
@@ -795,7 +795,7 @@ let builtin_subscript() Void = {
     let b UInt8 = text[1]
     println(b)
 
-    let p unsafe *mutable Int = alloc_memory[Int](2)
+    let p *unsafe mutable Int = alloc_memory[Int](2)
     p[0] = list[0]
     p[1] = list[1]
     println(p[1])
@@ -1034,7 +1034,7 @@ let collections() Void = {
 type Resource(id Int)
 
 given Resource as Drop {
-    drop(source unsafe *mutable Self) Void = {
+    drop(source *unsafe mutable Self) Void = {
         print("dropping resource ")
         println(source.id)
     }

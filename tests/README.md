@@ -93,7 +93,7 @@ Use this bucket when changing identifier parsing or naming-rule enforcement for 
 - `identifier_case_pattern_enum_ctor_error`
 - `identifier_case_module_error`
 
-### New reference surface (`*T`, `?*T`, `unsafe * T`)
+### New reference surface (`*T`, `?*T`, `*unsafe T`)
 
 Use this bucket when changing managed reference, weak reference, or raw-pointer syntax/semantics.
 
@@ -136,7 +136,7 @@ Use this bucket when changing receiver auto-ref/auto-deref, managed receiver ret
 - `self_mut_ref_rvalue_receiver_error`
 - `value_semantics_self_ref_on_immutable_base_error`
 
-Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mutable self`, `&`, `&mutable`, `unsafe &`, `*`).
+Legacy receiver-surface cases have been removed from the active tree. New work should add coverage directly under `tests/compiler-cases/` using the U2 surface (`*self`, `*mutable self`, `&`, `&mutable`, `&unsafe`, `&unsafe mutable`, `*`).
 
 ## Rerun a bucket
 

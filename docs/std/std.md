@@ -113,7 +113,7 @@ public trait Error {
 }
 
 public trait Drop {
-    drop(source unsafe * mutable Self) Void
+    drop(source *unsafe mutable Self) Void
 }
 ```
 
@@ -1105,8 +1105,8 @@ given[T Deref] List[T] {
     public fill(*mutable self, value T) Void
     public map[U Deref](*self, fn Func(T) U) List[U]
     public reverse(*mutable self) Void
-    public borrow_ptr(*self) unsafe * T
-    public borrow_mut_ptr(*mutable self) unsafe * mutable T
+    public borrow_ptr(*self) *unsafe T
+    public borrow_mut_ptr(*mutable self) *unsafe mutable T
     public slice_spec(*self, range Range[UInt]) SliceSpec
     public sublist(*self, range Range[UInt]) List[T]
     public enumerate(*self) EnumerateIterator[T, ListIterator[T]]
@@ -1497,18 +1497,18 @@ given[T Hash] SetIterator[T] as Iterator[T] {
 }
 
 given String {
-    public from_utf8_ptr_unchecked(bytes unsafe * UInt8, len UInt) String
-    public from_utf8_ptr(bytes unsafe * UInt8, len UInt) Result[String]
+    public from_utf8_ptr_unchecked(bytes *unsafe UInt8, len UInt) String
+    public from_utf8_ptr(bytes *unsafe UInt8, len UInt) Result[String]
     public from_bytes(bytes List[UInt8]) Result[String]
     public from_bytes_unchecked(bytes List[UInt8]) String
-    public from_cstring(cstr unsafe * UInt8) Result[String]
-    public from_cstring_unchecked(cstr unsafe * UInt8) String
+    public from_cstring(cstr *unsafe UInt8) Result[String]
+    public from_cstring_unchecked(cstr *unsafe UInt8) String
     public with_capacity(capacity UInt) String
     public new() String
     public count(*self) UInt
     public is_empty(*self) Bool
     public capacity(*self) UInt
-    public borrow_ptr(*self) unsafe * UInt8
+    public borrow_ptr(*self) *unsafe UInt8
     public to_bytes(*self) List[UInt8]
     public get(*self, index UInt) Option[UInt8]
     public push_byte(*mutable self, value UInt8) Void
@@ -1722,19 +1722,19 @@ given Int64 as Hash {
     public hash(self) UInt
 }
 
-given[T Any] unsafe * T as Eq {
-    public equals(self, other unsafe * T) Bool
+given[T Any] *unsafe T as Eq {
+    public equals(self, other *unsafe T) Bool
 }
 
-given[T Any] unsafe * T as Hash {
+given[T Any] *unsafe T as Hash {
     public hash(self) UInt
 }
 
-given[T Any] unsafe * mutable T as Eq {
-    public equals(self, other unsafe * mutable T) Bool
+given[T Any] *unsafe mutable T as Eq {
+    public equals(self, other *unsafe mutable T) Bool
 }
 
-given[T Any] unsafe * mutable T as Hash {
+given[T Any] *unsafe mutable T as Hash {
     public hash(self) UInt
 }
 

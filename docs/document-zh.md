@@ -210,7 +210,7 @@ Koral 使用引用类型来引用另一个值：
 
 - 普通 `&` 既可作用于左值，也可作用于右值；对右值时，编译器会按需物化托管存储。
 - `&mutable` 仍然要求可写左值。
-- `unsafe &` / `unsafe & mutable` 要求可取地址的存储，因此字面量和临时值会被拒绝。
+- `&unsafe` / `&unsafe mutable` 要求可取地址的存储，因此字面量和临时值会被拒绝。
 - `&` 产生 `*T`（或用 `&mutable` 产生 `*mutable T`）。编译器通过逃逸分析决定栈分配还是堆分配。
 - `box(expr)` 是显式托管构造，返回 `*mutable T`。
 
@@ -237,7 +237,7 @@ let owned *mutable Int = box(42) // box() 返回 *mutable T
 let temp *Int = &42          // OK：托管 & 可按需物化右值
 
 // let bad = &mutable 42      // 错误：&mutable 仍然要求可写左值
-// let raw_bad = unsafe & 42  // 错误：raw 取址需要可取地址存储
+// let raw_bad = &unsafe 42  // 错误：raw 取址需要可取地址存储
 
 // 函数参数不允许隐式托管引用提升：
 let takes_ref(r * Int) Int = *r
@@ -558,9 +558,9 @@ let owned *mutable Int = &mutable n
 
 指针类型同样区分只读和可变：
 
-- `unsafe * T` — 只读指针。支持 `unsafe *expr` 解引用读取，但不支持 `unsafe *expr` 赋值和 `p[i]` 赋值。
-- `unsafe * mutable T` — 可变指针。支持 `unsafe *expr` 解引用读取、`unsafe *expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
-- `unsafe * mutable T` 可隐式转换为 `unsafe * T`。反向转换不允许。
+- `*unsafe T` — 只读指针。支持 `*expr` 解引用读取，但不支持 `*expr` 赋值和 `p[i]` 赋值。
+- `*unsafe mutable T` — 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取和 `p[i] = value` 赋值。
+- `*unsafe mutable T` 可隐式转换为 `*unsafe T`。反向转换不允许。
 
 #### 弱引用
 
@@ -608,7 +608,7 @@ given Point as Eq {
 Koral 旨在提供高效且安全的内存管理。它结合了自动内存管理和手动控制的优点。
 
 - **值语义（Value Semantics）**：默认情况下，Koral 中的类型（如 `Int`, 结构体）具有值语义。这意味着在赋值或传递参数时，数据会被复制。
-- **引用（Reference）**：`*` / `*mutable` 是托管引用。普通 `&` 可从左值或右值形成托管引用；`&mutable` 仍要求可写左值；`unsafe &` / `unsafe &mutable` 只会从可取地址存储形成 raw 指针。编译器通过逃逸分析决定托管引用走栈还是走堆，`box(expr)` 是显式托管构造。函数参数不允许隐式 ref 提升——调用方必须用 `&` 显式传入。普通参数不允许 auto-deref——传入 `*T` 给期望 `T` 的参数需要显式用 `*expr`。隐式转换仅对 method receiver（`self`）生效；其中 `*self` 可在右值接收者上通过物化临时值调用，而 `*mutable self` 仍要求可写左值。Koral 使用所有权分析和逃逸分析来决定栈安全借用还是堆支持的引用计数，防止悬垂指针和内存泄漏。
+- **引用（Reference）**：`*` / `*mutable` 是托管引用。普通 `&` 可从左值或右值形成托管引用；`&mutable` 仍要求可写左值；`&unsafe` / `&unsafe mutable` 只会从可取地址存储形成 raw 指针。编译器通过逃逸分析决定托管引用走栈还是走堆，`box(expr)` 是显式托管构造。函数参数不允许隐式 ref 提升——调用方必须用 `&` 显式传入。普通参数不允许 auto-deref——传入 `*T` 给期望 `T` 的参数需要显式用 `*expr`。隐式转换仅对 method receiver（`self`）生效；其中 `*self` 可在右值接收者上通过物化临时值调用，而 `*mutable self` 仍要求可写左值。Koral 使用所有权分析和逃逸分析来决定栈安全借用还是堆支持的引用计数，防止悬垂指针和内存泄漏。
 - **所有权转移（Move Semantics）**：对于没有执行复制操作的变量，赋值和传参操作会导致所有权转移（Move）。一旦所有权被转移，原来的变量就不能再被使用了。
 
 ## 操作符
@@ -782,16 +782,16 @@ list[1] = 99
 let text = "abc"
 let b UInt8 = text[1]
 
-let p unsafe * mutable Int = alloc_memory[Int](2)
+let p *unsafe mutable Int = alloc_memory[Int](2)
 p[0] = list[0]
 let first = p[0]
 dealloc_memory(p)
 ```
 
-- `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`unsafe * T`、`unsafe * mutable T`。
+- `value[key]` 和 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`*unsafe T`、`*unsafe mutable T`。
 - `String[key]` 返回 `UInt8` 字节值，只读且不可取地址。
 - `List[T]` 和 `Deque[T]` 支持值读取、赋值、深层 place 更新，以及显式/隐式 `*` / `*mutable` 上下文。
-- `unsafe * T` 只支持 `unsafe *expr` 读取；`unsafe * mutable T` 同时支持 `unsafe *expr` 读取和写入。
+- `*unsafe T` 只支持 `*expr` 读取；`*unsafe mutable T` 同时支持 `*expr` 读取和写入。
 - 用户自定义类型不能通过 Trait 获得 `[]` 能力，泛型约束也不能为类型添加下标能力。
 
 ### 值合并与可选链
@@ -834,7 +834,7 @@ let load_port(path String) Result[Int] = {
 操作符优先级从高到低如下：
 
 1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 限定/泛型方法后缀
-2. 前缀: 一元 `-`, `~`，解引用 `*`，以及取址 `&`、`&mutable`、`unsafe &`、`unsafe & mutable`
+2. 前缀: 一元 `-`, `~`，解引用 `*`，以及取址 `&`、`&mutable`、`&unsafe`、`&unsafe mutable`
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
 5. 移位: `<<`, `>>`
@@ -1718,11 +1718,11 @@ let p = Point.origin()
 - `ToString`：字符串转换。
 - `Iterator[T]`：迭代协议（`next(*mutable self) Option[T]`）。
 - `Error`：错误消息接口（`message(*self) String`）。
-- `Drop`：析构钩子（`drop(source unsafe * mutable Self) Void`）。
+- `Drop`：析构钩子（`drop(source *unsafe mutable Self) Void`）。
 
 算术和比较操作符会在语义阶段降级为对应的 trait 方法（例如 `+` 对应 `Add`）。下标访问由编译器内建规则处理，不属于公开 trait 系统。
 
-`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source unsafe * mutable Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
+`Drop.drop` 是编译器保留的析构入口，不作为普通用户方法直接调用。它接收的是一块已拥有对象存储的地址 `source *unsafe mutable Self`。`Drop` 实现允许包含复合字段，不再要求字段必须是 primitive 形状。
 
 ### 方法接收器形式
 

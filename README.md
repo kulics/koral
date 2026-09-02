@@ -184,7 +184,7 @@ let result = list.iterator()
 - Type aliases: `type Name = TargetType`
 - Generic types and functions: `Type[T]`, `func[T Constraint](...)`
 - Function types: `Func(Int, Int) Int` — `(Int, Int) -> Int`
-- Reference types: `*` (managed read-only), `*mutable` (managed mutable), `unsafe *` (read-only), `unsafe * mutable` (mutable), `?*` (read-only weak), `?*mutable` (mutable weak)
+- Reference types: `*` (managed read-only), `*mutable` (managed mutable), `*unsafe` (read-only raw pointer), `*unsafe mutable` (mutable raw pointer), `?*` (read-only weak), `?*mutable` (mutable weak)
 
 ### Control Flow
 
@@ -238,18 +238,19 @@ let result = list.iterator()
 Reference creation rules:
 - `&` produces a `*T` (or `*mutable T` with `&mutable`). The compiler uses escape analysis to decide stack vs heap allocation.
 - `&` result mutability depends on the source: `let mutable` binding → `*mutable T`, `let` binding → `*T`, mutable path → `*mutable T`.
-- `&` on rvalues is rejected by the compiler.
+- `&` may take either an lvalue or an rvalue. Rvalues are materialized into managed storage as needed.
+- `&unsafe` / `&unsafe mutable` produce raw pointers and require addressable storage.
 - **No implicit ref promotion or auto-deref for function/method arguments.** If a function expects `*T` or `*mutable T`, the caller must use `&x` or `&mutable x` explicitly. If it expects `T`, the caller must use `*r` explicitly when starting from a managed reference. This applies to all arguments, including method arguments.
 - **Auto-ref and auto-deref only apply to method receivers (`self`).** `*self` methods accept values via auto-ref; `self` methods accept `*T` via auto-deref (following Go's pointer receiver behavior).
 - Calling a `*self` method on an rvalue can introduce hidden retain/allocation cost due to temporary materialization.
 - Trait objects follow the same mutability split as ordinary refs: `*Trait` can call only `*self` requirements, while `*mutable Trait` can call both `*mutable self` and `*self` requirements.
 - Method receiver forms: `self` (managed value), `*self` / `*mutable self` (managed receivers, auto-ref allowed), Auto-ref and auto-deref apply only to `self` and `*self` forms.
 - `*T` is read-only: `*expr` dereference read only. `*mutable T` supports `*expr` dereference read and `*expr = value` assignment.
-- `unsafe * T` is read-only: `unsafe *expr` dereference read only. `unsafe * mutable T` supports `unsafe *expr` dereference read, `unsafe *expr = value`, and `p[i] = value`.
+- `*unsafe T` is read-only raw pointer: `*expr` dereference read only. `*unsafe mutable T` supports `*expr` dereference read, `*expr = value`, and `p[i] = value`.
 - Use `box(expr)` for owned escaping references from literals/temporaries — returns `*mutable T`.
 - `box` forms the escaping reference directly from its parameter local; once that reference escapes, cleanup transfers to the ref owner instead of dropping the local again.
 - Ordinary parameter `mutable` is only local binding mutability inside the function body. It is not part of the function signature and is ignored for trait/given matching.
-- `Drop` uses `drop(source unsafe * mutable Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
+- `Drop` uses `drop(source *unsafe mutable Self) Void`. It is a compiler-only destructor entry, and `Drop` implementations are allowed on types with composite fields.
 
 Weak reference rules:
 - `downgrade(*T)` produces `?*T`; `downgrade_mutable(*mutable T)` produces `?*mutable T`.
