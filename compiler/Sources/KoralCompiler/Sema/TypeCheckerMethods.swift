@@ -1166,7 +1166,7 @@ extension TypeChecker {
       }
       let offsetExpr: TypedExpressionNode = .arithmeticExpression(
         left: ptrExpr, op: .plus, right: index, type: structType)
-      return .derefExpression(expression: offsetExpr, type: element)
+      return .unsafeDerefExpression(expression: offsetExpr, type: element)
     }
     if case .mutablePointer(let element) = structType {
       guard args.count == 1 else {
@@ -1186,7 +1186,7 @@ extension TypeChecker {
       }
       let offsetExpr: TypedExpressionNode = .arithmeticExpression(
         left: ptrExpr, op: .plus, right: index, type: structType)
-      return .derefExpression(expression: offsetExpr, type: element)
+      return .unsafeDerefExpression(expression: offsetExpr, type: element)
     }
 
     guard let builtinKind = resolveBuiltinSubscriptKind(baseType: base.type) else {
@@ -1356,7 +1356,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = ptr.type else {
         throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "unsafe * mutable")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*unsafe mutable")
       return .intrinsicCall(.takeMemory(ptr: ptr))
 
     case "spawn_thread":
@@ -1369,10 +1369,10 @@ extension TypeChecker {
       let stackSize = try inferTypedExpression(arguments[3])
       // Validate types
       guard case .mutablePointer(.pointer(.uint8)) = outHandle.type else {
-        throw SemanticError(.generic("spawn_thread: first argument must be unsafe * mutable unsafe * UInt8"))
+        throw SemanticError(.generic("spawn_thread: first argument must be *unsafe mutable *unsafe UInt8"))
       }
       guard case .mutablePointer(.uint64) = outTid.type else {
-        throw SemanticError(.generic("spawn_thread: second argument must be unsafe * mutable UInt64"))
+        throw SemanticError(.generic("spawn_thread: second argument must be *unsafe mutable UInt64"))
       }
       guard case .function(let params, let ret) = closure.type,
             params.isEmpty, ret == .void else {

@@ -210,7 +210,7 @@ given TypeChecker {
             .CastExpr(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .Unary(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .RefExpr(inner, _, _) then self.source_expr_is_obviously_pure_statement(inner),
-            .PtrExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
+            .PtrExpr(inner, _, _) then self.source_expr_is_obviously_pure_statement(inner),
             .DerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .UnsafeDerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(inner),
             .NamedArgument(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
@@ -514,10 +514,10 @@ given TypeChecker {
                             }
                             let ptr_expr = self.build_builtin_subscript_helper_call(typed_outer_base, typed_outer_args, "__index_mut_ptr")
                             yield when ptr_expr.expr_type in {
-                                .MutablePointerType(inner) then make_typed_expr(TypedExprKind.DerefExpr(box(ptr_expr)), *inner),
+                                .MutablePointerType(inner) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(ptr_expr)), *inner),
                                 _ then {
                                     self.push_diagnostic_at_span(
-                                        "Type mismatch: expected unsafe * mutable return, got \(self.display_type_name(ptr_expr.expr_type))",
+                                        "Type mismatch: expected *unsafe mutable return, got \(self.display_type_name(ptr_expr.expr_type))",
                                         self.typed_expr_span(box(ptr_expr))
                                     )
                                     yield self.empty_typed_block(Type.Unknown())
@@ -537,7 +537,7 @@ given TypeChecker {
                                 TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
                                 pointer_base_type,
                             )
-                            yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                            yield make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(offset_expr)), element_type)
                         },
                     },
                     .None() then {
@@ -577,7 +577,7 @@ given TypeChecker {
                         TypedExprKind.ArithmeticExpr(ptr_expr, ArithmeticOperator.Add(), box(typed_index)),
                         base_inner_type,
                     )
-                    let lvalue_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                    let lvalue_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(offset_expr)), element_type)
                     let lowered_value = when op in {
                         .Some(compound_op) then {
                             let typed_rhs = self.check_expr_scoped_ref(value, .Some(element_type), scope)
@@ -1212,16 +1212,20 @@ given TypeChecker {
                         self.push_diagnostic_at_span("Cannot assign through read-only pointer of type '\(type_to_string(typed_inner.expr_type))'", span)
                         yield *inner_ref
                     },
+                    .MutablePointerType(inner_ref) then *inner_ref,
                     _ then {
                         let actual = when typed_inner.expr_type in {
                             .TypeVar(_) then "Int",
                             _ then type_to_string(typed_inner.expr_type),
                         }
-                        self.push_diagnostic_at_span("Type mismatch: expected Mutable reference type, got \(actual)", span)
+                        self.push_diagnostic_at_span("Type mismatch: expected Mutable reference or pointer type, got \(actual)", span)
                         yield Type.Unknown()
                     },
                 }
-                return make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), result_type)
+                return when typed_inner.expr_type in {
+                    .MutablePointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), result_type),
+                    _ then make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), result_type),
+                }
             },
             .UnsafeDerefExpr(inner, span) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
@@ -1299,7 +1303,7 @@ given TypeChecker {
                             }
                             let ptr_expr = self.build_builtin_subscript_helper_call(typed_outer_base, typed_outer_args, "__index_mut_ptr")
                             yield when ptr_expr.expr_type in {
-                                .MutablePointerType(inner) then make_typed_expr(TypedExprKind.DerefExpr(box(ptr_expr)), *inner),
+                                .MutablePointerType(inner) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(ptr_expr)), *inner),
                                 _ then self.empty_typed_block(Type.Unknown()),
                             }
                         },
@@ -1316,7 +1320,7 @@ given TypeChecker {
                                 TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
                                 pointer_base_type,
                             )
-                            yield make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                            yield make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(offset_expr)), element_type)
                         },
                     },
                     .None() then {

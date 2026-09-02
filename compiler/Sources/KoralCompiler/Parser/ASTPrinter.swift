@@ -554,8 +554,8 @@ public func printAST(_ node: ASTNode) {
         printExpression(expr)
       }
 
-    case .ptrExpression(let expr):
-      print("\(indent)PtrExpression:")
+    case .ptrExpression(let expr, let mutable):
+      print("\(indent)PtrExpression\(mutable ? " mutable" : ""):")
       withIndent {
         printExpression(expr)
       }

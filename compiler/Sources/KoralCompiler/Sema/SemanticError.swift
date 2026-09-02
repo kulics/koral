@@ -121,7 +121,7 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case .assignToImmutable(let name):
             return "Cannot assign to immutable variable: \(name)"
         case .cannotTakeRefOfImmutable(let name):
-            return "Cannot take '&mutable' of immutable value: \(name). Only 'let mutable' lvalues (and lvalues reached through * or unsafe * links) can use '&mutable'."
+            return "Cannot take '&mutable' of immutable value: \(name). Only 'let mutable' lvalues (and lvalues reached through * or *unsafe links) can use '&mutable'."
         case .functionNotFound(let name):
             return "Function not found: \(name)"
         case .invalidArgumentCount(let function, let expected, let got):

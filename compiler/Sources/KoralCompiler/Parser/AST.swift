@@ -88,7 +88,7 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .reference(let inner, let mutable):
       return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable):
-      return mutable ? "unsafe * mutable \(inner)" : "unsafe * \(inner)"
+      return mutable ? "*unsafe mutable \(inner)" : "*unsafe \(inner)"
     case .weakReference(let inner, let mutable):
       return mutable ? "?*mutable \(inner)" : "?*\(inner)"
     case .generic(let base, let args):
@@ -464,7 +464,7 @@ public indirect enum ExpressionNode {
   case addressOfExpression(ExpressionNode, mutable: Bool)
   case derefExpression(ExpressionNode)
   case unsafeDerefExpression(ExpressionNode)
-  case ptrExpression(ExpressionNode)
+  case ptrExpression(ExpressionNode, mutable: Bool)
   case identifier(String)
   case blockExpression(statements: [StatementNode])
   case ifExpression(

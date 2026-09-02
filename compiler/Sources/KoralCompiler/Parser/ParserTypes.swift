@@ -13,7 +13,7 @@ extension Parser {
 
   private func isTypeStart(_ token: Token) -> Bool {
     switch token {
-    case .selfTypeKeyword, .questionMark, .unsafeKeyword, .multiply, .identifier:
+    case .selfTypeKeyword, .questionMark, .multiply, .identifier:
       return true
     default:
       return false
@@ -51,25 +51,17 @@ extension Parser {
         prefixes.append(.weakReference(mutable: mutable))
         continue
       }
-      if currentToken === .unsafeKeyword {
-        try match(.unsafeKeyword)
-        guard currentToken === .multiply else {
-          throw ParserError.unexpectedToken(
-            span: currentSpan,
-            got: currentToken.description,
-            expected: "'*' after 'unsafe'"
-          )
-        }
-        try match(.multiply)
-        let mutable = currentToken === .mutableKeyword
-        if mutable {
-          try match(.mutableKeyword)
-        }
-        prefixes.append(.pointer(mutable: mutable))
-        continue
-      }
       if currentToken === .multiply {
         try match(.multiply)
+        if currentToken === .unsafeKeyword {
+          try match(.unsafeKeyword)
+          let mutable = currentToken === .mutableKeyword
+          if mutable {
+            try match(.mutableKeyword)
+          }
+          prefixes.append(.pointer(mutable: mutable))
+          continue
+        }
         let mutable = currentToken === .mutableKeyword
         if mutable {
           try match(.mutableKeyword)
@@ -170,7 +162,7 @@ extension Parser {
   /// - Simple types: Int, String, Bool
   /// - Generic types: List[T], Dict[K, V]
   /// - Function types: Func(ParamType1, ParamType2) ReturnType
-  /// - U2 reference types: *T, *mutable T, ?*T, *raw T
+  /// - U2 reference types: *T, *mutable T, ?*T, *unsafe T
   /// - Self type: Self
   /// - Module-qualified types: module.TypeName, module.List[T]
   func parseType() throws -> TypeNode {

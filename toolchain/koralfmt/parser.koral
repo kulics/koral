@@ -399,7 +399,7 @@ given CstParser {
         }
 
     private is_type_start(*self, t Token) Bool = when t in {
-        .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() or .KwUnsafe() then true,
+        .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
         .Ident(name) then {
             let runes = name.to_runes()
             if runes.count() == 0 then { return false }
@@ -547,10 +547,10 @@ given CstParser {
             }
             return .Ok(.Ptr(box(inner), kw))
         }
-        if self.check(.KwUnsafe()) then {
-            let unsafe_kw = self.eat()
-            if self.check(.Star()) then {
-                let star_kw = self.eat()
+        if self.check(.Star()) then {
+            let kw = self.eat()
+            if self.check(.KwUnsafe()) then {
+                let unsafe_kw = self.eat()
                 let mutable mut_kw = Option[Token].None()
                 if self.check(.KwMut()) then {
                     mut_kw = .Some(self.eat())
@@ -560,17 +560,13 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 let ptr_kw = Token.KwPtr()
+                let _ = kw
                 let _ = unsafe_kw
                 if mut_kw is .Some(mk) then {
                     return .Ok(.Mutable(box(CstType.Ptr(box(inner), ptr_kw)), mk))
                 }
                 return .Ok(.Ptr(box(inner), ptr_kw))
             }
-            // unsafe & (address-of) is handled in expression parsing, not here
-            return .Error(box("Expected '*' after 'unsafe' in type"))
-        }
-        if self.check(.Star()) then {
-            let kw = self.eat()
             let mutable mut_kw = Option[Token].None()
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat())
@@ -1273,35 +1269,13 @@ given CstParser {
             return .Ok(.Deref(op, box(operand)))
         }
 
-        // Address-of: &, &mutable, unsafe &, unsafe & mutable
-        if self.check(.KwUnsafe()) then {
-            let unsafe_kw = self.eat()
-            if self.check(.Star()) then {
-                let star = self.eat()
-                let operand = when self.parse_prefix() in {
-                    .Ok(e) then e,
-                    .Error(e) then { return .Error(e) },
-                }
-                return .Ok(.PrefixKw(unsafe_kw, box(CstExpr.Deref(star, box(operand)))))
-            }
-            if self.check(.Amp()) then {
-                let op = self.eat()
-                let raw_kw = Option[Token].Some(unsafe_kw)
-                let mutable mut_kw = Option[Token].None()
-                if self.check(.KwMut()) then {
-                    mut_kw = .Some(self.eat())
-                }
-                let operand = when self.parse_prefix() in {
-                    .Ok(e) then e,
-                    .Error(e) then { return .Error(e) },
-                }
-                return .Ok(.AddressOf(op, raw_kw, mut_kw, box(operand)))
-            }
-            return .Error(box("Expected '&' or '*' after 'unsafe' in expression"))
-        }
+        // Address-of: &, &mutable, &unsafe, &unsafe mutable
         if self.check(.Amp()) then {
             let op = self.eat()
             let mutable raw_kw = Option[Token].None()
+            if self.check(.KwUnsafe()) then {
+                raw_kw = .Some(self.eat())
+            }
             let mutable mut_kw = Option[Token].None()
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat())

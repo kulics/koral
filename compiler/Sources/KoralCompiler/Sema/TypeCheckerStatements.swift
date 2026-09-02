@@ -44,7 +44,7 @@ extension TypeChecker {
          .addressOfExpression(let inner, _),
          .derefExpression(let inner),
           .unsafeDerefExpression(let inner),
-         .ptrExpression(let inner),
+          .ptrExpression(let inner, _),
          .unaryMinusExpression(let inner),
          .notExpression(let inner),
          .bitwiseNotExpression(let inner),
@@ -300,9 +300,9 @@ extension TypeChecker {
           helperName: "__index_mut_ptr"
         )
         guard case .mutablePointer(let valueType) = ptrExpr.type else {
-          throw SemanticError.typeMismatch(expected: "unsafe * mutable return", got: ptrExpr.type.description)
+          throw SemanticError.typeMismatch(expected: "*unsafe mutable return", got: ptrExpr.type.description)
         }
-        return .derefExpression(expression: ptrExpr, type: valueType)
+        return .unsafeDerefExpression(expression: ptrExpr, type: valueType)
       case .pointer:
         return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs)
       case .none:
@@ -498,7 +498,7 @@ extension TypeChecker {
             }
             let offsetExpr: TypedExpressionNode = .arithmeticExpression(
               left: ptrExpr, op: .plus, right: index, type: baseStructType)
-            let derefTarget: TypedExpressionNode = .derefExpression(expression: offsetExpr, type: element)
+              let derefTarget: TypedExpressionNode = .unsafeDerefExpression(expression: offsetExpr, type: element)
 
             var typedRhs = try inferTypedExpression(value)
             typedRhs = try coerceLiteral(typedRhs, to: element)
@@ -684,7 +684,7 @@ extension TypeChecker {
           }
           let offsetExpr: TypedExpressionNode = .arithmeticExpression(
             left: ptrExpr, op: .plus, right: index, type: baseStructType)
-          let derefTarget: TypedExpressionNode = .derefExpression(expression: offsetExpr, type: element)
+          let derefTarget: TypedExpressionNode = .unsafeDerefExpression(expression: offsetExpr, type: element)
 
           var typedValue = try inferTypedExpression(value)
           typedValue = try coerceLiteral(typedValue, to: element)

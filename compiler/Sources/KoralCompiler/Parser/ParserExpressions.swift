@@ -587,30 +587,17 @@ extension Parser {
       let expr = try parsePrefixExpression()
       return .bitwiseNotExpression(expr)
     }
-    if currentToken === .unsafeKeyword {
-      try match(.unsafeKeyword)
-      if currentToken === .multiply {
-        try match(.multiply)
-        let expr = try parsePrefixExpression()
-        return .unsafeDerefExpression(expr)
-      }
-      guard currentToken === .ampersand else {
-        throw ParserError.unexpectedToken(
-          span: currentSpan,
-          got: currentToken.description,
-          expected: "'&' or '*' after 'unsafe'"
-        )
-      }
-      try match(.ampersand)
-      let mutable = currentToken === .mutableKeyword
-      if mutable {
-        try match(.mutableKeyword)
-      }
-      let expr = try parsePrefixExpression()
-      return .ptrExpression(expr)
-    }
     if currentToken === .ampersand {
       try match(.ampersand)
+      if currentToken === .unsafeKeyword {
+        try match(.unsafeKeyword)
+        let mutable = currentToken === .mutableKeyword
+        if mutable {
+          try match(.mutableKeyword)
+        }
+        let expr = try parsePrefixExpression()
+        return .ptrExpression(expr, mutable: mutable)
+      }
       let mutable = currentToken === .mutableKeyword
       if mutable {
         try match(.mutableKeyword)

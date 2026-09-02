@@ -259,7 +259,7 @@ extension TypeChecker {
        .addressOfExpression(let inner, _),
        .derefExpression(let inner),
        .unsafeDerefExpression(let inner),
-        .ptrExpression(let inner):
+        .ptrExpression(let inner, _):
       try collectCapturedVariables(expr: inner, paramNames: paramNames, captures: &captures)
       
     case .ifExpression(let condition, let thenBranch, let elseBranch):

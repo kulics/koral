@@ -264,7 +264,7 @@ extension TypeChecker {
     if case .genericParameter(let paramName) = innerType {
       guard hasTraitBound(paramName, "Deref") else {
         throw SemanticError(.generic(
-          "Cannot use \(operation) on '\(paramName) \(spelledType)': type parameter '\(paramName)' does not have 'Deref' bound. " +
+          "Cannot use \(operation) on '\(spelledType) \(paramName)': type parameter '\(paramName)' does not have 'Deref' bound. " +
           "Add 'Deref' constraint: [\(paramName) Deref]"
         ), span: currentSpan)
       }
@@ -1958,16 +1958,19 @@ extension TypeChecker {
           spelledType = typedInner.type.containsBorrowedReference ? "borrowed *" : "*"
         case (.managedReference, true):
           spelledType = typedInner.type.containsBorrowedReference ? "borrowed *mutable" : "*mutable"
-        case (.rawPointer, _):
-          throw SemanticError(.generic(
-            "Raw pointer dereference requires 'unsafe *expr'; plain '*expr' is only for safe references"
-          ), span: currentSpan)
+        case (.rawPointer, false):
+          spelledType = "*unsafe"
+        case (.rawPointer, true):
+          spelledType = "*unsafe mutable"
         case (.weakReference, false):
           spelledType = "?*"
         case (.weakReference, true):
           spelledType = "?*mutable"
         }
         try requireDerefablePointee(targetType, operation: "*", spelledType: spelledType)
+        if info.family == .rawPointer {
+          return .unsafeDerefExpression(expression: typedInner, type: targetType)
+        }
         return .derefExpression(expression: typedInner, type: targetType)
       } else {
         throw SemanticError.typeMismatch(
@@ -1986,8 +1989,8 @@ extension TypeChecker {
           got: typedInner.type.description
         )
       }
-      let spelledType = info.mutable ? "unsafe * mutable" : "unsafe *"
-      try requireDerefablePointee(targetType, operation: "unsafe *", spelledType: spelledType)
+      let spelledType = info.mutable ? "*unsafe mutable" : "*unsafe"
+      try requireDerefablePointee(targetType, operation: "*", spelledType: spelledType)
       return .unsafeDerefExpression(expression: typedInner, type: targetType)
 
     case .addressOfExpression(let inner, let mutable):
@@ -2001,16 +2004,20 @@ extension TypeChecker {
       let refType: Type = mutable ? .mutableReference(inner: typedInner.type) : .reference(inner: typedInner.type)
       return .referenceExpression(expression: typedInner, type: refType)
 
-    case .ptrExpression(let inner):
+    case .ptrExpression(let inner, let mutable):
       let typedInner = try inferTypedExpression(inner)
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
       if !isAddressable {
         if isLiteralExpression(inner) {
-          throw SemanticError(.generic("cannot take unsafe & of literal"))
+          throw SemanticError(.generic("cannot take &unsafe of literal"))
         }
-        throw SemanticError(.generic("cannot take unsafe & of temporary value"))
+        throw SemanticError(.generic("cannot take &unsafe of temporary value"))
       }
-      let ptrType: Type = canTakeMutableReference(to: typedInner)
+      if mutable && !canTakeMutableReference(to: typedInner) {
+        let name = implicitSelfRefViolationName(typedInner) ?? String(describing: inner)
+        throw SemanticError(.generic("Cannot take '&unsafe mutable' from immutable binding '\(name)'"), span: currentSpan)
+      }
+      let ptrType: Type = mutable
         ? .mutablePointer(element: typedInner.type)
         : .pointer(element: typedInner.type)
       return .ptrExpression(expression: typedInner, type: ptrType)
@@ -4193,7 +4200,7 @@ extension TypeChecker {
         guard case .mutablePointer(let elementType) = ptrExpr.type else {
           throw SemanticError(.generic("cannot use * on non-pointer type"))
         }
-        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "unsafe * mutable")
+        try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*unsafe mutable")
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
 
@@ -4330,7 +4337,7 @@ extension TypeChecker {
         case .pointer(let resolvedElement), .mutablePointer(let resolvedElement):
           elementType = resolvedElement
         default:
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) unsafe *", got: ptr.type.description)
+          throw SemanticError.typeMismatch(expected: "*unsafe \(resolvedArgs[0])", got: ptr.type.description)
         }
         switch owner.type {
         case .reference, .mutableReference:
@@ -4355,7 +4362,7 @@ extension TypeChecker {
           expectedType: .mutableReference(inner: resolvedArgs[1])
         )
         guard case .mutablePointer(let elementType) = ptr.type else {
-          throw SemanticError.typeMismatch(expected: "\(resolvedArgs[0]) unsafe * mutable", got: ptr.type.description)
+          throw SemanticError.typeMismatch(expected: "*unsafe mutable \(resolvedArgs[0])", got: ptr.type.description)
         }
         guard case .mutableReference = owner.type else {
           throw SemanticError.typeMismatch(expected: "\(resolvedArgs[1]) *mutable", got: owner.type.description)
@@ -4616,7 +4623,7 @@ extension TypeChecker {
       guard case .mutablePointer(let elementType) = typedArguments[0].type else {
         throw SemanticError(.generic("cannot use * on non-pointer type"))
       }
-      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "unsafe * mutable")
+      try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*unsafe mutable")
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
     }
     if templateName == "null_ptr" {
@@ -4688,7 +4695,7 @@ extension TypeChecker {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]
       guard case .pointer(let elementType) = ptr.type else {
-        throw SemanticError.typeMismatch(expected: "T unsafe *", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "*unsafe T", got: ptr.type.description)
       }
       switch owner.type {
       case .reference, .mutableReference:
@@ -4702,7 +4709,7 @@ extension TypeChecker {
       let ptr = typedArguments[0]
       let owner = typedArguments[1]
       guard case .mutablePointer(let elementType) = ptr.type else {
-        throw SemanticError.typeMismatch(expected: "T unsafe * mutable", got: ptr.type.description)
+        throw SemanticError.typeMismatch(expected: "*unsafe mutable T", got: ptr.type.description)
       }
       guard case .mutableReference = owner.type else {
         throw SemanticError.typeMismatch(expected: "O *mutable", got: owner.type.description)
@@ -7038,7 +7045,7 @@ extension TypeChecker {
               helperName: "__index_mut_ptr"
             )
             guard case .mutablePointer(let valueType) = ptrExpr.type else {
-              throw SemanticError.typeMismatch(expected: "unsafe * mutable return", got: ptrExpr.type.description)
+              throw SemanticError.typeMismatch(expected: "*unsafe mutable return", got: ptrExpr.type.description)
             }
             return .unsafeDerefExpression(expression: ptrExpr, type: valueType)
           case .pointer:
@@ -7277,6 +7284,9 @@ extension TypeChecker {
         throw SemanticError(.generic(
           "Cannot assign through read-only pointer of type '\(typedInner.type)'"
         ), span: currentSpan)
+      case .mutablePointer(let elementType):
+        try requireDerefablePointee(elementType, operation: "*", spelledType: "*unsafe mutable")
+        return .unsafeDerefExpression(expression: typedInner, type: elementType)
       case .mutableReference(let innerType):
         try requireDerefablePointee(innerType, operation: "*", spelledType: "*mutable")
         return .derefExpression(expression: typedInner, type: innerType)
@@ -7285,7 +7295,7 @@ extension TypeChecker {
         return .derefExpression(expression: typedInner, type: innerType)
       default:
         throw SemanticError.typeMismatch(
-          expected: "Mutable reference type",
+          expected: "Mutable reference or pointer type",
           got: typedInner.type.description
         )
       }
@@ -7298,7 +7308,7 @@ extension TypeChecker {
           "Cannot assign through read-only pointer of type '\(typedInner.type)'"
         ), span: currentSpan)
       case .mutablePointer(let elementType):
-        try requireDerefablePointee(elementType, operation: "unsafe *", spelledType: "unsafe * mutable")
+        try requireDerefablePointee(elementType, operation: "*", spelledType: "*unsafe mutable")
         return .unsafeDerefExpression(expression: typedInner, type: elementType)
       default:
         throw SemanticError.typeMismatch(

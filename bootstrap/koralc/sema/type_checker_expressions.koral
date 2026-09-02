@@ -116,7 +116,7 @@ given TypeChecker {
             .CastExpr(_, inner, _) then self.expr_contains_or_return(inner),
             .RefExpr(inner, _, _) then self.expr_contains_or_return(inner),
             .WeakrefExpr(inner, _) then self.expr_contains_or_return(inner),
-            .PtrExpr(inner, _) then self.expr_contains_or_return(inner),
+            .PtrExpr(inner, _, _) then self.expr_contains_or_return(inner),
             .DerefExpr(inner, _) then self.expr_contains_or_return(inner),
             .UnsafeDerefExpr(inner, _) then self.expr_contains_or_return(inner),
             .Call(callee, args, _) then {
@@ -429,36 +429,10 @@ given TypeChecker {
                             _ then *inner_ref,
                         }
                     },
-                    .PointerType(_) then {
-                        self.push_expr_diagnostic(expr, "Raw pointer dereference requires 'unsafe *expr'; plain '*expr' is only for safe references")
-                        yield Type.Unknown()
-                    },
-                    .MutablePointerType(_) then {
-                        self.push_expr_diagnostic(expr, "Raw pointer dereference requires 'unsafe *expr'; plain '*expr' is only for safe references")
-                        yield Type.Unknown()
-                    },
-                    _ then {
-                        let actual = when typed_inner.expr_type in {
-                            .TypeVar(_) then "Int",
-                            _ then type_to_string(typed_inner.expr_type),
-                        }
-                        self.push_expr_diagnostic(expr, "Type mismatch: expected Reference type, got \(actual)")
-                        yield Type.Unknown()
-                    },
-                }
-                let checked_inner_t = when inner_t in {
-                    .Unknown() then inner_t,
-                    _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
-                }
-                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t)
-            },
-            .UnsafeDerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
-                let inner_t = when typed_inner.expr_type in {
                     .PointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use unsafe * on an opaque type unsafe *: type layout is unknown at compile time")
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then *inner_ref,
@@ -467,7 +441,47 @@ given TypeChecker {
                     .MutablePointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use unsafe * on an opaque type unsafe *: type layout is unknown at compile time")
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then *inner_ref,
+                        }
+                    },
+                    _ then {
+                        let actual = when typed_inner.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_inner.expr_type),
+                        }
+                        self.push_expr_diagnostic(expr, "Type mismatch: expected Reference or raw pointer type, got \(actual)")
+                        yield Type.Unknown()
+                    },
+                }
+                let checked_inner_t = when inner_t in {
+                    .Unknown() then inner_t,
+                    _ then if self.check_not_deref_constraint(inner_t, expr) then inner_t else Type.Unknown(),
+                }
+                yield when typed_inner.expr_type in {
+                    .PointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t),
+                    .MutablePointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t),
+                    _ then make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t),
+                }
+            },
+            .UnsafeDerefExpr(inner, _) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope)
+                let inner_t = when typed_inner.expr_type in {
+                    .PointerType(inner_ref) then {
+                        yield when *inner_ref in {
+                            .OpaqueType(_) then {
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then *inner_ref,
+                        }
+                    },
+                    .MutablePointerType(inner_ref) then {
+                        yield when *inner_ref in {
+                            .OpaqueType(_) then {
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then *inner_ref,
@@ -895,7 +909,7 @@ given TypeChecker {
             .MemberPath(_, path, _) then if path.is_empty() then "member" else path[path.count() - 1],
             .SubscriptExpr(base, _, _) then self.ref_target_expr_name(base),
             .DerefExpr(_, _) then "*e",
-            .UnsafeDerefExpr(_, _) then "unsafe *e",
+            .UnsafeDerefExpr(_, _) then "*e",
             _ then self.describe_expr_shallow(expr),
         }
     }
@@ -905,7 +919,7 @@ given TypeChecker {
             .Variable(sym) then self.context().symbol_name(*sym),
             .MemberPath(_, path) then if path.is_empty() then "member" else path[path.count() - 1],
             .DerefExpr(_) then "*e",
-            .UnsafeDerefExpr(_) then "unsafe *e",
+            .UnsafeDerefExpr(_) then "*e",
             _ then "value",
         }
     }
@@ -1453,7 +1467,7 @@ given TypeChecker {
                         }
                         let value_name = self.ref_target_typed_name(expr_ref)
                         self.push_diagnostic_at_span(
-                            "Cannot take '&' of immutable value: \(value_name). Only 'let mutable' lvalues (and lvalues reached through */unsafe * links) can use '&'.",
+                            "Cannot take '&' of immutable value: \(value_name). Only 'let mutable' lvalues (and lvalues reached through * or *unsafe links) can use '&'.",
                             diagnostic_span
                         )
                         adapted = make_typed_expr(TypedExprKind.RefExpr(expr_ref), expected_type)

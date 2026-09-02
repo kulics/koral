@@ -1460,7 +1460,7 @@ given TypeChecker {
                                 TypedExprKind.ArithmeticExpr(box(pointer_expr), ArithmeticOperator.Add(), box(typed_index)),
                                 pointer_base_type,
                             )
-                            let deref_expr = make_typed_expr(TypedExprKind.DerefExpr(box(offset_expr)), element_type)
+                            let deref_expr = make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(offset_expr)), element_type)
                             yield self.adapt_expr_to_expected_type(deref_expr, expected)
                         },
                         .String() then {
@@ -1854,7 +1854,7 @@ given TypeChecker {
                         make_diagnostic_at(
                             DiagnosticStage.Semantic(),
                             self.storage.file_path,
-                            "Cannot take '&mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or unsafe * links) can use '&mutable'.",
+                                    "Cannot take '&mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or *unsafe links) can use '&mutable'.",
                             self.ast_expr_span(inner)
                         )
                     )
@@ -1898,7 +1898,7 @@ given TypeChecker {
     protected check_ptr_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         let _ = expected
         return when expr in {
-            .PtrExpr(inner, _) then {
+            .PtrExpr(inner, is_mutable, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
                 let typed_inner_ref = box(typed_inner)
                 let is_addressable = self.is_implicit_ref_candidate_shape(typed_inner_ref)
@@ -1906,12 +1906,25 @@ given TypeChecker {
                     or inner is .UnsafeDerefExpr(_, _)
                 if not is_addressable then {
                     if self.is_literal_expr(inner) then {
-                        self.push_expr_diagnostic(expr, "cannot take unsafe & of literal")
+                        self.push_expr_diagnostic(expr, "cannot take &unsafe of literal")
                     } else {
-                        self.push_expr_diagnostic(expr, "cannot take unsafe & of temporary value")
+                        self.push_expr_diagnostic(expr, "cannot take &unsafe of temporary value")
                     }
                 }
-                let ptr_type = if self.can_take_mutable_ref_of_expr(typed_inner_ref) then {
+                let can_take_mutable = self.can_take_mutable_ref_of_expr(typed_inner_ref)
+                if is_mutable and not can_take_mutable and self.is_implicit_ref_candidate_shape(typed_inner_ref) then {
+                    let value_name = self.ref_target_expr_name(inner)
+                    self.storage.diagnostics.push(
+                        make_diagnostic_at(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Cannot take '&unsafe mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * or *unsafe links) can use '&unsafe mutable'.",
+                            self.ast_expr_span(inner)
+                        )
+                    )
+                    yield self.empty_typed_block(Type.Unknown())
+                }
+                let ptr_type = if is_mutable then {
                     yield Type.MutablePointerType(box(typed_inner.expr_type))
                 } else {
                     yield Type.PointerType(box(typed_inner.expr_type))
@@ -1983,20 +1996,30 @@ given TypeChecker {
                             _ then *inner_ref,
                         }
                     },
-                    .MutablePointerType(_) then {
-                        self.push_expr_diagnostic(expr, "Raw pointer dereference requires 'unsafe *expr'; plain '*expr' is only for safe references")
-                        yield Type.Unknown()
+                    .MutablePointerType(inner_ref) then {
+                        yield when *inner_ref in {
+                            .OpaqueType(_) then {
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then *inner_ref,
+                        }
                     },
-                    .PointerType(_) then {
-                        self.push_expr_diagnostic(expr, "Raw pointer dereference requires 'unsafe *expr'; plain '*expr' is only for safe references")
-                        yield Type.Unknown()
+                    .PointerType(inner_ref) then {
+                        yield when *inner_ref in {
+                            .OpaqueType(_) then {
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
+                                yield Type.Unknown()
+                            },
+                            _ then *inner_ref,
+                        }
                     },
                     _ then {
                         let actual = when typed_inner.expr_type in {
                             .TypeVar(_) then "Int",
                             _ then type_to_string(typed_inner.expr_type),
                         }
-                        self.push_expr_diagnostic(expr, "Type mismatch: expected Reference type, got \(actual)")
+                        self.push_expr_diagnostic(expr, "Type mismatch: expected Reference or raw pointer type, got \(actual)")
                         yield Type.Unknown()
                     },
                 }
@@ -2017,7 +2040,9 @@ given TypeChecker {
                         if has_deref_bound then {
                             checked_type = inner_t
                         } else {
-                            let ptr_type_name = "\(param_name) unsafe *"
+                            let ptr_type_name = if typed_inner.expr_type is .MutablePointerType(_)
+                                then "*unsafe mutable \(param_name)"
+                                else "*unsafe \(param_name)"
                             self.push_expr_diagnostic(
                                 expr,
                                 "Cannot use * on '\(ptr_type_name)': type parameter '\(param_name)' does not have 'Deref' bound. Add 'Deref' constraint: [\(param_name) Deref]"
@@ -2029,7 +2054,11 @@ given TypeChecker {
                         then inner_t
                         else Type.Unknown(),
                 }
-                yield make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t)
+                yield when typed_inner.expr_type in {
+                    .PointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t),
+                    .MutablePointerType(_) then make_typed_expr(TypedExprKind.UnsafeDerefExpr(box(typed_inner)), checked_inner_t),
+                    _ then make_typed_expr(TypedExprKind.DerefExpr(box(typed_inner)), checked_inner_t),
+                }
             },
             .UnsafeDerefExpr(inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope)
@@ -2037,7 +2066,7 @@ given TypeChecker {
                     .MutablePointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use unsafe * on an opaque type unsafe *: type layout is unknown at compile time")
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then *inner_ref,
@@ -2046,7 +2075,7 @@ given TypeChecker {
                     .PointerType(inner_ref) then {
                         yield when *inner_ref in {
                             .OpaqueType(_) then {
-                                self.push_expr_diagnostic(expr, "Cannot use unsafe * on an opaque type unsafe *: type layout is unknown at compile time")
+                                self.push_expr_diagnostic(expr, "Cannot use * on an opaque type *unsafe: type layout is unknown at compile time")
                                 yield Type.Unknown()
                             },
                             _ then *inner_ref,
@@ -2078,10 +2107,10 @@ given TypeChecker {
                         if has_deref_bound then {
                             checked_type = inner_t
                         } else {
-                            let ptr_type_name = "\(param_name) unsafe *"
+                            let ptr_type_name = type_to_string(typed_inner.expr_type)
                             self.push_expr_diagnostic(
                                 expr,
-                                "Cannot use unsafe * on '\(ptr_type_name)': type parameter '\(param_name)' does not have 'Deref' bound. Add 'Deref' constraint: [\(param_name) Deref]"
+                                "Cannot use * on '\(ptr_type_name)': type parameter '\(param_name)' does not have 'Deref' bound. Add 'Deref' constraint: [\(param_name) Deref]"
                             )
                         }
                         yield checked_type
@@ -2100,7 +2129,7 @@ given TypeChecker {
         return when expr in {
             .RefExpr(_, _, _) then self.check_ref_expr_ref(expr, expected, scope),
             .WeakrefExpr(_, _) then self.check_weakref_expr_ref(expr, expected, scope),
-            .PtrExpr(_, _) then self.check_ptr_expr_ref(expr, expected, scope),
+            .PtrExpr(_, _, _) then self.check_ptr_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_deref_expr_ref(expr, expected, scope),
             .UnsafeDerefExpr(_, _) then self.check_deref_expr_ref(expr, expected, scope),
             _ then self.empty_typed_block(Type.Unknown()),
@@ -2122,7 +2151,7 @@ given TypeChecker {
             .IsNotExpr(_, _, _) then self.check_literal_pattern_expr_ref(expr, expected, scope),
             .RefExpr(_, _, _) then self.check_reference_expr_ref(expr, expected, scope),
             .WeakrefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
-            .PtrExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
+            .PtrExpr(_, _, _) then self.check_reference_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
             .UnsafeDerefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
             _ then self.empty_typed_block(Type.Unknown()),
@@ -2144,8 +2173,9 @@ given TypeChecker {
             .IsNotExpr(_, _, _) then self.check_basic_expr_ref(expr, expected, scope),
             .RefExpr(_, _, _) then self.check_basic_expr_ref(expr, expected, scope),
             .WeakrefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
-            .PtrExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
+            .PtrExpr(_, _, _) then self.check_basic_expr_ref(expr, expected, scope),
             .DerefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
+            .UnsafeDerefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),
             .ComparisonExpr(left, op, right, _) then self.check_comparison_expr_ref(left, op, right, scope),
             .ComparisonChainExpr(operands, operators, _) then self.check_comparison_chain_expr_ref(operands, operators, scope),
@@ -2181,7 +2211,6 @@ given TypeChecker {
             .LambdaExpr(_, _, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
             .ImplicitMemberExpr(_, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
             .NamedArgument(_, _, _) then self.check_control_flow_expr_ref(expr, expected, scope),
-            .UnsafeDerefExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
         }
 
         return result
