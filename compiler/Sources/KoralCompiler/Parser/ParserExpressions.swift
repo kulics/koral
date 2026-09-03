@@ -173,7 +173,7 @@ extension Parser {
         break
       }
       try match(.orKeyword)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: .orKeyword)
       let right = try parseAndThenExpression()
       left = .orExpression(left: left, right: right)
     }
@@ -213,7 +213,7 @@ extension Parser {
       // If next token is `then`, don't consume — let parseAndThenExpression handle it
       if lexer.peekNextToken() === .thenKeyword { break }
       try match(.andKeyword)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: .andKeyword)
       let right = try parseLogicalNotExpression()
       left = .andExpression(left: left, right: right)
     }
@@ -249,12 +249,12 @@ extension Parser {
       // Check for `is not`
       if currentToken === .notKeyword {
         try match(.notKeyword)
-        try requireNoLineBreakBeforeRHS()
+        try requireNoLineBreakBeforeRHS(after: .notKeyword)
         let pattern = try parseSinglePattern()
         return .isNotExpression(subject: left, pattern: pattern, span: startSpan)
       }
 
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: .isKeyword)
       let pattern = try parseSinglePattern()
       return .isExpression(subject: left, pattern: pattern, span: startSpan)
     }
@@ -271,7 +271,7 @@ extension Parser {
         break
       }
       try match(.pipe)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: .pipe)
       let right = try parseBitwiseXorExpression()
       left = .bitwiseExpression(left: left, operator: .or, right: right)
     }
@@ -285,7 +285,7 @@ extension Parser {
         break
       }
       try match(.caret)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: .caret)
       let right = try parseBitwiseAndExpression()
       left = .bitwiseExpression(left: left, operator: .xor, right: right)
     }
@@ -299,7 +299,7 @@ extension Parser {
         break
       }
       try match(.ampersand)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: .ampersand)
       let right = try parseRangeExpression()
       left = .bitwiseExpression(left: left, operator: .and, right: right)
     }
@@ -312,16 +312,18 @@ extension Parser {
   private func parseRangeExpression() throws -> ExpressionNode {
     // Handle prefix range operators: ..b, ..<b, ..
     if currentToken === .range {
+      let op = currentToken
       try match(.range)
-      if canContinueRangeBoundAfterNewline() && canStartRangeBound() {
+      if canContinueRangeBoundAfterNewline(after: op) && canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .to, left: nil, right: right)
       }
       return .rangeExpression(operator: .full, left: nil, right: nil)
     }
     if currentToken === .rangeLess {
+      let op = currentToken
       try match(.rangeLess)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .toOpen, left: nil, right: right)
     }
@@ -334,8 +336,9 @@ extension Parser {
       if shouldBreakBinaryAtCurrentToken() {
         return left
       }
+      let op = currentToken
       try match(.range)
-      if canContinueRangeBoundAfterNewline() && canStartRangeBound() {
+      if canContinueRangeBoundAfterNewline(after: op) && canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .closed, left: left, right: right)
       }
@@ -344,16 +347,18 @@ extension Parser {
       if shouldBreakBinaryAtCurrentToken() {
         return left
       }
+      let op = currentToken
       try match(.rangeLess)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .closedOpen, left: left, right: right)
     case .lessRange:  // <..
       if shouldBreakBinaryAtCurrentToken() {
         return left
       }
+      let op = currentToken
       try match(.lessRange)
-      if canContinueRangeBoundAfterNewline() && canStartRangeBound() {
+      if canContinueRangeBoundAfterNewline(after: op) && canStartRangeBound() {
         let right = try parseComparisonExpression()
         return .rangeExpression(operator: .openClosed, left: left, right: right)
       }
@@ -362,8 +367,9 @@ extension Parser {
       if shouldBreakBinaryAtCurrentToken() {
         return left
       }
+      let op = currentToken
       try match(.lessRangeLess)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseComparisonExpression()
       return .rangeExpression(operator: .open, left: left, right: right)
     default:
@@ -435,7 +441,7 @@ extension Parser {
     if isEqualityComparisonToken(currentToken) {
       let op = currentToken
       try match(op)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseShiftExpression()
       if isComparisonToken(currentToken) {
         throw comparisonChainError(at: currentSpan)
@@ -450,7 +456,7 @@ extension Parser {
     let firstToken = currentToken
     let firstDirection = comparisonChainDirection(for: firstToken)
     try match(firstToken)
-    try requireNoLineBreakBeforeRHS()
+    try requireNoLineBreakBeforeRHS(after: firstToken)
     let firstRight = try parseShiftExpression()
 
     guard let direction = firstDirection else {
@@ -474,7 +480,7 @@ extension Parser {
 
       let op = currentToken
       try match(op)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseShiftExpression()
       operands.append(right)
       operators.append(tokenToComparisonOperator(op))
@@ -499,7 +505,7 @@ extension Parser {
       }
       let op = currentToken
       try match(op)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseAdditiveExpression()
       let bitOp: BitwiseOperator = (op === .leftShift) ? .shiftLeft : .shiftRight
       left = .bitwiseExpression(left: left, operator: bitOp, right: right)
@@ -519,7 +525,7 @@ extension Parser {
       }
       let op = currentToken
       try match(op)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parseMultiplicativeExpression()
       left = .arithmeticExpression(
         left: left,
@@ -540,7 +546,7 @@ extension Parser {
       }
       let op = currentToken
       try match(op)
-      try requireNoLineBreakBeforeRHS()
+      try requireNoLineBreakBeforeRHS(after: op)
       let right = try parsePrefixExpression()
       left = .arithmeticExpression(
         left: left,

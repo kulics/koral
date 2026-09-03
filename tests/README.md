@@ -93,6 +93,18 @@ Use this bucket when changing identifier parsing or naming-rule enforcement for 
 - `identifier_case_pattern_enum_ctor_error`
 - `identifier_case_module_error`
 
+### ASI / newline continuation
+
+Use this bucket when changing statement termination, line-join tokens, or
+trailing infix-operator continuation.
+
+- `newline_semicolon_trailing_operator_continuation_ok`
+- `newline_semicolon_continuation_ok`
+- `newline_semicolon_grouped_expression_ok`
+- `newline_semicolon_blankline_blocks_dot`
+- `newline_semicolon_comment_blocks_infix`
+- `newline_semicolon_comparison_blocks_error`
+
 ### New reference surface (`*T`, `?*T`, `*unsafe T`)
 
 Use this bucket when changing managed reference, weak reference, or raw-pointer syntax/semantics.

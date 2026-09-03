@@ -71,16 +71,20 @@ Semicolon insertion follows these rules:
 
 - A statement may end with an explicit semicolon `;`.
 - A newline terminates the current statement by default.
-- The global ASI whitelist contains only a narrow set of explicit join tokens: `and`, `or`, `is`, `then`, `else`, `.`, and `->`.
+- The line-leading ASI whitelist still contains only a narrow set of explicit join tokens: `and`, `or`, `is`, `then`, `else`, `.`, and `->`.
 - Forms such as `and then`, `or else`, and `or return` remain valid across newlines because they begin with the whitelisted `and` or `or` token and are then consumed by the surrounding grammar.
+- Separately, a newline may also continue the current expression when the previous line ends with an infix operator that still requires its right-hand side. This includes arithmetic, comparison, logical/bitwise, and range operators such as `+`, `*`, `==`, `and`, `<<`, and `..`.
 - Keywords such as `in` and `as` are not general ASI join tokens; whether they may continue across a newline is decided by the specific construct that owns them, such as `for ... in ...`, `when ... in ...`, or `given Type as Trait`.
 - Separately, multiline expressions may keep parsing while the parser is still inside an unclosed `()` or `[]` expression group.
-- Blank lines and comments do not change the decision on their own; only the next token and the current grouping state matter.
-- Ordinary operators do not join across newlines. This includes arithmetic, comparison, bitwise, and range operators such as `+`, `*`, `==`, `<<`, and `..`.
+- Blank lines and comments do not change the decision on their own; only the next token, whether the previous line ended with a trailing infix operator, and the current grouping state matter.
+- Ordinary operators still do not join across newlines at line start. This means `+`, `*`, `==`, `<<`, and `..` cannot begin the continued line unless the parser is already inside an unclosed grouping.
 
 ```koral
 let a = 0;
 let b = 1;
+
+let sum = 1 +
+    2
 
 let count = "abc"
 
@@ -99,12 +103,12 @@ let grouped = (
     + 2
 )
 
-// Not allowed: ordinary operators do not continue at line start.
+// Not allowed: ordinary operators still do not continue at line start.
 let bad = 1
 + 2
 ```
 
-The `+ 2` line above starts a new statement and therefore produces a parse error. By contrast, the grouped `(` ... `)` form stays valid because the expression is still inside an unclosed delimiter.
+The `1 +` form above stays in the same expression because the previous line ended with an infix operator that still needs its right-hand side. The `+ 2` line at the end still starts a new statement and therefore produces a parse error. By contrast, the grouped `(` ... `)` form stays valid because the expression is still inside an unclosed delimiter.
 
 ### Entry Function
 
