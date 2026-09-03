@@ -396,7 +396,7 @@ swift run koralc emit-c --package-config path/to/koral.json --target-module app:
 - `-o, --output <dir>`: output directory
 - `--package-config <path>`: build from a package manifest
 - `--target-module <name>`: choose the manifest target module, for example `app::main`
-- `--deps-root <path>`: dependency root directory for manifest-driven builds
+- `--requires-root <path>`: dependency root directory for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading the std manifest
 

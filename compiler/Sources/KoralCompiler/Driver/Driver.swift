@@ -15,7 +15,7 @@ public class Driver {
     var packageConfigPath: String?
     var entryFilePath: String?
     var targetModuleName: String?
-    var depsRoot: String?
+    var requiresRoot: String?
     var stdConfigPath: String?
     var outputDir: String?
     var noStd = false
@@ -118,12 +118,12 @@ public class Driver {
           writeStderr("Error: Missing value for --target-module option")
           exit(1)
         }
-      } else if arg == "--deps-root" {
+      } else if arg == "--requires-root" {
         if i + 1 < remainingArgs.count {
-          options.depsRoot = remainingArgs[i + 1]
+          options.requiresRoot = remainingArgs[i + 1]
           i += 2
         } else {
-          writeStderr("Error: Missing path for --deps-root option")
+          writeStderr("Error: Missing path for --requires-root option")
           exit(1)
         }
       } else if arg == "--std-config" {
@@ -339,7 +339,7 @@ public class Driver {
         mode: mode,
         outputDir: options.outputDir,
         noStd: options.noStd,
-        depsRoot: options.depsRoot,
+        requiresRoot: options.requiresRoot,
         stdConfigPath: options.stdConfigPath
       )
       return
@@ -425,7 +425,7 @@ public class Driver {
     mode: DriverCommand,
     outputDir: String?,
     noStd: Bool,
-    depsRoot: String?,
+    requiresRoot: String?,
     stdConfigPath: String?
   ) throws {
     let packageConfigURL = URL(fileURLWithPath: packageConfigPath).standardized
@@ -438,7 +438,7 @@ public class Driver {
       rootManifestPath: packageConfigURL.path,
       targetModuleName: resolvedTargetModuleName,
       stdManifestPath: resolvedStdConfigPath,
-      depsRoot: depsRoot
+      requiresRoot: requiresRoot
     )
 
     let baseName = sanitizeModuleArtifactName(packageGraph.targetModuleName)
@@ -986,7 +986,7 @@ public class Driver {
         -o, --output <path>       Output directory for generated files
         --package-config <path>   Package manifest path for manifest-driven builds
         --target-module <name>    Target module full name, e.g. app::main
-        --deps-root <path>        Dependency root directory (default unresolved)
+        --requires-root <path>        Root directory for resolved requires
         --std-config <path>       Standard library manifest path
         --no-std                  Compile without standard library
       """

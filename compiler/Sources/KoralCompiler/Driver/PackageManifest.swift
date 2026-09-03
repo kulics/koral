@@ -452,7 +452,7 @@ public func loadResolvedPackageGraph(
   rootManifestPath: String,
   targetModuleName: String,
   stdManifestPath: String?,
-  depsRoot: String?
+  requiresRoot: String?
 ) throws -> ResolvedPackageGraph {
   let rootManifest = try loadPackageManifest(at: rootManifestPath)
   var modulesByName: [String: ResolvedModuleSpec] = [:]
@@ -467,9 +467,9 @@ public func loadResolvedPackageGraph(
       ?? stdManifest.modules.keys.sorted().first
   }
 
-  if let depsRoot {
+  if let requiresRoot {
     for (depKey, _) in rootManifest.dependencies.sorted(by: { $0.key < $1.key }) {
-      let depManifestPath = URL(fileURLWithPath: depsRoot)
+      let depManifestPath = URL(fileURLWithPath: requiresRoot)
         .appendingPathComponent(depKey)
         .appendingPathComponent("koral.json")
         .standardized
