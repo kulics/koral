@@ -3262,68 +3262,6 @@ extension TypeChecker {
     ), span: currentSpan)
   }
 
-  // MARK: - Named Argument Validation
-
-  /// Validates named argument labels against parameter definitions.
-  /// Called after arguments are type-checked to verify label correctness.
-  /// - Parameters:
-  ///   - callArgs: The call arguments with optional labels from the call site
-  ///   - parameters: The parameter definitions with name and named flag
-  ///   - callDescription: Description of the call for error messages
-  private func validateNamedArguments(
-    callArgs: [CallArg],
-    parameters: [(name: String, named: Bool)],
-    callDescription: String
-  ) throws {
-    let paramCount = min(callArgs.count, parameters.count)
-    for i in 0..<paramCount {
-      let arg = callArgs[i]
-      let param = parameters[i]
-      if param.named {
-        // Parameter requires a label
-        guard let label = arg.label else {
-          throw SemanticError(.generic("Missing named argument label: expected '\(param.name)' at position \(i + 1)"), span: currentSpan)
-        }
-        if label != param.name {
-          throw SemanticError(.generic("Named argument mismatch: expected '\(param.name)', got '\(label)' at position \(i + 1)"), span: currentSpan)
-        }
-      } else {
-        // Parameter is positional - should not have a label
-        if let label = arg.label {
-          throw SemanticError(.generic("Unexpected named argument label '\(label)' at position \(i + 1): this parameter is positional"), span: currentSpan)
-        }
-      }
-    }
-  }
-
-  /// Validates named argument labels for pattern matching against parameter definitions.
-  /// - Parameters:
-  ///   - patternArgs: The pattern arguments with optional labels
-  ///   - parameters: The parameter definitions with name and named flag
-  ///   - patternDescription: Description of the pattern for error messages
-  func validateNamedPatternArguments(
-    patternArgs: [PatternArg],
-    parameters: [(name: String, named: Bool)],
-    patternDescription: String
-  ) throws {
-    let paramCount = min(patternArgs.count, parameters.count)
-    for i in 0..<paramCount {
-      let arg = patternArgs[i]
-      let param = parameters[i]
-      if param.named {
-        guard let label = arg.label else {
-          throw SemanticError(.generic("Missing named argument label in pattern: expected '\(param.name)' at position \(i + 1)"), span: currentSpan)
-        }
-        if label != param.name {
-          throw SemanticError(.generic("Named argument mismatch in pattern: expected '\(param.name)', got '\(label)' at position \(i + 1)"), span: currentSpan)
-        }
-      } else {
-        if let label = arg.label {
-          throw SemanticError(.generic("Unexpected named argument label '\(label)' in pattern at position \(i + 1): this parameter is positional"), span: currentSpan)
-        }
-      }
-    }
-  }
   
   /// Infers the type of a call expression
   func inferCallExpression(callee: ExpressionNode, arguments callArgs: [CallArg], expectedType: Type? = nil) throws -> TypedExpressionNode {
