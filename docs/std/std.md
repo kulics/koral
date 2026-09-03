@@ -115,6 +115,10 @@ public trait Error {
 public trait Drop {
     drop(source *unsafe mutable Self) Void
 }
+
+public trait Default {
+    default() Self
+}
 ```
 
 ## Types
@@ -948,7 +952,7 @@ given[T Deref] List[T] {
 }
 
 given Duration {
-    public new(seconds: Int64, nanoseconds: Int64) Result[Duration]
+    public new(seconds Int64, nanoseconds Int64) Result[Duration]
     public as_nanoseconds(self) Int64
     public as_microseconds(self) Int64
     public as_milliseconds(self) Int64
@@ -964,6 +968,10 @@ given Duration as Eq {
 
 given Duration as Ord {
     public compare(self, other Duration) Int
+}
+
+given Duration as Default {
+    public default() Self
 }
 
 given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
@@ -1533,10 +1541,10 @@ given String {
     public find_from(*self, start UInt, pat String) Option[UInt]
     public contains(*self, pat String) Bool
     public repeat(*self, times UInt) String
-    public replace_n(*self, pat String, n UInt, with: String) String
+    public replace_n(*self, pat String, n UInt, with String) String
     public split_once(*self, sep String) Option[Pair[String, String]]
     public split_last_once(*self, sep String) Option[Pair[String, String]]
-    public replace_all(*self, pat String, with: String) String
+    public replace_all(*self, pat String, with String) String
     public split_ascii_whitespace(*self) StringSplitAsciiWhitespaceIterator
     public split(*self, sep String) StringSplitIterator
     public lines(*self) StringLinesIterator

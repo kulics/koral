@@ -25,8 +25,8 @@ public type TimeZone
 ## Given Implementations
 ```koral
 given ClockTime {
-    public new(hour: Int, minute: Int, second: Int) Result[ClockTime]
-    public new_full(hour: Int, minute: Int, second: Int, nanosecond: Int) Result[ClockTime]
+    public new(hour Int, minute Int, second Int) Result[ClockTime]
+    public new_full(hour Int, minute Int, second Int, nanosecond Int) Result[ClockTime]
     public midnight() ClockTime
 }
 

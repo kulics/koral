@@ -60,7 +60,7 @@ public let read_file[T IntoPath](path T) Result[List[UInt8]] = {
             let mutable out List[UInt8] = []
             let mutable chunk = make_bytes(4096)
             while true then {
-                when f.read(into: &mutable chunk, ..) in {
+                when f.read(&mutable chunk, ..) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return Result[List[UInt8]].Ok(out)
@@ -79,13 +79,13 @@ public let read_file[T IntoPath](path T) Result[List[UInt8]] = {
 }
 
 /// Write a byte list to file (binary, overwrite)
-public let write_file[T IntoPath](path T, content: List[UInt8]) Result[Void] = {
+public let write_file[T IntoPath](path T, content List[UInt8]) Result[Void] = {
     return when open_file(path.into_path(), OpenMode.Write()) in {
         .Ok(f) then {
             let mutable start UInt = 0
             let end = content.count()
             while start < end then {
-                when f.write(from: content, start..<end) in {
+                when f.write(content, start..<end) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return Result[Void].Error(box(IoError.WriteZero()))
@@ -106,13 +106,13 @@ public let write_file[T IntoPath](path T, content: List[UInt8]) Result[Void] = {
 }
 
 /// Append a byte list to file (binary)
-public let append_file[T IntoPath](path T, content: List[UInt8]) Result[Void] = {
+public let append_file[T IntoPath](path T, content List[UInt8]) Result[Void] = {
     return when open_file(path.into_path(), OpenMode.Append()) in {
         .Ok(f) then {
             let mutable start UInt = 0
             let end = content.count()
             while start < end then {
-                when f.write(from: content, start..<end) in {
+                when f.write(content, start..<end) in {
                     .Ok(n) then {
                         if n == 0 then {
                             return Result[Void].Error(box(IoError.WriteZero()))
@@ -146,13 +146,13 @@ public let read_text_file[T IntoPath](path T) Result[String] = {
 }
 
 /// Write a string to file (UTF-8 text, overwrite)
-public let write_text_file[T IntoPath](path T, content: String) Result[Void] = {
-    return write_file(path, content: content.to_bytes())
+public let write_text_file[T IntoPath](path T, content String) Result[Void] = {
+    return write_file(path, content.to_bytes())
 }
 
 /// Append a string to file (UTF-8 text)
-public let append_text_file[T IntoPath](path T, content: String) Result[Void] = {
-    return append_file(path, content: content.to_bytes())
+public let append_text_file[T IntoPath](path T, content String) Result[Void] = {
+    return append_file(path, content.to_bytes())
 }
 
 // ============================================================================
@@ -160,9 +160,9 @@ public let append_text_file[T IntoPath](path T, content: String) Result[Void] = 
 // ============================================================================
 
 /// Copy file (reads source as bytes, writes to destination)
-public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void] =
+public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to T2) Result[Void] =
     when read_file(src) in {
-        .Ok(bytes) then write_file(to, content: bytes),
+        .Ok(bytes) then write_file(to, bytes),
         .Error(e) then Result[Void].Error(e),
     }
 
@@ -176,7 +176,7 @@ public let remove_file[T IntoPath](path T) Result[Void] = {
 }
 
 /// Rename or move a file/directory
-public let rename_path[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void] = {
+public let rename_path[T1 IntoPath, T2 IntoPath](src T1, to T2) Result[Void] = {
     let src_s = src.into_path().to_string()
     let to_s = to.into_path().to_string()
     return if __koral_rename(src_s.storage.data, to_s.storage.data) == 0 then
@@ -321,7 +321,7 @@ public let set_permissions[T IntoPath](path T, perm Permission) Result[Void] = {
 }
 
 /// Create a hard link at `link` pointing to `to`
-public let create_hard_link[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Void] = {
+public let create_hard_link[T1 IntoPath, T2 IntoPath](link T1, to T2) Result[Void] = {
     let norm_target = to.into_path().normalize().to_string()
     let norm_link = link.into_path().normalize().to_string()
     let result = __koral_link(norm_target.storage.data, norm_link.storage.data)
@@ -332,7 +332,7 @@ public let create_hard_link[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Vo
 }
 
 /// Create a symbolic link at `link` pointing to `to`
-public let create_symlink[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Void] = {
+public let create_symlink[T1 IntoPath, T2 IntoPath](link T1, to T2) Result[Void] = {
     let norm_target = to.into_path().normalize().to_string()
     let norm_link = link.into_path().normalize().to_string()
     let result = __koral_symlink(norm_target.storage.data, norm_link.storage.data)
@@ -372,7 +372,7 @@ public let truncate_file[T IntoPath](path T, size UInt64) Result[Void] = {
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
 /// Returns an open File handle (use file.path() to get the path).
-public let create_temp_file[T IntoPath](dir T, prefix: String) Result[File] = {
+public let create_temp_file[T IntoPath](dir T, prefix String) Result[File] = {
     let dir_path = dir.into_path()
     let base = if dir_path.is_empty() then temp_dir() else dir_path
     let base_str = base.to_string()

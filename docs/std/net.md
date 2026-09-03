@@ -162,22 +162,22 @@ given TcpSocket {
 }
 
 given TcpSocket as Reader {
-    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given TcpSocket as Writer {
-    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public write(*self, from List[UInt8], range Range[UInt]) Result[UInt]
     public flush(*self) Result[Void]
 }
 
 given UdpSocket {
     public fd(*self) Int
     public bind[T IntoSocketAddr](addr T) Result[UdpSocket]
-    public send_to[T IntoSocketAddr](*self, addr T, from: List[UInt8], range Range[UInt]) Result[UInt]
-    public recv_from(*self, into: *mutable List[UInt8], range Range[UInt]) Result[Pair[UInt, SocketAddr]]
+    public send_to[T IntoSocketAddr](*self, addr T, from List[UInt8], range Range[UInt]) Result[UInt]
+    public recv_from(*self, into *mutable List[UInt8], range Range[UInt]) Result[Pair[UInt, SocketAddr]]
     public connect[T IntoSocketAddr](*self, addr T) Result[Void]
-    public send(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
-    public recv(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public send(*self, from List[UInt8], range Range[UInt]) Result[UInt]
+    public recv(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
     public local_addr(*self) Result[SocketAddr]
     public peer_addr(*self) Result[SocketAddr]
     public set_broadcast(*self, broadcast Bool) Result[Void]

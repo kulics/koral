@@ -237,7 +237,9 @@ extension TypeChecker {
     case .call(let callee, let arguments):
       try collectCapturedVariables(expr: callee, paramNames: paramNames, captures: &captures)
       for arg in arguments {
-        try collectCapturedVariables(expr: arg.expression, paramNames: paramNames, captures: &captures)
+        if let expr = arg.expression {
+          try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+        }
       }
       
     case .arithmeticExpression(let left, _, let right),
@@ -310,7 +312,9 @@ extension TypeChecker {
       
     case .staticMethodCall(_, _, _, let arguments):
       for arg in arguments {
-        try collectCapturedVariables(expr: arg.expression, paramNames: paramNames, captures: &captures)
+        if let expr = arg.expression {
+          try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+        }
       }
       
     case .forExpression(_, let iterable, let body):
@@ -343,25 +347,33 @@ extension TypeChecker {
       // Generic method call - collect from base and arguments
       try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
       for arg in arguments {
-        try collectCapturedVariables(expr: arg.expression, paramNames: paramNames, captures: &captures)
+        if let expr = arg.expression {
+          try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+        }
       }
 
     case .qualifiedMethodCall(let base, _, _, let arguments):
       try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
       for arg in arguments {
-        try collectCapturedVariables(expr: arg.expression, paramNames: paramNames, captures: &captures)
+        if let expr = arg.expression {
+          try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+        }
       }
 
     case .qualifiedGenericMethodCall(let base, _, _, _, let arguments):
       try collectCapturedVariables(expr: base, paramNames: paramNames, captures: &captures)
       for arg in arguments {
-        try collectCapturedVariables(expr: arg.expression, paramNames: paramNames, captures: &captures)
+        if let expr = arg.expression {
+          try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+        }
       }
       
     case .implicitMemberExpression(_, let arguments, _):
       // Implicit member expression - collect from arguments
       for arg in arguments {
-        try collectCapturedVariables(expr: arg.expression, paramNames: paramNames, captures: &captures)
+        if let expr = arg.expression {
+          try collectCapturedVariables(expr: expr, paramNames: paramNames, captures: &captures)
+        }
       }
 
     case .orElseExpression(let operand, let defaultExpr, _):

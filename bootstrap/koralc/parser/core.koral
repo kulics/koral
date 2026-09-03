@@ -910,10 +910,8 @@ given Parser {
                     return .Error(box(self.invalid_parameter_name_error(name)))
                 }
 
-                let mutable is_named = false
                 if self.current().kind is .Colon() then {
-                    is_named = true
-                    self.advance()
+                    return .Error(box("Function parameters use 'name Type', not 'name: Type'"))
                 }
 
                 if not self.is_type_start() then {
@@ -923,7 +921,7 @@ given Parser {
                     return .Error(box("parse parameter type error"))
                 }
 
-                params.push(Param(name, is_mut, param_type, is_named))
+                params.push(Param(name, is_mut, param_type, false))
             }
 
             when self.current().kind in {
@@ -976,14 +974,6 @@ given Parser {
 
             self.advance()
             let params = self.parse_param_list() or return
-
-            if is_foreign then {
-                for param in params then {
-                    if param.named then {
-                        return .Error(box("Named parameters are not supported in foreign declarations"))
-                    }
-                }
-            }
 
             when self.current().kind in {
                 .RParen() then {},
@@ -1124,17 +1114,15 @@ given Parser {
                             if not self.is_valid_value_name(field_name) then {
                                 return .Error(box(self.invalid_field_name_error(field_name)))
                             }
-                            let mutable field_named = false
                             if self.current().kind is .Colon() then {
-                                field_named = true
-                                self.advance()
+                                return .Error(box("Constructor field declarations use 'name Type', not 'name: Type'"))
                             }
 
                             let field_type = self.parse_type() or else {
                                 return .Error(box("parse field type error"))
                             }
 
-                            fields.push(Field(field_access, field_name, field_mut, field_type, field_named))
+                            fields.push(Field(field_access, field_name, field_mut, field_type, false))
                             if self.current().kind is .Comma() then {
                                 self.advance()
                             }
@@ -1192,15 +1180,13 @@ given Parser {
                                             if not self.is_valid_value_name(payload_name) then {
                                                 return .Error(box(self.invalid_parameter_name_error(payload_name)))
                                             }
-                                            let mutable payload_named = false
                                             if self.current().kind is .Colon() then {
-                                                payload_named = true
-                                                self.advance()
+                                                return .Error(box("Enum payload field declarations use 'name Type', not 'name: Type'"))
                                             }
                                             let payload_type = self.parse_type() or else {
                                                 return .Error(box("parse enum payload type error"))
                                             }
-                                            case_fields.push(EnumCaseField(payload_name, payload_type, payload_named))
+                                            case_fields.push(EnumCaseField(payload_name, payload_type, false))
                                             when self.current().kind in {
                                                 .Comma() then {
                                                     self.advance()

@@ -9,11 +9,11 @@ This page lists the public API of module `Std.Io` (declaration-only syntax), org
 ## Traits
 ```koral
 public trait Reader {
-    read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 public trait Writer {
-    write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    write(*self, from List[UInt8], range Range[UInt]) Result[UInt]
     flush(*self) Result[Void]
 }
 
@@ -50,13 +50,13 @@ given[R Reader] BufReader[R] {
     public with_capacity(cap UInt, r R) BufReader[R]
     public read_byte(*self) Result[Option[UInt8]]
     public read_rune(*self) Result[Option[Rune]]
-    public read_until(*self, delim UInt8, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read_until(*self, delim UInt8, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
     public read_line(*self) Result[Option[String]]
     public skip(*self, n UInt) Result[UInt]
 }
 
 given[R Reader] BufReader[R] as Reader {
-    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given[R Reader and Seeker] BufReader[R] as Seeker {
@@ -73,7 +73,7 @@ given[W Writer] BufWriter[W] {
 }
 
 given[W Writer] BufWriter[W] as Writer {
-    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public write(*self, from List[UInt8], range Range[UInt]) Result[UInt]
     public flush(*self) Result[Void]
 }
 
@@ -89,7 +89,7 @@ given ByteBuffer {
 }
 
 given ByteBuffer as Reader {
-    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given ByteBuffer as Writer {

@@ -263,13 +263,11 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
-        var isNamed = false
         if currentToken === .colon {
-          try match(.colon)
-          isNamed = true
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
         }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -363,13 +361,11 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
-        var isNamed = false
         if currentToken === .colon {
-          try match(.colon)
-          isNamed = true
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
         }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -466,13 +462,11 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: pname)
         }
         try match(.identifier(pname))
-        var isNamed = false
         if currentToken === .colon {
-          try match(.colon)
-          isNamed = true
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
         }
         let paramType = try parseType()
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -645,13 +639,11 @@ extension Parser {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
       }
       try match(.identifier(pname))
-      var isNamed = false
       if currentToken === .colon {
-        try match(.colon)
-        isNamed = true
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
       }
       let paramType = try parseType()
-      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
       if currentToken === .comma {
         try match(.comma)
       }
@@ -711,13 +703,11 @@ extension Parser {
         throw ParserError.invalidParameterName(span: currentSpan, name: pname)
       }
       try match(.identifier(pname))
-      var isNamed = false
       if currentToken === .colon {
-        try match(.colon)
-        isNamed = true
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Function parameters use 'name Type', not 'name: Type'")
       }
       let paramType = try parseType()
-      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
       if currentToken === .comma {
         try match(.comma)
       }
@@ -837,15 +827,13 @@ extension Parser {
         throw ParserError.invalidFieldName(span: currentSpan, name: paramName)
       }
       try match(.identifier(paramName))
-      var isNamed = false
       if currentToken === .colon {
-        try match(.colon)
-        isNamed = true
+        throw ParserError.unexpectedToken(span: currentSpan, got: "Constructor field declarations use 'name Type', not 'name: Type'")
       }
       let paramType = try parseType()
 
       parameters.append(
-        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: isNamed))
+        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: false))
 
       if currentToken === .comma {
         try match(.comma)
@@ -893,13 +881,11 @@ extension Parser {
           throw ParserError.invalidParameterName(span: currentSpan, name: paramName)
         }
         try match(.identifier(paramName))
-        var isNamed = false
         if currentToken === .colon {
-          try match(.colon)
-          isNamed = true
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Enum payload field declarations use 'name Type', not 'name: Type'")
         }
         let paramType = try parseType()
-        parameters.append((name: paramName, type: paramType, named: isNamed))
+        parameters.append((name: paramName, type: paramType, named: false))
 
         if currentToken === .comma {
           try match(.comma)

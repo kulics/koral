@@ -768,6 +768,11 @@ extension Parser {
 
   /// Parse a single call argument, which may be a named argument (label: expr) or positional (expr).
   private func parseCallArgument() throws -> CallArg {
+    if currentToken === .ellipsis {
+      try match(.ellipsis)
+      return CallArg(defaultFill: ())
+    }
+
     // Try to parse as named argument: identifier followed by colon
     if case .identifier(let name) = currentToken,
        isValidVariableName(name),
@@ -1125,7 +1130,7 @@ extension Parser {
         
         // Check for named parameter syntax in lambda - not allowed
         if currentToken === .colon {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Named parameters are not supported in lambda expressions")
+          throw ParserError.unexpectedToken(span: currentSpan, got: "Lambda parameters use 'name Type', not 'name: Type'")
         }
         
         // Check for optional type annotation
@@ -1173,6 +1178,12 @@ extension Parser {
       
       // Single untyped param without arrow - restore and parse as expression
       // This handles cases like (a) which could be just a parenthesized identifier
+    } catch let error as ParserError {
+      if case .unexpectedToken(_, let got, _) = error,
+         got == "Lambda parameters use 'name Type', not 'name: Type'" {
+        throw error
+      }
+      // Parsing as lambda failed, restore state
     } catch {
       // Parsing as lambda failed, restore state
     }
@@ -1247,8 +1258,8 @@ extension Parser {
       typeArgs: [],
       methodName: "new",
       arguments: [
-        CallArg(label: "seconds", expression: .integerLiteral(String(secs))),
-        CallArg(label: "nanoseconds", expression: .integerLiteral(String(nanos)))
+        CallArg(expression: .integerLiteral(String(secs))),
+        CallArg(expression: .integerLiteral(String(nanos)))
       ]
     )
 

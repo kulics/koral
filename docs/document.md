@@ -362,7 +362,7 @@ let f = 42ns
 ```
 
 Supported suffixes are `s`, `ms`, `us`, `ns`.
-Duration literals are lowered to `Duration.new(seconds: ..., nanoseconds: ...)`.
+Duration literals are lowered to `Duration.new(..., ...)` after unit normalization.
 Negative durations keep unary-minus semantics (for example `-5s` is parsed as unary `-` applied to `5s`).
 
 ### Type Casting
@@ -1205,72 +1205,65 @@ let increment(mutable x Int) Int = { x += 1; return x }
 
 For ordinary parameters, `mutable` only makes the local binding writable inside the function body. It is not part of the function signature, does not change the function type, and is ignored when checking trait/given method compatibility.
 
-#### Named Parameters
+#### Constructor Labels and Default Fill
 
-Named parameters follow these rules:
-
-- A named parameter is declared with `name: Type`.
-- Callers must supply the label at the call site as `name: expr`.
-- Each parameter independently chooses named or positional form; mixed signatures are legal.
-- Named arguments remain fixed-order and do not permit reordering.
-- Named parameters do not support default values.
+Ordinary functions and methods use positional parameters only.
 
 ```koral
-// Mixed positional and named parameters
-let create_rect(x Int, y Int, width: Int, height: Int) Rect = Rect(Point(x, y), width, height)
-create_rect(10, 20, width: 100, height: 200)
-
-// All named parameters
-let connect(host: String, port: Int) Void = {}
-connect(host: "localhost", port: 8080)
+let connect(host String, port Int) Void = {}
+connect("localhost", 8080)
 ```
 
-Swapping named arguments or omitting labels is a compile error.
-
-Named parameters also apply to structs and enums:
+Labels are reserved for nominal construction and destructuring.
 
 ```koral
-type Button(width: Int, height: Int, label: String)
-let b = Button(width: 100, height: 50, label: "OK")
+type Button(width Int, height Int, label String)
 
+let a = Button(100, 50, "OK")
+let b = Button(label: "OK", height: 50, width: 100)
+```
+
+Constructor labels follow these rules:
+
+- They are valid only on struct and enum constructors.
+- Labeled constructor arguments match by field name, not by position.
+- Reordering is allowed.
+- Positional and labeled constructor arguments may not be mixed.
+
+```koral
 type Shape {
-    Circle(radius: Float64),
-    Line(start Point, end: Point),  // mixed
+    Circle(radius Float64),
+    Line(start Point, end Point),
 }
-let s = Shape.Line(Point(0, 0), end: Point(1, 1))
+
+let s = Shape.Line(end: Point(1, 1), start: Point(0, 0))
 ```
 
-In pattern matching, named parameter positions require `name: pattern` syntax, keeping construction and destructuring symmetric:
+When omitted fields have obvious defaults, constructors may end with trailing `...`.
+
+```koral
+trait Default {
+    default() Self
+}
+
+type Window(title String, width Int, height Int)
+
+let w1 = Window(...)
+let w2 = Window(title: "Koral", ...)
+```
+
+`...` fills each omitted field by calling `Default.default()` on the omitted field type. It is constructor-only, may appear at most once, and must be the final argument.
+
+In pattern matching, labeled nominal destructuring remains available and also matches by field name:
 
 ```koral
 when s in {
     .Circle(radius: r) then println(r),
-    .Line(s, end: e) then println(s.x),
+    .Line(end: e, start: p) then println(p.x),
 }
-if b is Button(width: w, height: _, label: l) then println(l)
+
+if b is Button(label: l, width: w, height: _) then println(l)
 ```
-
-Trait methods can use named parameters. Implementations must match the trait declaration exactly (same names, same positions):
-
-```koral
-trait Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void
-}
-given MyType as Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void = {}  // must match
-}
-```
-
-Function types (`Func`) do not carry named parameter labels, and lambda parameters always use positional syntax:
-
-```koral
-let f Func(String, Int) Void = (host String, port Int) -> {
-    connect(host: host, port: port)
-}
-f("localhost", 8080)
-```
-
-Foreign declarations (`foreign let`, `foreign type`) do not support named parameters.
 
 ### Function Types
 

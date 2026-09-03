@@ -7,7 +7,7 @@ This page lists the public API of module `Std.Proc` (declaration-only syntax), o
 ```koral
 public let current_pid() UInt32
 
-public let send_process_signal(signal Int, to: UInt32) Result[Void]
+public let send_process_signal(signal Int, to UInt32) Result[Void]
 
 public let kill_process(pid UInt32) Result[Void]
 
@@ -93,7 +93,7 @@ given StdinPipe {
 }
 
 given StdinPipe as Writer {
-    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public write(*self, from List[UInt8], range Range[UInt]) Result[UInt]
     public flush(*self) Result[Void]
 }
 
@@ -102,7 +102,7 @@ given StdoutPipe {
 }
 
 given StdoutPipe as Reader {
-    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given StderrPipe {
@@ -110,7 +110,7 @@ given StderrPipe {
 }
 
 given StderrPipe as Reader {
-    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given Process {

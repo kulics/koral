@@ -386,7 +386,7 @@ let f = 42ns
 ```
 
 支持的后缀为 `s`、`ms`、`us`、`ns`。
-Duration 字面量会被降糖为 `Duration.new(seconds: ..., nanoseconds: ...)`。
+Duration 字面量会在单位归一化后降糖为 `Duration.new(..., ...)`。
 负值保持一元负号语义（例如 `-5s` 会被解析为对 `5s` 应用一元 `-`）。
 
 ### 类型转换
@@ -1245,72 +1245,65 @@ let increment(mutable x Int) Int = { x += 1; return x }
 
 对于普通参数，`mutable` 只表示函数体内部这个形参绑定可重新赋值。它不是函数签名的一部分，不会改变函数类型，也不会参与 trait/given 方法满足性的判断。
 
-#### 命名参数
+#### 构造器标签与默认填充
 
-命名参数遵循以下规则：
-
-- 命名参数声明形式为 `name: Type`。
-- 调用时必须以 `name: expr` 的形式传递。
-- 每个参数独立决定使用命名形式还是位置形式，因此允许混合签名。
-- 命名参数仍然保持固定顺序，不支持重排。
-- 命名参数不支持默认值。
+普通函数和方法一律使用位置参数：
 
 ```koral
-// 混合位置参数和命名参数
-let create_rect(x Int, y Int, width: Int, height: Int) Rect = Rect(Point(x, y), width, height)
-create_rect(10, 20, width: 100, height: 200)
-
-// 全部命名参数
-let connect(host: String, port: Int) Void = {}
-connect(host: "localhost", port: 8080)
+let connect(host String, port Int) Void = {}
+connect("localhost", 8080)
 ```
 
-调换命名参数顺序或省略标签会导致编译错误。
-
-命名参数同样适用于结构体和枚举：
+标签保留给名义类型的构造与解构：
 
 ```koral
-type Button(width: Int, height: Int, label: String)
-let b = Button(width: 100, height: 50, label: "OK")
+type Button(width Int, height Int, label String)
 
+let a = Button(100, 50, "OK")
+let b = Button(label: "OK", height: 50, width: 100)
+```
+
+构造器标签遵循这些规则：
+
+- 只允许用于 struct 和 enum 构造。
+- 标签按字段名匹配，而不是按位置匹配。
+- 允许重排。
+- 不允许在同一次构造中混用位置参数和标签参数。
+
+```koral
 type Shape {
-    Circle(radius: Float64),
-    Line(start Point, end: Point),  // 混合使用
+    Circle(radius Float64),
+    Line(start Point, end Point),
 }
-let s = Shape.Line(Point(0, 0), end: Point(1, 1))
+
+let s = Shape.Line(end: Point(1, 1), start: Point(0, 0))
 ```
 
-在模式匹配中，命名参数位置需要使用 `name: pattern` 语法，保持构造与解构的对称性：
+当遗漏字段的类型提供明显默认值时，构造器可以在末尾使用 `...`：
+
+```koral
+trait Default {
+    default() Self
+}
+
+type Window(title String, width Int, height Int)
+
+let w1 = Window(...)
+let w2 = Window(title: "Koral", ...)
+```
+
+`...` 会对每个遗漏字段调用其字段类型的 `Default.default()`。它只能用于构造器，最多出现一次，并且必须是最后一个参数。
+
+在模式匹配中，名义类型的带标签解构仍然可用，并且同样按字段名匹配：
 
 ```koral
 when s in {
     .Circle(radius: r) then println(r),
-    .Line(s, end: e) then println(s.x),
+    .Line(end: e, start: p) then println(p.x),
 }
-if b is Button(width: w, height: _, label: l) then println(l)
+
+if b is Button(label: l, width: w, height: _) then println(l)
 ```
-
-Trait 方法可以使用命名参数。实现时必须与 trait 声明完全一致（相同名称、相同位置）：
-
-```koral
-trait Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void
-}
-given MyType as Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void = {}  // 必须匹配
-}
-```
-
-函数类型（`Func`）不携带命名参数标签，lambda 参数始终使用位置参数语法：
-
-```koral
-let f Func(String, Int) Void = (host String, port Int) -> {
-    connect(host: host, port: port)
-}
-f("localhost", 8080)
-```
-
-Foreign 声明（`foreign let`、`foreign type`）不支持命名参数。
 
 ### 函数类型
 

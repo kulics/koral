@@ -226,47 +226,47 @@ let fn_types() Void = {
 }
 
 // ============================================================
-// 命名参数 (Named Parameters)
+// 构造器标签与默认填充 (Constructor Labels and Default Fill)
 // ============================================================
 
-// 命名参数使用 `name: Type` 语法声明，调用时必须以 `name: expr` 形式传递。
-// 每个参数独立决定是否命名，支持与位置参数混合使用。
+// 普通函数只使用位置参数。
+// 标签保留给 struct / enum 构造和对应的解构模式。
 
-// 函数定义：混合命名参数和位置参数
-let create_rect(x Int, y Int, width: Int, height: Int) Rect =
-    Rect(Point(x, y), width, height)
+let connect(host String, port Int) Void = {}
 
-// 全部命名参数
-let connect(host: String, port: Int) Void = {}
-
-// 函数调用：命名参数位置必须写标签
-let named_param_calls() Void = {
-    create_rect(10, 20, width: 100, height: 200)
-    connect(host: "localhost", port: 8080)
+let positional_calls() Void = {
+    connect("localhost", 8080)
 }
 
-// 结构体命名字段
-type Button(width: Int, height: Int, label: String)
+// 结构体字段声明使用 `name Type`。
+// 调用时仍然可以按字段名写标签。
+type Button(width Int, height Int, label String)
 
-let named_struct() Void = {
+let labeled_struct() Void = {
     let b = Button(width: 100, height: 50, label: "OK")
     println(b.label)
 }
 
-// Enum 变体命名参数
-type DrawCmd {
-    Line(start Point, end: Point),
-    Circle(center: Point, radius: Float64),
+// 支持重排与 `...` 默认填充
+let struct_default_fill() Void = {
+    let b = Button(label: "OK", ...)
+    println(b.width)
 }
 
-let named_enum() Void = {
+// Enum 变体同样支持标签构造
+type DrawCmd {
+    Line(start Point, end Point),
+    Circle(center Point, radius Float64),
+}
+
+let labeled_enum() Void = {
     let cmd = DrawCmd.Circle(center: Point(0, 0), radius: 5.0)
-    // 隐式成员表达式同样需要命名参数
+    // 隐式成员表达式同样支持标签构造
     let cmd2 Option[DrawCmd] = .Some(.Line(Point(0, 0), end: Point(1, 1)))
 }
 
-// 模式匹配中的命名参数（构造与解构对称）
-let named_pattern_matching() Void = {
+// 模式匹配中的标签解构（按字段名匹配）
+let labeled_pattern_matching() Void = {
     let cmd = DrawCmd.Circle(center: Point(0, 0), radius: 5.0)
 
     // when 表达式
@@ -283,26 +283,15 @@ let named_pattern_matching() Void = {
     if b is Button(width: w, height: _, label: l) then println(l)
 }
 
-// Trait 方法中的命名参数（实现必须保持一致）
-trait Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void
-}
-
-type Sprite(id Int)
-given Sprite as Drawable {
-    draw(*self, at_x: Int, at_y: Int) Void = {}
-}
-
-// 函数类型不携带命名参数标签；lambda 参数始终使用位置参数
-let named_func_type() Void = {
+// 函数类型与 lambda 参数始终使用位置参数
+let positional_func_type() Void = {
     let f Func(String, Int) Void = (host String, port Int) -> {
-        connect(host: host, port: port)
+        connect(host, port)
     }
     f("localhost", 8080)
 }
 
-// Foreign 函数不支持命名参数
-// foreign let fopen(path: *unsafe UInt8) *unsafe FILE  // 错误
+// Foreign 函数同样使用位置参数
 foreign let fclose(file *unsafe FILE) Int32          // 正确：位置参数
 
 // ============================================================
@@ -965,13 +954,13 @@ let doubled_value(res Result[Int]) Result[Int] = {
 let format_file_with_or_return(path String) Result[Void] = {
     let source = read_text_file(path) or return
     let formatted = format_source(source) or return
-    return write_text_file(path, content: formatted)
+    return write_text_file(path, formatted)
 }
 
 let format_file_with_or_else(path String) Result[Void] = {
     let source = read_text_file(path) or else { return Result[Void].Error(it) }
     let formatted = format_source(source) or else { return Result[Void].Error(it) }
-    return write_text_file(path, content: formatted)
+    return write_text_file(path, formatted)
 }
 
 // or else 仍然用于需要自定义处理的场景

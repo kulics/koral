@@ -2034,11 +2034,14 @@ extension TypeChecker {
       return resolvedSubscript
 
     case .genericMethodCall(let baseExpr, let methodTypeArgs, let methodName, let arguments):
+      if arguments.contains(where: { $0.expression == nil }) {
+        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
+      }
       return try inferGenericMethodCallExpression(
         baseExpr: baseExpr,
         methodTypeArgs: methodTypeArgs,
         methodName: methodName,
-        arguments: arguments.map { $0.expression }
+        arguments: arguments.compactMap { $0.expression }
       )
 
     case .traitQualificationExpression:
@@ -2047,32 +2050,41 @@ extension TypeChecker {
       ), span: currentSpan)
 
     case .qualifiedMethodCall(let baseExpr, let traitType, let methodName, let arguments):
+      if arguments.contains(where: { $0.expression == nil }) {
+        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
+      }
       return try inferQualifiedMethodCallExpression(
         baseExpr: baseExpr,
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: nil,
-        arguments: arguments.map { $0.expression }
+        arguments: arguments.compactMap { $0.expression }
       )
 
     case .qualifiedGenericMethodCall(let baseExpr, let traitType, let methodTypeArgs, let methodName, let arguments):
+      if arguments.contains(where: { $0.expression == nil }) {
+        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
+      }
       return try inferQualifiedMethodCallExpression(
         baseExpr: baseExpr,
         traitType: traitType,
         methodName: methodName,
         methodTypeArgs: methodTypeArgs,
-        arguments: arguments.map { $0.expression }
+        arguments: arguments.compactMap { $0.expression }
       )
 
     case .memberPath(let baseExpr, let path):
       return try inferMemberPathExpression(baseExpr: baseExpr, path: path)
 
     case .staticMethodCall(let typeName, let typeArgs, let methodName, let arguments):
+      if arguments.contains(where: { $0.expression == nil }) {
+        throw SemanticError(.generic("Default-fill '...' is only valid in constructor calls"), span: currentSpan)
+      }
       return try inferStaticMethodCallExpression(
         typeName: typeName,
         typeArgs: typeArgs,
         methodName: methodName,
-        arguments: arguments.map { $0.expression }
+        arguments: arguments.compactMap { $0.expression }
       )
 
     case .forExpression(let pattern, let iterable, let body):
@@ -2727,7 +2739,10 @@ extension TypeChecker {
     expectedType: Type?,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
-    let arguments = callArgs.map { $0.expression }
+    if callArgs.contains(where: { $0.isDefaultFill && $0.expression != nil }) {
+      throw SemanticError(.generic("Invalid default-fill argument"), span: currentSpan)
+    }
+    let arguments = callArgs.compactMap { $0.expression }
     // 1. Check if we have an expected type
     guard let expected = expectedType else {
       throw SemanticError(
@@ -2832,32 +2847,15 @@ extension TypeChecker {
     guard let caseInfo = enumCases.first(where: { $0.name == memberName }) else {
       return nil
     }
-    
-    // Check argument count
-    if arguments.count != caseInfo.parameters.count {
-      throw SemanticError(
-        .generic("Enum case '\(memberName)' expects \(caseInfo.parameters.count) argument(s), got \(arguments.count)"),
-        span: span
-      )
-    }
-    
-    // Type check arguments
-    var typedArgs: [TypedExpressionNode] = []
-    for (arg, param) in zip(arguments, caseInfo.parameters) {
-      var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-      typedArg = try coerceLiteral(typedArg, to: param.type)
-      if typedArg.type != param.type {
-        throw SemanticError.typeMismatch(
-          expected: param.type.description, got: typedArg.type.description)
-      }
-      typedArgs.append(typedArg)
-    }
-    
-    // Validate named argument labels for enum case construction
-    try validateNamedArguments(
-      callArgs: callArgs,
-      parameters: caseInfo.parameters.map { (name: $0.name, named: $0.named) },
-      callDescription: ".\(memberName)"
+    let plan = try planConstructorArguments(
+      callArgs,
+      fieldNames: caseInfo.parameters.map { $0.name },
+      constructorDescription: ".\(memberName)"
+    )
+    let typedArgs = try typeCheckConstructorArguments(
+      plan: plan,
+      members: caseInfo.parameters.map { (name: $0.name, type: $0.type) },
+      constructorDescription: ".\(memberName)"
     )
     
     // Generate enum construction
@@ -3337,8 +3335,7 @@ extension TypeChecker {
        ) {
       return typedChain
     }
-    // Extract bare expressions for internal use; labels are used for named argument validation
-    let arguments = callArgs.map { $0.expression }
+    let arguments = callArgs.compactMap { $0.expression }
     
     if shouldRecoverCallSiteOnce {
       shouldRecoverCallSiteOnce = false
@@ -3391,6 +3388,7 @@ extension TypeChecker {
                 got: arguments.count
               )
             }
+            try rejectNonConstructorCallArguments(callArgs)
 
             var typedArguments: [TypedExpressionNode] = []
             for (arg, param) in zip(arguments, params) {
@@ -3582,31 +3580,18 @@ extension TypeChecker {
             }
           }
           
-          if arguments.count != resolvedParams.count {
-            throw SemanticError.invalidArgumentCount(
-              function: "\(baseName).\(memberName)",
-              expected: resolvedParams.count,
-              got: arguments.count
-            )
-          }
-          
-          // Validate named argument labels for generic enum case construction
-          try validateNamedArguments(
-            callArgs: callArgs,
-            parameters: c.parameters.map { (name: $0.name, named: $0.named) },
-            callDescription: "\(baseName).\(memberName)"
+          let plan = try planConstructorArguments(
+            callArgs,
+            fieldNames: c.parameters.map { $0.name },
+            constructorDescription: "\(baseName).\(memberName)"
           )
-          
-          var typedArgs: [TypedExpressionNode] = []
-          for (arg, param) in zip(arguments, resolvedParams) {
-            var typedArg = try inferTypedExpression(arg)
-            typedArg = try coerceLiteral(typedArg, to: param.type)
-            if typedArg.type != param.type {
-              throw SemanticError.typeMismatch(
-                expected: param.type.description, got: typedArg.type.description)
-            }
-            typedArgs.append(typedArg)
-          }
+          let typedArgs = try typeCheckConstructorArguments(
+            plan: plan,
+            members: zip(c.parameters, resolvedParams).map { source, resolved in
+              (name: source.name, type: resolved.type)
+            },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
           
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
@@ -3689,31 +3674,21 @@ extension TypeChecker {
           if symbolName.starts(with: uName + ".") {
             let caseName = String(symbolName.dropFirst(uName.count + 1))
             let params = symbol.type.functionParameters!
-
-            if arguments.count != params.count {
-              throw SemanticError.invalidArgumentCount(
-                function: symbolName, expected: params.count, got: arguments.count)
-            }
-
-            // Validate named argument labels for enum case construction
-            if let namedParams = functionNamedParams[symbol.defId] {
-              try validateNamedArguments(
-                callArgs: callArgs,
-                parameters: namedParams,
-                callDescription: symbolName
-              )
-            }
-
-            var typedArgs: [TypedExpressionNode] = []
-            for (arg, param) in zip(arguments, params) {
-              var typedArg = try inferTypedExpression(arg, expectedType: param.type)
-              typedArg = try coerceLiteral(typedArg, to: param.type)
-              if typedArg.type != param.type {
-                throw SemanticError.typeMismatch(
-                  expected: param.type.description, got: typedArg.type.description)
-              }
-              typedArgs.append(typedArg)
-            }
+            let paramNames = try enumCaseFieldNames(enumType: returnType, caseName: caseName)
+              ?? functionNamedParams[symbol.defId]?.map { $0.name }
+              ?? params.enumerated().map { index, _ in "arg\(index)" }
+            let plan = try planConstructorArguments(
+              callArgs,
+              fieldNames: paramNames,
+              constructorDescription: symbolName
+            )
+            let typedArgs = try typeCheckConstructorArguments(
+              plan: plan,
+              members: zip(paramNames, params).map { name, param in
+                (name: name, type: param.type)
+              },
+              constructorDescription: symbolName
+            )
 
             return .enumConstruction(type: returnType, caseName: caseName, arguments: typedArgs)
           }
@@ -3725,6 +3700,7 @@ extension TypeChecker {
     if case .identifier(let name) = callee {
       // 1. Try Generic Function Template (Implicit Inference)
       if let template = currentScope.lookupGenericFunctionTemplate(name) {
+        try rejectNonConstructorCallArguments(callArgs)
         return try inferImplicitGenericFunctionCall(
           template: template,
           name: name,
@@ -3749,34 +3725,16 @@ extension TypeChecker {
           members: parameters,
           span: currentSpan
         )
-
-        if arguments.count != parameters.count {
-          throw SemanticError.invalidArgumentCount(
-            function: name,
-            expected: parameters.count,
-            got: arguments.count
-          )
-        }
-
-        // Validate named argument labels for struct construction
-        try validateNamedArguments(
-          callArgs: callArgs,
-          parameters: parameters.map { (name: $0.name, named: $0.named) },
-          callDescription: name
+        let plan = try planConstructorArguments(
+          callArgs,
+          fieldNames: parameters.map { $0.name },
+          constructorDescription: name
         )
-
-        var typedArguments: [TypedExpressionNode] = []
-        for (arg, expectedMember) in zip(arguments, parameters) {
-          var typedArg = try inferTypedExpression(arg, expectedType: expectedMember.type)
-          typedArg = try coerceLiteral(typedArg, to: expectedMember.type)
-          if typedArg.type != expectedMember.type {
-            throw SemanticError.typeMismatch(
-              expected: expectedMember.type.description,
-              got: typedArg.type.description
-            )
-          }
-          typedArguments.append(typedArg)
-        }
+        let typedArguments = try typeCheckConstructorArguments(
+          plan: plan,
+          members: parameters.map { (name: $0.name, type: $0.type) },
+          constructorDescription: name
+        )
 
         return .typeConstruction(
           identifier: makeLocalSymbol(name: name, type: type, kind: .type),
@@ -3792,13 +3750,7 @@ extension TypeChecker {
       if isASCIITypeStyleIdentifier(name) {
         // Try generic struct template
         if let template = currentScope.lookupGenericStructTemplate(name) {
-          // Validate named argument labels for generic struct construction
-          try validateNamedArguments(
-            callArgs: callArgs,
-            parameters: template.parameters.map { (name: $0.name, named: $0.named) },
-            callDescription: name
-          )
-          return try inferGenericStructConstruction(template: template, name: name, arguments: arguments)
+          return try inferGenericStructConstruction(template: template, name: name, callArgs: callArgs)
         }
         
         // Try generic enum template (for enum case constructors without dot notation)
@@ -3830,23 +3782,7 @@ extension TypeChecker {
           .generic("compiler protocol method drop cannot be called explicitly"),
           span: currentSpan)
       }
-      // Validate named argument labels for method calls (including trait object method calls)
-      if let namedParams = functionNamedParams[method.defId], namedParams.count > 0 {
-        // Skip self parameter for method calls if the first param is self
-        let callSiteParams: [(name: String, named: Bool)]
-        if namedParams.first?.name == "self" {
-          callSiteParams = Array(namedParams.dropFirst())
-        } else {
-          callSiteParams = namedParams
-        }
-        if !callSiteParams.isEmpty {
-          try validateNamedArguments(
-            callArgs: callArgs,
-            parameters: callSiteParams,
-            callDescription: context.getName(method.defId) ?? "method"
-          )
-        }
-      }
+      try rejectNonConstructorCallArguments(callArgs)
       return try inferMethodCall(
         base: base,
         method: method,
@@ -3863,20 +3799,7 @@ extension TypeChecker {
       guard case .function(let params, let returns) = methodType else {
         throw SemanticError.invalidOperation(op: "call", type1: methodType.description, type2: "")
       }
-      
-      // Validate named argument labels using the trait method signature
-      if traits[traitName] != nil {
-        let allMethods = try flattenedTraitMethods(traitName)
-        if let sig = allMethods[methodName] {
-          // Build named param info from trait method signature, skipping self
-          let namedParams = sig.parameters.dropFirst().map { (name: $0.name, named: $0.named) }
-          try validateNamedArguments(
-            callArgs: callArgs,
-            parameters: namedParams,
-            callDescription: "\(traitName).\(methodName)"
-          )
-        }
-      }
+      try rejectNonConstructorCallArguments(callArgs)
       
       // The first parameter is 'self' (the base), so we check remaining arguments
       let expectedArgCount = params.count - 1
@@ -3956,16 +3879,7 @@ extension TypeChecker {
           got: arguments.count
         )
       }
-
-      // Validate named argument labels if the callee is a known function (not a function type variable)
-      if case .variable(let symbol) = typedCallee,
-         let namedParams = functionNamedParams[symbol.defId] {
-        try validateNamedArguments(
-          callArgs: callArgs,
-          parameters: namedParams,
-          callDescription: context.getName(symbol.defId) ?? "function"
-        )
-      }
+      try rejectNonConstructorCallArguments(callArgs)
 
       var typedArguments: [TypedExpressionNode] = []
       for (arg, param) in zip(arguments, params) {
@@ -4066,35 +3980,16 @@ extension TypeChecker {
         }
       }
 
-      if arguments.count != memberTypes.count {
-        throw SemanticError.invalidArgumentCount(
-          function: base,
-          expected: memberTypes.count,
-          got: arguments.count
-        )
-      }
-
-      // Validate named argument labels for generic struct construction
-      if let callArgs = callArgs {
-        try validateNamedArguments(
-          callArgs: callArgs,
-          parameters: template.parameters.map { (name: $0.name, named: $0.named) },
-          callDescription: base
-        )
-      }
-
-      var typedArguments: [TypedExpressionNode] = []
-      for (arg, expectedMember) in zip(arguments, memberTypes) {
-        var typedArg = try inferTypedExpression(arg)
-        typedArg = try coerceLiteral(typedArg, to: expectedMember.type)
-        if typedArg.type != expectedMember.type {
-          throw SemanticError.typeMismatch(
-            expected: expectedMember.type.description,
-            got: typedArg.type.description
-          )
-        }
-        typedArguments.append(typedArg)
-      }
+      let plan = try planConstructorArguments(
+        callArgs ?? arguments.map { CallArg(expression: $0) },
+        fieldNames: template.parameters.map { $0.name },
+        constructorDescription: base
+      )
+      let typedArguments = try typeCheckConstructorArguments(
+        plan: plan,
+        members: memberTypes.map { (name: $0.name, type: $0.type) },
+        constructorDescription: base
+      )
       
       // Return parameterized type
       let genericType = Type.genericStruct(template: base, args: resolvedArgs)
@@ -4106,6 +4001,9 @@ extension TypeChecker {
         type: genericType
       )
     } else if let template = currentScope.lookupGenericFunctionTemplate(base) {
+      if let callArgs {
+        try rejectNonConstructorCallArguments(callArgs)
+      }
       // Special handling for explicit intrinsic template calls (e.g. [Int]alloc_memory)
       if base == "alloc_memory" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -5822,7 +5720,7 @@ extension TypeChecker {
     throw SemanticError.undefinedType(typeName)
   }
   
-  private func inferGenericStructStaticMethodCall(
+  func inferGenericStructStaticMethodCall(
     template: GenericStructTemplate,
     typeName: String,
     resolvedTypeArgs: [Type],
@@ -5893,7 +5791,7 @@ extension TypeChecker {
     throw SemanticError.undefinedMember(methodName, typeName)
   }
   
-  private func inferGenericEnumStaticMethodCall(
+  func inferGenericEnumStaticMethodCall(
     template: GenericEnumTemplate,
     typeName: String,
     resolvedTypeArgs: [Type],
@@ -6119,7 +6017,7 @@ extension TypeChecker {
     return resolvedArgs
   }
   
-  private func inferConcreteTypeStaticMethodCall(
+  func inferConcreteTypeStaticMethodCall(
     type: Type,
     typeName: String,
     resolvedTypeArgs: [Type],
@@ -6512,28 +6410,13 @@ extension TypeChecker {
         type2: ""
       )
     }
-
-    if let namedParams = functionNamedParams[method.defId], namedParams.count > 0 {
-      let callSiteParams: [(name: String, named: Bool)]
-      if namedParams.first?.name == "self" {
-        callSiteParams = Array(namedParams.dropFirst())
-      } else {
-        callSiteParams = namedParams
-      }
-      if !callSiteParams.isEmpty {
-        try validateNamedArguments(
-          callArgs: callArgs,
-          parameters: callSiteParams,
-          callDescription: context.getName(method.defId) ?? "method"
-        )
-      }
-    }
+    try rejectNonConstructorCallArguments(callArgs)
 
     return try inferMethodCall(
       base: base,
       method: method,
       methodType: methodType,
-      arguments: callArgs.map { $0.expression },
+      arguments: callArgs.compactMap { $0.expression },
       expectedReturnType: expectedType
     )
   }

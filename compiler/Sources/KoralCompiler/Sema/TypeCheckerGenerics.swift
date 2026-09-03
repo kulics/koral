@@ -377,7 +377,7 @@ extension TypeChecker {
   func inferGenericStructConstruction(
     template: GenericStructTemplate,
     name: String,
-    arguments: [ExpressionNode]
+    callArgs: [CallArg]
   ) throws -> TypedExpressionNode {
     try ensureStructConstructionAccess(
       typeName: name,
@@ -388,25 +388,31 @@ extension TypeChecker {
       span: currentSpan
     )
 
-    // Type check arguments first
-    if arguments.count != template.parameters.count {
-      throw SemanticError.invalidArgumentCount(
-        function: name,
-        expected: template.parameters.count,
-        got: arguments.count
-      )
-    }
+    let plan = try planConstructorArguments(
+      callArgs,
+      fieldNames: template.parameters.map { $0.name },
+      constructorDescription: name
+    )
     
     var typedArguments: [TypedExpressionNode] = []
-    for argExpr in arguments {
-      let typedArg = try inferTypedExpression(argExpr)
+    for callArg in plan.orderedCallArgs {
+      guard let expression = callArg?.expression else {
+        continue
+      }
+      let typedArg = try inferTypedExpression(expression)
       typedArguments.append(typedArg)
     }
     
     // Infer type arguments from constructor arguments
     var inferred: [String: Type] = [:]
     let typeParamNames = template.typeParameters.map { $0.name }
-    for (typedArg, param) in zip(typedArguments, template.parameters) {
+    var explicitArgIndex = 0
+    for (paramIndex, param) in template.parameters.enumerated() {
+      guard let callArg = plan.orderedCallArgs[paramIndex], callArg.expression != nil else {
+        continue
+      }
+      let typedArg = typedArguments[explicitArgIndex]
+      explicitArgIndex += 1
       try unify(node: param.type, type: typedArg.type, inferred: &inferred, typeParams: typeParamNames)
     }
     
@@ -478,6 +484,11 @@ extension TypeChecker {
     // Build resolved type arguments
     let resolvedArgs = try template.typeParameters.map { param -> Type in
       guard let type = inferred[param.name] else {
+        if plan.usesDefaultFill {
+          throw SemanticError(.generic(
+            "Cannot infer type parameter '\(param.name)' from default-filled constructor fields; specify type arguments or an expected type"
+          ), span: currentSpan)
+        }
         throw SemanticError.typeMismatch(
           expected: "inferred type for \(param.name)", got: "unknown")
       }
@@ -512,18 +523,11 @@ extension TypeChecker {
       }
     }
     
-    // Re-check arguments with resolved types and apply coercion
-    var finalTypedArguments: [TypedExpressionNode] = []
-    for (typedArg, expectedMember) in zip(typedArguments, memberTypes) {
-      let finalArg = try coerceLiteral(typedArg, to: expectedMember.type)
-      if finalArg.type != expectedMember.type {
-        throw SemanticError.typeMismatch(
-          expected: expectedMember.type.description,
-          got: finalArg.type.description
-        )
-      }
-      finalTypedArguments.append(finalArg)
-    }
+    let finalTypedArguments = try typeCheckConstructorArguments(
+      plan: plan,
+      members: memberTypes.map { (name: $0.name, type: $0.type) },
+      constructorDescription: name
+    )
     
     let genericType = Type.genericStruct(template: name, args: resolvedArgs)
     

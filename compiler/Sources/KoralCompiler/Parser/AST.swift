@@ -422,12 +422,21 @@ public enum InterpolatedPart {
 
 public struct CallArg {
     public let label: String?
-    public let expression: ExpressionNode
+  public let expression: ExpressionNode?
     
     public init(label: String? = nil, expression: ExpressionNode) {
         self.label = label
         self.expression = expression
     }
+
+  public init(defaultFill: Void = ()) {
+    self.label = nil
+    self.expression = nil
+  }
+
+  public var isDefaultFill: Bool {
+    expression == nil
+  }
 }
 
 public struct PatternArg {

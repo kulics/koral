@@ -164,6 +164,7 @@ given TypeChecker {
                 }
                 yield TypedPattern.StructPattern(type_name, typed_elements)
             },
+            _ then TypedPattern.Wildcard(),
         }
     }
 
@@ -180,8 +181,7 @@ given TypeChecker {
                     scope.define(self.context(), Symbol(def_id, subject_type, kind))
                 }
             },
-            .EnumCase(case_name, elements, span) then {
-                // 尝试从 subject_type 中查找 enum case 的字段类型
+            .EnumCase(case_name, elements, _) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name)
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
                 let case_field_types = self.get_enum_case_field_types(subject_type, case_name)
@@ -195,7 +195,7 @@ given TypeChecker {
                     i += 1
                 }
             },
-            .StructPattern(type_name, elements, span) then {
+            .StructPattern(type_name, elements, _) then {
                 let param_specs = self.get_struct_pattern_param_specs(subject_type, type_name)
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
                 let field_types = self.get_struct_pattern_field_types(subject_type, type_name)
@@ -209,14 +209,14 @@ given TypeChecker {
                     i += 1
                 }
             },
-            .AndPattern(left, right, span) then {
+            .AndPattern(left, right, _) then {
                 self.bind_pattern_vars(left, subject_type, scope)
                 self.bind_pattern_vars(right, subject_type, scope)
             },
-            .OrPattern(left, right, span) then {
+            .OrPattern(left, right, _) then {
                 self.bind_pattern_vars(left, subject_type, scope)
             },
-            .NotPattern(inner, span) then {
+            .NotPattern(inner, _) then {
                 self.bind_pattern_vars(inner, subject_type, scope)
             },
             _ then {},
@@ -286,21 +286,45 @@ given TypeChecker {
     }
 
     protected validate_named_pattern_arguments(self, elements List[PatternElement], param_specs List[FunctionParamSpec]) Void = {
-        let mutable named_spec_names = Set[String].new()
+        let mutable has_label = false
+        let mutable has_positional = false
+        for element in elements then {
+            when element.label in {
+                .Some(_) then { has_label = true },
+                .None() then { has_positional = true },
+            }
+        }
+
+        if has_label and has_positional then {
+            self.storage.diagnostics.push(
+                make_diagnostic(
+                    DiagnosticStage.Semantic(),
+                    self.storage.file_path,
+                    "Pattern cannot mix positional and labeled arguments"
+                )
+            )
+            return
+        }
+
+        if not has_label then {
+            return
+        }
+
+        let mutable valid_names = Set[String].new()
         for spec in param_specs then {
-            if spec.named then { named_spec_names.insert(spec.name) }
+            valid_names.insert(spec.name)
         }
 
         let mutable seen_named_labels = Set[String].new()
         for element in elements then {
             when element.label in {
                 .Some(label) then {
-                    if not named_spec_names.contains(label) then {
+                    if not valid_names.contains(label) then {
                         self.storage.diagnostics.push(
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
-                                "Unexpected named argument label '\(label)' in pattern: no matching named field"
+                                "Unknown constructor label '\(label)' for pattern"
                             )
                         )
                         return
@@ -310,7 +334,7 @@ given TypeChecker {
                             make_diagnostic(
                                 DiagnosticStage.Semantic(),
                                 self.storage.file_path,
-                                "Duplicate named argument label '\(label)' in pattern"
+                                "Duplicate constructor label '\(label)'"
                             )
                         )
                         return
@@ -322,12 +346,12 @@ given TypeChecker {
         }
 
         for spec in param_specs then {
-            if spec.named and not seen_named_labels.contains(spec.name) then {
+            if not seen_named_labels.contains(spec.name) then {
                 self.storage.diagnostics.push(
                     make_diagnostic(
                         DiagnosticStage.Semantic(),
                         self.storage.file_path,
-                        "Missing named argument label in pattern: expected '\(spec.name)'"
+                        "Missing constructor field '\(spec.name)' in pattern"
                     )
                 )
                 return
@@ -336,60 +360,30 @@ given TypeChecker {
     }
 
     protected reorder_pattern_elements(self, elements List[PatternElement], param_specs List[FunctionParamSpec]) List[PatternElement] = {
-        let mutable ordered = List[PatternElement].new()
-        let mutable used_indices = Set[UInt].new()
-
-        for spec in param_specs then {
-            if spec.named then {
-                let mutable found = Option[PatternElement].None()
-                let mutable idx UInt = 0
-                for element in elements then {
-                    when element.label in {
-                        .Some(label) then {
-                            if label == spec.name and not used_indices.contains(idx) then {
-                                found = Option[PatternElement].Some(element)
-                                used_indices.insert(idx)
-                            }
-                        },
-                        .None() then {},
-                    }
-                    idx += 1
-                }
-                when found in {
-                    .Some(element) then ordered.push(element),
-                    .None() then {},
-                }
-            } else {
-                let mutable idx UInt = 0
-                let mutable consumed = false
-                for element in elements then {
-                    if consumed then {
-                        idx += 1
-                        continue
-                    }
-                    if used_indices.contains(idx) then {
-                        idx += 1
-                        continue
-                    }
-                    when element.label in {
-                        .None() then {
-                            ordered.push(element)
-                            used_indices.insert(idx)
-                            consumed = true
-                        },
-                        .Some(_) then {},
-                    }
-                    idx += 1
-                }
+        let mutable has_label = false
+        for element in elements then {
+            if element.label is .Some(_) then {
+                has_label = true
+                break
             }
         }
 
-        let mutable idx UInt = 0
-        for element in elements then {
-            if not used_indices.contains(idx) then {
-                ordered.push(element)
+        if not has_label then {
+            return elements
+        }
+
+        let mutable ordered = List[PatternElement].new()
+
+        for spec in param_specs then {
+            for element in elements then {
+                when element.label in {
+                    .Some(label) then if label == spec.name then {
+                        ordered.push(element)
+                        break
+                    },
+                    .None() then {},
+                }
             }
-            idx += 1
         }
         return ordered
     }
@@ -650,7 +644,7 @@ given TypeChecker {
                     when self.context().get_struct_fields(def_id) in {
                         .Some(fields) then {
                             for field in fields then {
-                                specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named))
+                                specs.push(FunctionParamSpec(field.name, field.is_mutable, true))
                             }
                         },
                         .None() then {},
@@ -665,7 +659,7 @@ given TypeChecker {
                         .Some(struct_template) then when self.context().get_struct_fields(struct_template.def_id) in {
                             .Some(fields) then {
                                 for field in fields then {
-                                    specs.push(FunctionParamSpec(field.name, field.is_mutable, field.named))
+                                    specs.push(FunctionParamSpec(field.name, field.is_mutable, true))
                                 }
                             },
                             .None() then {},

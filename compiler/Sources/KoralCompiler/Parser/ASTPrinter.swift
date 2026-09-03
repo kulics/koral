@@ -482,7 +482,11 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg.expression)
+            if let expr = arg.expression {
+              printExpression(expr)
+            } else {
+              print("\(indent)...")
+            }
           }
         }
       }
@@ -578,7 +582,11 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg.expression)
+            if let expr = arg.expression {
+              printExpression(expr)
+            } else {
+              print("\(indent)...")
+            }
           }
         }
       }
@@ -593,7 +601,11 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg.expression)
+            if let expr = arg.expression {
+              printExpression(expr)
+            } else {
+              print("\(indent)...")
+            }
           }
         }
       }
@@ -609,7 +621,11 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg.expression)
+            if let expr = arg.expression {
+              printExpression(expr)
+            } else {
+              print("\(indent)...")
+            }
           }
         }
       }
@@ -625,7 +641,11 @@ public func printAST(_ node: ASTNode) {
       withIndent {
         withIndent {
           for arg in arguments {
-            printExpression(arg.expression)
+            if let expr = arg.expression {
+              printExpression(expr)
+            } else {
+              print("\(indent)...")
+            }
           }
         }
       }
@@ -689,7 +709,11 @@ public func printAST(_ node: ASTNode) {
         withIndent {
           withIndent {
             for arg in arguments {
-              printExpression(arg.expression)
+              if let expr = arg.expression {
+                printExpression(expr)
+              } else {
+                print("\(indent)...")
+              }
             }
           }
         }

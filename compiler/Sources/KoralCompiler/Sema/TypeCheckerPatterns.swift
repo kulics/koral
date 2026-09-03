@@ -149,18 +149,12 @@ extension TypeChecker {
       }
       let caseDef = cases[caseIndex]
 
-      let subPatterns = subPatternArgs.map { $0.pattern }
-      if caseDef.parameters.count != subPatterns.count {
-        throw SemanticError.invalidArgumentCount(
-          function: caseName, expected: caseDef.parameters.count, got: subPatterns.count)
-      }
-
-      // Validate named argument labels in pattern
-      try validateNamedPatternArguments(
-        patternArgs: subPatternArgs,
-        parameters: caseDef.parameters.map { (name: $0.name, named: $0.named) },
+      let orderedPatternArgs = try reorderPatternArguments(
+        subPatternArgs,
+        fieldNames: caseDef.parameters.map { $0.name },
         patternDescription: ".\(caseName)"
       )
+      let subPatterns = orderedPatternArgs.map { $0.pattern }
 
       var typedSubPatterns: [TypedPattern] = []
       for (idx, subPat) in subPatterns.enumerated() {
@@ -321,19 +315,12 @@ extension TypeChecker {
           expected: "Struct Type", got: subjectType.description), span: span)
       }
       
-      // Verify sub-pattern count matches field count
-      let subPatterns = subPatternArgs.map { $0.pattern }
-      if subPatterns.count != members.count {
-        throw SemanticError.invalidArgumentCount(
-          function: typeName, expected: members.count, got: subPatterns.count)
-      }
-      
-      // Validate named argument labels in struct pattern
-      try validateNamedPatternArguments(
-        patternArgs: subPatternArgs,
-        parameters: members.map { (name: $0.name, named: $0.named) },
+      let orderedPatternArgs = try reorderPatternArguments(
+        subPatternArgs,
+        fieldNames: members.map { $0.name },
         patternDescription: typeName
       )
+      let subPatterns = orderedPatternArgs.map { $0.pattern }
       
       // Recursively check each sub-pattern with visibility check
       var typedSubPatterns: [TypedPattern] = []

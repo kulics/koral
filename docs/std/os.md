@@ -17,7 +17,7 @@ public let read_dir[T IntoPath](path T) Result[DirIterator]
 
 public let walk_dir[T IntoPath](path T) Result[WalkDirIterator]
 
-public let create_temp_dir[T IntoPath](dir T, prefix: String) Result[Path]
+public let create_temp_dir[T IntoPath](dir T, prefix String) Result[Path]
 
 public let env(name String) Option[String]
 
@@ -41,21 +41,21 @@ public let current_exe() Result[Path]
 
 public let read_file[T IntoPath](path T) Result[List[UInt8]]
 
-public let write_file[T IntoPath](path T, content: List[UInt8]) Result[Void]
+public let write_file[T IntoPath](path T, content List[UInt8]) Result[Void]
 
-public let append_file[T IntoPath](path T, content: List[UInt8]) Result[Void]
+public let append_file[T IntoPath](path T, content List[UInt8]) Result[Void]
 
 public let read_text_file[T IntoPath](path T) Result[String]
 
-public let write_text_file[T IntoPath](path T, content: String) Result[Void]
+public let write_text_file[T IntoPath](path T, content String) Result[Void]
 
-public let append_text_file[T IntoPath](path T, content: String) Result[Void]
+public let append_text_file[T IntoPath](path T, content String) Result[Void]
 
-public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void]
+public let copy_file[T1 IntoPath, T2 IntoPath](src T1, to T2) Result[Void]
 
 public let remove_file[T IntoPath](path T) Result[Void]
 
-public let rename_path[T1 IntoPath, T2 IntoPath](src T1, to: T2) Result[Void]
+public let rename_path[T1 IntoPath, T2 IntoPath](src T1, to T2) Result[Void]
 
 public let path_exist[T IntoPath](path T) Bool
 
@@ -73,15 +73,15 @@ public let symlink_info[T IntoPath](path T) Result[FileInfo]
 
 public let set_permissions[T IntoPath](path T, perm Permission) Result[Void]
 
-public let create_hard_link[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Void]
+public let create_hard_link[T1 IntoPath, T2 IntoPath](link T1, to T2) Result[Void]
 
-public let create_symlink[T1 IntoPath, T2 IntoPath](link T1, to: T2) Result[Void]
+public let create_symlink[T1 IntoPath, T2 IntoPath](link T1, to T2) Result[Void]
 
 public let read_symlink[T IntoPath](path T) Result[Path]
 
 public let truncate_file[T IntoPath](path T, size UInt64) Result[Void]
 
-public let create_temp_file[T IntoPath](dir T, prefix: String) Result[File]
+public let create_temp_file[T IntoPath](dir T, prefix String) Result[File]
 
 public let path_separator() String
 
@@ -164,7 +164,7 @@ given File {
 }
 
 given File as Reader {
-    public read(*self, into: *mutable List[UInt8], range Range[UInt]) Result[UInt]
+    public read(*self, into *mutable List[UInt8], range Range[UInt]) Result[UInt]
 }
 
 given File as Writer {

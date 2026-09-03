@@ -61,6 +61,296 @@ given TypeChecker {
         return typed_args
     }
 
+    protected constructor_field_names(self, constructed_type Type) List[String] = {
+        return when constructed_type in {
+            .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    let mutable names = List[String].new()
+                    for field in fields then {
+                        names.push(field.name)
+                    }
+                    yield names
+                },
+                .None() then List[String].new(),
+            },
+            .GenericStruct(template_name, _) then when self.storage.generic_templates.lookup_struct(template_name) in {
+                .Some(template) then when self.context().get_struct_fields(template.def_id) in {
+                    .Some(fields) then {
+                        let mutable names = List[String].new()
+                        for field in fields then {
+                            names.push(field.name)
+                        }
+                        yield names
+                    },
+                    .None() then List[String].new(),
+                },
+                .None() then List[String].new(),
+            },
+            .EnumType(def_id) then when self.context().get_enum_cases(def_id) in {
+                .Some(cases) then {
+                    let mutable names = List[String].new()
+                    if not cases.is_empty() then {
+                        for param in cases[0(UInt)].params then {
+                            names.push(param.name)
+                        }
+                    }
+                    yield names
+                },
+                .None() then List[String].new(),
+            },
+            _ then List[String].new(),
+        }
+    }
+
+    protected reorder_constructor_args(self, args List[* Expr], constructed_type Type) List[* Expr] = {
+        let field_names = self.constructor_field_names(constructed_type)
+        let mutable has_named = false
+        let mutable has_positional = false
+        for arg in args then {
+            when arg in {
+                .NamedArgument(label, _, _) then if label <> "..." then { has_named = true },
+                _ then { has_positional = true },
+            }
+        }
+
+        if not has_named or has_positional then {
+            return args
+        }
+
+        let mutable ordered = List[* Expr].new()
+        for field_name in field_names then {
+            for arg in args then {
+                when arg in {
+                    .NamedArgument(label, inner, _) then if label == field_name then {
+                        ordered.push(inner)
+                        break
+                    },
+                    _ then {},
+                }
+            }
+        }
+        return ordered
+    }
+
+    protected type_node_for_type(self, t Type) TypeNode = {
+        return when t in {
+            .IntType() then TypeNode.Identifier("Int"),
+            .Int8Type() then TypeNode.Identifier("Int8"),
+            .Int16Type() then TypeNode.Identifier("Int16"),
+            .Int32Type() then TypeNode.Identifier("Int32"),
+            .Int64Type() then TypeNode.Identifier("Int64"),
+            .UIntType() then TypeNode.Identifier("UInt"),
+            .UInt8Type() then TypeNode.Identifier("UInt8"),
+            .UInt16Type() then TypeNode.Identifier("UInt16"),
+            .UInt32Type() then TypeNode.Identifier("UInt32"),
+            .UInt64Type() then TypeNode.Identifier("UInt64"),
+            .Float32Type() then TypeNode.Identifier("Float32"),
+            .Float64Type() then TypeNode.Identifier("Float64"),
+            .BoolType() then TypeNode.Identifier("Bool"),
+            .VoidType() then TypeNode.Identifier("Void"),
+            .NeverType() then TypeNode.Identifier("Never"),
+            .StructureType(def_id) then TypeNode.Identifier(self.context().get_name(def_id) or else self.context().type_display_name(t)),
+            .EnumType(def_id) then TypeNode.Identifier(self.context().get_name(def_id) or else self.context().type_display_name(t)),
+            .ReferenceType(inner) then TypeNode.Reference(box(self.type_node_for_type(*inner)), false),
+            .MutableReferenceType(inner) then TypeNode.Reference(box(self.type_node_for_type(*inner)), true),
+            .BorrowedReferenceType(inner) then TypeNode.BorrowedReference(box(self.type_node_for_type(*inner)), false),
+            .MutableBorrowedReferenceType(inner) then TypeNode.BorrowedReference(box(self.type_node_for_type(*inner)), true),
+            .PointerType(inner) then TypeNode.Pointer(box(self.type_node_for_type(*inner)), false),
+            .MutablePointerType(inner) then TypeNode.Pointer(box(self.type_node_for_type(*inner)), true),
+            .WeakReferenceType(inner) then TypeNode.WeakReference(box(self.type_node_for_type(*inner)), false),
+            .MutableWeakReferenceType(inner) then TypeNode.WeakReference(box(self.type_node_for_type(*inner)), true),
+            .GenericParameter(name) then TypeNode.Identifier(name),
+            .GenericStruct(template, type_args) then {
+                let mutable arg_nodes = List[* TypeNode].new()
+                for arg in type_args then {
+                    arg_nodes.push(box(self.type_node_for_type(*arg)))
+                }
+                yield TypeNode.Generic(template, arg_nodes)
+            },
+            .GenericEnum(template, type_args) then {
+                let mutable arg_nodes = List[* TypeNode].new()
+                for arg in type_args then {
+                    arg_nodes.push(box(self.type_node_for_type(*arg)))
+                }
+                yield TypeNode.Generic(template, arg_nodes)
+            },
+            _ then TypeNode.Identifier(self.context().type_display_name(t)),
+        }
+    }
+
+    protected default_fill_expr_for_type(self, field_type Type) Option[* Expr] = {
+        if not self.has_explicit_trait_conformance(field_type, "Default") then {
+            return Option[* Expr].None()
+        }
+        let span = unknown_span()
+        return when field_type in {
+            .GenericStruct(template, type_args) then {
+                let mutable arg_nodes = List[* TypeNode].new()
+                for arg in type_args then {
+                    arg_nodes.push(box(self.type_node_for_type(*arg)))
+                }
+                yield Option[* Expr].Some(box(Expr.StaticMethodCall(template, arg_nodes, "default", List[* Expr].new(), span)))
+            },
+            .GenericEnum(template, type_args) then {
+                let mutable arg_nodes = List[* TypeNode].new()
+                for arg in type_args then {
+                    arg_nodes.push(box(self.type_node_for_type(*arg)))
+                }
+                yield Option[* Expr].Some(box(Expr.StaticMethodCall(template, arg_nodes, "default", List[* Expr].new(), span)))
+            },
+            _ then {
+                let type_name = when field_type in {
+                    .StructureType(def_id) then self.context().get_name(def_id) or else self.context().type_display_name(field_type),
+                    .EnumType(def_id) then self.context().get_name(def_id) or else self.context().type_display_name(field_type),
+                    _ then self.context().type_display_name(field_type),
+                }
+                yield Option[* Expr].Some(box(Expr.StaticMethodCall(type_name, List[* TypeNode].new(), "default", List[* Expr].new(), span)))
+            },
+        }
+    }
+
+    protected normalize_constructor_call_args(self, args List[* Expr], param_specs List[FunctionParamSpec], field_types List[Type], constructor_description String) Option[List[* Expr]] = {
+        let mutable has_named = false
+        let mutable has_positional = false
+        let mutable saw_default_fill = false
+        let mutable arg_index UInt = 0
+        let first_arg_span = when args.get(0(UInt)) in {
+            .Some(arg_ref) then expr_span(arg_ref),
+            .None() then unknown_span(),
+        }
+        let last_arg_span = if args.is_empty() then unknown_span() else when args.get(args.count() - 1(UInt)) in {
+            .Some(arg_ref) then expr_span(arg_ref),
+            .None() then unknown_span(),
+        }
+        for arg in args then {
+            when arg in {
+                .NamedArgument(label, _, _) then {
+                    if label == "..." then {
+                        if saw_default_fill then {
+                            self.push_diagnostic_at_span("Default-fill '...' may appear at most once in constructor call '\(constructor_description)'", expr_span(arg))
+                            return Option[List[* Expr]].None()
+                        }
+                        if arg_index + 1(UInt) <> args.count() then {
+                            self.push_diagnostic_at_span("Default-fill '...' must be the last constructor argument", expr_span(arg))
+                            return Option[List[* Expr]].None()
+                        }
+                        saw_default_fill = true
+                    } else {
+                        has_named = true
+                    }
+                },
+                _ then {
+                    has_positional = true
+                },
+            }
+            arg_index += 1
+        }
+
+        if has_named and has_positional then {
+            self.push_diagnostic_at_span("Constructor call cannot mix positional and labeled arguments", first_arg_span)
+            return Option[List[* Expr]].None()
+        }
+
+        if not has_named then {
+            if saw_default_fill then {
+                if args.count() <> 1(UInt) then {
+                    self.push_diagnostic_at_span("Default-fill '...' requires labeled constructor arguments or no preceding arguments", first_arg_span)
+                    return Option[List[* Expr]].None()
+                }
+                let mutable filled = List[* Expr].new()
+                let mutable idx UInt = 0
+                while idx < param_specs.count() and idx < field_types.count() then {
+                    when self.default_fill_expr_for_type(field_types[idx]) in {
+                        .Some(default_expr) then filled.push(default_expr),
+                        .None() then {
+                            self.push_diagnostic_at_span(
+                                "Field '\(param_specs[idx].name)' omitted by '...', but type '\(self.context().type_display_name(field_types[idx]))' does not implement Default",
+                                first_arg_span
+                            )
+                            return Option[List[* Expr]].None()
+                        },
+                    }
+                    idx += 1
+                }
+                return Option[List[* Expr]].Some(filled)
+            }
+            return Option[List[* Expr]].Some(args)
+        }
+
+        let mutable valid_names = Set[String].new()
+        for spec in param_specs then {
+            valid_names.insert(spec.name)
+        }
+        let mutable seen_names = Set[String].new()
+        for arg in args then {
+            when arg in {
+                .NamedArgument(label, _, _) then {
+                    if label == "..." then {
+                    } else if not valid_names.contains(label) then {
+                        self.push_diagnostic_at_span("Unknown constructor label '\(label)' for type '\(constructor_description)'", expr_span(arg))
+                        return Option[List[* Expr]].None()
+                    } else if seen_names.contains(label) then {
+                        self.push_diagnostic_at_span("Duplicate constructor label '\(label)'", expr_span(arg))
+                        return Option[List[* Expr]].None()
+                    } else {
+                        seen_names.insert(label)
+                    }
+                },
+                _ then {},
+            }
+        }
+
+        let mutable ordered = List[* Expr].new()
+        let mutable missing_count UInt = 0
+        let mutable idx UInt = 0
+        while idx < param_specs.count() and idx < field_types.count() then {
+            let spec = param_specs[idx]
+            let mutable matched = Option[* Expr].None()
+            for arg in args then {
+                when arg in {
+                    .NamedArgument(label, inner, _) then {
+                        if label == spec.name then {
+                            matched = Option[* Expr].Some(inner)
+                            break
+                        }
+                    },
+                    _ then {},
+                }
+            }
+            when matched in {
+                .Some(inner) then ordered.push(inner),
+                .None() then {
+                    if saw_default_fill then {
+                        when self.default_fill_expr_for_type(field_types[idx]) in {
+                            .Some(default_expr) then {
+                                ordered.push(default_expr)
+                                missing_count += 1(UInt)
+                            },
+                            .None() then {
+                                self.push_diagnostic_at_span(
+                                    "Field '\(spec.name)' omitted by '...', but type '\(self.context().type_display_name(field_types[idx]))' does not implement Default",
+                                    first_arg_span
+                                )
+                                return Option[List[* Expr]].None()
+                            },
+                        }
+                    } else {
+                        self.push_diagnostic_at_span("Missing constructor field '\(spec.name)'; provide '\(spec.name):' or use '...'", first_arg_span)
+                        return Option[List[* Expr]].None()
+                    }
+                },
+            }
+            idx += 1
+        }
+
+        if saw_default_fill and missing_count == 0(UInt) and not args.is_empty() then {
+            self.push_diagnostic_at_span("Trailing '...' is redundant because all constructor fields are already provided", last_arg_span)
+            return Option[List[* Expr]].None()
+        }
+
+        return Option[List[* Expr]].Some(ordered)
+    }
+
     protected should_suppress_missing_member_call_diagnostic(self, typed_callee TypedExpr) Bool = {
         let _ = self
         return when typed_callee.expr_kind in {
@@ -415,6 +705,10 @@ given TypeChecker {
 
     protected check_static_method_call_ref(self, type_name String, type_args List[* TypeNode], method_name String, args List[* Expr], expected Option[Type], scope Scope) TypedExpr = {
         let effective_type_name = type_name
+        let mutable call_args = List[* Expr].new()
+        for arg in args then {
+            call_args.push(arg)
+        }
         if type_name.contains(".") then {
             self.storage.diagnostics.push(
                 make_diagnostic(
@@ -518,6 +812,16 @@ given TypeChecker {
                 else Option[Type].None(),
             .None() then Option[Type].None(),
         }
+        when enum_constructor_type_opt in {
+            .Some(enum_type) then {
+                let param_specs = self.get_enum_case_param_specs(enum_type, method_name)
+                let field_types = self.get_enum_case_field_types(enum_type, method_name)
+                call_args = self.normalize_constructor_call_args(call_args, param_specs, field_types, "\(effective_type_name).\(method_name)") or else {
+                    return self.empty_typed_block(Type.Unknown())
+                }
+            },
+            .None() then {},
+        }
         let static_sig_opt = self.resolve_static_method_signature_for_receiver(effective_type_name, declared_receiver_type, method_name)
         let static_param_types = when static_sig_opt in {
             .Some(sig) then {
@@ -551,7 +855,7 @@ given TypeChecker {
         let static_param_specs = self.resolve_static_call_param_specs(effective_type_name, method_name)
         let mutable typed_args = List[* TypedExpr].new()
         let mutable static_arg_idx UInt = 0
-        for a in args then {
+        for a in call_args then {
             let static_param_expected = when static_param_types.get(static_arg_idx) in {
                 .Some(pt) then Option[Type].Some(pt),
                 .None() then Option[Type].None(),
@@ -886,6 +1190,15 @@ given TypeChecker {
         let mutable call_args = List[* Expr].new()
         for arg in args then {
             call_args.push(arg)
+        }
+
+        let constructor_type_probe = self.resolved_constructor_type_or_unknown(callee, scope)
+        if constructor_type_probe is .StructureType(_) or constructor_type_probe is .GenericStruct(_, _) then {
+            let constructor_param_specs = self.struct_constructor_param_specs(constructor_type_probe)
+            let constructor_field_types = self.type_construction_arg_types(constructor_type_probe)
+            call_args = self.normalize_constructor_call_args(call_args, constructor_param_specs, constructor_field_types, self.context().type_display_name(constructor_type_probe)) or else {
+                return make_typed_expr(TypedExprKind.Call(box(self.check_call_callee_expr_ref(callee, scope)), List[* TypedExpr].new()), Type.Unknown())
+            }
         }
 
         when callee in {
@@ -1315,6 +1628,22 @@ given TypeChecker {
         when callee in {
             .Identifier(_, _) then when typed_callee.expr_kind in {
                 .Variable(sym) then {
+                    if sym.kind is not .TypeSymbol() and not self.reject_non_constructor_named_arguments(call_args) then {
+                        return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown())
+                    }
+                },
+                _ then if not self.reject_non_constructor_named_arguments(call_args) then {
+                    return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown())
+                },
+            },
+            _ then if not self.reject_non_constructor_named_arguments(call_args) then {
+                return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown())
+            },
+        }
+
+        when callee in {
+            .Identifier(_, _) then when typed_callee.expr_kind in {
+                .Variable(sym) then {
                     when sym.kind in {
                         .TypeSymbol() then {},
                         _ then self.validate_named_arguments(call_args, callee_param_specs),
@@ -1457,7 +1786,12 @@ given TypeChecker {
                     or ret_type is .EnumType(_)
                 then {
                     let identifier = self.type_construction_symbol_for_type(base_type, ret_type)
-                    let constructor_args = self.recheck_type_construction_args(args, ret_type, scope)
+                    let param_specs = self.struct_constructor_param_specs(ret_type)
+                    let field_types = self.type_construction_arg_types(ret_type)
+                    let normalized_args = self.normalize_constructor_call_args(args, param_specs, field_types, self.context().type_display_name(ret_type)) or else {
+                        return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown())
+                    }
+                    let constructor_args = self.recheck_type_construction_args(normalized_args, ret_type, scope)
                     return make_typed_expr(TypedExprKind.TypeConstruction(identifier, type_args, constructor_args), ret_type)
                 }
             },
@@ -1469,7 +1803,12 @@ given TypeChecker {
                         or ret_type is .GenericEnum(_, _)
                     then {
                         let identifier = box(Symbol(sym.def_id, ret_type, SymbolKind.TypeSymbol()))
-                        let constructor_args = self.recheck_type_construction_args(args, ret_type, scope)
+                        let param_specs = self.struct_constructor_param_specs(ret_type)
+                        let field_types = self.type_construction_arg_types(ret_type)
+                        let normalized_args = self.normalize_constructor_call_args(args, param_specs, field_types, self.context().symbol_name(*sym)) or else {
+                            return make_typed_expr(TypedExprKind.Call(typed_callee_ref, typed_args), Type.Unknown())
+                        }
+                        let constructor_args = self.recheck_type_construction_args(normalized_args, ret_type, scope)
                         return make_typed_expr(TypedExprKind.TypeConstruction(identifier, List[Type].new(), constructor_args), ret_type)
                     }
                 }
@@ -1831,14 +2170,32 @@ given TypeChecker {
         return when callee in {
             .Identifier(name, _) then when self.storage.generic_templates.lookup_struct(name) in {
                 .Some(template) then {
-                    let mutable inferred = Option[Type].None()
-                    if name == "Pair" and typed_args.count() == 2 then {
-                        let mutable resolved_args = List[* Type].new()
-                        resolved_args.push(box(self.concretize_default_literal_type(typed_args[0(UInt)].expr_type)))
-                        resolved_args.push(box(self.concretize_default_literal_type(typed_args[1(UInt)].expr_type)))
-                        inferred = Option[Type].Some(Type.GenericStruct(name, resolved_args))
+                    yield when self.context().get_struct_fields(template.def_id) in {
+                        .Some(fields) then {
+                            let mutable bindings = Dict[String, Type].new()
+                            let mutable field_index UInt = 0
+                            let field_limit = if fields.count() < typed_args.count() then fields.count() else typed_args.count()
+                            while field_index < field_limit then {
+                                let field = fields[field_index]
+                                let arg_type = self.concretize_default_literal_type(typed_args[field_index].expr_type)
+                                self.infer_type_bindings(field.field_type, arg_type, &mutable bindings)
+                                field_index += 1
+                            }
+
+                            let mutable resolved_args = List[* Type].new()
+                            for type_param in template.type_parameters then {
+                                when bindings.get(type_param.name) in {
+                                    .Some(bound_type) then resolved_args.push(box(bound_type)),
+                                    .None() then {
+                                        return Option[Type].None()
+                                    },
+                                }
+                            }
+
+                            yield Option[Type].Some(Type.GenericStruct(template.name, resolved_args))
+                        },
+                        .None() then Option[Type].None(),
                     }
-                    yield inferred
                 },
                 .None() then Option[Type].None(),
             },
