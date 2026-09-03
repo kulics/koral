@@ -57,7 +57,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 - `-o, --output <dir>`：输出目录
 - `--package-config <path>`：从包 manifest 构建
 - `--target-module <name>`：选择 manifest 中的目标模块
-- `--deps-root <path>`：manifest 构建模式下的依赖根目录
+- `--requires-root <path>`：manifest 构建模式下的依赖根目录
 - `--std-config <path>`：显式指定 std manifest
 - `--no-std`：编译时不加载 `std/koral.json` 中声明的模块
 

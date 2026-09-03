@@ -33,6 +33,32 @@ given TestRunner {
         }
     }
 
+    test_error_contains(*mutable self, name String, input String, expected_substring String) Void = {
+        when format_source(input) in {
+            .Ok(result) then {
+                self.fail_count += 1
+                println("FAIL: " + name)
+                println("  expected error containing:")
+                println(expected_substring)
+                println("  got formatted output:")
+                println(result)
+            },
+            .Error(e) then {
+                let message = e.message()
+                if message.contains(expected_substring) then {
+                    self.pass_count += 1
+                } else {
+                    self.fail_count += 1
+                    println("FAIL: " + name)
+                    println("  expected error containing:")
+                    println(expected_substring)
+                    println("  got error:")
+                    println(message)
+                }
+            },
+        }
+    }
+
     summary(self) Void = {
         let total = self.pass_count + self.fail_count
         println(self.pass_count.to_string() + "/" + total.to_string() + " tests passed")
@@ -63,7 +89,8 @@ let main() Void = {
 
     // === Using declarations ===
     t.test("using", "using \"foo\"\n", "using \"foo\"\n")
-    t.test("foreign using", "foreign using \"math\"\n", "foreign using \"math\"\n")
+    t.test("module using", "using std::io{Reader as IoReader,Writer}\n", "using std::io { Reader as IoReader, Writer }\n")
+    t.test("module using all public", "using std::io{..}\n", "using std::io { .. }\n")
 
     // === Type declarations ===
     t.test("public type tuple", "public type Point(x Int,y Int)\n", "public type Point(x Int, y Int)\n")
@@ -111,6 +138,8 @@ let main() Void = {
         "let main() Void = {\n    let xs = [1, 2, ]\n    let d = [\"a\": 1, ]\n}\n")
     t.test("qualified trait call", "let main() Void={\nlet r=(x as Tag).plus_ten(1,)\n}\n",
         "let main() Void = {\n    let r = (x as Tag).plus_ten(1, )\n}\n")
+    t.test("constructor default fill", "type Button(width Int,height Int,label String)\nlet make() Button=Button(label:\"OK\",...)\n",
+        "type Button(width Int, height Int, label String)\n\nlet make() Button = Button(label: \"OK\", ...)\n")
     t.test("given not trait", "given Kind not Deref\n",
         "given Kind not Deref\n")
     t.test("trait parent list", "trait FloatMath Numeric and Div[Self] and Neg {\n}\n",
@@ -123,6 +152,17 @@ let main() Void = {
     t.test("idempotent simple", "let x = 1 + 2\n", "let x = 1 + 2\n")
     t.test("idempotent trait", "trait Foo {\n    bar(self) Int\n}\n",
         "trait Foo {\n    bar(self) Int\n}\n")
+
+    // === Rejected stale syntax ===
+    t.test_error_contains("foreign using removed", "foreign using \"math\"\n", "expected primary expression")
+    t.test_error_contains("using file alias removed", "using \"foo\" as Bar\n", "file merge syntax no longer supports aliases")
+    t.test_error_contains("using all public must stand alone", "using std::io{..,Reader}\n", "'..' must be the only item in a module import list")
+    t.test_error_contains("using after declaration", "let x=1\nusing \"foo\"\n", "using declarations must appear before other top-level declarations")
+    t.test_error_contains("colon params rejected", "let add(x: Int,y Int) Int=x+y\n", "Function parameters use 'name Type', not 'name: Type'")
+    t.test_error_contains("colon constructor field rejected", "type Point(x: Int)\n", "Constructor field declarations use 'name Type', not 'name: Type'")
+    t.test_error_contains("legacy range form rejected", "let x=<...5\n", "expected primary expression")
+    t.test_error_contains("while value position rejected", "let x Void = while true then {}\n", "'while' can only be used as a statement")
+    t.test_error_contains("for value position rejected", "let x Void = for item in [1,2] then println(item)\n", "'for' can only be used as a statement")
 
     t.summary()
 }

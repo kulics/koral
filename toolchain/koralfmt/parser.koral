@@ -99,7 +99,10 @@ public type CstExpr {
 }
 
 // Call argument with optional trailing comma
-public type CstCallArg(label Option[Token], colon Option[Token], value * CstExpr, comma Option[Token])
+public type CstCallArg {
+    Value(label Option[Token], colon Option[Token], value * CstExpr, comma Option[Token]),
+    DefaultFill(leading_comments List[Token], ellipsis Token, comma Option[Token]),
+}
 
 public type CstCollectionElement(value * CstExpr, comma Option[Token])
 
@@ -182,6 +185,7 @@ public type CstStmt {
     Defer(kw Token, value * CstExpr),
     Return(kw Token, value Option[* CstExpr]),
     Break(kw Token, value Option[* CstExpr]),
+    Yield(kw Token, value * CstExpr),
     Continue(kw Token),
 }
 
@@ -490,6 +494,23 @@ given CstParser {
         return CstParser.is_code_item(prev)
     }
 
+    private item_is_using_decl(item CstItem) Bool = when item in {
+        .Decl(decl) then when *decl in {
+            .Using(_) or .ForeignUsing(_, _) then true,
+            _ then false,
+        },
+        _ then false,
+    }
+
+    private item_is_non_using_top_level_code(item CstItem) Bool = when item in {
+        .Decl(decl) then when *decl in {
+            .Using(_) or .ForeignUsing(_, _) then false,
+            _ then true,
+        },
+        .Stmt(_) then true,
+        _ then false,
+    }
+
     // Check if we crossed a newline boundary (for statement termination)
     private at_newline_boundary(*self) Bool = {
         if self.pos == 0 then { return false }
@@ -761,9 +782,8 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
 
-            let mutable colon = Option[Token].None()
             if self.check(.Colon()) then {
-                colon = .Some(self.eat())
+                return .Error(box("Parse error: Function parameters use 'name Type', not 'name: Type'"))
             }
 
             // Parameters must have explicit type annotation.
@@ -775,7 +795,7 @@ given CstParser {
                 .Error(e) then { return .Error(e) },
             }
             let comma = self.eat_comma()
-            params.push(.NamedParam(name, param_mut, colon, box(pt), comma))
+            params.push(.NamedParam(name, param_mut, .None(), box(pt), comma))
             first = 0
         }
         return .Ok(params)
@@ -1008,7 +1028,7 @@ given CstParser {
     }
 
     private parse_range(*mutable self) Result[CstExpr] = {
-        // Prefix range: ..b, ..<b, ..., ...<b, ....
+        // Prefix range: ..b, ..<b, ..
         when self.peek() in {
             .Range() then {
                 let op = self.eat()
@@ -1022,29 +1042,6 @@ given CstParser {
                 return .Ok(.RangeExpr(.None(), op, .None()))
             },
             .RangeLt() then {
-                let op = self.eat()
-                let right = when self.parse_comparison() in {
-                    .Ok(e) then e,
-                    .Error(e) then { return .Error(e) },
-                }
-                return .Ok(.RangeExpr(.None(), op, .Some(box(right))))
-            },
-            .FullRange() then {
-                let op = self.eat()
-                return .Ok(.RangeExpr(.None(), op, .None()))
-            },
-            .Unbounded() then {
-                let op = self.eat()
-                if self.can_start_range_bound() then {
-                    let right = when self.parse_comparison() in {
-                        .Ok(e) then e,
-                        .Error(e) then { return .Error(e) },
-                    }
-                    return .Ok(.RangeExpr(.None(), op, .Some(box(right))))
-                }
-                return .Ok(.RangeExpr(.None(), op, .None()))
-            },
-            .UnboundedLt() then {
                 let op = self.eat()
                 let right = when self.parse_comparison() in {
                     .Ok(e) then e,
@@ -1089,10 +1086,6 @@ given CstParser {
                     }
                     return .Ok(.RangeExpr(.Some(box(left)), op, .Some(box(right))))
                 }
-                return .Ok(.RangeExpr(.Some(box(left)), op, .None()))
-            },
-            .Unbounded() or .LtUnbounded() then {
-                let op = self.eat()
                 return .Ok(.RangeExpr(.Some(box(left)), op, .None()))
             },
             _ then { return .Ok(left) },
@@ -1404,7 +1397,7 @@ given CstParser {
                         .Error(e) then { return .Error(e) },
                     }
                     let comma = self.eat_comma()
-                    args.push(CstCallArg(.None(), .None(), box(value), comma))
+                    args.push(.Value(.None(), .None(), box(value), comma))
                 }
                 let rb = when self.expect(.RBracket(), "']'") in {
                     .Ok(t) then t,
@@ -1432,6 +1425,16 @@ given CstParser {
                 leading_comments.push(self.eat())
             }
             let before = self.pos
+            if self.check(.Unbounded()) then {
+                let ellipsis = self.eat()
+                let comma = self.eat_comma()
+                args.push(.DefaultFill(leading_comments, ellipsis, comma))
+                if self.pos == before then {
+                    self.leave_line_join_grouping()
+                    return .Error(box("Parse error: parser made no progress in argument list"))
+                }
+                continue
+            }
             let mutable label = Option[Token].None()
             let mutable colon = Option[Token].None()
             if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Colon() then {
@@ -1446,7 +1449,7 @@ given CstParser {
                 value = .Commented(leading_comments, box(value))
             }
             let comma = self.eat_comma()
-            args.push(CstCallArg(label, colon, box(value), comma))
+            args.push(.Value(label, colon, box(value), comma))
             if self.pos == before then {
                 self.leave_line_join_grouping()
                 return .Error(box("Parse error: parser made no progress in argument list"))
@@ -1532,10 +1535,6 @@ given CstParser {
                 return .Error(box("Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())"))
             },
             _ then {},
-        }
-        if not self.is_eof() then {
-            let bad = self.eat()
-            return .Ok(.Ident(bad))
         }
         return .Error(box("Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())"))
     }
@@ -1976,7 +1975,7 @@ given CstParser {
 
     private expect_pattern_value(*mutable self, what String) Result[Token] = {
         return when self.peek() in {
-            .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue() or .BoolFalse() or .Ident(_) then .Ok(self.eat()),
+            .IntLit(_) then .Ok(self.eat()),
             _ then .Error(box(self.expected_error(what))),
         }
     }
@@ -2077,7 +2076,6 @@ given CstParser {
         // Integer literal
         when self.peek() in {
             .IntLit(_) then { return .Ok(.PatIntLit(self.eat())) },
-            .FloatLit(_) then { return .Ok(.PatIntLit(self.eat())) },
             .StrLit(_) then { return .Ok(.PatStrLit(self.eat())) },
             .BoolTrue() or .BoolFalse() then { return .Ok(.PatBoolLit(self.eat())) },
             _ then {},
@@ -2232,7 +2230,7 @@ given CstParser {
                     .Error(e) then { return .Error(e) },
                 }
                 if self.peek() is .Semi() then { self.eat() }
-                return .Ok(.Break(kw, .Some(box(value))))
+                return .Ok(.Yield(kw, box(value)))
             },
             .KwContinue() then {
                 let kw = self.eat()
@@ -2369,6 +2367,7 @@ given CstParser {
     // Main entry point
     public parse(*mutable self) Result[CstFile] = {
         let mutable items = List[*CstItem].new()
+        let mutable seen_non_using = false
         while not self.is_eof() then {
             let nl_count = self.count_newlines()
             if nl_count >= 2 then {
@@ -2393,10 +2392,18 @@ given CstParser {
                 continue
             }
             let before = self.pos
-            when self.parse_top_item() in {
-                .Ok(item) then { items.push(box(item)) },
+            let item = when self.parse_top_item() in {
+                .Ok(parsed_item) then parsed_item,
                 .Error(e) then { return .Error(e) },
             }
+            if CstParser.item_is_using_decl(item) then {
+                if seen_non_using then {
+                    return .Error(box("Parse error: using declarations must appear before other top-level declarations"))
+                }
+            } else if CstParser.item_is_non_using_top_level_code(item) then {
+                seen_non_using = true
+            }
+            items.push(box(item))
             if self.pos == before then {
                 return .Error(box("Parse error: parser made no progress"))
             }
@@ -2410,19 +2417,6 @@ given CstParser {
             when self.parse_using_decl() in {
                 .Ok(d) then { return .Ok(.Decl(box(d))) },
                 .Error(e) then { return .Error(e) },
-            }
-        }
-        // Foreign using
-        if self.check(.KwForeign()) then {
-            let next = self.peek_at_skip_nl(1)
-            when next in {
-                .KwUsing() then {
-                    when self.parse_foreign_using_decl() in {
-                        .Ok(d) then { return .Ok(.Decl(box(d))) },
-                        .Error(e) then { return .Error(e) },
-                    }
-                },
-                _ then {},
             }
         }
 
@@ -2469,6 +2463,118 @@ given CstParser {
     // Using declarations
     // ========================================================================
 
+    private validate_using_trailing_tokens(*self, tokens List[Token], start UInt, message String) Result[Void] = {
+        let mutable i = start
+        while i < tokens.count() then {
+            when tokens[i] in {
+                .Semi() then { i += 1 },
+                .LineComment(_) or .BlockComment(_) then { return .Ok({}) },
+                _ then { return .Error(box(message)) },
+            }
+        }
+        return .Ok({})
+    }
+
+    private validate_module_using_tokens(*self, tokens List[Token], start UInt) Result[Void] = {
+        let mutable i = start
+        if i >= tokens.count() or tokens[i] is not .Ident(_) then {
+            return .Error(box("Parse error: expected module import like 'std::io { Reader }'"))
+        }
+        i += 1
+
+        while i + 2 < tokens.count() then {
+            if tokens[i] is .Colon() and tokens[i + 1] is .Colon() and tokens[i + 2] is .Ident(_) then {
+                i += 3
+                continue
+            }
+            break
+        }
+
+        if i >= tokens.count() or tokens[i] is not .LBrace() then {
+            return .Error(box("Parse error: expected module import like 'std::io { Reader }'"))
+        }
+        i += 1
+
+        if i >= tokens.count() then {
+            return .Error(box("Parse error: expected import item or '..' in module import"))
+        }
+
+        if tokens[i] is .Range() then {
+            i += 1
+            if i >= tokens.count() or tokens[i] is not .RBrace() then {
+                return .Error(box("Parse error: '..' must be the only item in a module import list"))
+            }
+            i += 1
+            return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after module import")
+        }
+
+        let mutable saw_item = false
+        while true then {
+            if i >= tokens.count() then {
+                return .Error(box("Parse error: expected '}' in module import"))
+            }
+            if tokens[i] is .RBrace() then {
+                if not saw_item then {
+                    return .Error(box("Parse error: expected import item or '..' in module import"))
+                }
+                i += 1
+                return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after module import")
+            }
+            if tokens[i] is not .Ident(_) then {
+                return .Error(box("Parse error: expected import item or '..' in module import"))
+            }
+            saw_item = true
+            i += 1
+
+            if i < tokens.count() and tokens[i] is .KwAs() then {
+                i += 1
+                if i >= tokens.count() or tokens[i] is not .Ident(_) then {
+                    return .Error(box("Parse error: expected alias name after 'as'"))
+                }
+                i += 1
+            }
+
+            if i >= tokens.count() then {
+                return .Error(box("Parse error: expected ',' or '}' in module import list"))
+            }
+            if tokens[i] is .Comma() then {
+                i += 1
+                continue
+            }
+            if tokens[i] is .RBrace() then {
+                i += 1
+                return self.validate_using_trailing_tokens(tokens, i, "Parse error: unexpected tokens after module import")
+            }
+            return .Error(box("Parse error: expected ',' or '}' in module import list"))
+        }
+
+        return .Ok({})
+    }
+
+    private validate_using_decl_tokens(*self, tokens List[Token]) Result[Void] = {
+        if tokens.count() == 0 or tokens[0] is not .KwUsing() then {
+            return .Error(box("Parse error: expected 'using' declaration"))
+        }
+        if tokens.count() < 2 then {
+            return .Error(box("Parse error: expected string literal for file merge, or module import like 'std::io { Reader }'"))
+        }
+
+        when tokens[1] in {
+            .StrLit(_) then {
+                if tokens.count() > 2 and tokens[2] is .KwAs() then {
+                    return .Error(box("Parse error: file merge syntax no longer supports aliases"))
+                }
+                return self.validate_using_trailing_tokens(tokens, 2, "Parse error: unexpected tokens after file merge using")
+            },
+            .Ident(_) then {
+                return self.validate_module_using_tokens(tokens, 1)
+            },
+            _ then {
+                return .Error(box("Parse error: expected string literal for file merge, or module import like 'std::io { Reader }'"))
+            },
+        }
+    }
+
     private parse_using_decl(*mutable self) Result[CstDecl] = {
         let mutable tokens = List[Token].new()
         while not self.is_eof() then {
@@ -2476,6 +2582,10 @@ given CstParser {
                 .Newline() or .EOF() then { break },
                 _ then { tokens.push(self.advance()) },
             }
+        }
+        when self.validate_using_decl_tokens(tokens) in {
+            .Ok(_) then {},
+            .Error(e) then { return .Error(e) },
         }
         return .Ok(.Using(tokens))
     }
@@ -2645,16 +2755,15 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                let mutable colon = Option[Token].None()
                 if self.check(.Colon()) then {
-                    colon = .Some(self.eat())
+                    return .Error(box("Parse error: Constructor field declarations use 'name Type', not 'name: Type'"))
                 }
                 let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                items.push(box(CstStructBodyItem.Field(CstStructField(field_mut, field_access, field_name, colon, box(field_type), comma))))
+                items.push(box(CstStructBodyItem.Field(CstStructField(field_mut, field_access, field_name, .None(), box(field_type), comma))))
             }
             let rp = when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
@@ -2741,16 +2850,15 @@ given CstParser {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
-                let mutable colon = Option[Token].None()
                 if self.check(.Colon()) then {
-                    colon = .Some(self.eat())
+                    return .Error(box("Parse error: Enum payload field declarations use 'name Type', not 'name: Type'"))
                 }
                 let field_type = when self.parse_type_node() in {
                     .Ok(t) then t,
                     .Error(e) then { return .Error(e) },
                 }
                 let comma = self.eat_comma()
-                fields.push(CstEnumField(field_name, colon, box(field_type), comma))
+                fields.push(CstEnumField(field_name, .None(), box(field_type), comma))
             }
             rp = .Some(when self.expect(.RParen(), "')'") in {
                 .Ok(t) then t,
@@ -2895,16 +3003,15 @@ given CstParser {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
-            let mutable colon = Option[Token].None()
             if self.check(.Colon()) then {
-                colon = .Some(self.eat())
+                return .Error(box("Parse error: Function parameters use 'name Type', not 'name: Type'"))
             }
             let pt = when self.parse_type_node() in {
                 .Ok(t) then t,
                 .Error(e) then { return .Error(e) },
             }
             let comma = self.eat_comma()
-            params.push(.NamedParam(pname, colon, box(pt), comma))
+            params.push(.NamedParam(pname, .None(), box(pt), comma))
             first = 0
         }
         let rp = when self.expect(.RParen(), "')'") in {

@@ -57,7 +57,7 @@ Common options:
 - `-o, --output <dir>`: output directory
 - `--package-config <path>`: build from a package manifest
 - `--target-module <name>`: choose the manifest target module
-- `--deps-root <path>`: dependency root for manifest-driven builds
+- `--requires-root <path>`: dependency root for manifest-driven builds
 - `--std-config <path>`: explicit std manifest path
 - `--no-std`: compile without loading modules declared by `std/koral.json`
 

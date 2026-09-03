@@ -547,33 +547,61 @@ given Printer {
             self.write_newline()
             self.indent += 1
             for arg in args then {
-                if arg.label is .Some(label) then {
-                    self.write_token(label)
-                    if arg.colon is .Some(c) then { self.write_token(c); self.write_space() }
-                }
-                self.print_expr(*arg.value)
-                if arg.comma is .Some(c) then { self.write_token(c) }
+                self.print_call_arg_multiline(arg)
                 if not self.at_line_start then { self.write_newline() }
             }
             self.indent -= 1
             return
         }
         for i in 0..<args.count() then {
-            let a = args[i]
-            if a.label is .Some(label) then {
-                self.write_token(label)
-                if a.colon is .Some(c) then { self.write_token(c); self.write_space() }
-            }
-            self.print_expr(*a.value)
-            if a.comma is .Some(c) then { self.write_token(c); self.write_space() }
+            self.print_call_arg_inline(args[i])
         }
+    }
+
+    private print_call_arg_multiline(*mutable self, arg CstCallArg) Void = when arg in {
+        .Value(label, colon, value, comma) then {
+            if label is .Some(arg_label) then {
+                self.write_token(arg_label)
+                if colon is .Some(c) then { self.write_token(c); self.write_space() }
+            }
+            self.print_expr(*value)
+            if comma is .Some(c) then { self.write_token(c) }
+        },
+        .DefaultFill(leading_comments, ellipsis, comma) then {
+            for comment in leading_comments then {
+                self.write_token(comment)
+                self.write_newline()
+            }
+            self.write_token(ellipsis)
+            if comma is .Some(c) then { self.write_token(c) }
+        },
+    }
+
+    private print_call_arg_inline(*mutable self, arg CstCallArg) Void = when arg in {
+        .Value(label, colon, value, comma) then {
+            if label is .Some(arg_label) then {
+                self.write_token(arg_label)
+                if colon is .Some(c) then { self.write_token(c); self.write_space() }
+            }
+            self.print_expr(*value)
+            if comma is .Some(c) then { self.write_token(c); self.write_space() }
+        },
+        .DefaultFill(_, ellipsis, comma) then {
+            self.write_token(ellipsis)
+            if comma is .Some(c) then { self.write_token(c); self.write_space() }
+        },
     }
 
     private call_args_need_multiline(*self, args List[CstCallArg]) Bool = {
         for arg in args then {
-            when *arg.value in {
-                .Commented(_, _) then { return true },
-                _ then {},
+            when arg in {
+                .Value(_, _, value, _) then when *value in {
+                    .Commented(_, _) then { return true },
+                    _ then {},
+                },
+                .DefaultFill(leading_comments, _, _) then {
+                    if leading_comments.count() > 0 then { return true }
+                },
             }
         }
         return false
@@ -809,6 +837,11 @@ given Printer {
                 self.print_expr(*v)
             }
         },
+        .Yield(kw, value) then {
+            self.write_token(kw)
+            self.write_space()
+            self.print_expr(*value)
+        },
         .Continue(kw) then self.write_token(kw),
     }
 
@@ -938,7 +971,7 @@ given Printer {
             _ then {},
         }
         when cur in {
-            .Colon() or .Dot() or .Comma() or .RBrace() or .RParen() or .RBracket() then { return false },
+            .Colon() or .Dot() or .Comma() or .Semi() or .RParen() or .RBracket() then { return false },
             .LBrace() then { return true },
             _ then {},
         }
@@ -1115,6 +1148,25 @@ given Printer {
             },
         }
         if comma is .Some(c) then { self.write_token(c); self.write_space() }
+    }
+
+    private estimate_call_arg_length(*self, arg CstCallArg) UInt = when arg in {
+        .Value(label, colon, value, comma) then {
+            let mutable len = self.estimate_expr_length(*value)
+            if label is .Some(arg_label) then {
+                len += arg_label.to_string().count()
+                if colon is .Some(c) then {
+                    len += c.to_string().count() + 1
+                }
+            }
+            if comma is .Some(c) then { len += c.to_string().count() }
+            yield len
+        },
+        .DefaultFill(_, ellipsis, comma) then {
+            let mutable len = ellipsis.to_string().count()
+            if comma is .Some(c) then { len += c.to_string().count() }
+            yield len
+        },
     }
 
     private print_param(*mutable self, param CstParam) Void = {
@@ -1677,7 +1729,7 @@ given Printer {
             let mutable len = self.estimate_expr_length(*base) + 4 + trait_name.to_string().count() + method_name.to_string().count() + 2
             for i in 0..<args.count() then {
                 if i > 0 then { len += 2 }
-                len += self.estimate_expr_length(*args[i].value)
+                len += self.estimate_call_arg_length(args[i])
             }
             yield len
         },
@@ -1685,7 +1737,7 @@ given Printer {
             let mutable len = self.estimate_expr_length(*callee) + 2
             for i in 0..<args.count() then {
                 if i > 0 then { len += 2 }
-                len += self.estimate_expr_length(*args[i].value)
+                len += self.estimate_call_arg_length(args[i])
             }
             yield len
         },
@@ -1932,11 +1984,173 @@ given Printer {
 // Top-level format_source function
 // ============================================================================
 
+private let validate_optional_expr_usage(expr Option[* CstExpr], statement_context Bool) Result[Void] = when expr in {
+    .Some(inner) then validate_expr_usage(*inner, statement_context),
+    .None() then .Ok({}),
+}
+
+private let validate_call_args(args List[CstCallArg]) Result[Void] = {
+    for arg in args then {
+        when arg in {
+            .Value(_, _, value, _) then {
+                validate_expr_usage(*value, false) or return
+            },
+            .DefaultFill(_, _, _) then {},
+        }
+    }
+    return .Ok({})
+}
+
+private let validate_item_list(items List[* CstItem]) Result[Void] = {
+    for item in items then {
+        when validate_item(*item) in {
+            .Ok(_) then {},
+            .Error(e) then { return .Error(e) },
+        }
+    }
+    return .Ok({})
+}
+
+private let validate_type_body(body CstTypeBody) Result[Void] = when body in {
+    .Enum(_, cases, _) then validate_item_list(cases),
+    _ then .Ok({}),
+}
+
+private let validate_decl(decl CstDecl) Result[Void] = when decl in {
+    .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(*body, false),
+    .Type(_, _, _, _, _, body) then validate_type_body(*body),
+    .Trait(_, _, _, _, _, _, members, _) then validate_item_list(members),
+    .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
+    .Using(_) or .ForeignUsing(_, _) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _)
+    or .GivenNot(_, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok({}),
+}
+
+private let validate_stmt(stmt CstStmt) Result[Void] = when stmt in {
+    .VarDecl(_, _, _, _, _, value) then validate_expr_usage(*value, false),
+    .PairVarDecl(_, _, _, _, _, _, _, value) then validate_expr_usage(*value, false),
+    .Assignment(target, _, value) then {
+        validate_expr_usage(*target, false) or return
+        return validate_expr_usage(*value, false)
+    },
+    .ExprStmt(expr, _) then validate_expr_usage(*expr, true),
+    .Defer(_, value) then validate_expr_usage(*value, true),
+    .Return(_, value) then validate_optional_expr_usage(value, false),
+    .Break(_, value) then validate_optional_expr_usage(value, false),
+    .Yield(_, value) then validate_expr_usage(*value, false),
+    .Continue(_) then .Ok({}),
+}
+
+private let validate_item(item CstItem) Result[Void] = when item in {
+    .Decl(decl) then validate_decl(*decl),
+    .Stmt(stmt) then validate_stmt(*stmt),
+    .Comment(_) or .TrailingComment(_) or .BlankLine() then .Ok({}),
+}
+
+private let validate_expr_usage(expr CstExpr, statement_context Bool) Result[Void] = when expr in {
+    .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolLit(_) or .Ident(_)
+    or .SelfExpr(_) or .UnderscoreExpr(_) or .EnumVariant(_, _, _, _) then .Ok({}),
+    .Commented(_, inner) then validate_expr_usage(*inner, statement_context),
+    .BinaryOp(left, _, right) then {
+        validate_expr_usage(*left, false) or return
+        return validate_expr_usage(*right, false)
+    },
+    .UnaryMinus(_, operand) or .Deref(_, operand) or .NotExpr(_, operand)
+    or .BitwiseNot(_, operand) or .PrefixKw(_, operand) then validate_expr_usage(*operand, false),
+    .AddressOf(_, _, _, operand) then validate_expr_usage(*operand, false),
+    .IsExpr(subject, _, _, _) then validate_expr_usage(*subject, false),
+    .TypeCast(_, _, _, operand) then validate_expr_usage(*operand, false),
+    .Paren(_, inner, _) then validate_expr_usage(*inner, false),
+    .PairExpr(_, first, _, second, _) then {
+        validate_expr_usage(*first, false) or return
+        return validate_expr_usage(*second, false)
+    },
+    .TraitQualification(_, base, _, _, _) then validate_expr_usage(*base, false),
+    .FieldAccess(base, _, _) then validate_expr_usage(*base, false),
+    .QualifiedCall(base, _, _, _, _, _, _, args, _) then {
+        validate_expr_usage(*base, false) or return
+        return validate_call_args(args)
+    },
+    .Call(callee, _, args, _) then {
+        validate_expr_usage(*callee, false) or return
+        return validate_call_args(args)
+    },
+    .SubscriptExpr(base, _, args, _) then {
+        validate_expr_usage(*base, false) or return
+        return validate_call_args(args)
+    },
+    .GenericInst(base, _, _, _) then validate_expr_usage(*base, false),
+    .ImplicitMember(_, _, _, args, _) then validate_call_args(args),
+    .Block(_, items, _) then validate_item_list(items),
+    .If(_, cond, _, then_body, _, else_body) then {
+        validate_expr_usage(*cond, false) or return
+        validate_expr_usage(*then_body, statement_context) or return
+        return validate_optional_expr_usage(else_body, statement_context)
+    },
+    .IfPattern(_, subject, _, _, _, then_body, _, else_body) then {
+        validate_expr_usage(*subject, false) or return
+        validate_expr_usage(*then_body, statement_context) or return
+        return validate_optional_expr_usage(else_body, statement_context)
+    },
+    .While(_, cond, _, body) then {
+        if not statement_context then {
+            return .Error(box("Parse error: 'while' can only be used as a statement"))
+        }
+        validate_expr_usage(*cond, false) or return
+        return validate_expr_usage(*body, true)
+    },
+    .WhilePattern(_, subject, _, _, _, body) then {
+        if not statement_context then {
+            return .Error(box("Parse error: 'while' can only be used as a statement"))
+        }
+        validate_expr_usage(*subject, false) or return
+        return validate_expr_usage(*body, true)
+    },
+    .For(_, _, _, iterable, _, body) then {
+        if not statement_context then {
+            return .Error(box("Parse error: 'for' can only be used as a statement"))
+        }
+        validate_expr_usage(*iterable, false) or return
+        return validate_expr_usage(*body, true)
+    },
+    .When(_, subject, _, _, arms, _) then {
+        validate_expr_usage(*subject, false) or return
+        for arm in arms then {
+            validate_expr_usage(*arm.body, statement_context) or return
+        }
+        return .Ok({})
+    },
+    .AndThen(left, _, _, right) or .OrElse(left, _, _, right) then {
+        validate_expr_usage(*left, false) or return
+        return validate_expr_usage(*right, false)
+    },
+    .OrReturn(left, _, _) then validate_expr_usage(*left, false),
+    .RangeExpr(left, _, right) then {
+        validate_optional_expr_usage(left, false) or return
+        return validate_optional_expr_usage(right, false)
+    },
+    .EmptyLiteral(_, _) then .Ok({}),
+    .CollectionLiteral(_, elements, _) then {
+        for element in elements then {
+            validate_expr_usage(*element.value, false) or return
+        }
+        return .Ok({})
+    },
+    .DictLiteral(_, entries, _) then {
+        for entry in entries then {
+            validate_expr_usage(*entry.key, false) or return
+            validate_expr_usage(*entry.value, false) or return
+        }
+        return .Ok({})
+    },
+    .Lambda(_, _, _, _, _, body) then validate_expr_usage(*body, false),
+}
+
 public let format_source(source String) Result[String] = {
     let mutable tokenizer = Tokenizer.new(source)
     let tokens = tokenizer.tokenize() or return
     let mutable parser = CstParser.new(tokens)
     let file = parser.parse() or return
+    validate_item_list(file.items) or return
     let mutable printer = Printer.new()
     printer.print_file(file.items)
     printer.finalize()
