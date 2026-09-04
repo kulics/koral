@@ -12,7 +12,7 @@ Specification note:
 
 ## Key Features
 
-- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if` and `when` can be expressions or statements; blocks can produce values in expression contexts, while `while` and `for` are syntactically expressions (same surface form as `if`), but may be restricted to statement positions by semantic checks.
+- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` are always expressions. Single-branch forms (without `else`) produce `Void`; dual-branch forms produce a value.
 - Automatic memory management based on reference counting, ownership analysis, and escape analysis.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
@@ -825,7 +825,7 @@ When mixing `and then`, `or else`, and `or return` in one expression, use parent
 
 Selection structures are used to judge given conditions and control the flow of the program.
 
-In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed. With both `then` and `else`, `if` is an expression; without `else`, the single-branch `if` is a statement and its block branch defaults to `Void`.
+In Koral, selection structures use `if` syntax. `if` is followed by a judgment condition. When the condition is `true`, the `then` branch is executed. When the condition is `false`, the `else` branch is executed. `if` is always an expression. With both `then` and `else`, it produces a value; without `else`, the single-branch `if` produces `Void`.
 
 ```koral
 let main() Void = if 1 == 1 then println("yes") else println("no")
@@ -897,7 +897,7 @@ Rules for condition composition:
 
 ### while Statement
 
-In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is syntactically an expression but may be restricted to statement positions by semantic checks.
+In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is an expression that produces `Void`.
 
 ```koral
 let mutable i = 0
@@ -949,7 +949,7 @@ while true then {
 
 The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
-In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is syntactically an expression but may be restricted to statement positions by semantic checks.
+In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is an expression that produces `Void`.
 
 ```koral
 let nums List[Int] = [10, 20, 30]
@@ -1035,7 +1035,7 @@ Koral has powerful pattern matching capabilities, mainly used through `when` exp
 
 ### when Expression
 
-The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` can be used as an expression or a statement; as an expression, it returns the value of the matching branch.
+The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` is always an expression. It returns the value of the matching branch; single-branch `when` (without a default `_` arm) produces `Void`.
 
 ```koral
 let x = 5
