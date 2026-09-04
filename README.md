@@ -122,27 +122,6 @@ let read_config(path String) Result[Config] = {
 }
 ```
 
-### Newline-based semicolons
-
-Koral uses newline-based statement termination. A newline still ends the current
-statement by default, but an expression may continue when the next line starts
-with a narrow join token such as `.`, `and`, `or`, `is`, `then`, `else`, or
-`->`, or when the previous line ends with an infix operator that still needs a
-right-hand side.
-
-```koral
-let sum = 1 +
-    2
-
-let branch = if ready
-    then "ok"
-    else "wait"
-
-// Still invalid: line-leading ordinary operators start a new statement.
-let bad = 1
-+ 2
-```
-
 ### Generics
 
 ```koral

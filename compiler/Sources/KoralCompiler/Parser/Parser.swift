@@ -45,23 +45,6 @@ public class Parser {
     return token.isLineJoinToken
   }
 
-  func allowsTrailingOperatorContinuation(after token: Token) -> Bool {
-    switch token {
-    case .plus, .minus, .multiply, .divide, .remainder:
-      return true
-    case .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual:
-      return true
-    case .ampersand, .pipe, .caret, .leftShift, .rightShift:
-      return true
-    case .range, .rangeLess, .lessRange, .lessRangeLess:
-      return true
-    case .andKeyword, .orKeyword, .isKeyword, .notKeyword:
-      return true
-    default:
-      return false
-    }
-  }
-
   func allowsPostfixAfterNewline(_ token: Token) -> Bool {
     token === .dot
   }
@@ -70,12 +53,12 @@ public class Parser {
     lexer.newlineBeforeCurrent && !(allowsLineJoinAfterNewline(currentToken) || isInsideLineJoinGrouping())
   }
 
-  func canContinueRangeBoundAfterNewline(after token: Token) -> Bool {
-    !lexer.newlineBeforeCurrent || isInsideLineJoinGrouping() || allowsTrailingOperatorContinuation(after: token)
+  func canContinueRangeBoundAfterNewline() -> Bool {
+    !lexer.newlineBeforeCurrent || isInsideLineJoinGrouping()
   }
 
-  func requireNoLineBreakBeforeRHS(after token: Token) throws {
-    if lexer.newlineBeforeCurrent && !isInsideLineJoinGrouping() && !allowsTrailingOperatorContinuation(after: token) {
+  func requireNoLineBreakBeforeRHS() throws {
+    if lexer.newlineBeforeCurrent && !isInsideLineJoinGrouping() {
       throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
     }
   }

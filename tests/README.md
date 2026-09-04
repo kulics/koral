@@ -95,10 +95,8 @@ Use this bucket when changing identifier parsing or naming-rule enforcement for 
 
 ### ASI / newline continuation
 
-Use this bucket when changing statement termination, line-join tokens, or
-trailing infix-operator continuation.
+Use this bucket when changing statement termination or line-join tokens.
 
-- `newline_semicolon_trailing_operator_continuation_ok`
 - `newline_semicolon_continuation_ok`
 - `newline_semicolon_grouped_expression_ok`
 - `newline_semicolon_blankline_blocks_dot`
