@@ -231,16 +231,20 @@
 // ============================================================================
 
 <expression> ::= <if-expression>
+               | <while-expression>
+               | <for-expression>
                | <when-expression>
                | <or-return-expression>
 
 <if-expression> ::= "if" <expression> "then" <expression> ("else" <expression>)?
+<while-expression> ::= "while" <expression> "then" <expression>
+<for-expression> ::= "for" <match-pattern> "in" <expression> "then" <expression>
 
 <when-expression> ::= "when" <expression> "in" "{" <match-arm-list> "}"
 <match-arm-list> ::= <match-arm> ("," <match-arm>)* ","?
 <match-arm> ::= <match-pattern> "then" <expression>
-// `if` / `when` are expressions.
-// `while` / `for` use the same surface syntax shape but are statement-only.
+// `if`, `while`, `for`, `when` are all expressions.
+// `while` / `for` may be rejected in value positions by semantic checks.
 
 // ============================================================================
 // Binary Expressions (by precedence, lowest to highest)
@@ -330,7 +334,6 @@
                    | <member-suffix>
                    | <cast-suffix>
                    | <qualified-method-suffix>
-                   | <generic-method-suffix>
 
 <call-suffix> ::= "(" <argument-list>? ")"
 <subscript-suffix> ::= "[" <expression-list> "]"
@@ -341,10 +344,6 @@
 // 例: (n as Tag).plus_ten()  /  (b as Transform[Int]).apply[Out](f)
 <qualified-method-suffix> ::= "." <identifier> ("[" <type-list> "]")? "(" <argument-list>? ")"
 <qualified-base-expression> ::= "(" <expression> "as" <type> ")"
-
-// 泛型方法调用：方法级泛型参数，不指定 trait。
-// 例: b.transform[Int](f)
-<generic-method-suffix> ::= "." <identifier> "[" <type-list> "]" "(" <argument-list>? ")"
 
 <argument> ::= <identifier> ":" <expression>
              | "..."
@@ -374,9 +373,11 @@
 
 <pair-literal> ::= "(" <expression> "," <expression> ")"
 
-// Generic instantiation / explicit generic call is postfix:
-//   Box[Int](42)
-//   make[Int](1)
+// Generic instantiation is handled by postfix composition:
+//   TypeName[T]  → <identifier> <subscript-suffix>  (GenericInstantiation)
+//   TypeName[T].method(args)  → <identifier> <subscript-suffix> <member-suffix> <call-suffix>  (StaticMethodCall)
+//   TypeName.method(args)  → <identifier> <member-suffix> <call-suffix>  (StaticMethodCall)
+//   make[T](1)  → <identifier> <subscript-suffix> <call-suffix>  (GenericInstantiation + Call)
 
 <collection-literal> ::= "[" "]"
                        | "[" <expression-list> ","? "]"

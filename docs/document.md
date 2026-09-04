@@ -12,7 +12,7 @@ Specification note:
 
 ## Key Features
 
-- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if` and `when` can be expressions or statements; blocks can produce values in expression contexts, while `while` and `for` remain statement-only.
+- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if` and `when` can be expressions or statements; blocks can produce values in expression contexts, while `while` and `for` are syntactically expressions (same surface form as `if`), but may be restricted to statement positions by semantic checks.
 - Automatic memory management based on reference counting, ownership analysis, and escape analysis.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
@@ -897,7 +897,7 @@ Rules for condition composition:
 
 ### while Statement
 
-In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is statement-only.
+In Koral, loop structures use `while` syntax. `while` is followed by a judgment condition. When the condition is `true`, the following body executes, then control returns to the condition for the next iteration. `while` is syntactically an expression but may be restricted to statement positions by semantic checks.
 
 ```koral
 let mutable i = 0
@@ -949,7 +949,7 @@ while true then {
 
 The `for` loop is used to traverse any object that implements the iterator interface (such as lists, maps, sets, ranges, etc.).
 
-In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is statement-only.
+In each iteration, the next value produced by the iterator will try to match `pattern`. If the match is successful, the statement body following `then` is executed. `for` is syntactically an expression but may be restricted to statement positions by semantic checks.
 
 ```koral
 let nums List[Int] = [10, 20, 30]
