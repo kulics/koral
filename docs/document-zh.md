@@ -834,7 +834,7 @@ let load_port(path String) Result[Int] = {
 操作符优先级从高到低如下：
 
 1. 后缀: 调用 `()`, 下标 `[]`, 成员访问 `.`, 限定/泛型方法后缀
-2. 前缀: 一元 `-`, `~`，解引用 `*`，以及取址 `&`、`&mutable`、`&unsafe`、`&unsafe mutable`
+2. 前缀 / 控制流: 一元 `-`, `~`，解引用 `*`，以及取址 `&`、`&mutable`、`&unsafe`、`&unsafe mutable`；`if`、`while`、`for`、`when`
 3. 乘除: `*`, `/`, `%`
 4. 加减: `+`, `-`
 5. 移位: `<<`, `>>`

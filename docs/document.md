@@ -802,7 +802,7 @@ It must be used inside a function whose return kind matches the propagated value
 Operator precedence from high to low:
 
 1. Postfix: calls `()`, subscripts `[]`, member access `.`, qualified/generic method suffixes
-2. Prefix: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mutable`, `&unsafe`, `&unsafe mutable`
+2. Prefix / Control flow: unary `-`, `~`, dereference `*`, managed/raw address-of `&`, `&mutable`, `&unsafe`, `&unsafe mutable`; `if`, `while`, `for`, `when`
 3. Multiplication/Division: `*`, `/`, `%`
 4. Addition/Subtraction: `+`, `-`
 5. Shift: `<<`, `>>`
