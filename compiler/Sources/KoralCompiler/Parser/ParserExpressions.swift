@@ -180,8 +180,26 @@ extension Parser {
     return left
   }
 
-  /// and then layer: between logical or and logical and.
-  /// Parses `<expr> and then <expr>` as value transformation / optional chaining.
+  /// Logical AND layer: below optional chaining / value transformation (`and then`).
+  private func parseAndExpression() throws -> ExpressionNode {
+    var left = try parseLogicalNotExpression()
+
+    while currentToken === .andKeyword {
+      if shouldBreakBinaryAtCurrentToken() {
+        break
+      }
+      // If next token is `then`, don't consume — handled by `and then` layer above.
+      if lexer.peekNextToken() === .thenKeyword { break }
+      try match(.andKeyword)
+      try requireNoLineBreakBeforeRHS()
+      let right = try parseLogicalNotExpression()
+      left = .andExpression(left: left, right: right)
+    }
+    return left
+  }
+
+  /// Optional chaining / value transformation layer: above logical AND, below logical OR.
+  /// Parses `<expr> and then <expr>` left-associatively.
   private func parseAndThenExpression() throws -> ExpressionNode {
     var left = try parseAndExpression()
 
@@ -197,25 +215,8 @@ extension Parser {
         let transformExpr = try parseAndExpression()
         left = .andThenExpression(operand: left, transformExpr: transformExpr, span: startSpan)
       } else {
-        break  // Not `and then`, let parseAndExpression handle logical `and`
+        break  // Not `and then`, let caller handle logical `and`
       }
-    }
-    return left
-  }
-
-  private func parseAndExpression() throws -> ExpressionNode {
-    var left = try parseLogicalNotExpression()
-
-    while currentToken === .andKeyword {
-      if shouldBreakBinaryAtCurrentToken() {
-        break
-      }
-      // If next token is `then`, don't consume — let parseAndThenExpression handle it
-      if lexer.peekNextToken() === .thenKeyword { break }
-      try match(.andKeyword)
-      try requireNoLineBreakBeforeRHS()
-      let right = try parseLogicalNotExpression()
-      left = .andExpression(left: left, right: right)
     }
     return left
   }
