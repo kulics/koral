@@ -134,7 +134,7 @@ given Parser {
     }
 
     protected parse_range(*mutable self) Result[* Expr] = {
-        let mutable expr = self.parse_term() or return
+        let mutable expr = self.parse_comparison() or return
 
         while true then {
             if self.should_break_binary_at_current_token() then { break }
@@ -142,7 +142,7 @@ given Parser {
                 .Range() then {
                     self.advance()
                     if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
-                        let rhs = self.parse_term() or return
+                        let rhs = self.parse_comparison() or return
                         expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
                         expr = box(Expr.RangeExpr(RangeOperator.From(), .Some(box(*expr)), Option[* Expr].None(), self.span_from_expr_start(expr)))
@@ -151,13 +151,13 @@ given Parser {
                 .RangeLess() then {
                     self.advance()
                     let _ = self.require_no_line_break_before_rhs() or return
-                    let rhs = self.parse_term() or return
+                    let rhs = self.parse_comparison() or return
                     expr = box(Expr.RangeExpr(RangeOperator.ClosedOpen(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                 },
                 .LessRange() then {
                     self.advance()
                     if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
-                        let rhs = self.parse_term() or return
+                        let rhs = self.parse_comparison() or return
                         expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
                         expr = box(Expr.RangeExpr(RangeOperator.FromOpen(), .Some(box(*expr)), Option[* Expr].None(), self.span_from_expr_start(expr)))
@@ -166,7 +166,7 @@ given Parser {
                 .LessRangeLess() then {
                     self.advance()
                     let _ = self.require_no_line_break_before_rhs() or return
-                    let rhs = self.parse_term() or return
+                    let rhs = self.parse_comparison() or return
                     expr = box(Expr.RangeExpr(RangeOperator.Open(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
@@ -177,7 +177,7 @@ given Parser {
     }
 
     protected parse_shift(*mutable self) Result[* Expr] = {
-        let mutable expr = self.parse_range() or return
+        let mutable expr = self.parse_term() or return
 
         while true then {
             if self.should_break_binary_at_current_token() then { break }
@@ -185,13 +185,13 @@ given Parser {
                 .LeftShift() then {
                     self.advance()
                     let _ = self.require_no_line_break_before_rhs() or return
-                    let rhs = self.parse_range() or return
+                    let rhs = self.parse_term() or return
                     expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.LeftShift(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 .RightShift() then {
                     self.advance()
                     let _ = self.require_no_line_break_before_rhs() or return
-                    let rhs = self.parse_range() or return
+                    let rhs = self.parse_term() or return
                     expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.RightShift(), box(*rhs), self.span_from_expr_start(expr)))
                 },
                 _ then { break },
@@ -202,13 +202,13 @@ given Parser {
     }
 
     protected parse_bitwise_and(*mutable self) Result[* Expr] = {
-        let mutable expr = self.parse_comparison() or return
+        let mutable expr = self.parse_range() or return
 
         while self.current().kind is .Ampersand() then {
             if self.should_break_binary_at_current_token() then { break }
             self.advance()
             let _ = self.require_no_line_break_before_rhs() or return
-            let rhs = self.parse_comparison() or return
+            let rhs = self.parse_range() or return
             expr = box(Expr.BitwiseExpr(box(*expr), BitwiseOperator.BitAnd(), box(*rhs), self.span_from_expr_start(expr)))
         }
 
@@ -252,6 +252,27 @@ given Parser {
         }
 
         let first_kind = self.current().kind
+
+        // Handle equality (==, <>) - no chaining allowed
+        if self.comparison_kind_is_equality(first_kind) then {
+            if self.expr_is_ordering_comparison(expr) then {
+                return self.invalid_comparison_chain_error()
+            }
+            let op = self.comparison_operator_from_kind(first_kind)
+            self.advance()
+            let _ = self.require_no_line_break_before_rhs() or return
+            let rhs = self.parse_shift() or return
+            if self.expr_is_ordering_comparison(rhs) then {
+                return self.invalid_comparison_chain_error()
+            }
+            let result = box(Expr.ComparisonExpr(expr, op, rhs, self.span_from_expr_start(expr)))
+            if self.comparison_kind_is_equality(self.current().kind) or self.comparison_kind_is_ordering(self.current().kind) then {
+                return self.invalid_comparison_chain_error()
+            }
+            return .Ok(result)
+        }
+
+        // Handle ordering (<, >, <=, >=) - chaining allowed
         if not self.comparison_kind_is_ordering(first_kind) then {
             return .Ok(expr)
         }
@@ -262,7 +283,11 @@ given Parser {
         let _ = self.require_no_line_break_before_rhs() or return
         let first_right = self.parse_shift() or return
 
+        // Check if next token is equality (invalid in chain) or not ordering (simple comparison)
         if not self.comparison_kind_is_ordering(self.current().kind) then {
+            if self.comparison_kind_is_equality(self.current().kind) then {
+                return self.invalid_comparison_chain_error()
+            }
             return .Ok(box(Expr.ComparisonExpr(expr, first_op, first_right, self.span_from_expr_start(expr))))
         }
 
@@ -272,9 +297,12 @@ given Parser {
         let mutable operators = List[ComparisonOperator].new()
         operators.push(first_op)
 
-        while self.comparison_kind_is_ordering(self.current().kind) then {
+        while self.comparison_kind_is_ordering(self.current().kind) or self.comparison_kind_is_equality(self.current().kind) then {
             if self.should_break_binary_at_current_token() then { break }
             let next_kind = self.current().kind
+            if self.comparison_kind_is_equality(next_kind) then {
+                return self.invalid_comparison_chain_error()
+            }
             if self.comparison_kind_is_ascending(next_kind) <> direction_is_ascending then {
                 return self.invalid_comparison_chain_error()
             }
@@ -289,37 +317,10 @@ given Parser {
         return .Ok(box(Expr.ComparisonChainExpr(operands, operators, self.span_from_start(start))))
     }
 
-    protected parse_equality(*mutable self) Result[* Expr] = {
-        let expr = self.parse_bitwise_or() or return
 
-        if self.should_break_binary_at_current_token() then {
-            return .Ok(expr)
-        }
-
-        if not self.comparison_kind_is_equality(self.current().kind) then {
-            return .Ok(expr)
-        }
-        if self.expr_is_ordering_comparison(expr) then {
-            return self.invalid_comparison_chain_error()
-        }
-
-        let op = self.comparison_operator_from_kind(self.current().kind)
-        self.advance()
-        let _ = self.require_no_line_break_before_rhs() or return
-        let rhs = self.parse_bitwise_or() or return
-        if self.expr_is_ordering_comparison(rhs) then {
-            return self.invalid_comparison_chain_error()
-        }
-        let result = box(Expr.ComparisonExpr(expr, op, rhs, self.span_from_expr_start(expr)))
-        if self.comparison_kind_is_equality(self.current().kind) or self.comparison_kind_is_ordering(self.current().kind) then {
-            return self.invalid_comparison_chain_error()
-        }
-
-        return .Ok(result)
-    }
 
     protected parse_is(*mutable self) Result[* Expr] = {
-        let mutable expr = self.parse_equality() or return
+        let mutable expr = self.parse_bitwise_or() or return
 
         if self.should_break_binary_at_current_token() then {
             return .Ok(expr)
