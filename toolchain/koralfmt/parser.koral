@@ -534,6 +534,17 @@ given CstParser {
         return self.count_newlines() > 0
     }
 
+    private is_line_join_peek(*self) Bool = {
+        when self.peek() in {
+            .KwAnd() or .KwOr() or .KwIs() or .KwThen() or .KwElse() or .Dot() or .Arrow() then true,
+            _ then false,
+        }
+    }
+
+    private should_break_expr_at_peek(*self) Bool = {
+        return self.newline_before_current() and not self.is_line_join_peek()
+    }
+
     private enter_line_join_grouping(*mutable self) Void = {
         self.line_join_grouping += 1
     }
@@ -811,7 +822,7 @@ given CstParser {
     //   and then
     //   and
     //   not
-    //   is / is not
+    //   is / is not (newline before `is` is allowed as a grammar join token)
     //   | (bitwise or)
     //   ^ (bitwise xor)
     //   & (bitwise and)
@@ -839,6 +850,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwOr()) then {
+            if self.should_break_expr_at_peek() then { break }
             let next = self.peek_at_skip_nl(1)
             when next in {
                 .KwReturn() then {
@@ -858,6 +870,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwOr()) then {
+            if self.should_break_expr_at_peek() then { break }
             let next = self.peek_at_skip_nl(1)
             when next in {
                 .KwElse() then {
@@ -881,6 +894,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwOr()) then {
+            if self.should_break_expr_at_peek() then { break }
             let next = self.peek_at_skip_nl(1)
             if next is .KwElse() then { break }
             if next is .KwReturn() then { break }
@@ -900,6 +914,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwAnd()) then {
+            if self.should_break_expr_at_peek() then { break }
             let next = self.peek_at_skip_nl(1)
             when next in {
                 .KwThen() then {
@@ -923,6 +938,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.KwAnd()) then {
+            if self.should_break_expr_at_peek() then { break }
             let next = self.peek_at_skip_nl(1)
             if next is .KwThen() then { break }
             let op = self.eat()
@@ -945,7 +961,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
 
-        if self.newline_before_current() then {
+        if self.should_break_expr_at_peek() then {
             return .Ok(left)
         }
         if not self.check(.KwIs()) then {
@@ -982,7 +998,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.Pipe()) then {
-            if self.newline_before_current() then { break }
+            if self.should_break_expr_at_peek() then { break }
             let op = self.eat()
             let right = when self.parse_bitwise_xor() in {
                 .Ok(e) then e,
@@ -999,7 +1015,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.Caret()) then {
-            if self.newline_before_current() then { break }
+            if self.should_break_expr_at_peek() then { break }
             let op = self.eat()
             let right = when self.parse_bitwise_and() in {
                 .Ok(e) then e,
@@ -1016,7 +1032,7 @@ given CstParser {
             .Error(e) then { return .Error(e) },
         }
         while self.check(.Amp()) then {
-            if self.newline_before_current() then { break }
+            if self.should_break_expr_at_peek() then { break }
             let op = self.eat()
             let right = when self.parse_range() in {
                 .Ok(e) then e,
@@ -1108,7 +1124,7 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .EqEq() or .NotEq() or .Gt() or .Lt() or .GtEq() or .LtEq() then {
-                    if self.newline_before_current() then { break }
+                    if self.should_break_expr_at_peek() then { break }
                     let op = self.eat()
                     let right = when self.parse_shift() in {
                         .Ok(e) then e,
@@ -1130,7 +1146,7 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .LShift() or .RShift() then {
-                    if self.newline_before_current() then { break }
+                    if self.should_break_expr_at_peek() then { break }
                     let op = self.eat()
                     let right = when self.parse_additive() in {
                         .Ok(e) then e,
@@ -1152,7 +1168,7 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .Plus() then {
-                    if self.newline_before_current() then { break }
+                    if self.should_break_expr_at_peek() then { break }
                     let op = self.eat()
                     let right = when self.parse_multiplicative() in {
                         .Ok(e) then e,
@@ -1161,7 +1177,7 @@ given CstParser {
                     left = .BinaryOp(box(left), op, box(right))
                 },
                 .Minus() then {
-                    if self.newline_before_current() then { break }
+                    if self.should_break_expr_at_peek() then { break }
                     let op = self.eat()
                     let right = when self.parse_multiplicative() in {
                         .Ok(e) then e,
@@ -1183,7 +1199,7 @@ given CstParser {
         while true then {
             when self.peek() in {
                 .Star() or .Slash() or .Percent() then {
-                    if self.newline_before_current() then { break }
+                    if self.should_break_expr_at_peek() then { break }
                     let op = self.eat()
                     let right = when self.parse_prefix() in {
                         .Ok(e) then e,
