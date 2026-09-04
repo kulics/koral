@@ -653,7 +653,7 @@ extension TypeChecker {
   }
 
   private func makeBreakBlock(span: SourceSpan) -> ExpressionNode {
-    .blockExpression(statements: [.break(value: nil, span: span)])
+    .blockExpression(statements: [.break(span: span)])
   }
 
   func createBranchBreakTarget(

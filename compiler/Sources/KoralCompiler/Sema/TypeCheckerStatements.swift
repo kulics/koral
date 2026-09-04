@@ -868,52 +868,11 @@ extension TypeChecker {
       try mergeBranchBreakTargetResult(type: typedValue.type, span: span)
       return .branchBreak(target: currentTarget.id, value: typedValue)
 
-    case .break(let value, let span):
+    case .break(let span):
       self.currentSpan = span
       if insideDefer {
         throw SemanticError(.generic(
           "control flow statement 'break' is not allowed in defer expression"))
-      }
-      if let value {
-        if let currentTarget = branchBreakTargets.last {
-          // Check if there are intervening constructs between the break and the branch target
-          if exitableConstructStack.count > currentTarget.constructStackDepthAtCreation {
-            if let penetrated = exitableConstructStack.last {
-              switch penetrated {
-              case .loop:
-                throw SemanticError(.generic(
-                  "yield cannot penetrate through loop boundary"), span: span)
-              case .branch:
-                throw SemanticError(.generic(
-                  "yield cannot penetrate through branch boundary"), span: span)
-              }
-            }
-          }
-          let candidateExpectedTypes = [currentTarget.preferredType, currentTarget.resultType].compactMap { $0 }
-          var typedValueOpt: TypedExpressionNode?
-          for expectedType in candidateExpectedTypes {
-            do {
-              typedValueOpt = try normalizeBranchExpression(
-                try inferTypedExpression(value, expectedType: expectedType),
-                expectedType: expectedType
-              )
-              break
-            } catch {
-              continue
-            }
-          }
-          let typedValue: TypedExpressionNode
-          if let inferredValue = typedValueOpt {
-            typedValue = inferredValue
-          } else {
-            typedValue = try inferTypedExpression(value)
-          }
-          markExplicitBranchBreak(on: currentTarget.id)
-          try mergeBranchBreakTargetResult(type: typedValue.type, span: span)
-          return .branchBreak(target: currentTarget.id, value: typedValue)
-        }
-
-        throw SemanticError(.generic("yield outside of branch expression body"), span: span)
       }
       // Check if the innermost exitable construct is a branch (not a loop)
       if let lastConstruct = exitableConstructStack.last, lastConstruct == .branch {

@@ -155,7 +155,7 @@ public class Parser {
     case .breakKeyword:
       try match(.breakKeyword)
       if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
-        return .break(value: nil, span: startSpan)
+        return .break(span: startSpan)
       }
       throw ParserError.unexpectedToken(
         span: currentSpan,

@@ -410,10 +410,8 @@ extension TypeChecker {
       if let value = value {
         try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
       }
-    case .break(let value, _):
-      if let value {
-        try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
-      }
+    case .break:
+      break
     case .yield(let value, _):
       try collectCapturedVariables(expr: value, paramNames: paramNames, captures: &captures)
     case .continue:

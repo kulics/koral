@@ -337,7 +337,7 @@ public class BidirectionalInference {
             }
             // Check for control transfer
             switch lastStmt {
-            case .return, .break(nil, _), .continue:
+            case .return, .break, .continue:
                 return .never
             default:
                 break
@@ -459,10 +459,8 @@ public class BidirectionalInference {
         case .expression(let expr, _):
             let _ = synthesize(expr, span: span)
             
-        case .break(let value, _):
-            if let value {
-                let _ = synthesize(value, span: span)
-            }
+        case .break:
+            break
 
         case .yield(let value, _):
             let _ = synthesize(value, span: span)
