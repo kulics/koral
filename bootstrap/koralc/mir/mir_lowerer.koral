@@ -565,11 +565,38 @@ type MIREscapeSummary(
     direct_reference_escaping_parameter_indices Set[UInt],
 )
 
+private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
+    return when place in {
+        .Local(local_id) then Option[UInt].Some(local_id.raw_value),
+        .Global(_) then Option[UInt].None(),
+        .Field(base, _) then base_local_id_of_place(*base),
+        .EnumPayload(base, _, _, _, _) then base_local_id_of_place(*base),
+        .Deref(base, _) then when base in {
+            .Operand(.Local(local_id)) then Option[UInt].Some(local_id.raw_value),
+            _ then Option[UInt].None(),
+        },
+        .PointerElement(base, _) then when base in {
+            .Operand(.Local(local_id)) then Option[UInt].Some(local_id.raw_value),
+            _ then Option[UInt].None(),
+        },
+    }
+}
+
 private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) Void = {
     when value in {
         .Operand(.Local(local_id)) then { escaping.insert(local_id.raw_value) },
-        .PlaceRead(.Local(local_id), _) then { escaping.insert(local_id.raw_value) },
-        .Ref(.Local(local_id), _, _) then { escaping.insert(local_id.raw_value) },
+        .PlaceRead(place, _) then {
+            when base_local_id_of_place(place) in {
+                .Some(id) then { escaping.insert(id) },
+                .None() then {},
+            }
+        },
+        .Ref(place, _, _) then {
+            when base_local_id_of_place(place) in {
+                .Some(id) then { escaping.insert(id) },
+                .None() then {},
+            }
+        },
         _ then {},
     }
 }
@@ -786,35 +813,24 @@ private let collect_parameter_sources(
     local_sources Dict[UInt, Set[UInt]],
     out *mutable Set[UInt]
 ) Void = {
+    let mutable maybe_id = Option[UInt].None()
     when value in {
-        .Operand(.Local(local_id)) then {
-            when param_map.get(local_id.raw_value) in {
-                .Some(pi) then { out.insert(pi) },
-                .None() then {
-                    let local_params = local_sources.get(local_id.raw_value) or else Set[UInt].new()
-                    for pi in local_params then { out.insert(pi) }
-                },
-            }
-        },
-        .PlaceRead(.Local(local_id), _) then {
-            when param_map.get(local_id.raw_value) in {
-                .Some(pi) then { out.insert(pi) },
-                .None() then {
-                    let local_params = local_sources.get(local_id.raw_value) or else Set[UInt].new()
-                    for pi in local_params then { out.insert(pi) }
-                },
-            }
-        },
-        .Ref(.Local(local_id), _, _) then {
-            when param_map.get(local_id.raw_value) in {
-                .Some(pi) then { out.insert(pi) },
-                .None() then {
-                    let local_params = local_sources.get(local_id.raw_value) or else Set[UInt].new()
-                    for pi in local_params then { out.insert(pi) }
-                },
-            }
-        },
+        .Operand(.Local(local_id)) then { maybe_id = Option[UInt].Some(local_id.raw_value) },
+        .PlaceRead(place, _) then { maybe_id = base_local_id_of_place(place) },
+        .Ref(place, _, _) then { maybe_id = base_local_id_of_place(place) },
         _ then {},
+    }
+    when maybe_id in {
+        .Some(local_id) then {
+            when param_map.get(local_id) in {
+                .Some(pi) then { out.insert(pi) },
+                .None() then {
+                    let local_params = local_sources.get(local_id) or else Set[UInt].new()
+                    for pi in local_params then { out.insert(pi) }
+                },
+            }
+        },
+        .None() then {},
     }
 }
 

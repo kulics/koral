@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdatomic.h>
+#include <ctype.h>
 #include "koral_runtime.h"
 
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -2151,6 +2152,9 @@ uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
 #include <sys/wait.h>
 #include <signal.h>
 #include <poll.h>
+#if defined(__APPLE__)
+#include <libproc.h>
+#endif
 #endif
 
 typedef struct {
@@ -2242,6 +2246,11 @@ int64_t __koral_process_working_set_bytes(uint32_t pid) {
     CloseHandle(h);
     if (!ok) return -1;
     return (int64_t)pmc.WorkingSetSize;
+#elif defined(__APPLE__)
+    struct proc_taskinfo taskinfo;
+    int size = proc_pidinfo((int)pid, PROC_PIDTASKINFO, 0, &taskinfo, (int)sizeof(taskinfo));
+    if (size != (int)sizeof(taskinfo)) return -1;
+    return (int64_t)taskinfo.pti_resident_size;
 #else
     char path[64];
     snprintf(path, sizeof(path), "/proc/%u/status", pid);
@@ -2259,6 +2268,101 @@ int64_t __koral_process_working_set_bytes(uint32_t pid) {
     return rss_kb > 0 ? rss_kb * 1024 : -1;
 #endif
 }
+
+#if defined(__APPLE__)
+static int64_t __koral_process_group_working_set_bytes_macos(uint32_t root_pid) {
+    int count = proc_listallpids(NULL, 0);
+    if (count <= 0) {
+        return __koral_process_working_set_bytes(root_pid);
+    }
+
+    int* pids = (int*)malloc((size_t)count * sizeof(int));
+    if (pids == NULL) {
+        return __koral_process_working_set_bytes(root_pid);
+    }
+
+    int actual = proc_listallpids(pids, count * (int)sizeof(int));
+    if (actual < 0) {
+        free(pids);
+        return __koral_process_working_set_bytes(root_pid);
+    }
+
+    int64_t total = 0;
+    for (int i = 0; i < actual; i++) {
+        int pid = pids[i];
+        if (pid <= 0) continue;
+
+        struct proc_bsdinfo bsdinfo;
+        int bsd_size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsdinfo, (int)sizeof(bsdinfo));
+        if (bsd_size != (int)sizeof(bsdinfo)) continue;
+        if ((uint32_t)bsdinfo.pbi_pgid != root_pid) continue;
+
+        int64_t rss = __koral_process_working_set_bytes((uint32_t)pid);
+        if (rss > 0) total += rss;
+    }
+
+    free(pids);
+    if (total > 0) return total;
+    return __koral_process_working_set_bytes(root_pid);
+}
+#endif
+
+#if defined(__linux__)
+static int __koral_linux_process_group_id(uint32_t pid, uint32_t* out_pgid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%u/stat", pid);
+    FILE* f = fopen(path, "r");
+    if (!f) return -1;
+
+    char line[4096];
+    if (!fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    char* closing_paren = strrchr(line, ')');
+    if (!closing_paren) return -1;
+
+    char state = 0;
+    long ppid = 0;
+    long pgid = 0;
+    if (sscanf(closing_paren + 1, " %c %ld %ld", &state, &ppid, &pgid) != 3) {
+        return -1;
+    }
+    if (pgid <= 0) return -1;
+
+    *out_pgid = (uint32_t)pgid;
+    return 0;
+}
+
+static int64_t __koral_process_group_working_set_bytes_linux(uint32_t root_pid) {
+    DIR* dir = opendir("/proc");
+    if (!dir) {
+        return __koral_process_working_set_bytes(root_pid);
+    }
+
+    int64_t total = 0;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!isdigit((unsigned char)entry->d_name[0])) continue;
+
+        uint32_t pid = (uint32_t)strtoul(entry->d_name, NULL, 10);
+        if (pid == 0) continue;
+
+        uint32_t pgid = 0;
+        if (__koral_linux_process_group_id(pid, &pgid) != 0) continue;
+        if (pgid != root_pid) continue;
+
+        int64_t rss = __koral_process_working_set_bytes(pid);
+        if (rss > 0) total += rss;
+    }
+
+    closedir(dir);
+    if (total > 0) return total;
+    return __koral_process_working_set_bytes(root_pid);
+}
+#endif
 
 
 // --- __koral_process_tree_working_set_bytes ---
@@ -2288,13 +2392,6 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
             if (count < 4096) {
                 procs[count].pid = pe.th32ProcessID;
                 procs[count].ppid = pe.th32ParentProcessID;
-                count++;
-            }
-        } while (Process32Next(snapshot, &pe));
-    }
-    CloseHandle(snapshot);
-
-    // BFS to find all descendants of root_pid
     uint32_t queue[4096];
     int qhead = 0, qtail = 0;
     queue[qtail++] = root_pid;
@@ -2311,10 +2408,37 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
     }
 
     return total;
+#elif defined(__APPLE__)
+    // POSIX subprocesses spawned by Koral run in a dedicated process group,
+    // so summing the group captures the compiler and any helper children.
+    return __koral_process_group_working_set_bytes_macos(root_pid);
+#elif defined(__linux__)
+    return __koral_process_group_working_set_bytes_linux(root_pid);
 #else
-    // On Linux/Unix, use /proc/<pid>/task/*/children or just sum RSS
-    // For simplicity, use the same approach as single process for now
+    // On other POSIX targets, fall back to the root process only.
     return __koral_process_working_set_bytes(root_pid);
+#endif
+}
+
+int32_t __koral_kill_process_tree(uint32_t root_pid, int32_t signal) {
+#if defined(_WIN32) || defined(_WIN64)
+    return __koral_send_signal(root_pid, signal);
+#else
+    pid_t group_pid = (pid_t)root_pid;
+    if (group_pid <= 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (kill(-group_pid, signal) == 0) {
+        return 0;
+    }
+
+    if (errno == ESRCH) {
+        return kill(group_pid, signal) == 0 ? 0 : -1;
+    }
+
+    return -1;
 #endif
 }
 
@@ -2778,6 +2902,7 @@ int32_t __koral_spawn(
         }
         if (child_pid == 0) {
             // Child process
+            if (setpgid(0, 0) < 0) _exit(127);
             if (chdir((const char*)cwd) < 0) _exit(127);
 
             // Set up stdin
@@ -2828,7 +2953,19 @@ int32_t __koral_spawn(
     } else {
         // posix_spawn approach (more efficient, no fork overhead)
         posix_spawn_file_actions_t actions;
+        posix_spawnattr_t attr;
         posix_spawn_file_actions_init(&actions);
+        posix_spawnattr_init(&attr);
+
+        short spawn_flags = 0;
+#if defined(POSIX_SPAWN_SETPGROUP)
+        if (posix_spawnattr_setpgroup(&attr, 0) == 0) {
+            spawn_flags |= POSIX_SPAWN_SETPGROUP;
+        }
+#endif
+        if (spawn_flags != 0) {
+            posix_spawnattr_setflags(&attr, spawn_flags);
+        }
 
         // stdin
         if (stdin_mode == 1) {
@@ -2871,15 +3008,16 @@ int32_t __koral_spawn(
         }
 
         if (child_envp) {
-            spawn_err = posix_spawn(&child_pid, (const char*)program, &actions, NULL,
+            spawn_err = posix_spawn(&child_pid, (const char*)program, &actions, &attr,
                                     child_argv, child_envp);
         } else {
             extern char** environ;
-            spawn_err = posix_spawnp(&child_pid, (const char*)program, &actions, NULL,
+            spawn_err = posix_spawnp(&child_pid, (const char*)program, &actions, &attr,
                                      child_argv, environ);
         }
 
         posix_spawn_file_actions_destroy(&actions);
+        posix_spawnattr_destroy(&attr);
     }
 
     free(child_argv);

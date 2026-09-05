@@ -24,6 +24,7 @@ private foreign let __koral_is_alive(pid UInt32) Int32
 /// Get the working set size (resident memory) of a process in bytes. Returns -1 on error.
 private foreign let __koral_process_working_set_bytes(pid UInt32) Int64
 private foreign let __koral_process_tree_working_set_bytes(pid UInt32) Int64
+private foreign let __koral_kill_process_tree(pid UInt32, signal Int32) Int32
 
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
@@ -51,6 +52,17 @@ public let send_process_signal(signal Int, to UInt32) Result[Void] = {
 
 /// Force-kill the process with the given PID (equivalent to send_process_signal(9, pid)).
 public let kill_process(pid UInt32) Result[Void] = send_process_signal(9, pid)
+
+/// Force-kill the process group rooted at the given PID.
+/// Koral-spawned subprocesses run in their own process group on POSIX,
+/// so this terminates the root process and any compiler children it spawned.
+public let kill_process_tree(pid UInt32) Result[Void] = {
+    let result = __koral_kill_process_tree(pid, 9)
+    if result <> 0 then {
+        return Result[Void].Error(box(last_error_message()))
+    }
+    return Result[Void].Ok({})
+}
 
 /// Check whether the process with the given PID is still alive.
 public let is_process_alive(pid UInt32) Bool = __koral_is_alive(pid) <> 0

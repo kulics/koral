@@ -74,6 +74,21 @@ final class MIRReferenceAllocationPromoter {
       returning: inout Set<Int>,
       directEscaping: inout Set<Int>
     ) {
+      func baseLocalID(of place: MIRPlace) -> MIRLocalID? {
+        switch place {
+        case .local(let id): return id
+        case .global: return nil
+        case .field(let base, _): return baseLocalID(of: base)
+        case .enumPayload(let base, _, _, _, _): return baseLocalID(of: base)
+        case .deref(let base, _):
+          if case .operand(.local(let id)) = base { return id }
+          return nil
+        case .pointerElement(let base, _):
+          if case .operand(.local(let id)) = base { return id }
+          return nil
+        }
+      }
+
       func markEscaping(_ value: MIRValue) {
         switch value {
         case .operand(.local(let localID)):
@@ -81,11 +96,11 @@ final class MIRReferenceAllocationPromoter {
             directEscaping.insert(index)
           }
         case .placeRead(let place, _):
-          if case .local(let localID) = place, let index = parameterLocals[localID] {
+          if let id = baseLocalID(of: place), let index = parameterLocals[id] {
             directEscaping.insert(index)
           }
         case .ref(let place, _, _):
-          if case .local(let localID) = place, let index = parameterLocals[localID] {
+          if let id = baseLocalID(of: place), let index = parameterLocals[id] {
             directEscaping.insert(index)
           }
         default:

@@ -56,6 +56,7 @@ Useful flags:
 - `--cases <dir>`: override the case root, default `tests/compiler-cases`
 - `--filter <substring>`: run only matching cases
 - `--timeout <sec>`: per-case timeout, default `120`
+- `--memory-limit <MB>`: per-case RSS ceiling, default `1024`; once any case exceeds it, the runner kills that process tree and aborts the remaining suite
 - `--report-file <path>`: override the stable summary log path
 
 `--filter` uses plain substring matching only. It does not accept regular expressions, so focused semantic reruns should pass exact case-name substrings one-by-one.

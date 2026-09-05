@@ -8,6 +8,7 @@ using std::time { .. }
 private type CaseWorkerEvent {
     Started(info CaseInfo),
     Finished(result CaseResult),
+    WorkerExited(),
 }
 
 private let effective_parallel_jobs(config RunnerConfig, total UInt) UInt = {
@@ -31,6 +32,8 @@ private let finalize_summary(total UInt, passed UInt, failed UInt, timed_out UIn
 private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSummary = {
     let start = MonoTime.now()
     let total = cases.count()
+    let stop_requested = AtomicInt.new(0)
+    let mutable executed UInt = 0
     let mutable passed UInt = 0
     let mutable failed UInt = 0
     let mutable timed_out UInt = 0
@@ -39,7 +42,8 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
 
     for i in 0..<total then {
         print_case_started(config, i + 1, total, cases[i])
-        let result = run_single_case(config, cases[i])
+        let result = run_single_case(config, cases[i], stop_requested)
+        executed += 1
         print_case_result(config, i + 1, total, result)
         if result.passed then {
             passed += 1
@@ -50,6 +54,15 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
             }
             if result.failure_type == "memory_exceeded" then {
                 memory_exceeded += 1
+                stop_requested.store(1)
+                if executed < total then {
+                    report_error_line(
+                        config,
+                        "Aborting remaining " + (total - executed).to_string()
+                            + " case(s) after memory limit exceeded by " + result.case_info.relative_path
+                    )
+                }
+                break
             }
             if result.failure_type == "infrastructure_error" then {
                 infra_failed += 1
@@ -57,12 +70,20 @@ private let run_cases_serial(config RunnerConfig, cases List[CaseInfo]) RunSumma
         }
     }
 
-    return finalize_summary(total, passed, failed, timed_out, memory_exceeded, infra_failed, start)
+    return finalize_summary(executed, passed, failed, timed_out, memory_exceeded, infra_failed, start)
 }
 
-private let run_case_and_emit_events(config RunnerConfig, info CaseInfo, sender SendChannel[CaseWorkerEvent]) Void = {
+private let run_case_and_emit_events(
+    config RunnerConfig,
+    info CaseInfo,
+    stop_requested AtomicInt,
+    sender SendChannel[CaseWorkerEvent],
+) Void = {
+    if stop_requested.load() <> 0 then {
+        return
+    }
     let _ = sender.send(.Started(info))
-    let result = run_single_case(config, info)
+    let result = run_single_case(config, info, stop_requested)
     let _ = sender.send(.Finished(result))
 }
 
@@ -72,25 +93,35 @@ private let run_case_with_group_lock(
     sync_lock Mutex,
     net_lock Mutex,
     env_lock Mutex,
+    stop_requested AtomicInt,
     sender SendChannel[CaseWorkerEvent],
 ) Void = {
+    if stop_requested.load() <> 0 then {
+        return
+    }
     when info.group_key in {
         "sync" then {
             sync_lock.lock()
-            run_case_and_emit_events(config, info, sender)
+            if stop_requested.load() == 0 then {
+                run_case_and_emit_events(config, info, stop_requested, sender)
+            }
             sync_lock.unlock()
         },
         "net" then {
             net_lock.lock()
-            run_case_and_emit_events(config, info, sender)
+            if stop_requested.load() == 0 then {
+                run_case_and_emit_events(config, info, stop_requested, sender)
+            }
             net_lock.unlock()
         },
         "env" then {
             env_lock.lock()
-            run_case_and_emit_events(config, info, sender)
+            if stop_requested.load() == 0 then {
+                run_case_and_emit_events(config, info, stop_requested, sender)
+            }
             env_lock.unlock()
         },
-        _ then run_case_and_emit_events(config, info, sender),
+        _ then run_case_and_emit_events(config, info, stop_requested, sender),
     }
 }
 
@@ -107,7 +138,8 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
     random.shuffle(&mutable shuffled_cases)
 
     let next_index = AtomicInt.new(0)
-    let channels = make_channel[CaseWorkerEvent](total + total)
+    let stop_requested = AtomicInt.new(0)
+    let channels = make_channel[CaseWorkerEvent](total + total + worker_count)
     let sender = channels.first
     let receiver = channels.second
     let sync_lock = Mutex.new()
@@ -115,6 +147,7 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
     let env_lock = Mutex.new()
     let mutable started UInt = 0
     let mutable received UInt = 0
+    let mutable workers_exited UInt = 0
     let mutable passed UInt = 0
     let mutable failed UInt = 0
     let mutable timed_out UInt = 0
@@ -126,24 +159,43 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
         let shared_cases = shuffled_cases
         let shared_config = config
         let shared_index = next_index
+        let shared_stop_requested = stop_requested
         let shared_sync_lock = sync_lock
         let shared_net_lock = net_lock
         let shared_env_lock = env_lock
 
         let _ = run_task(() -> {
             while true then {
+                if shared_stop_requested.load() <> 0 then {
+                    break
+                }
+
                 let idx = shared_index.fetch_add(1)
                 if idx < 0 or idx(UInt) >= shared_cases.count() then {
                     break
                 }
 
+                if shared_stop_requested.load() <> 0 then {
+                    break
+                }
+
                 let case_info = shared_cases[idx(UInt)]
-                run_case_with_group_lock(shared_config, case_info, shared_sync_lock, shared_net_lock, shared_env_lock, shared_sender)
+                run_case_with_group_lock(
+                    shared_config,
+                    case_info,
+                    shared_sync_lock,
+                    shared_net_lock,
+                    shared_env_lock,
+                    shared_stop_requested,
+                    shared_sender,
+                )
             }
+
+            let _ = shared_sender.send(.WorkerExited())
         })
     }
 
-    while received < total then {
+    while workers_exited < worker_count then {
         when receiver.recv() in {
             .Ok(event) then {
                 when event in {
@@ -162,12 +214,24 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
                             }
                             if result.failure_type == "memory_exceeded" then {
                                 memory_exceeded += 1
+                                if stop_requested.load() == 0 then {
+                                    stop_requested.store(1)
+                                    let remaining = if total > started then total - started else 0(UInt)
+                                    report_error_line(
+                                        config,
+                                        "Aborting remaining " + remaining.to_string()
+                                            + " queued case(s) after memory limit exceeded by " + result.case_info.relative_path
+                                    )
+                                }
                             }
                             if result.failure_type == "infrastructure_error" then {
                                 infra_failed += 1
                             }
                         }
                         received += 1
+                    },
+                    .WorkerExited() then {
+                        workers_exited += 1
                     },
                 }
             },
@@ -177,7 +241,7 @@ private let run_cases_parallel(config RunnerConfig, cases List[CaseInfo]) RunSum
         }
     }
 
-    return finalize_summary(total, passed, failed, timed_out, memory_exceeded, infra_failed, start)
+    return finalize_summary(received, passed, failed, timed_out, memory_exceeded, infra_failed, start)
 }
 
 public let run_cases(config RunnerConfig, cases List[CaseInfo]) RunSummary = {

@@ -1,0 +1,51 @@
+// EXPECT: PASS
+// Test: reference promotion handles projection places correctly
+
+type IntPair(first Int, second Int)
+
+// Test 1: parameter.field escaping via aggregate return
+let return_field_ref(p * IntPair) * Int = {
+    return &p.first  // p.first is a projection place - p should be marked as escaping
+}
+
+let test_projection_escape() Void = {
+    let mutable p = IntPair(10, 20)
+    let r = return_field_ref(&p)
+    assert(*r == 10, "projection field escape")
+}
+
+// Test 2: local.field stored in returned aggregate
+type RefBox(data * Int)
+
+let return_struct_with_field_ref() RefBox = {
+    let mutable x Int = 42
+    return RefBox(&x)  // x escapes through struct field
+}
+
+let test_struct_field_escape() Void = {
+    let box = return_struct_with_field_ref()
+    assert(*box.data == 42, "struct field escape")
+}
+
+// Test 3: enum payload with projection
+type TestResult {
+    Ok(value Int),
+    Err(msg String),
+}
+
+let test_enum_payload_ref() Void = {
+    let mutable x Int = 99
+    let r * Int = &x
+    let result = TestResult.Ok(*r)
+    when result in {
+        .Ok(v) then assert(v == 99, "enum payload value"),
+        _ then assert(false, "should be Ok"),
+    }
+}
+
+let main() Void = {
+    test_projection_escape()
+    test_struct_field_escape()
+    test_enum_payload_ref()
+    println("PASS")
+}

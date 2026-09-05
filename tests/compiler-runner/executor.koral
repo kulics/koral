@@ -56,8 +56,55 @@ private let is_windows_host() Bool =
 private type CommandExecution {
     Finished(output CommandOutput),
     TimedOut(exit_code Int),
+    Aborted(exit_code Int),
     MemoryExceeded(exit_code Int, peak_bytes UInt),
     InfrastructureError(message String),
+}
+
+private let timeout_case_result(config RunnerConfig, info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
+    let duration_ms = start.elapsed().as_milliseconds()
+    return failure_result(
+        info,
+        "timed_out",
+        "timeout",
+        "case timed out after \(config.timeout_secs) seconds",
+        exit_code,
+        duration_ms,
+    )
+}
+
+private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
+    return "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)"
+}
+
+private let memory_exceeded_case_result(
+    config RunnerConfig,
+    info CaseInfo,
+    start MonoTime,
+    exit_code Int,
+    peak_bytes UInt,
+) CaseResult = {
+    let duration_ms = start.elapsed().as_milliseconds()
+    return failure_result(
+        info,
+        "memory_exceeded",
+        "memory_exceeded",
+        memory_limit_failure_message(config, peak_bytes),
+        exit_code,
+        duration_ms,
+    )
+}
+
+private let aborted_case_result(info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
+    let duration_ms = start.elapsed().as_milliseconds()
+    return failure_result(
+        info,
+        "aborted",
+        "aborted",
+        "case aborted after another test exceeded the memory limit",
+        exit_code,
+        duration_ms,
+    )
 }
 
 private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
@@ -284,6 +331,7 @@ private let execute_command_with_timeout(
     capture_prefix String,
     timeout_secs Int64,
     spawn_error_prefix String,
+    stop_requested AtomicInt,
 ) CommandExecution = {
     let stdout_path = capture_root.join(capture_prefix + "_stdout.txt")
     let stderr_path = capture_root.join(capture_prefix + "_stderr.txt")
@@ -298,6 +346,7 @@ private let execute_command_with_timeout(
     let command_start = MonoTime.now()
     let poll_sleep = Duration.new(seconds: 0, nanoseconds: 50_000_000).unwrap()
 
+    let mutable aborted = false
     let mutable timed_out = false
     let mutable memory_exceeded = false
     let mutable peak_memory UInt = 0
@@ -319,6 +368,9 @@ private let execute_command_with_timeout(
                 if timed_out then {
                     return CommandExecution.TimedOut(-1)
                 }
+                if aborted then {
+                    return CommandExecution.Aborted(-1)
+                }
                 return CommandExecution.InfrastructureError("failed to wait process: " + message.message())
             },
         }
@@ -327,9 +379,14 @@ private let execute_command_with_timeout(
             break
         }
 
+        if not aborted and stop_requested.load() <> 0 then {
+            aborted = true
+            let _ = kill_process_tree(pid)
+        }
+
         if not timed_out and command_start.elapsed().as_seconds() >= timeout_secs then {
             timed_out = true
-            let _ = kill_process(pid)
+            let _ = kill_process_tree(pid)
         }
 
         let current_mem_raw = process_tree_working_set_bytes(pid)
@@ -340,7 +397,7 @@ private let execute_command_with_timeout(
             }
             if not memory_exceeded and memory_limit_bytes > 0(UInt) and current_mem > memory_limit_bytes then {
                 memory_exceeded = true
-                let _ = kill_process(pid)
+                let _ = kill_process_tree(pid)
             }
         }
 
@@ -358,6 +415,9 @@ private let execute_command_with_timeout(
             if timed_out then {
                 return CommandExecution.TimedOut(infer_exit_code(status))
             }
+            if aborted then {
+                return CommandExecution.Aborted(infer_exit_code(status))
+            }
             return CommandExecution.Finished(CommandOutput(status, stdout_content, stderr_content))
         },
         .None() then {
@@ -366,6 +426,9 @@ private let execute_command_with_timeout(
             }
             if timed_out then {
                 return CommandExecution.TimedOut(-1)
+            }
+            if aborted then {
+                return CommandExecution.Aborted(-1)
             }
             return CommandExecution.InfrastructureError("failed to wait process: no exit status")
         },
@@ -378,6 +441,7 @@ private let execute_built_executable_with_retry(
     output_dir Path,
     capture_root Path,
     timeout_secs Int64,
+    stop_requested AtomicInt,
 ) CommandExecution = {
     let first_program = prepared_run_executable_path(info, output_dir, 0(UInt)) or else {
         return CommandExecution.InfrastructureError("failed to prepare built executable: " + it.message())
@@ -390,6 +454,7 @@ private let execute_built_executable_with_retry(
         "run",
         timeout_secs,
         "failed to spawn built executable",
+        stop_requested,
     )
     return when first in {
         .InfrastructureError(_) then {
@@ -405,6 +470,7 @@ private let execute_built_executable_with_retry(
                 "run",
                 timeout_secs,
                 "failed to spawn built executable",
+                stop_requested,
             )
             yield when second in {
                 .InfrastructureError(_) then {
@@ -420,6 +486,7 @@ private let execute_built_executable_with_retry(
                         "run",
                         timeout_secs,
                         "failed to spawn built executable",
+                        stop_requested,
                     )
                 },
                 _ then second,
@@ -470,7 +537,7 @@ private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Pa
     return Result[Path].Error(box("failed to create unique temp output dir"))
 }
 
-public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
+public let run_single_case(config RunnerConfig, info CaseInfo, stop_requested AtomicInt) CaseResult = {
     let start = MonoTime.now()
     let timeout_secs = config.timeout_secs(Int64)
 
@@ -536,29 +603,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         compile_command_name,
         timeout_secs,
         "failed to spawn compiler",
+        stop_requested,
     ) in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
-            let duration_ms = start.elapsed().as_milliseconds()
-            return failure_result(
-                info,
-                "timed_out",
-                "timeout",
-                "case timed out after \(config.timeout_secs) seconds",
-                exit_code,
-                duration_ms,
-            )
+            return timeout_case_result(config, info, start, exit_code)
+        },
+        .Aborted(exit_code) then {
+            return aborted_case_result(info, start, exit_code)
         },
         .MemoryExceeded(exit_code, peak_bytes) then {
-            let duration_ms = start.elapsed().as_milliseconds()
-            return failure_result(
-                info,
-                "memory_exceeded",
-                "memory_exceeded",
-                "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
-                exit_code,
-                duration_ms,
-            )
+            return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
         },
         .InfrastructureError(message) then {
             let duration_ms = start.elapsed().as_milliseconds()
@@ -612,29 +667,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             compile_command_name,
             timeout_secs,
             "failed to spawn compiler",
+            stop_requested,
         ) in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
-                let current_duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "timed_out",
-                    "timeout",
-                    "case timed out after \(config.timeout_secs) seconds",
-                    exit_code,
-                    current_duration_ms,
-                )
+                return timeout_case_result(config, info, start, exit_code)
+            },
+            .Aborted(exit_code) then {
+                return aborted_case_result(info, start, exit_code)
             },
             .MemoryExceeded(exit_code, peak_bytes) then {
-                let current_duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "memory_exceeded",
-                    "memory_exceeded",
-                    "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
-                    exit_code,
-                    current_duration_ms,
-                )
+                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
             },
             .InfrastructureError(message) then {
                 let current_duration_ms = start.elapsed().as_milliseconds()
@@ -688,29 +731,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
             active_output_dir,
             active_output_dir,
             timeout_secs,
+            stop_requested,
         ) in {
             .Finished(output) then output,
             .TimedOut(exit_code) then {
-                let current_duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "timed_out",
-                    "timeout",
-                    "case timed out after \(config.timeout_secs) seconds",
-                    exit_code,
-                    current_duration_ms,
-                )
+                return timeout_case_result(config, info, start, exit_code)
+            },
+            .Aborted(exit_code) then {
+                return aborted_case_result(info, start, exit_code)
             },
             .MemoryExceeded(exit_code, peak_bytes) then {
-                let current_duration_ms = start.elapsed().as_milliseconds()
-                return failure_result(
-                    info,
-                    "memory_exceeded",
-                    "memory_exceeded",
-                    "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
-                    exit_code,
-                    current_duration_ms,
-                )
+                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
             },
             .InfrastructureError(message) then {
                 yield when execute_built_executable_with_retry(
@@ -719,29 +750,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                     active_output_dir,
                     active_output_dir,
                     timeout_secs,
+                    stop_requested,
                 ) in {
                     .Finished(output) then output,
                     .TimedOut(exit_code) then {
-                        let current_duration_ms = start.elapsed().as_milliseconds()
-                        return failure_result(
-                            info,
-                            "timed_out",
-                            "timeout",
-                            "case timed out after \(config.timeout_secs) seconds",
-                            exit_code,
-                            current_duration_ms,
-                        )
+                        return timeout_case_result(config, info, start, exit_code)
+                    },
+                    .Aborted(exit_code) then {
+                        return aborted_case_result(info, start, exit_code)
                     },
                     .MemoryExceeded(exit_code, peak_bytes) then {
-                        let current_duration_ms = start.elapsed().as_milliseconds()
-                        return failure_result(
-                            info,
-                            "memory_exceeded",
-                            "memory_exceeded",
-                            "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
-                            exit_code,
-                            current_duration_ms,
-                        )
+                        return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
                     },
                     .InfrastructureError(_) then {
                         let current_duration_ms = start.elapsed().as_milliseconds()
@@ -823,29 +842,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
         active_output_dir,
         active_output_dir,
         timeout_secs,
+        stop_requested,
     ) in {
         .Finished(output) then output,
         .TimedOut(exit_code) then {
-            let current_duration_ms = start.elapsed().as_milliseconds()
-            return failure_result(
-                info,
-                "timed_out",
-                "timeout",
-                "case timed out after \(config.timeout_secs) seconds",
-                exit_code,
-                current_duration_ms,
-            )
+            return timeout_case_result(config, info, start, exit_code)
+        },
+        .Aborted(exit_code) then {
+            return aborted_case_result(info, start, exit_code)
         },
         .MemoryExceeded(exit_code, peak_bytes) then {
-            let current_duration_ms = start.elapsed().as_milliseconds()
-            return failure_result(
-                info,
-                "memory_exceeded",
-                "memory_exceeded",
-                "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
-                exit_code,
-                current_duration_ms,
-            )
+            return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
         },
         .InfrastructureError(message) then {
             yield when execute_built_executable_with_retry(
@@ -854,29 +861,17 @@ public let run_single_case(config RunnerConfig, info CaseInfo) CaseResult = {
                 active_output_dir,
                 active_output_dir,
                 timeout_secs,
+                stop_requested,
             ) in {
                 .Finished(output) then output,
                 .TimedOut(exit_code) then {
-                    let current_duration_ms = start.elapsed().as_milliseconds()
-                    return failure_result(
-                        info,
-                        "timed_out",
-                        "timeout",
-                        "case timed out after \(config.timeout_secs) seconds",
-                        exit_code,
-                        current_duration_ms,
-                    )
+                    return timeout_case_result(config, info, start, exit_code)
+                },
+                .Aborted(exit_code) then {
+                    return aborted_case_result(info, start, exit_code)
                 },
                 .MemoryExceeded(exit_code, peak_bytes) then {
-                    let current_duration_ms = start.elapsed().as_milliseconds()
-                    return failure_result(
-                        info,
-                        "memory_exceeded",
-                        "memory_exceeded",
-                        "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)",
-                        exit_code,
-                        current_duration_ms,
-                    )
+                    return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes)
                 },
                 .InfrastructureError(_) then {
                     let current_duration_ms = start.elapsed().as_milliseconds()

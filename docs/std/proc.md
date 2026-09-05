@@ -11,7 +11,13 @@ public let send_process_signal(signal Int, to UInt32) Result[Void]
 
 public let kill_process(pid UInt32) Result[Void]
 
+public let kill_process_tree(pid UInt32) Result[Void]
+
 public let is_process_alive(pid UInt32) Bool
+
+public let process_working_set_bytes(pid UInt32) UInt64
+
+public let process_tree_working_set_bytes(pid UInt32) UInt64
 
 public let run_command(program String, args List[String]) Result[ExitStatus]
 
