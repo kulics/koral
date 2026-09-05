@@ -1996,36 +1996,51 @@ extension TypeChecker {
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
-      let type = try resolveTypeNode(typeNode)
-      try assertNotOpaqueType(type, span: span)
-      try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
-      try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
-      
-      // For Lambda expressions, pass the expected type for type inference
+
+      // Resolve expected type: explicit annotation or nil for inference
+      let expectedType: Type? = typeNode != nil ? try resolveTypeNode(typeNode!) : nil
+      if let type = expectedType {
+        try assertNotOpaqueType(type, span: span)
+        try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
+        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
+      }
+
+      // Type-check the initializer, passing expected type for inference/coercion
       var typedValue: TypedExpressionNode
       if case .lambdaExpression(let parameters, let returnType, let body, _) = value {
         typedValue = try inferLambdaExpression(
           parameters: parameters,
           returnType: returnType,
           body: body,
-          expectedType: type
+          expectedType: expectedType
         )
       } else {
-        typedValue = try inferTypedExpression(value)
+        typedValue = try inferTypedExpression(value, expectedType: expectedType)
       }
-      
-      if typedValue.type != .never && typedValue.type != type {
-        throw SemanticError.typeMismatch(
-          expected: type.description, got: typedValue.type.description)
+
+      // Determine the final type: explicit annotation takes precedence, otherwise infer from value
+      let type: Type
+      if let expectedType = expectedType {
+        type = expectedType
+        if typedValue.type != .never && typedValue.type != type {
+          throw SemanticError.typeMismatch(
+            expected: type.description, got: typedValue.type.description)
+        }
+      } else {
+        type = typedValue.type
+        try assertNotOpaqueType(type, span: span)
+        try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
+        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: span)
       }
+
       if isPrivate {
         currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut, modulePath: currentModulePath)
       } else {
         currentScope.defineWithModulePath(name, type, mutable: isMut, modulePath: currentModulePath, access: access)
       }
-      
+
       let symbol = makeGlobalSymbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value), access: access)
-      
+
       return .globalVariable(
         identifier: symbol,
         value: typedValue,

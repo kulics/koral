@@ -29,7 +29,7 @@ public func printAST(_ node: ASTNode) {
       print("\(indent)GlobalVariableDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
-      print("\(indent)  Type: \(type)")
+      print("\(indent)  Type: \(type ?? .identifier("(inferred)"))")
       print("\(indent)  Mutable: \(mutable)")
       print("\(indent)  Value:")
       withIndent {

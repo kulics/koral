@@ -134,7 +134,7 @@ public indirect enum GlobalNode {
   case usingDeclaration(UsingDeclaration)
   
   case globalVariableDeclaration(
-    name: String, type: TypeNode, value: ExpressionNode, mutable: Bool, access: AccessModifier,
+    name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, access: AccessModifier,
     span: SourceSpan)
   case globalFunctionDeclaration(
     name: String,

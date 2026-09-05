@@ -42,7 +42,15 @@ given TypeChecker {
     protected check_decl(*mutable self, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, is_mutable, type_name, initializer, span) then {
-                let resolved = self.resolve_type(type_name)
+                let expected_type = when type_name in {
+                    .Some(ta) then Option[Type].Some(self.resolve_type(ta)),
+                    .None() then Option[Type].None(),
+                }
+                let typed_init = self.check_expr_global_ref(initializer, expected_type)
+                let resolved = when expected_type in {
+                    .Some(t) then t,
+                    .None() then typed_init.expr_type,
+                }
                 self.validate_signature_type_visibility(name, access, [resolved], span)
                 if resolved is .TraitObject(_, _) then {
                     self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, "use trait as type"))
@@ -56,7 +64,6 @@ given TypeChecker {
                         )
                     )
                 }
-                let typed_init = self.check_expr_global_ref(initializer, .Some(resolved))
                 let stable_initializer = if retain_checked_template_bodies then {
                     let mutable context = self.context()
                     let placeholder_id = self.get_or_allocate_top_level_def_id(name, DefKind.Variable(), access, span)

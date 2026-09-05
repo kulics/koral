@@ -549,7 +549,7 @@ extension Parser {
   private func globalVariableDeclaration(
     name: String, mutable: Bool, access: AccessModifier, span: SourceSpan
   ) throws -> GlobalNode {
-    var type: TypeNode = .identifier("Int")
+    var type: TypeNode? = nil
     if currentToken !== .equal {
       type = try parseType()
     }

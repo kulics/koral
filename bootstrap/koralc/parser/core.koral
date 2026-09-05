@@ -609,7 +609,11 @@ given Parser {
         if is_foreign then {
             return when base in {
                 .FunctionDecl(_, name, _, params, return_type, _, span) then .Ok(Decl.ForeignFunctionDecl(access, name, params, return_type, span)),
-                .LetDecl(_, name, is_mutable, type_name, _, span) then .Ok(Decl.ForeignLetDecl(access, name, is_mutable, type_name, span)),
+                .LetDecl(_, name, is_mutable, type_name, _, span) then
+                    when type_name in {
+                        .Some(tn) then Result[Decl].Ok(Decl.ForeignLetDecl(access, name, is_mutable, tn, span)),
+                        .None() then Result[Decl].Error(box("foreign let declaration requires explicit type")),
+                    },
                 .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span)),
                 .GivenDecl(_, _, _, _) then .Error(box("foreign given declaration is not supported")),
                 .GivenTraitDecl(_, _, _, _, _) then .Error(box("foreign given declaration is not supported")),
@@ -1039,22 +1043,25 @@ given Parser {
             }
             self.consume_semicolon()
             let span = self.span_from_start(start)
-            let base = Decl.LetDecl(access, name, is_mut, foreign_type, box(Expr.Identifier("<foreign-init>", span)), span)
+            let base = Decl.LetDecl(access, name, is_mut, .Some(foreign_type), box(Expr.Identifier("<foreign-init>", span)), span)
             return self.wrap_decl(access, is_foreign, is_intrinsic, base)
         }
 
-        let mutable type_name = TypeNode.Identifier("Int")
+        let mutable type_name = Option[TypeNode].None()
         if self.is_type_start() then {
-            type_name = self.parse_type() or else {
+            let parsed = self.parse_type() or else {
                 return .Error(box("parse let declaration type error"))
             }
+            type_name = .Some(parsed)
         }
 
-        // skip to '='
+        // expect '='
         if self.current().kind is .Eof() then {
             return .Error(box("Expected '=' in let declaration"))
         }
-
+        if not (self.current().kind is .Assign()) then {
+            return .Error(box("Expected '=' in let declaration, got \(token_text(self.current()))"))
+        }
         self.advance()
         let initializer = self.parse_expression_checked("let declaration initializer") or return
         self.consume_semicolon()
