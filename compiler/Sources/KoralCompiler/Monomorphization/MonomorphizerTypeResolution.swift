@@ -523,6 +523,14 @@ extension Monomorphizer {
                 let entry = ConcreteMethodEntry(symbol: remappedIdentifier, trait: resolvedTrait)
                 methodMap[canonicalMethodBaseName] = entry
                 remappedFunctionDefIds[method.identifier.defId, default: []].append((defId: remappedIdentifier.defId, type: remappedIdentifier.type))
+                if let dispatchInfo = receiverMethodDispatch[method.identifier.defId] {
+                    receiverMethodDispatch[remappedIdentifier.defId] = ReceiverMethodDispatchInfo(
+                        methodDefId: remappedIdentifier.defId,
+                        methodName: dispatchInfo.methodName,
+                        owner: dispatchInfo.owner,
+                        conformanceTraitName: dispatchInfo.conformanceTraitName
+                    )
+                }
 
                 return TypedMethodDeclaration(
                     identifier: remappedIdentifier,
@@ -1188,10 +1196,12 @@ extension Monomorphizer {
             let resolvedTraitTypeArgs = traitTypeArgs.map { resolveParameterizedType($0) }
             // Collect vtable request for non-generic code paths
             if !context.containsGenericParameter(resolvedConcreteType) {
+                let traitRef = CanonicalTraitRef(traitName: traitName, traitTypeArgs: resolvedTraitTypeArgs)
                 vtableRequests.insert(VtableRequest(
                     concreteType: resolvedConcreteType,
                     traitName: traitName,
-                    traitTypeArgs: resolvedTraitTypeArgs
+                    traitTypeArgs: resolvedTraitTypeArgs,
+                    witnessKey: ConformanceWitness.key(selfType: resolvedConcreteType, traitRef: traitRef)
                 ))
             }
             return .traitObjectConversion(
@@ -1543,6 +1553,17 @@ extension Monomorphizer {
         switch pattern {
         case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
             return pattern
+        case .traitObjectType(let targetType):
+            return .traitObjectType(targetType: resolveParameterizedType(targetType))
+        case .traitObjectTypeBinding(let symbol, let targetType):
+            let newSymbol = copySymbolPreservingDefId(
+                symbol,
+                newType: resolveParameterizedType(symbol.type)
+            )
+            return .traitObjectTypeBinding(
+                symbol: newSymbol,
+                targetType: resolveParameterizedType(targetType)
+            )
             
         case .variable(let symbol):
             let newSymbol = copySymbolPreservingDefId(

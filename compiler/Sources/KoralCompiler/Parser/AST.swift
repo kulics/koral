@@ -603,6 +603,10 @@ public indirect enum PatternNode: CustomStringConvertible {
   case orPattern(left: PatternNode, right: PatternNode, span: SourceSpan)
   /// Not pattern for negating a pattern
   case notPattern(pattern: PatternNode, span: SourceSpan)
+  /// Exact implementation-type pattern for trait objects: `*Concrete` / `*mutable Concrete`
+  case traitObjectType(targetType: TypeNode, span: SourceSpan)
+  /// Binding exact implementation-type pattern for trait objects: `name *Concrete`
+  case traitObjectTypeBinding(name: String, mutable: Bool, targetType: TypeNode, span: SourceSpan)
   /// Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
   case structPattern(typeName: String, elements: [PatternArg], span: SourceSpan)
 
@@ -641,6 +645,10 @@ public indirect enum PatternNode: CustomStringConvertible {
       return "(\(left.description) or \(right.description))"
     case .notPattern(let pattern, _):
       return "not \(pattern.description)"
+    case .traitObjectType(let targetType, _):
+      return targetType.description
+    case .traitObjectTypeBinding(let name, let mutable, let targetType, _):
+      return mutable ? "mutable \(name) \(targetType.description)" : "\(name) \(targetType.description)"
     case .structPattern(let typeName, let elements, _):
       let args = elements.map { arg in
         if let label = arg.label {
@@ -668,6 +676,8 @@ public indirect enum PatternNode: CustomStringConvertible {
     case .andPattern(_, _, let span): return span
     case .orPattern(_, _, let span): return span
     case .notPattern(_, let span): return span
+    case .traitObjectType(_, let span): return span
+    case .traitObjectTypeBinding(_, _, _, let span): return span
     case .structPattern(_, _, let span): return span
     }
   }

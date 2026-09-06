@@ -381,7 +381,15 @@ given TypeChecker {
         return when expr in {
             .WhenExpr(subject, arms, _) then {
                 let typed_subj = self.check_expr_scoped_ref(subject, .None(), scope)
-                let pattern_subject_type = when typed_subj.expr_type in {
+                let mutable needs_raw_subject = false
+                for arm in arms then {
+                    if self.pattern_requires_raw_subject(box(arm.pattern)) then {
+                        needs_raw_subject = true
+                    }
+                }
+                let pattern_subject_type = if needs_raw_subject then {
+                    yield typed_subj.expr_type
+                } else when typed_subj.expr_type in {
                     .MutableReferenceType(inner) then *inner,
                     .ReferenceType(inner) then *inner,
                     .BorrowedReferenceType(inner) then *inner,

@@ -392,6 +392,8 @@ public indirect enum TypedPattern: CustomStringConvertible {
   case stringLiteral(value: String)
   case wildcard
   case variable(symbol: Symbol)
+  case traitObjectType(targetType: Type)
+  case traitObjectTypeBinding(symbol: Symbol, targetType: Type)
   case enumCase(caseName: String, tagIndex: Int, elements: [TypedPattern])
   
   // Comparison pattern - matches values based on comparison operators
@@ -415,6 +417,10 @@ public indirect enum TypedPattern: CustomStringConvertible {
     case .stringLiteral(let v): return "\"\(v)\""
     case .wildcard: return "_"
     case .variable(let s): return "def#\(s.defId.id)"
+    case .traitObjectType(let targetType): return targetType.description
+    case .traitObjectTypeBinding(let symbol, let targetType):
+      _ = symbol
+      return targetType.description
     case .enumCase(let name, _, let elements):
       let args = elements.map { $0.description }.joined(separator: ", ")
       return ".\(name)(\(args))"

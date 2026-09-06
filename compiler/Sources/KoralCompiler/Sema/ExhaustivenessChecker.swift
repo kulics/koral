@@ -47,6 +47,7 @@ extension ExhaustivenessChecker {
         var catchallIndex: Int? = nil
         var catchallPattern: String? = nil
         var coveredEnumCases: Set<String> = []
+        var coveredTraitObjectTypes: Set<String> = []
         
         for (index, pattern) in patterns.enumerated() {
             // Check if we already have a catchall pattern
@@ -97,6 +98,21 @@ extension ExhaustivenessChecker {
                 
                 coveredEnumCases.formUnion(casesInPattern)
             }
+
+            let traitObjectTypesInPattern = collectTraitObjectTypeKeys(pattern)
+            if !traitObjectTypesInPattern.isEmpty {
+                let alreadyCovered = traitObjectTypesInPattern.intersection(coveredTraitObjectTypes)
+                if let repeated = alreadyCovered.first {
+                    throw SemanticError(
+                        .unreachablePattern(
+                            pattern: pattern.description,
+                            reason: "implementation type pattern '\(repeated)' is already covered"
+                        ),
+                        span: currentSpan
+                    )
+                }
+                coveredTraitObjectTypes.formUnion(traitObjectTypesInPattern)
+            }
             
             // Update covered space
             coveredSpace = updateCoveredSpace(coveredSpace, with: pattern)
@@ -109,11 +125,19 @@ extension ExhaustivenessChecker {
         collectEnumCasesFromPattern(pattern, into: &cases)
         return cases
     }
+
+    private func collectTraitObjectTypeKeys(_ pattern: TypedPattern) -> Set<String> {
+        var keys: Set<String> = []
+        collectTraitObjectTypeKeys(pattern, into: &keys)
+        return keys
+    }
     
     private func isCatchallPattern(_ pattern: TypedPattern) -> Bool {
         switch pattern {
         case .wildcard, .variable:
             return true
+        case .traitObjectType, .traitObjectTypeBinding:
+            return false
         case .comparisonPattern:
             // Comparison patterns are not catchall - they only match values within the comparison
             return false
@@ -265,6 +289,20 @@ extension ExhaustivenessChecker {
             // Recursively collect from both sides of or pattern
             collectEnumCasesFromPattern(left, into: &coveredCases)
             collectEnumCasesFromPattern(right, into: &coveredCases)
+        default:
+            break
+        }
+    }
+
+    private func collectTraitObjectTypeKeys(_ pattern: TypedPattern, into keys: inout Set<String>) {
+        switch pattern {
+        case .traitObjectType(let targetType):
+            keys.insert(targetType.description)
+        case .traitObjectTypeBinding(_, let targetType):
+            keys.insert(targetType.description)
+        case .orPattern(let left, let right):
+            collectTraitObjectTypeKeys(left, into: &keys)
+            collectTraitObjectTypeKeys(right, into: &keys)
         default:
             break
         }

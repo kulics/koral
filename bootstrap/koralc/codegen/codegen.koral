@@ -218,7 +218,49 @@ given CodeGen {
     }
 
     concretize_codegen_type(*self, t Type) Type = {
-        return t
+        return when t in {
+            .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
+                .Some(mapped_type) then self.concretize_codegen_type(mapped_type),
+                .None() then t,
+            },
+            .ReferenceType(inner_ref) then Type.ReferenceType(box(self.concretize_codegen_type(*inner_ref))),
+            .MutableReferenceType(inner_ref) then Type.MutableReferenceType(box(self.concretize_codegen_type(*inner_ref))),
+            .BorrowedReferenceType(inner_ref) then Type.BorrowedReferenceType(box(self.concretize_codegen_type(*inner_ref))),
+            .MutableBorrowedReferenceType(inner_ref) then Type.MutableBorrowedReferenceType(box(self.concretize_codegen_type(*inner_ref))),
+            .PointerType(inner_ref) then Type.PointerType(box(self.concretize_codegen_type(*inner_ref))),
+            .MutablePointerType(inner_ref) then Type.MutablePointerType(box(self.concretize_codegen_type(*inner_ref))),
+            .WeakReferenceType(inner_ref) then Type.WeakReferenceType(box(self.concretize_codegen_type(*inner_ref))),
+            .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(box(self.concretize_codegen_type(*inner_ref))),
+            .GenericStruct(template, args) then {
+                let mutable concrete_args = List[* Type].new()
+                for arg_ref in args then {
+                    concrete_args.push(box(self.concretize_codegen_type(*arg_ref)))
+                }
+                yield Type.GenericStruct(template, concrete_args)
+            },
+            .GenericEnum(template, args) then {
+                let mutable concrete_args = List[* Type].new()
+                for arg_ref in args then {
+                    concrete_args.push(box(self.concretize_codegen_type(*arg_ref)))
+                }
+                yield Type.GenericEnum(template, concrete_args)
+            },
+            .TraitObject(trait_name, args) then {
+                let mutable concrete_args = List[* Type].new()
+                for arg_ref in args then {
+                    concrete_args.push(box(self.concretize_codegen_type(*arg_ref)))
+                }
+                yield Type.TraitObject(trait_name, concrete_args)
+            },
+            .FunctionType(fn_params, return_type_ref) then {
+                let mutable concrete_param_types = List[* Type].new()
+                for entry in fn_params then {
+                    concrete_param_types.push(box(self.concretize_codegen_type(entry.param_type)))
+                }
+                yield make_function_type(concrete_param_types, self.concretize_codegen_type(*return_type_ref))
+            },
+            _ then t,
+        }
     }
 
     trait_object_type_from_name(self, trait_name String) Type = {
@@ -456,21 +498,35 @@ given CodeGen {
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
             let def_id = entry.first
             let info = entry.second
-            if not (info.logical_name == method_name) then { continue }
-            when info.owner_type in {
-                .Some(owner_type) then {
-                    let owner_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(owner_type))
-                    if not (owner_key == receiver_key) then { continue }
-                    when info.trait_conformance in {
-                        .Some(conformance) then {
-                            if conformance == trait_name then {
-                                return Option[DefId].Some(def_id)
-                            }
-                        },
-                        .None() then {},
+            if info.logical_name <> method_name then { continue }
+            let owner_type = info.owner_type or else { continue }
+            let owner_key = self.concrete_receiver_lookup_key(self.concretize_codegen_type(owner_type))
+            if owner_key <> receiver_key then { continue }
+            let conformance = info.trait_conformance or else { continue }
+            if conformance == trait_name then {
+                return Option[DefId].Some(def_id)
+            }
+        }
+
+        for global in self.program.globals then {
+            when global in {
+                .Given(target_type, trait_conformance, _, methods) then {
+                    let conformance = trait_conformance or else { continue }
+                    if conformance <> trait_name then {
+                        continue
+                    }
+                    if not self.owner_types_match(target_type, concrete_receiver_type) then {
+                        continue
+                    }
+                    for method in methods then {
+                        let raw_method_name = self.context.symbol_name(*method)
+                        let candidate_name = self.callable_logical_name(method.def_id)
+                        if raw_method_name == method_name or candidate_name == method_name then {
+                            return Option[DefId].Some(method.def_id)
+                        }
                     }
                 },
-                .None() then {},
+                _ then {},
             }
         }
 
@@ -485,6 +541,32 @@ given CodeGen {
             },
             .None() then Option[DefId].None(),
         }
+    }
+
+    protected lookup_trait_method_def_id_from_given_globals(self, concrete_type Type, trait_name String, method_name String) Option[DefId] = {
+        let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
+        for global in self.program.globals then {
+            when global in {
+                .Given(target_type, trait_conformance, _, methods) then {
+                    let conformance = trait_conformance or else { continue }
+                    if conformance <> trait_name then {
+                        continue
+                    }
+                    if not self.owner_types_match(target_type, concrete_receiver_type) then {
+                        continue
+                    }
+                    for method in methods then {
+                        let raw_method_name = self.context.symbol_name(*method)
+                        let logical_method_name = self.callable_logical_name(method.def_id)
+                        if raw_method_name == method_name or logical_method_name == method_name then {
+                            return Option[DefId].Some(method.def_id)
+                        }
+                    }
+                },
+                _ then {},
+            }
+        }
+        return Option[DefId].None()
     }
 
     protected lookup_receiver_method_def_id(self, receiver_type Type, method_name String) Option[DefId] = {

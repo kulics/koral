@@ -430,18 +430,33 @@ given TypeChecker {
         let type_key = self.extension_template_key(target_type)
         when self.storage.generic_templates.extension_methods.get(type_key) in {
             .Some(existing) then {
+                let mutable updated = existing
                 let mutable index = 0(UInt)
-                while index < existing.count() then {
-                    let mutable current_ref = existing[index]
+                while index < updated.count() then {
+                    let current_ref = updated[index]
                     if current_ref.method.name == method_name
                         and current_ref.type_params.count() == owner_type_param_count
                         and current_ref.method.type_params.count() == method_type_param_count
                         and current_ref.conformance_trait_name == conformance_trait_name then {
-                        if *checked_body is .Some(_) then {
-                            current_ref.checked_body = *checked_body
+                        let new_checked_body = when *checked_body in {
+                            .Some(_) then *checked_body,
+                            .None() then current_ref.checked_body,
                         }
-                        current_ref.checked_parameters = checked_parameters
-                        current_ref.checked_return_type = Option[Type].Some(checked_return_type)
+                        updated[index] = box(self.copied_extension_method_template(
+                            current_ref.type_params,
+                            current_ref.method,
+                            current_ref.conformance_trait_name,
+                            current_ref.conformance_target_type,
+                            current_ref.conformance_trait_args,
+                            current_ref.uses_trait_type_params,
+                            current_ref.source_file,
+                            current_ref.module_path,
+                            current_ref.package_id,
+                            new_checked_body,
+                            checked_parameters,
+                            Option[Type].Some(checked_return_type),
+                        ))
+                        self.storage.generic_templates.extension_methods.insert(type_key, updated)
                         return
                     }
                     index += 1(UInt)
@@ -793,14 +808,25 @@ given TypeChecker {
         if self.storage.global_scope.lookup(name) is .Some(sym) then {
             when self.storage.generic_templates.lookup_function(name) in {
                 .Some(existing) then {
-                    let mutable existing_ref = existing
-                    if checked_body is .Some(_) then {
-                        existing_ref.checked_body = checked_body
+                    let new_checked_body = when checked_body in {
+                        .Some(_) then checked_body,
+                        .None() then existing.checked_body,
                     }
-                    existing_ref.checked_parameters = checked_parameters
-                    if checked_return_type is .Some(_) then {
-                        existing_ref.checked_return_type = checked_return_type
+                    let new_checked_return_type = when checked_return_type in {
+                        .Some(_) then checked_return_type,
+                        .None() then existing.checked_return_type,
                     }
+                    let updated = GenericFunctionTemplate(
+                        existing.def_id,
+                        existing.name,
+                        self.copy_template_type_params(existing.type_parameters),
+                        self.copy_template_params(existing.parameters),
+                        self.copy_type_node(existing.return_type),
+                        self.copy_optional_checked_body(new_checked_body),
+                        self.copy_optional_symbols(checked_parameters),
+                        self.copy_optional_type(new_checked_return_type),
+                    )
+                    self.storage.generic_templates.function_templates.insert(name, box(updated))
                 },
                 .None() then {
                     let template = GenericFunctionTemplate(

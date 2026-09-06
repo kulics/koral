@@ -931,6 +931,37 @@ if foo() is .A(x) and bar(x) is .B(y) and y > 0 then {
 - 前面 `is` 子句绑定的变量可用于后续 `and` 子句与 `then` 分支。
 - 带绑定的 `is` 不允许出现在 `or` 分支下，也不允许被 `not` 包裹。
 
+`if` 条件也支持 trait object 的实现类型精确匹配：
+
+```koral
+trait Problem {
+    render(*self) String
+}
+
+type IoError(code Int)
+
+given IoError as Problem {
+    render(*self) String = "io"
+}
+
+let err *Problem = box(IoError(7))
+
+if err is *IoError then {
+    println("io")
+}
+
+if err is io *IoError then {
+    println(io.render())
+}
+```
+
+这类精确类型模式遵循以下规则：
+
+- subject 仍然是 trait object 引用，不会自动解引用成实现值。
+- 目标必须写成 `*ConcreteType` 或 `*mutable ConcreteType`。
+- `err is io *IoError` 会把 `io` 绑定成 `*IoError`。
+- `*Problem` 不能匹配 `*mutable IoError`；`*mutable Problem` 可以匹配 `*IoError` 或 `*mutable IoError`。
+
 ## 循环结构
 
 循环结构是指在程序中需要反复执行某个功能而设置的一种程序结构。
@@ -1109,6 +1140,7 @@ let label = when score in {
 - 通配符模式：`_`（匹配任意值）
 - 字面量模式：`1`、`-5`、`"abc"`、`'a'`、`true`（支持负整数字面量模式如 `-5`）
 - 变量绑定模式：`x`（匹配任意值并绑定到 x），`mutable x`（可变绑定）
+- trait object 精确类型模式：`*IoError`、`*mutable IoError`、`err *IoError`
 - 比较模式：`> 5`, `< 0`, `>= 10`, `<= -1`
 - 结构体解构模式：`Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair 解构模式：`(a, b)`（等价于 `Pair(a, b)` 模式）
@@ -1133,6 +1165,23 @@ let grade = when score in {
     >= 80 then "B",
     >= 70 then "C",
     _ then "F",
+}
+
+// trait object 实现类型精确匹配
+trait Problem {
+    render(*self) String
+}
+
+type IoError(code Int)
+
+given IoError as Problem {
+    render(*self) String = "io"
+}
+
+let err *Problem = box(IoError(7))
+when err in {
+    io *IoError then println(io.render()),
+    _ then println("other"),
 }
 
 // 逻辑模式
@@ -1805,6 +1854,52 @@ trait Resettable {
 ```
 
 Trait object（`*TraitName`、`*mutable TraitName`）不支持直接解引用，应通过动态派发调用 trait 方法。
+
+#### 精确类型模式
+
+Trait object 也支持通过 Koral 现有模式系统，对实现类型做精确匹配。
+
+```koral
+trait Problem {
+    render(*self) String
+}
+
+type IoError(code Int)
+type NetError(code Int)
+
+given IoError as Problem {
+    render(*self) String = "io"
+}
+
+given NetError as Problem {
+    render(*self) String = "net"
+}
+
+let err *Problem = box(IoError(7))
+
+if err is *IoError then {
+    println("io")
+}
+
+if err is io *IoError then {
+    println(io.render())
+}
+
+let label = when err in {
+    io *IoError then io.render(),
+    _ then "other",
+}
+```
+
+规则：
+
+- 精确类型模式只允许用于 trait object 引用 subject。
+- 目标必须是具体托管引用类型：`*Concrete` 或 `*mutable Concrete`。
+- 匹配要求实现类型与泛型实参都精确一致。
+- 匹配不会自动解引用成底层值类型。
+- `*TraitName` 不能满足 `*mutable Concrete` 模式。
+- `*mutable TraitName` 可以满足 `*Concrete` 或 `*mutable Concrete`。
+- 这类模式属于开放世界测试；放在 `when` 中时不算穷尽，因此仍需要默认 `_` 分支。
 
 ## 泛型
 

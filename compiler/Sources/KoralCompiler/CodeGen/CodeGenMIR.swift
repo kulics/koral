@@ -188,7 +188,9 @@ final class MIRFunctionCodeEmitter {
            .downgradeRef(let ptr, _),
            .downgradeMutRef(let ptr, _),
            .upgradeRef(let ptr, _),
-           .upgradeMutRef(let ptr, _):
+           .upgradeMutRef(let ptr, _),
+           .traitObjectMatches(let ptr, _, _, _),
+           .traitObjectDowncast(let ptr, _):
         walkValue(ptr)
       case .copyMemory(let dest, let source, let count),
            .moveMemory(let dest, let source, let count):
@@ -2107,6 +2109,33 @@ final class MIRFunctionCodeEmitter {
         codeGen.addIndent()
         codeGen.appendToBuffer("}\n")
       }
+      emitCleanups(valueEmission.cleanups)
+      return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
+
+    case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
+      let valueEmission = emitValue(value, sourceMode: true)
+      let concreteTypeCName = codeGen.concreteTypeCIdentifier(concreteType) ?? codeGen.cTypeName(concreteType)
+      let vtableName = codeGen.vtableInstanceName(
+        concreteTypeCName: concreteTypeCName,
+        traitName: traitName,
+        traitTypeArgs: traitTypeArguments
+      )
+      let expression = codeGen.nextTempWithInit(
+        cType: "int",
+        initExpr: "(\(valueEmission.expression).vtable == &\(vtableName))"
+      )
+      emitCleanups(valueEmission.cleanups)
+      return MIRValueEmission(expression: expression, cleanups: [])
+
+    case .traitObjectDowncast(let value, let resultType):
+      let valueEmission = emitValue(value, sourceMode: true)
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).ptr = \(valueEmission.expression).ptr;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).control = \(valueEmission.expression).control;\n")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("if (\(expression).control) { __koral_retain(\(expression).control); }\n")
       emitCleanups(valueEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
 

@@ -18,6 +18,54 @@ struct CodeGenTraitCallArgument {
 
 extension CodeGen {
 
+  private func emittedMethodSymbol(defId: DefId) -> Symbol? {
+    for global in mirProgram.globals {
+      switch global {
+      case .given(_, _, let methods):
+        if let method = methods.first(where: { $0.defId == defId }) {
+          return method
+        }
+      case .function(let identifier, _, _):
+        if identifier.defId == defId {
+          return identifier
+        }
+      default:
+        continue
+      }
+    }
+    return nil
+  }
+
+  private func resolveMethodDefIdFromWitness(
+    concreteType: Type,
+    traitName: String,
+    traitTypeArgs: [Type],
+    methodName: String
+  ) -> DefId? {
+    let traitRef = CanonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    let key = ConformanceWitness.key(selfType: concreteType, traitRef: traitRef)
+    guard let witness = mirProgram.conformanceWitnesses[key] else {
+      return nil
+    }
+
+    if let direct = witness.localImplementationDefIdsByMethodName[methodName] {
+      return direct
+    }
+
+    for parentTraitRef in witness.directParentTraitRefs {
+      if let defId = resolveMethodDefIdFromWitness(
+        concreteType: concreteType,
+        traitName: parentTraitRef.traitName,
+        traitTypeArgs: parentTraitRef.traitTypeArgs,
+        methodName: methodName
+      ) {
+        return defId
+      }
+    }
+
+    return nil
+  }
+
   private func sanitizeTraitMangleToken(_ raw: String) -> String {
     String(raw.map { ch in
       if ch.isLetter || ch.isNumber || ch == "_" {
@@ -70,6 +118,17 @@ extension CodeGen {
       "\(qualifiedTypeName)_trait_\(compositeTraitTag)_\(methodName)"
     }
 
+    if let witnessDefId = resolveMethodDefIdFromWitness(
+      concreteType: concreteType,
+      traitName: traitName,
+      traitTypeArgs: traitTypeArgs,
+      methodName: methodName
+    ) {
+      if let method = emittedMethodSymbol(defId: witnessDefId) {
+        return cIdentifier(for: method)
+      }
+    }
+
     // Strategy 1: Search through MIR given globals for a matching method.
     for node in mirProgram.globals {
       guard case .given(let type, let trait, let methods) = node else { continue }
@@ -94,12 +153,6 @@ extension CodeGen {
 
         let emittedMethodSymbolName = context.getName(method.defId) ?? ""
         if let compositeTraitMethodName, emittedMethodSymbolName == compositeTraitMethodName {
-          return cIdentifier(for: method)
-        }
-        if emittedMethodSymbolName == methodName {
-          return cIdentifier(for: method)
-        }
-        if emittedMethodSymbolName.hasSuffix("_\(methodName)") {
           return cIdentifier(for: method)
         }
       }
@@ -212,6 +265,16 @@ extension CodeGen {
           buffer += wrapperCode
           buffer += "\n"
         }
+      }
+
+      if actualMethodCNames.count != orderedMethods.count {
+        let missingMethods = orderedMethods
+          .map(\.name)
+          .filter { actualMethodCNames[$0] == nil }
+          .joined(separator: ", ")
+        fatalError(
+          "Refusing to emit partial vtable for \(request.traitName) on \(context.getDebugName(request.concreteType)); missing methods: \(missingMethods)"
+        )
       }
       
       // Step 3: Generate vtable instance
@@ -496,7 +559,9 @@ extension CodeGen {
       } else {
         // Managed receiver: vtable entry points directly to the actual method
         guard let actualName = actualMethodCNames[methodName] else {
-          continue
+          fatalError(
+            "Missing vtable method binding for \(traitName).\(methodName) on \(concreteTypeCName)"
+          )
         }
         functionRef = actualName
       }

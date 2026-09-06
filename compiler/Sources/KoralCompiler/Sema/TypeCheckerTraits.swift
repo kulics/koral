@@ -40,43 +40,239 @@ extension TypeChecker {
     return result
   }
 
+  func canonicalTraitRef(traitName: String, traitTypeArgs: [Type] = []) -> CanonicalTraitRef {
+    CanonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+  }
+
+  func resolveCanonicalTraitRef(from constraint: TraitConstraint) throws -> CanonicalTraitRef {
+    try resolveCanonicalTraitRef(from: constraint, substitution: [:])
+  }
+
+  func resolveCanonicalTraitRef(
+    from constraint: TraitConstraint,
+    substitution: [String: Type]
+  ) throws -> CanonicalTraitRef {
+    switch constraint {
+    case .simple(let name):
+      return canonicalTraitRef(traitName: name)
+    case .generic(let base, let args):
+      let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+      return canonicalTraitRef(traitName: base, traitTypeArgs: resolvedArgs)
+    }
+  }
+
+  func traitTypeSubstitution(for traitRef: CanonicalTraitRef, selfType: Type) -> [String: Type] {
+    var substitution: [String: Type] = ["Self": selfType]
+    guard let traitInfo = traits[traitRef.traitName] else {
+      return substitution
+    }
+    for (index, parameter) in traitInfo.typeParameters.enumerated() where index < traitRef.traitTypeArgs.count {
+      substitution[parameter.name] = traitRef.traitTypeArgs[index]
+    }
+    return substitution
+  }
+
+  func directParentTraitRefs(for traitRef: CanonicalTraitRef, selfType: Type) throws -> [CanonicalTraitRef] {
+    guard let traitInfo = traits[traitRef.traitName] else {
+      return []
+    }
+    let substitution = traitTypeSubstitution(for: traitRef, selfType: selfType)
+    return try traitInfo.superTraits.map {
+      try resolveCanonicalTraitRef(from: $0, substitution: substitution)
+    }
+  }
+
+  func requirementSlots(for traitRef: CanonicalTraitRef, selfType: Type) throws -> [RequirementSlot] {
+    var slots: [RequirementSlot] = []
+    var seenMethods: Set<String> = []
+    var visitedTraitRefs: Set<String> = []
+
+    func collect(_ current: CanonicalTraitRef) throws {
+      guard visitedTraitRefs.insert(current.cacheKey).inserted else {
+        return
+      }
+      let parents = try directParentTraitRefs(for: current, selfType: selfType)
+      for parent in parents {
+        try collect(parent)
+      }
+
+      guard let traitInfo = traits[current.traitName] else {
+        return
+      }
+      let substitution = traitTypeSubstitution(for: current, selfType: selfType)
+
+      for method in traitInfo.methods where seenMethods.insert(method.name).inserted {
+        let slot = try withNewScope {
+          for methodTypeParam in method.typeParameters {
+            let genericType: Type = .genericParameter(name: methodTypeParam.name)
+            currentScope.defineGenericParameter(methodTypeParam.name, type: genericType)
+            try currentScope.defineType(methodTypeParam.name, type: genericType)
+          }
+
+          let parameters = try method.parameters.map { parameter in
+            RequirementSlotParameter(
+              name: parameter.name,
+              mutable: parameter.mutable,
+              type: try resolveTypeNodeWithSubstitution(parameter.type, substitution: substitution),
+              named: parameter.named
+            )
+          }
+          let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
+          return RequirementSlot(
+            declaringTraitRef: current,
+            methodName: method.name,
+            parameters: parameters,
+            returnType: returnType,
+            index: slots.count
+          )
+        }
+        slots.append(
+          slot
+        )
+      }
+    }
+
+    try collect(traitRef)
+    return slots
+  }
+
+  func resolvedTraitBound(
+    _ paramName: String,
+    traitName: String,
+    traitTypeArgs: [Type]? = nil
+  ) -> CanonicalTraitRef? {
+    guard let bounds = genericTraitBounds[paramName] else {
+      return nil
+    }
+
+    let genericSelfType: Type = .genericParameter(name: paramName)
+
+    if let traitTypeArgs {
+      let expected = canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+      for bound in bounds {
+        guard let actual = try? resolveCanonicalTraitRef(from: bound) else {
+          continue
+        }
+        if let matched = resolvedInheritedTraitRef(
+          from: actual,
+          selfTypeForInheritance: genericSelfType,
+          matching: expected
+        ) {
+          return matched
+        }
+      }
+      return nil
+    }
+
+    for bound in bounds {
+      guard let actual = try? resolveCanonicalTraitRef(from: bound) else {
+        continue
+      }
+      if let matched = resolvedInheritedTraitRef(
+        from: actual,
+        selfTypeForInheritance: genericSelfType,
+        matchingTraitName: traitName
+      ) {
+        return matched
+      }
+    }
+    return nil
+  }
+
+  private func resolvedInheritedTraitRef(
+    from actual: CanonicalTraitRef,
+    selfTypeForInheritance: Type,
+    matching expected: CanonicalTraitRef
+  ) -> CanonicalTraitRef? {
+    if actual == expected {
+      return actual
+    }
+
+    guard let traitInfo = traits[actual.traitName] else {
+      return nil
+    }
+
+    var substitution: [String: Type] = ["Self": selfTypeForInheritance]
+    for (index, typeParam) in traitInfo.typeParameters.enumerated() where index < actual.traitTypeArgs.count {
+      substitution[typeParam.name] = actual.traitTypeArgs[index]
+    }
+
+    for parent in traitInfo.superTraits {
+      guard let parentRef = try? resolveCanonicalTraitRef(from: parent, substitution: substitution) else {
+        continue
+      }
+      if let matched = resolvedInheritedTraitRef(
+        from: parentRef,
+        selfTypeForInheritance: selfTypeForInheritance,
+        matching: expected
+      ) {
+        return matched
+      }
+    }
+
+    return nil
+  }
+
+  private func resolvedInheritedTraitRef(
+    from actual: CanonicalTraitRef,
+    selfTypeForInheritance: Type,
+    matchingTraitName traitName: String
+  ) -> CanonicalTraitRef? {
+    if actual.traitName == traitName {
+      return actual
+    }
+
+    guard let traitInfo = traits[actual.traitName] else {
+      return nil
+    }
+
+    var substitution: [String: Type] = ["Self": selfTypeForInheritance]
+    for (index, typeParam) in traitInfo.typeParameters.enumerated() where index < actual.traitTypeArgs.count {
+      substitution[typeParam.name] = actual.traitTypeArgs[index]
+    }
+
+    for parent in traitInfo.superTraits {
+      guard let parentRef = try? resolveCanonicalTraitRef(from: parent, substitution: substitution) else {
+        continue
+      }
+      if let matched = resolvedInheritedTraitRef(
+        from: parentRef,
+        selfTypeForInheritance: selfTypeForInheritance,
+        matchingTraitName: traitName
+      ) {
+        return matched
+      }
+    }
+
+    return nil
+  }
+
   /// Checks if a type parameter has a trait bound, including inherited traits.
   /// For example, if K has bound HashKey and HashKey extends Equatable,
   /// then hasTraitBound("K", "Equatable") returns true.
   func hasTraitBound(_ paramName: String, _ traitName: String) -> Bool {
-    guard let bounds = genericTraitBounds[paramName] else {
-      return false
-    }
-    
-    // Check direct bounds
-    if bounds.contains(where: { $0.baseName == traitName }) {
-      return true
-    }
-    
-    // Check inherited traits
-    for bound in bounds {
-      let boundName = bound.baseName
-      if let traitInfo = traits[boundName] {
-        // Check if this trait inherits from the target trait
-        if traitInfo.superTraits.contains(where: { $0.baseName == traitName }) {
-          return true
-        }
-        // Recursively check super traits
-        for superTrait in traitInfo.superTraits {
-          if hasTraitInheritance(superTrait.baseName, traitName) {
-            return true
-          }
-        }
-      }
-    }
-    
-    return false
+    resolvedTraitBound(paramName, traitName: traitName) != nil
+  }
+
+  func hasTraitBound(_ paramName: String, traitName: String, traitTypeArgs: [Type]) -> Bool {
+    resolvedTraitBound(paramName, traitName: traitName, traitTypeArgs: traitTypeArgs) != nil
   }
   
   /// Finds the trait constraint for a given type parameter and trait name.
   /// Returns the full TraitConstraint including type arguments.
-  func findTraitConstraint(_ paramName: String, _ traitName: String) -> TraitConstraint? {
+  func findTraitConstraint(_ paramName: String, _ traitName: String, traitTypeArgs: [Type]? = nil) -> TraitConstraint? {
     guard let bounds = genericTraitBounds[paramName] else {
+      return nil
+    }
+    if let traitTypeArgs {
+      for bound in bounds {
+        guard let resolved = try? resolveCanonicalTraitRef(from: bound) else {
+          continue
+        }
+        if resolved == canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs) {
+          return bound
+        }
+      }
       return nil
     }
     return bounds.first(where: { $0.baseName == traitName })

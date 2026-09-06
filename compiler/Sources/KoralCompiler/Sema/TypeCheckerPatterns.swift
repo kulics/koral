@@ -5,6 +5,65 @@ import Foundation
 
 extension TypeChecker {
 
+  func resolveTraitObjectPatternTargetType(
+    _ targetTypeNode: TypeNode,
+    subjectType: Type,
+    span: SourceSpan
+  ) throws -> Type {
+    guard let subjectIsMutable = traitObjectPatternSubjectMutability(subjectType) else {
+      throw SemanticError(.generic(
+        "Trait object type patterns require a trait object subject, got '\(subjectType)'"
+      ), span: span)
+    }
+
+    let resolvedTarget = try resolveTypeNode(targetTypeNode)
+    switch resolvedTarget {
+    case .reference(let inner):
+      try validateTraitObjectPatternConcreteType(inner, span: span)
+      return .reference(inner: inner)
+    case .mutableReference(let inner):
+      guard subjectIsMutable else {
+        throw SemanticError(.generic(
+          "Trait object type pattern '\(resolvedTarget)' requires a mutable trait object subject"
+        ), span: span)
+      }
+      try validateTraitObjectPatternConcreteType(inner, span: span)
+      return .mutableReference(inner: inner)
+    default:
+      throw SemanticError(.generic(
+        "Trait object type pattern must be '*Type' or '*mutable Type', got '\(resolvedTarget)'"
+      ), span: span)
+    }
+  }
+
+  private func traitObjectPatternSubjectMutability(_ type: Type) -> Bool? {
+    switch type {
+    case .reference(let inner):
+      if case .traitObject = inner { return false }
+      return nil
+    case .mutableReference(let inner):
+      if case .traitObject = inner { return true }
+      return nil
+    default:
+      return nil
+    }
+  }
+
+  private func validateTraitObjectPatternConcreteType(_ type: Type, span: SourceSpan) throws {
+    switch type {
+    case .structure,
+         .enum,
+         .opaque,
+         .genericStruct,
+         .genericEnum:
+      return
+    default:
+      throw SemanticError(.generic(
+        "Trait object type pattern target must be a concrete nominal type, got '\(type)'"
+      ), span: span)
+    }
+  }
+
   /// Check if a field is accessible from the current source file/module.
   /// - Parameters:
   ///   - fieldAccess: The access modifier of the field
@@ -34,6 +93,19 @@ extension TypeChecker {
     var bindings: [(String, Bool, Type)] = []
 
     switch pattern {
+    case .traitObjectType(let targetType, let span):
+      let resolvedTarget = try resolveTraitObjectPatternTargetType(targetType, subjectType: subjectType, span: span)
+      return (.traitObjectType(targetType: resolvedTarget), [])
+
+    case .traitObjectTypeBinding(let name, let mutable, let targetType, let span):
+      let resolvedTarget = try resolveTraitObjectPatternTargetType(targetType, subjectType: subjectType, span: span)
+      let symbol = makeLocalSymbol(
+        name: name,
+        type: resolvedTarget,
+        kind: .variable(mutable ? .MutableValue : .Value)
+      )
+      return (.traitObjectTypeBinding(symbol: symbol, targetType: resolvedTarget), [(name, mutable, resolvedTarget)])
+
     case .integerLiteral(let val, _):
       if !subjectType.isIntegerType {
         throw SemanticError.typeMismatch(expected: "integer type", got: subjectType.description)
@@ -353,7 +425,8 @@ extension TypeChecker {
   /// Check whether a typed pattern contains any variable bindings.
   func patternContainsBindings(_ pattern: TypedPattern) -> Bool {
     switch pattern {
-    case .variable:
+    case .variable,
+         .traitObjectTypeBinding:
       return true
     case .enumCase(_, _, let elements):
       return elements.contains { patternContainsBindings($0) }
@@ -363,7 +436,7 @@ extension TypeChecker {
       return patternContainsBindings(left) || patternContainsBindings(right)
     case .notPattern(let inner):
       return patternContainsBindings(inner)
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       return false
     }
   }
@@ -385,6 +458,10 @@ extension TypeChecker {
       if seenDefIds.insert(symbol.defId.id).inserted {
         symbols.append(symbol)
       }
+    case .traitObjectTypeBinding(let symbol, _):
+      if seenDefIds.insert(symbol.defId.id).inserted {
+        symbols.append(symbol)
+      }
     case .enumCase(_, _, let elements):
       for element in elements {
         collectPatternSymbols(element, into: &symbols, seenDefIds: &seenDefIds)
@@ -398,7 +475,7 @@ extension TypeChecker {
       collectPatternSymbols(right, into: &symbols, seenDefIds: &seenDefIds)
     case .notPattern(let pattern):
       collectPatternSymbols(pattern, into: &symbols, seenDefIds: &seenDefIds)
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       break
     }
   }
@@ -423,6 +500,12 @@ extension TypeChecker {
         return pattern
       }
       return .variable(symbol: canonical)
+    case .traitObjectTypeBinding(let symbol, let targetType):
+      guard let name = context.getName(symbol.defId),
+            let canonical = canonicalSymbolsByName[name] else {
+        return pattern
+      }
+      return .traitObjectTypeBinding(symbol: canonical, targetType: targetType)
     case .enumCase(let caseName, let tagIndex, let elements):
       return .enumCase(
         caseName: caseName,
@@ -446,7 +529,7 @@ extension TypeChecker {
       )
     case .notPattern(let inner):
       return .notPattern(pattern: canonicalizePatternBindings(inner, canonicalSymbolsByName: canonicalSymbolsByName))
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern:
+    case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType:
       return pattern
     }
   }

@@ -92,6 +92,12 @@ extension Parser {
   /// Parse primary pattern (literals, wildcards, variables, enum cases, comparison patterns)
   private func parsePrimaryPattern() throws -> PatternNode {
     let startSpan = currentSpan
+
+    if currentToken === .multiply {
+      let targetType = try parseType()
+      let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+      return .traitObjectType(targetType: targetType, span: span)
+    }
     
     // Comparison patterns: > n, < n, >= n, <= n
     if currentToken === .greater || currentToken === .less ||
@@ -177,6 +183,12 @@ extension Parser {
         return .wildcard(span: startSpan)
       }
       try match(.identifier(name))
+
+      if currentToken === .multiply {
+        let targetType = try parseType()
+        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+        return .traitObjectTypeBinding(name: name, mutable: false, targetType: targetType, span: span)
+      }
       
       // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
       if currentToken === .leftParen, isValidTypeName(name) {
@@ -219,6 +231,13 @@ extension Parser {
         throw ParserError.invalidVariableName(span: currentSpan, name: name)
       }
       try match(.identifier(name))
+
+      if currentToken === .multiply {
+        let targetType = try parseType()
+        let span = SourceSpan(start: startSpan.start, end: currentSpan.end)
+        return .traitObjectTypeBinding(name: name, mutable: true, targetType: targetType, span: span)
+      }
+
       return .variable(name: name, mutable: true, span: startSpan)
     }
     

@@ -218,7 +218,9 @@ private final class MIRStatsCounter {
          .downgradeRef(let value, _),
          .downgradeMutRef(let value, _),
          .upgradeRef(let value, _),
-         .upgradeMutRef(let value, _):
+         .upgradeMutRef(let value, _),
+         .traitObjectMatches(let value, _, _, _),
+         .traitObjectDowncast(let value, _):
       count(value)
     case .makeRef(let ptr, let owner, _),
          .makeMutRef(let ptr, let owner, _),

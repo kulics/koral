@@ -164,6 +164,10 @@ struct MIRTypeResolver {
       return resultType
     case .isUniqueMutable:
       return .bool
+    case .traitObjectMatches:
+      return .bool
+    case .traitObjectDowncast(_, let resultType):
+      return resultType
     case .refCount:
       return .uint
     case .spawnThread:

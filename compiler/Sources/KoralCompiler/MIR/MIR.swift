@@ -36,6 +36,7 @@ struct MIRProgram {
   let context: CompilerContext
   let staticMethodLookup: [String: DefId]
   let traits: [String: TraitDeclInfo]
+  let conformanceWitnesses: [String: ConformanceWitness]
   let receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo]
   let escapeSummaries: [DefId: MIREscapeSummary]
 
@@ -332,6 +333,8 @@ indirect enum MIRIntrinsic {
   case downgradeMutRef(value: MIRValue, resultType: Type)
   case upgradeRef(value: MIRValue, resultType: Type)
   case upgradeMutRef(value: MIRValue, resultType: Type)
+  case traitObjectMatches(value: MIRValue, traitName: String, traitTypeArguments: [Type], concreteType: Type)
+  case traitObjectDowncast(value: MIRValue, resultType: Type)
   case initMemory(ptr: MIRValue, value: MIRValue)
   case deinitMemory(ptr: MIRValue)
   case takeMemory(ptr: MIRValue, resultType: Type)

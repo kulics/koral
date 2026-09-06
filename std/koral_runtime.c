@@ -2370,11 +2370,35 @@ static int64_t __koral_process_group_working_set_bytes_linux(uint32_t root_pid) 
 // This is needed because the test runner monitors the compiler process,
 // but the compiler spawns child processes (like clang) that may consume
 // significant memory independently.
+#if defined(_WIN32) || defined(_WIN64)
+static uint64_t __koral_filetime_ticks(FILETIME ft) {
+    return ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime;
+}
+
+static int __koral_process_creation_ticks(DWORD pid, uint64_t* out_ticks) {
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (h == NULL) return -1;
+
+    FILETIME creation_time, exit_time, kernel_time, user_time;
+    BOOL ok = GetProcessTimes(h, &creation_time, &exit_time, &kernel_time, &user_time);
+    CloseHandle(h);
+    if (!ok) return -1;
+
+    *out_ticks = __koral_filetime_ticks(creation_time);
+    return 0;
+}
+#endif
+
 int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
 #if defined(_WIN32) || defined(_WIN64)
     // First, get memory for the root process
     int64_t total = __koral_process_working_set_bytes(root_pid);
     if (total < 0) total = 0;
+
+    uint64_t root_creation_ticks = 0;
+    if (__koral_process_creation_ticks((DWORD)root_pid, &root_creation_ticks) != 0) {
+        return total;
+    }
 
     // Build a map of parent PID -> child PIDs using Toolhelp32
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -2392,17 +2416,40 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
             if (count < 4096) {
                 procs[count].pid = pe.th32ProcessID;
                 procs[count].ppid = pe.th32ParentProcessID;
-    uint32_t queue[4096];
+                count++;
+            }
+        } while (Process32Next(snapshot, &pe));
+    }
+
+    CloseHandle(snapshot);
+
+    typedef struct { uint32_t pid; uint64_t creation_ticks; } ProcQueueEntry;
+    ProcQueueEntry queue[4096];
     int qhead = 0, qtail = 0;
-    queue[qtail++] = root_pid;
+    queue[qtail].pid = root_pid;
+    queue[qtail].creation_ticks = root_creation_ticks;
+    qtail++;
 
     while (qhead < qtail) {
-        uint32_t current = queue[qhead++];
+        uint32_t current = queue[qhead].pid;
+        uint64_t current_creation_ticks = queue[qhead].creation_ticks;
+        qhead++;
         for (int i = 0; i < count; i++) {
             if (procs[i].ppid == current) {
+                uint64_t child_creation_ticks = 0;
+                if (__koral_process_creation_ticks(procs[i].pid, &child_creation_ticks) != 0) {
+                    continue;
+                }
+                if (child_creation_ticks < current_creation_ticks) {
+                    continue;
+                }
                 int64_t child_mem = __koral_process_working_set_bytes(procs[i].pid);
                 if (child_mem > 0) total += child_mem;
-                if (qtail < 4096) queue[qtail++] = procs[i].pid;
+                if (qtail < 4096) {
+                    queue[qtail].pid = procs[i].pid;
+                    queue[qtail].creation_ticks = child_creation_ticks;
+                    qtail++;
+                }
             }
         }
     }

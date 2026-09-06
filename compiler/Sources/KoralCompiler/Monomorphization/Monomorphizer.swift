@@ -17,6 +17,9 @@ public struct MonomorphizedProgram {
     /// Trait declarations indexed by trait name.
     /// Used by CodeGen for vtable struct generation.
     public let traits: [String: TraitDeclInfo]
+
+    /// Explicit conformance witnesses collected during type checking.
+    public let conformanceWitnesses: [String: ConformanceWitness]
     
     /// Vtable generation requests collected during monomorphization.
     /// Each entry represents a (concreteType, trait) combination that needs
@@ -31,12 +34,14 @@ public struct MonomorphizedProgram {
         globalNodes: [TypedGlobalNode],
         staticMethodLookup: [String: DefId] = [:],
         traits: [String: TraitDeclInfo] = [:],
+        conformanceWitnesses: [String: ConformanceWitness] = [:],
         vtableRequests: Set<VtableRequest> = [],
         receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo] = [:]
     ) {
         self.globalNodes = globalNodes
         self.staticMethodLookup = staticMethodLookup
         self.traits = traits
+        self.conformanceWitnesses = conformanceWitnesses
         self.vtableRequests = vtableRequests
         self.receiverMethodDispatch = receiverMethodDispatch
     }
@@ -671,6 +676,7 @@ public class Monomorphizer {
             globalNodes: allNodes,
             staticMethodLookup: staticMethodLookup,
             traits: input.genericTemplates.traits,
+            conformanceWitnesses: input.conformanceWitnesses,
             vtableRequests: vtableRequests,
             receiverMethodDispatch: receiverMethodDispatch
         )

@@ -10,8 +10,11 @@ extension TypedPattern {
 
   var introducesBinding: Bool {
     switch self {
-    case .variable:
+    case .variable,
+         .traitObjectTypeBinding:
       return true
+    case .traitObjectType:
+      return false
     case .enumCase(_, _, let elements),
          .structPattern(_, let elements):
       return elements.contains { $0.introducesBinding }
@@ -40,6 +43,8 @@ extension TypedPattern {
          .integerLiteral,
          .stringLiteral,
          .variable,
+          .traitObjectType,
+          .traitObjectTypeBinding,
          .comparisonPattern,
          .andPattern,
          .orPattern,
@@ -53,6 +58,9 @@ extension TypedPattern {
     case .wildcard,
          .variable:
       return true
+    case .traitObjectType,
+         .traitObjectTypeBinding:
+      return false
     case .structPattern(_, let elements):
       return elements.allSatisfy { $0.isConditionlessPayloadPattern }
     default:
@@ -63,6 +71,10 @@ extension TypedPattern {
   private func collectBindingSymbols(into symbols: inout [Symbol], seenDefIds: inout Set<UInt64>) {
     switch self {
     case .variable(let symbol):
+      if seenDefIds.insert(symbol.defId.id).inserted {
+        symbols.append(symbol)
+      }
+    case .traitObjectTypeBinding(let symbol, _):
       if seenDefIds.insert(symbol.defId.id).inserted {
         symbols.append(symbol)
       }
@@ -81,6 +93,7 @@ extension TypedPattern {
          .booleanLiteral,
          .integerLiteral,
          .stringLiteral,
+         .traitObjectType,
          .comparisonPattern:
       break
     }

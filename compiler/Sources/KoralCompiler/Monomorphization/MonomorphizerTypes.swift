@@ -17,6 +17,8 @@ public struct VtableRequest: Hashable {
     public let traitName: String
     /// The trait's type arguments (e.g., [] for non-generic traits)
     public let traitTypeArgs: [Type]
+    /// Canonical witness key for this conformance request.
+    public let witnessKey: String
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(concreteType)
@@ -24,12 +26,14 @@ public struct VtableRequest: Hashable {
         for arg in traitTypeArgs {
             hasher.combine(arg)
         }
+        hasher.combine(witnessKey)
     }
 
     public static func == (lhs: VtableRequest, rhs: VtableRequest) -> Bool {
         return lhs.concreteType == rhs.concreteType
             && lhs.traitName == rhs.traitName
             && lhs.traitTypeArgs == rhs.traitTypeArgs
+            && lhs.witnessKey == rhs.witnessKey
     }
 }
 

@@ -253,6 +253,8 @@ private let mir_walk_intrinsic_uses(
         .DowngradeMutRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
         .UpgradeRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
         .UpgradeMutRef(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
+        .TraitObjectMatches(value, _, _, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
+        .TraitObjectDowncast(value, _) then mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes),
         .InitMemory(pointer, value) then {
             mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *pointer, block, active_scopes)
             mir_walk_value_uses(shared_use_scope_by_local, first_use_block_by_local, multiple_use_blocks_by_local, tracked_drop_local_ids, parent_scope_by_scope, *value, block, active_scopes)
@@ -1331,7 +1333,8 @@ given MIRFunctionCodeEmitter {
             self.codegen.buffer.push_string(".fn))(")
             self.codegen.push_joined_strings(arguments, ", ")
             self.codegen.buffer.push_string(");\n")
-            self.codegen.indent = self.codegen.indent.substring(..self.codegen.indent.count() - 4(UInt))
+            let then_trimmed_indent_len = self.codegen.indent.count() - 4(UInt)
+            self.codegen.indent = self.codegen.indent.substring(..then_trimmed_indent_len)
             self.codegen.add_indent()
             self.codegen.buffer.push_string("} else {\n")
             self.codegen.indent = "\(self.codegen.indent)    "
@@ -1345,7 +1348,8 @@ given MIRFunctionCodeEmitter {
             self.codegen.buffer.push_string(".fn))(")
             self.codegen.push_joined_strings(args_with_env, ", ")
             self.codegen.buffer.push_string(");\n")
-            self.codegen.indent = self.codegen.indent.substring(..self.codegen.indent.count() - 4(UInt))
+            let else_trimmed_indent_len = self.codegen.indent.count() - 4(UInt)
+            self.codegen.indent = self.codegen.indent.substring(..else_trimmed_indent_len)
             self.codegen.add_indent()
             self.codegen.buffer.push_string("}\n")
             return ""
@@ -1367,7 +1371,8 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(".fn))(")
         self.codegen.push_joined_strings(arguments, ", ")
         self.codegen.buffer.push_string(");\n")
-        self.codegen.indent = self.codegen.indent.substring(..self.codegen.indent.count() - 4(UInt))
+        let then_result_trimmed_indent_len = self.codegen.indent.count() - 4(UInt)
+        self.codegen.indent = self.codegen.indent.substring(..then_result_trimmed_indent_len)
         self.codegen.add_indent()
         self.codegen.buffer.push_string("} else {\n")
         self.codegen.indent = "\(self.codegen.indent)    "
@@ -1382,7 +1387,8 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(".fn))(")
         self.codegen.push_joined_strings(args_with_env, ", ")
         self.codegen.buffer.push_string(");\n")
-        self.codegen.indent = self.codegen.indent.substring(..self.codegen.indent.count() - 4(UInt))
+        let else_result_trimmed_indent_len = self.codegen.indent.count() - 4(UInt)
+        self.codegen.indent = self.codegen.indent.substring(..else_result_trimmed_indent_len)
         self.codegen.add_indent()
         self.codegen.buffer.push_string("}\n")
         return result
@@ -1960,6 +1966,27 @@ given MIRFunctionCodeEmitter {
             .DowngradeMutRef(value, result_type) then self.emit_downgrade_ref(*value, result_type),
             .UpgradeRef(value, result_type) then self.emit_upgrade_ref(*value, result_type),
             .UpgradeMutRef(value, result_type) then self.emit_upgrade_ref(*value, result_type),
+            .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then {
+                let emission = self.emit_value_source(*value)
+                let concrete_c_name = self.codegen.concrete_type_c_name_fallback(concrete_type) or else self.codegen.sanitize_codegen_identifier(self.codegen.c_type_name(concrete_type))
+                let vtable_name = self.codegen.vtable_instance_name(trait_name, concrete_c_name)
+                let expression = self.codegen.next_temp_with_init(self.codegen.c_type_name(Type.BoolType()), "(\(emission.expression).vtable == &\(vtable_name))")
+                let _ = trait_type_args
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(expression, Option[* MIRValueCleanup].None())
+            },
+            .TraitObjectDowncast(value, result_type) then {
+                let emission = self.emit_value_source(*value)
+                let expression = self.codegen.next_temp_with_decl(self.codegen.c_type_name(result_type))
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("\(expression).ptr = \(emission.expression).ptr;\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("\(expression).control = \(emission.expression).control;\n")
+                self.codegen.add_indent()
+                self.codegen.buffer.push_string("if (\(expression).control) { __koral_retain(\(expression).control); }\n")
+                self.emit_cleanup(emission.cleanup)
+                yield MIRValueEmission(expression, self.cleanup_for_temporary_result(expression, result_type))
+            },
             .InitMemory(pointer, value) then {
                 let p = self.emit_value_source(*pointer)
                 let v = self.emit_value_source(*value)
@@ -2168,7 +2195,11 @@ given MIRFunctionCodeEmitter {
         let mutable parameter_local_names = List[String].new()
         for local in mir_function.locals then {
             if local.storage is .Parameter() and parameter_local_names.count() < params.count() then {
-                parameter_local_names.push(plan.local_names_by_id.get(local.id.raw_value) or else plan.local_names[parameter_local_names.count()])
+                let fallback_param = params[parameter_local_names.count()]
+                let fallback_name = if parameter_local_names.count() < plan.local_names.count()
+                    then plan.local_names[parameter_local_names.count()]
+                    else self.codegen.c_identifier_for_symbol(fallback_param)
+                parameter_local_names.push(plan.local_names_by_id.get(local.id.raw_value) or else fallback_name)
             }
         }
         // Build parameter list
@@ -2205,7 +2236,11 @@ given MIRFunctionCodeEmitter {
         let mutable parameter_local_names = List[String].new()
         for local in mir_function.locals then {
             if local.storage is .Parameter() and parameter_local_names.count() < params.count() then {
-                parameter_local_names.push(plan.local_names_by_id.get(local.id.raw_value) or else plan.local_names[parameter_local_names.count()])
+                let fallback_param = params[parameter_local_names.count()]
+                let fallback_name = if parameter_local_names.count() < plan.local_names.count()
+                    then plan.local_names[parameter_local_names.count()]
+                    else self.codegen.c_identifier_for_symbol(fallback_param)
+                parameter_local_names.push(plan.local_names_by_id.get(local.id.raw_value) or else fallback_name)
             }
         }
         // Build parameter list with void* __env first
@@ -2458,6 +2493,8 @@ given MIRFunctionCodeEmitter {
             .DowngradeMutRef(_, result_type) then result_type,
             .UpgradeRef(_, result_type) then result_type,
             .UpgradeMutRef(_, result_type) then result_type,
+            .TraitObjectMatches(_, _, _, _) then Type.BoolType(),
+            .TraitObjectDowncast(_, result_type) then result_type,
             .TakeMemory(_, result_type) then result_type,
             .NullPtr(result_type) then result_type,
             .SpawnThread(_, _, _, _) then Type.Int32Type(),
@@ -2467,7 +2504,32 @@ given MIRFunctionCodeEmitter {
 
     protected local_target_id(*self, place MIRPlace) Option[MIRLocalID] = when place in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() }
     protected local_id_from_operand(*self, operand MIROperand) Option[MIRLocalID] = when operand in { .Local(local) then Option[MIRLocalID].Some(local), _ then Option[MIRLocalID].None() }
-    protected local_name(*self, local MIRLocalID) String = self.local_names_by_id.get(local.raw_value) or else "__mir_local_\(local.raw_value)"
+
+    protected computed_local_name(*self, local MIRLocal) String = {
+        return when local.storage in {
+            .Parameter() then when local.symbol in {
+                .Some(symbol) then self.codegen.c_identifier_for_symbol(symbol),
+                .None() then self.codegen.sanitize_codegen_identifier(local.name),
+            },
+            .Capture() then when local.symbol in {
+                .Some(symbol) then self.codegen.c_identifier_for_symbol(symbol),
+                .None() then self.codegen.sanitize_codegen_identifier(local.name),
+            },
+            _ then "__mir_\(self.codegen.sanitize_codegen_identifier(local.name))_\(local.id.raw_value)",
+        }
+    }
+
+    protected local_name(*self, local MIRLocalID) String = {
+        return when self.local_names_by_id.get(local.raw_value) in {
+            .Some(name) then name,
+            .None() then when self.local_info(local) in {
+                .Some(info) then self.computed_local_name(*info),
+                .None() then if local.raw_value < self.local_names.count()
+                    then self.local_names[local.raw_value]
+                    else "__mir_local_\(local.raw_value)",
+            },
+        }
+    }
     protected block_label(*self, block MIRBlockID) String = "__mir_bb_\(block.raw_value)"
 
     protected is_parameter_operand(*self, operand MIROperand) Bool = {

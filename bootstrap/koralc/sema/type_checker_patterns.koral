@@ -57,6 +57,82 @@ given TypeChecker {
         }
     }
 
+    protected pattern_requires_raw_subject(self, pattern * PatternNode) Bool = {
+        return when pattern in {
+            .TraitObjectType(_, _) then true,
+            .TraitObjectTypeBinding(_, _, _, _) then true,
+            .EnumCase(_, elements, _) then {
+                for element in elements then {
+                    if self.pattern_requires_raw_subject(element.pattern) then { return true }
+                }
+                yield false
+            },
+            .StructPattern(_, elements, _) then {
+                for element in elements then {
+                    if self.pattern_requires_raw_subject(element.pattern) then { return true }
+                }
+                yield false
+            },
+            .AndPattern(left, right, _) then self.pattern_requires_raw_subject(left) or self.pattern_requires_raw_subject(right),
+            .OrPattern(left, right, _) then self.pattern_requires_raw_subject(left) or self.pattern_requires_raw_subject(right),
+            .NotPattern(inner, _) then self.pattern_requires_raw_subject(inner),
+            _ then false,
+        }
+    }
+
+    protected resolve_trait_object_pattern_target_type(self, target_type_node TypeNode, subject_type Type, span SourceSpan) Type = {
+        let subject_is_mutable = when subject_type in {
+            .ReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Bool].Some(false) else Option[Bool].None(),
+            .MutableReferenceType(inner) then if *inner is .TraitObject(_, _) then Option[Bool].Some(true) else Option[Bool].None(),
+            _ then Option[Bool].None(),
+        }
+        when subject_is_mutable in {
+            .None() then {
+                self.push_diagnostic_at_span("Trait object type patterns require a trait object subject, got '\(type_to_string(subject_type))'", span)
+                return Type.Unknown()
+            },
+            _ then {},
+        }
+
+        let resolved_target = self.resolve_type(target_type_node)
+        return when resolved_target in {
+            .ReferenceType(inner) then {
+                if self.is_valid_trait_object_pattern_concrete_type(*inner) then {
+                    yield resolved_target
+                }
+                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(*inner))'", span)
+                yield Type.Unknown()
+            },
+            .MutableReferenceType(inner) then {
+                if subject_is_mutable is .Some(false) then {
+                    self.push_diagnostic_at_span("Trait object type pattern '\(type_to_string(resolved_target))' requires a mutable trait object subject", span)
+                    return Type.Unknown()
+                }
+                if self.is_valid_trait_object_pattern_concrete_type(*inner) then {
+                    yield resolved_target
+                }
+                self.push_diagnostic_at_span("Trait object type pattern target must be a concrete nominal type, got '\(type_to_string(*inner))'", span)
+                yield Type.Unknown()
+            },
+            _ then {
+                self.push_diagnostic_at_span("Trait object type pattern must be '*Type' or '*mutable Type', got '\(type_to_string(resolved_target))'", span)
+                yield Type.Unknown()
+            },
+        }
+    }
+
+    protected is_valid_trait_object_pattern_concrete_type(self, t Type) Bool = {
+        let _ = self
+        return when t in {
+            .StructureType(_) then true,
+            .EnumType(_) then true,
+            .OpaqueType(_) then true,
+            .GenericStruct(_, _) then true,
+            .GenericEnum(_, _) then true,
+            _ then false,
+        }
+    }
+
     protected lower_rune_literal_pattern(self, value String, subject_type Type, span SourceSpan) TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type)
         let rune_count = value.to_runes().count()
@@ -101,6 +177,12 @@ given TypeChecker {
             .Variable(name, is_mutable, span) then {
                 let symbol = self.pattern_binding_symbol(name, is_mutable, subject_type, scope, span)
                 yield TypedPattern.Variable(symbol)
+            },
+            .TraitObjectType(target_type, span) then TypedPattern.TraitObjectType(self.resolve_trait_object_pattern_target_type(target_type, subject_type, span)),
+            .TraitObjectTypeBinding(name, is_mutable, target_type, span) then {
+                let bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span)
+                let symbol = self.pattern_binding_symbol(name, is_mutable, bound_type, scope, span)
+                yield TypedPattern.TraitObjectTypeBinding(symbol, bound_type)
             },
             .BoolLiteral(value, _) then TypedPattern.BoolLiteral(value),
             .IntegerLiteral(value, _) then TypedPattern.IntegerLiteral(value),
@@ -181,6 +263,18 @@ given TypeChecker {
                     scope.define(self.context(), Symbol(def_id, subject_type, kind))
                 }
             },
+            .TraitObjectTypeBinding(name, is_mutable, target_type, span) then {
+                if not (name == "_") then {
+                    let kind = if is_mutable
+                        then SymbolKind.Variable(VariableKind.MutableValue())
+                        else SymbolKind.Variable(VariableKind.Value())
+                    let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
+                    let mutable context = self.context()
+                    context.set_span(def_id, span)
+                    let bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span)
+                    scope.define(self.context(), Symbol(def_id, bound_type, kind))
+                }
+            },
             .EnumCase(case_name, elements, _) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name)
                 let ordered_elements = self.reorder_pattern_elements(elements, param_specs)
@@ -235,6 +329,20 @@ given TypeChecker {
                         let mutable context = self.context()
                         context.set_span(def_id, span)
                         scope.define(self.context(), Symbol(def_id, subject_type, kind))
+                    }
+                }
+            },
+            .TraitObjectTypeBinding(name, is_mutable, target_type, span) then {
+                if not (name == "_") then {
+                    if scope.lookup_local(name) is .None() then {
+                        let kind = if is_mutable
+                            then SymbolKind.Variable(VariableKind.MutableValue())
+                            else SymbolKind.Variable(VariableKind.Value())
+                        let def_id = self.allocate_unindexed_def_id(name, DefKind.Variable())
+                        let mutable context = self.context()
+                        context.set_span(def_id, span)
+                        let bound_type = self.resolve_trait_object_pattern_target_type(target_type, subject_type, span)
+                        scope.define(self.context(), Symbol(def_id, bound_type, kind))
                     }
                 }
             },

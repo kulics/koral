@@ -60,6 +60,28 @@ struct ConformanceKey: Hashable {
   let traitTypeArgs: [ConformanceTypeKey]
 }
 
+public struct CanonicalTraitRef: Equatable, CustomStringConvertible {
+  public let traitName: String
+  public let traitTypeArgs: [Type]
+
+  public init(traitName: String, traitTypeArgs: [Type] = []) {
+    self.traitName = traitName
+    self.traitTypeArgs = traitTypeArgs
+  }
+
+  public var description: String {
+    guard !traitTypeArgs.isEmpty else {
+      return traitName
+    }
+    let args = traitTypeArgs.map(\.description).joined(separator: ", ")
+    return "[\(args)]\(traitName)"
+  }
+
+  public var cacheKey: String {
+    description
+  }
+}
+
 indirect enum ConformanceTypeKey: Hashable {
   case int
   case int8
@@ -123,6 +145,7 @@ public class TypeChecker {
   var explicitConformances: Set<ConformanceKey> = []
   var declaredConformances: Set<ConformanceKey> = []
   var conformanceDeclOrigins: [ConformanceKey: SourceSpan] = [:]
+  var conformanceWitnesses: [String: ConformanceWitness] = [:]
   
   // Cache for object safety check results to avoid redundant computation
   var objectSafetyCache: [String: (Bool, [String])] = [:]
@@ -606,14 +629,25 @@ public class TypeChecker {
     return zip(pattern.traitTypeArgs, actual.traitTypeArgs).allSatisfy { conformanceTypeKeyMatches($0, $1) }
   }
 
-  func hasNominalConformance(selfType: Type, traitName: String, traitTypeArgs: [Type]) -> Bool {
+  func traitConformanceCacheKey(selfType: Type, traitRef: CanonicalTraitRef) -> String {
+    "\(selfType):\(traitRef.cacheKey)"
+  }
+
+  func hasNominalConformance(selfType: Type, traitRef: CanonicalTraitRef) -> Bool {
     let actual = ConformanceKey(
       selfType: exactConformanceTypeKey(selfType),
-      traitName: traitName,
-      traitTypeArgs: traitTypeArgs.map { exactConformanceTypeKey($0) }
+      traitName: traitRef.traitName,
+      traitTypeArgs: traitRef.traitTypeArgs.map { exactConformanceTypeKey($0) }
     )
     return explicitConformances.contains(where: { conformanceKeyMatches($0, actual) })
       || declaredConformances.contains(where: { conformanceKeyMatches($0, actual) })
+  }
+
+  func hasNominalConformance(selfType: Type, traitName: String, traitTypeArgs: [Type]) -> Bool {
+    hasNominalConformance(
+      selfType: selfType,
+      traitRef: CanonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
+    )
   }
   
   // MARK: - Pass Architecture Support

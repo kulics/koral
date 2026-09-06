@@ -730,6 +730,10 @@ given Parser {
             .KwMut() then {
                 self.advance()
                 let name = self.expect_identifier("mutable pattern variable") or return
+                if self.current().kind is .Star() then {
+                    let target_type = self.parse_type() or return
+                    yield PatternNode.TraitObjectTypeBinding(name, true, target_type, self.span_from_start(start))
+                }
                 yield PatternNode.Variable(name, true, self.span_from_start(start))
             },
             .KwTrue() then {
@@ -832,39 +836,46 @@ given Parser {
                     }
                 yield PatternNode.ComparisonPattern(ComparisonPatternOperator.LessEqual(), value, self.span_from_start(start))
             },
+            .Star() then {
+                let target_type = self.parse_type() or return
+                yield PatternNode.TraitObjectType(target_type, self.span_from_start(start))
+            },
             .Identifier(name) then {
                 self.advance()
-                let parsed_pattern = if name == "_" then PatternNode.Wildcard(self.span_from_start(start)) else {
-                    // Struct destructuring pattern: TypeName(pattern1, pattern2, ...)
-                    let mutable parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start))
-                    if self.is_upper_first(name) then {
-                        if self.current().kind is .LParen() then {
+                if name == "_" then {
+                    yield PatternNode.Wildcard(self.span_from_start(start))
+                }
+                if self.current().kind is .Star() then {
+                    let target_type = self.parse_type() or return
+                    yield PatternNode.TraitObjectTypeBinding(name, false, target_type, self.span_from_start(start))
+                }
+                let mutable parsed_pattern = PatternNode.Variable(name, false, self.span_from_start(start))
+                if self.is_upper_first(name) then {
+                    if self.current().kind is .LParen() then {
+                        self.advance()
+                        let mutable elements = List[PatternElement].new()
+                        if self.current().kind is .RParen() then {
                             self.advance()
-                            let mutable elements = List[PatternElement].new()
-                            if self.current().kind is .RParen() then {
-                                self.advance()
-                            } else {
-                                while true then {
-                                    let elem = self.parse_pattern_argument(stop_on_in) or return
-                                    elements.push(elem)
-                                    if self.current().kind is .Comma() then {
-                                        self.advance()
-                                    } else {
-                                        break
-                                    }
-                                }
-                                when self.current().kind in {
-                                    .RParen() then { self.advance() },
-                                    _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
+                        } else {
+                            while true then {
+                                let elem = self.parse_pattern_argument(stop_on_in) or return
+                                elements.push(elem)
+                                if self.current().kind is .Comma() then {
+                                    self.advance()
+                                } else {
+                                    break
                                 }
                             }
-                            parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start))
+                            when self.current().kind in {
+                                .RParen() then { self.advance() },
+                                _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
+                            }
                         }
+                        parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start))
                     }
-                    if not self.is_upper_first(name) and not self.is_valid_value_name(name) then {
-                        return .Error(box(self.invalid_variable_name_error(name)))
-                    }
-                    yield parsed_pattern
+                }
+                if not self.is_upper_first(name) and not self.is_valid_value_name(name) then {
+                    return .Error(box(self.invalid_variable_name_error(name)))
                 }
                 yield parsed_pattern
             },

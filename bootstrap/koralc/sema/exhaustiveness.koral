@@ -170,6 +170,7 @@ given ExhaustivenessChecker {
     // 检查不可达模式（已被前面模式完全覆盖的分支）
     private check_unreachable_patterns(self) Result[Void] = {
         let mutable covered_cases = Set[String].new()
+        let mutable covered_trait_object_types = Set[String].new()
         let mutable has_catchall = false
         let mutable catchall_is_struct = false
         let mutable catchall_pattern_desc = ""
@@ -211,6 +212,21 @@ given ExhaustivenessChecker {
                 }
                 for case_name in pattern_cases.iterator() then {
                     covered_cases.insert(case_name)
+                }
+            }
+
+            let pattern_trait_types = collect_trait_object_types(p)
+            if not pattern_trait_types.is_empty() then {
+                for type_name in pattern_trait_types.iterator() then {
+                    if covered_trait_object_types.contains(type_name) then {
+                        let mutable msg = "Unreachable pattern: implementation type pattern '"
+                        msg.push_string(type_name)
+                        msg.push_string("' is already covered")
+                        return Result[Void].Error(box(msg))
+                    }
+                }
+                for type_name in pattern_trait_types.iterator() then {
+                    covered_trait_object_types.insert(type_name)
                 }
             }
 
@@ -404,6 +420,8 @@ public let is_catchall(pattern * TypedPattern) Bool = {
     return when pattern in {
         .Wildcard() then true,
         .Variable(_) then true,
+        .TraitObjectType(_) then false,
+        .TraitObjectTypeBinding(_, _) then false,
         .OrPattern(left, right) then is_catchall(left) or is_catchall(right),
         .AndPattern(left, right) then is_catchall(left) and is_catchall(right),
         .NotPattern(_) then false,
@@ -430,6 +448,8 @@ public let pattern_description(pattern * TypedPattern) String = {
             msg.push_string("sym#\(symbol.def_id.id)")
             yield msg
         } else "sym#\(symbol.def_id.id)",
+        .TraitObjectType(target_type) then type_to_string(target_type),
+        .TraitObjectTypeBinding(_, target_type) then type_to_string(target_type),
         .BoolLiteral(value) then if value then "true" else "false",
         .IntegerLiteral(value) then value,
         .NegativeIntegerLiteral(value) then {
@@ -491,6 +511,30 @@ public let collect_enum_cases(pattern * TypedPattern) Set[String] = {
             let right_cases = collect_enum_cases(right)
             for case_name in right_cases.iterator() then {
                 covered.insert(case_name)
+            }
+        },
+        _ then {},
+    }
+    return covered
+}
+
+public let collect_trait_object_types(pattern * TypedPattern) Set[String] = {
+    let mutable covered = Set[String].new()
+    when pattern in {
+        .TraitObjectType(target_type) then {
+            covered.insert(type_to_string(target_type))
+        },
+        .TraitObjectTypeBinding(_, target_type) then {
+            covered.insert(type_to_string(target_type))
+        },
+        .OrPattern(left, right) then {
+            let left_types = collect_trait_object_types(left)
+            for type_name in left_types.iterator() then {
+                covered.insert(type_name)
+            }
+            let right_types = collect_trait_object_types(right)
+            for type_name in right_types.iterator() then {
+                covered.insert(type_name)
             }
         },
         _ then {},

@@ -9,7 +9,7 @@ private type BuiltinSubscriptKind {
 given TypeChecker {
     protected box_type(self, inner Type) * Type = {
         let _ = self
-        return &inner
+        return box(inner)
     }
 
     protected method_param_specs(self, method Symbol) List[FunctionParamSpec] = {
@@ -1724,6 +1724,25 @@ given TypeChecker {
                     .None() then {},
                 }
             },
+            .TraitObject(receiver_trait_name, receiver_trait_args) then {
+                when self.storage.trait_registry.get(receiver_trait_name) in {
+                    .Some(info) then {
+                        let mutable idx UInt = 0
+                        while idx < info.type_params.count() and idx < receiver_trait_args.count() then {
+                            let param_name = info.type_params[idx]
+                            if not bindings.contains_key(param_name) then {
+                                bindings.insert(param_name, (*receiver_trait_args[idx]))
+                            }
+                            idx += 1
+                        }
+                    },
+                    .None() then {},
+                }
+                if receiver_trait_name <> trait_name then {
+                    let mutable receiver_visited = Set[String].new()
+                    bindings = self.collect_trait_method_bindings_recursive(receiver_trait_name, bindings, &mutable receiver_visited)
+                }
+            },
             _ then {},
         }
 
@@ -2407,17 +2426,9 @@ given TypeChecker {
                 }
             },
             .TraitObject(trait_name, _) then {
-                when self.storage.trait_registry.flatten_methods(trait_name) in {
-                    .Ok(methods) then {
-                        if methods.get(method_name) is .Some(member) then {
-                            let mutable typed_params = List[TypedParam].new()
-                            for p in member.params then {
-                                typed_params.push(TypedParam(p.name, p.is_mutable, p.param_type, p.named))
-                            }
-                            return Option[Symbol].Some(self.make_method_callable_symbol(method_name, typed_params, member.return_type))
-                        }
-                    },
-                    .Error(_) then {},
+                when self.resolve_trait_registry_method_signature(trait_name, method_name, inner_type) in {
+                    .Some(method) then { return Option[Symbol].Some(method) },
+                    .None() then {},
                 }
                 if self.lookup_method_signature(trait_name, method_name) is .Some(raw_method) then {
                     return Option[Symbol].Some(raw_method)
@@ -2511,12 +2522,13 @@ given TypeChecker {
             .None() then {},
         }
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(method_name) is .Some(member) then {
+            let bindings = self.trait_method_bindings(trait_name, receiver_type)
             // member.params 包含 self，跳过第一个
             if member.params.count() > 0(UInt) then {
                 let mutable out = List[Type].new()
                 let mutable i = 1(UInt)
                 while i < member.params.count() then {
-                    out.push(self.apply_trait_self_binding(member.params[i].param_type, receiver_type))
+                    out.push(self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(member.params[i].param_type, bindings))))
                     i += 1(UInt)
                 }
                 return out
@@ -2552,7 +2564,8 @@ given TypeChecker {
             .None() then {},
         }
         if self.storage.trait_registry.flatten_methods(trait_name) is .Ok(methods) and methods.get(method_name) is .Some(member) and member.params.count() > 0(UInt) then {
-            return Option[Type].Some(self.apply_trait_self_binding(member.params[0(UInt)].param_type, receiver_type))
+            let bindings = self.trait_method_bindings(trait_name, receiver_type)
+            return Option[Type].Some(self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(member.params[0(UInt)].param_type, bindings))))
         }
         if self.lookup_method_signature(trait_name, method_name) is .Some(method) then {
             return self.resolve_bound_method_self_type(receiver_type, method)
@@ -2611,9 +2624,10 @@ given TypeChecker {
             .Ok(methods) then {
                 when methods.get(method_name) in {
                     .Some(member) then {
+                        let bindings = self.trait_method_bindings(trait_name, base_type)
                         when member.return_type in {
                             .Unknown() then {},
-                            _ then { return self.apply_trait_self_binding(member.return_type, base_type) },
+                            _ then { return self.canonicalize_alias_type(self.concretize_default_literal_type(self.apply_type_bindings(member.return_type, bindings))) },
                         }
                     },
                     .None() then {},

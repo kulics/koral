@@ -1049,7 +1049,8 @@ extension TypeChecker {
     let typedSubject = try inferTypedExpression(subject)
 
     var subjectType = typedSubject.type
-    if let inner = dereferenceTargetType(of: subjectType) {
+    if !untypedPatternRequiresRawSubject(pattern),
+       let inner = dereferenceTargetType(of: subjectType) {
       subjectType = inner
     }
 
@@ -1195,10 +1196,11 @@ extension TypeChecker {
   /// Check whether an untyped PatternNode contains variable bindings.
   private func untypedPatternContainsBindings(_ pattern: PatternNode) -> Bool {
     switch pattern {
-    case .variable:
+    case .variable,
+         .traitObjectTypeBinding:
       return true
     case .wildcard, .booleanLiteral, .integerLiteral, .negativeIntegerLiteral,
-         .stringLiteral, .runeLiteral, .comparisonPattern:
+         .stringLiteral, .runeLiteral, .comparisonPattern, .traitObjectType:
       return false
     case .enumCase(_, let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
@@ -1210,6 +1212,30 @@ extension TypeChecker {
       return untypedPatternContainsBindings(left) || untypedPatternContainsBindings(right)
     case .notPattern(let inner, _):
       return untypedPatternContainsBindings(inner)
+    }
+  }
+
+  private func untypedPatternRequiresRawSubject(_ pattern: PatternNode) -> Bool {
+    switch pattern {
+    case .traitObjectType, .traitObjectTypeBinding:
+      return true
+    case .enumCase(_, let elements, _),
+         .structPattern(_, let elements, _):
+      return elements.contains { untypedPatternRequiresRawSubject($0.pattern) }
+    case .andPattern(let left, let right, _),
+         .orPattern(let left, let right, _):
+      return untypedPatternRequiresRawSubject(left) || untypedPatternRequiresRawSubject(right)
+    case .notPattern(let inner, _):
+      return untypedPatternRequiresRawSubject(inner)
+    case .variable,
+         .wildcard,
+         .booleanLiteral,
+         .integerLiteral,
+         .negativeIntegerLiteral,
+         .stringLiteral,
+         .runeLiteral,
+         .comparisonPattern:
+      return false
     }
   }
 
@@ -1555,16 +1581,18 @@ extension TypeChecker {
       let typedSubject = try inferTypedExpression(subject)
       // Auto-deref subject type for pattern matching
       var subjectType = typedSubject.type
-      switch subjectType {
-      case .reference(let inner),
-           .mutableReference(let inner),
-           .borrowedReference(let inner),
-           .mutableBorrowedReference(let inner),
-           .weakReference(let inner),
-           .mutableWeakReference(let inner):
-        subjectType = inner
-      default:
-        break
+      if !cases.contains(where: { untypedPatternRequiresRawSubject($0.pattern) }) {
+        switch subjectType {
+        case .reference(let inner),
+             .mutableReference(let inner),
+             .borrowedReference(let inner),
+             .mutableBorrowedReference(let inner),
+             .weakReference(let inner),
+             .mutableWeakReference(let inner):
+          subjectType = inner
+        default:
+          break
+        }
       }
 
       let targetId: BranchBreakTargetId? = usage == .statement
@@ -2131,7 +2159,8 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
-      if let inner = dereferenceTargetType(of: subjectType) {
+      if !untypedPatternRequiresRawSubject(pattern),
+         let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
 
@@ -2154,7 +2183,8 @@ extension TypeChecker {
 
       // Auto-deref subject type for pattern matching (consistent with `when`)
       var subjectType = typedSubject.type
-      if let inner = dereferenceTargetType(of: subjectType) {
+      if !untypedPatternRequiresRawSubject(pattern),
+         let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
 
@@ -3182,9 +3212,13 @@ extension TypeChecker {
 
     // Qualified call on generic parameter via trait bound.
     if case .genericParameter(let paramName) = typedBase.type {
-      guard hasTraitBound(paramName, traitName) else {
+      let hasBound = traitTypeArgs.isEmpty
+        ? hasTraitBound(paramName, traitName)
+        : hasTraitBound(paramName, traitName: traitName, traitTypeArgs: traitTypeArgs)
+      guard hasBound else {
+        let requiredTrait = canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
         throw SemanticError(.generic(
-          "Type parameter '\(paramName)' does not have trait bound '\(traitName)'"
+          "Type parameter '\(paramName)' does not have trait bound '\(requiredTrait)'"
         ), span: currentSpan)
       }
       let methods = try flattenedTraitToolMethods(traitName)
@@ -6698,7 +6732,12 @@ extension TypeChecker {
     arguments: [TypedExpressionNode],
     allowMissingTrait: Bool
   ) throws -> TypedExpressionNode? {
-    guard let constraint = findTraitConstraint(paramName, traitName) else {
+    let matchedTraitRef = resolvedTraitBound(
+      paramName,
+      traitName: traitName,
+      traitTypeArgs: requiredTraitArgs
+    )
+    guard let matchedTraitRef else {
       if allowMissingTrait { return nil }
       let opName: String
       switch methodName {
@@ -6714,14 +6753,8 @@ extension TypeChecker {
         span: currentSpan)
     }
 
-    let traitInfo = traits[traitName]
-    var traitTypeArgs: [Type] = []
-    if case .generic(_, let argNodes) = constraint {
-      for argNode in argNodes {
-        let argType = try resolveTypeNode(argNode)
-        traitTypeArgs.append(argType)
-      }
-    }
+    let traitInfo = traits[matchedTraitRef.traitName]
+    let traitTypeArgs = matchedTraitRef.traitTypeArgs
 
     if let required = requiredTraitArgs {
       if traitTypeArgs.count != required.count || !zip(traitTypeArgs, required).allSatisfy({ $0 == $1 }) {
@@ -7652,6 +7685,10 @@ extension TypeChecker {
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Comparison patterns are not exhaustive."
       ), span: currentSpan)
+    case .traitObjectType, .traitObjectTypeBinding:
+      throw SemanticError(.generic(
+        "For loop pattern must be exhaustive. Trait object type patterns are not exhaustive."
+      ), span: currentSpan)
     case .andPattern, .orPattern, .notPattern:
       throw SemanticError(.generic(
         "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."
@@ -7887,6 +7924,9 @@ extension TypeChecker {
         intValue = Int64(value) ?? 0
       }
       return .comparisonPattern(operator: op, value: intValue)
+    case .traitObjectType, .traitObjectTypeBinding:
+      let (typedPattern, _) = try checkPattern(pattern, subjectType: expectedType)
+      return typedPattern
     case .andPattern(let left, let right, _):
       return .andPattern(
         left: try convertPatternToTypedPattern(left, expectedType: expectedType),
@@ -7917,8 +7957,16 @@ extension TypeChecker {
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
       try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
-    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral:
+    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral, .traitObjectType:
       break
+    case .traitObjectTypeBinding(let name, let mutable, let targetType, let span):
+      let boundType = try resolveTraitObjectPatternTargetType(targetType, subjectType: type, span: span)
+      let symbol = makeLocalSymbol(
+        name: name,
+        type: boundType,
+        kind: mutable ? .variable(.MutableValue) : .variable(.Value)
+      )
+      try currentScope.defineLocal(name, defId: symbol.defId, line: currentLine)
     case .enumCase(_, let elements, _):
       for elem in elements {
         try bindPatternVariables(pattern: elem.pattern, type: .void)

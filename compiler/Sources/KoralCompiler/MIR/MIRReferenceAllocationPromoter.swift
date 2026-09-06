@@ -47,6 +47,7 @@ final class MIRReferenceAllocationPromoter {
       context: context,
       staticMethodLookup: program.staticMethodLookup,
       traits: program.traits,
+      conformanceWitnesses: program.conformanceWitnesses,
       receiverMethodDispatch: program.receiverMethodDispatch,
       escapeSummaries: escapeSummariesByDefId
     )
@@ -158,7 +159,8 @@ final class MIRReferenceAllocationPromoter {
         case .downgradeRef(let value, _), .downgradeMutRef(let value, _):
           visitValue(value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         case .upgradeRef(let value, _), .upgradeMutRef(let value, _),
-             .isUniqueMutable(let value), .refCount(let value):
+             .isUniqueMutable(let value), .refCount(let value),
+             .traitObjectMatches(let value, _, _, _), .traitObjectDowncast(let value, _):
           visitValue(value, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
         case .copyMemory(let dest, let source, let count), .moveMemory(let dest, let source, let count):
           visitValue(dest, parameterLocals: parameterLocals, summaries: summaries, returning: &returning, directEscaping: &directEscaping)
@@ -567,6 +569,15 @@ private final class MIRReferenceAllocationFunctionPromoter {
       return .upgradeRef(value: promoteValue(value, destinationType: nil), resultType: resultType)
     case .upgradeMutRef(let value, let resultType):
       return .upgradeMutRef(value: promoteValue(value, destinationType: nil), resultType: resultType)
+    case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
+      return .traitObjectMatches(
+        value: promoteValue(value, destinationType: nil),
+        traitName: traitName,
+        traitTypeArguments: traitTypeArguments,
+        concreteType: concreteType
+      )
+    case .traitObjectDowncast(let value, let resultType):
+      return .traitObjectDowncast(value: promoteValue(value, destinationType: resultType), resultType: resultType)
     case .initMemory(let ptr, let value):
       return .initMemory(
         ptr: promoteValue(ptr, destinationType: nil),
@@ -697,6 +708,15 @@ private final class MIRReferenceAllocationFunctionPromoter {
       return .upgradeRef(value: promoteDirectReferences(in: value), resultType: resultType)
     case .upgradeMutRef(let value, let resultType):
       return .upgradeMutRef(value: promoteDirectReferences(in: value), resultType: resultType)
+    case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
+      return .traitObjectMatches(
+        value: promoteDirectReferences(in: value),
+        traitName: traitName,
+        traitTypeArguments: traitTypeArguments,
+        concreteType: concreteType
+      )
+    case .traitObjectDowncast(let value, let resultType):
+      return .traitObjectDowncast(value: promoteDirectReferences(in: value), resultType: resultType)
     case .initMemory(let ptr, let value):
       return .initMemory(
         ptr: promoteDirectReferences(in: ptr),

@@ -63,6 +63,8 @@ extension PatternSpace {
         case .wildcard, .variable:
             // Wildcard and variable patterns cover everything
             return .empty
+        case .traitObjectType, .traitObjectTypeBinding:
+            return self
             
         case .booleanLiteral(let value):
             return subtractBoolLiteral(value, type: type)
@@ -271,6 +273,8 @@ extension PatternSpace {
         switch pattern {
         case .wildcard, .variable:
             return true
+        case .traitObjectType, .traitObjectTypeBinding:
+            return false
         case .booleanLiteral(let value):
             if case .boolValues(let remaining) = self {
                 return remaining == [value]

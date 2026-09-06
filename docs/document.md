@@ -893,6 +893,37 @@ Rules for condition composition:
 - Bindings introduced by earlier `is` clauses are available in later `and` clauses and in the `then` branch.
 - Bound `is` matches are not allowed under `or` branches or beneath `not`.
 
+`if` conditions also support exact trait-object implementation type tests:
+
+```koral
+trait Problem {
+    render(*self) String
+}
+
+type IoError(code Int)
+
+given IoError as Problem {
+    render(*self) String = "io"
+}
+
+let err *Problem = box(IoError(7))
+
+if err is *IoError then {
+    println("io")
+}
+
+if err is io *IoError then {
+    println(io.render())
+}
+```
+
+For these exact type patterns:
+
+- The subject stays a trait object reference; it is not auto-dereferenced to the implementation value.
+- The target must be written as `*ConcreteType` or `*mutable ConcreteType`.
+- `err is io *IoError` binds `io` as `*IoError`.
+- `*Problem` cannot match `*mutable IoError`; `*mutable Problem` may match either `*IoError` or `*mutable IoError`.
+
 ## Loop Structure
 
 ### while Statement
@@ -1069,6 +1100,7 @@ Supported patterns include:
 - Wildcard pattern: `_` (matches any value)
 - Literal patterns: `1`, `-5`, `"abc"`, `'a'`, `true` (negative integer literals such as `-5` are supported)
 - Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
+- Trait-object exact type patterns: `*IoError`, `*mutable IoError`, `err *IoError`
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
 - Pair destructuring pattern: `(a, b)` (equivalent to `Pair(a, b)` pattern)
@@ -1119,6 +1151,23 @@ when r in {
 // Struct destructuring in if...is
 if p is Point(x, y) then {
     println(x * y)  // 200
+}
+
+// Exact trait-object implementation type matching
+trait Problem {
+    render(*self) String
+}
+
+type IoError(code Int)
+
+given IoError as Problem {
+    render(*self) String = "io"
+}
+
+let err *Problem = box(IoError(7))
+when err in {
+    io *IoError then println(io.render()),
+    _ then println("other"),
 }
 
 // Wildcard and literal field matching
@@ -1766,6 +1815,52 @@ trait Resettable {
 ```
 
 Trait objects (`*TraitName`, `*mutable TraitName`) do not support direct dereference; use trait methods through dynamic dispatch.
+
+#### Exact Type Patterns
+
+Trait objects also support exact implementation-type testing through Koral's existing pattern system.
+
+```koral
+trait Problem {
+    render(*self) String
+}
+
+type IoError(code Int)
+type NetError(code Int)
+
+given IoError as Problem {
+    render(*self) String = "io"
+}
+
+given NetError as Problem {
+    render(*self) String = "net"
+}
+
+let err *Problem = box(IoError(7))
+
+if err is *IoError then {
+    println("io")
+}
+
+if err is io *IoError then {
+    println(io.render())
+}
+
+let label = when err in {
+    io *IoError then io.render(),
+    _ then "other",
+}
+```
+
+Rules:
+
+- Exact type patterns are only valid when the subject is a trait object reference.
+- The target must be a concrete managed reference type: `*Concrete` or `*mutable Concrete`.
+- Matching is exact on the implementation type and its generic arguments.
+- Matching does not auto-dereference to the underlying value type.
+- `*TraitName` cannot satisfy a `*mutable Concrete` pattern.
+- `*mutable TraitName` may satisfy either `*Concrete` or `*mutable Concrete`.
+- These patterns are open-world tests; in `when`, they do not count as exhaustive coverage, so a default `_` arm is still required.
 
 ## Generics
 

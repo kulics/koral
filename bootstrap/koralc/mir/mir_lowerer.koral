@@ -378,15 +378,17 @@ given MIRLowerer {
     }
 
     protected make_given_member_symbol(self, member * TypedGivenMember) * Symbol = {
+        let mutable rebuilt_param_types = List[* Type].new()
+        for param in member.params then {
+            rebuilt_param_types.push(box(param.param_type))
+        }
+        let rebuilt_function_type = Type.FunctionType(types_to_param_entries(rebuilt_param_types), box(member.return_type))
         let function_type = when self.context.get_function_type(member.def_id) in {
-            .Some(t) then t,
-            .None() then {
-                let mutable param_types = List[* Type].new()
-                for param in member.params then {
-                    param_types.push(box(param.param_type))
-                }
-                yield Type.FunctionType(types_to_param_entries(param_types), box(member.return_type))
-            },
+            .Some(t) then if self.context.contains_generic_parameter(t)
+                and not self.context.contains_generic_parameter(rebuilt_function_type)
+                then rebuilt_function_type
+                else t,
+            .None() then rebuilt_function_type,
         }
         return box(Symbol(member.def_id, function_type, SymbolKind.Function()))
     }
@@ -407,42 +409,142 @@ given MIRLowerer {
     }
 
     protected make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
-        // Collect trait members without ref mutable (ref mutable doesn't persist in bootstrap codegen).
-        // Use iterative approach with explicit work list.
         let mutable ordered_members = List[TypedTraitMember].new()
         let mutable visited_traits = Set[String].new()
         let mutable seen_methods = Set[String].new()
-        let mutable work_stack = List[String].new()
-        work_stack.push(request.trait_name)
-        while not work_stack.is_empty() then {
-            let trait_name = work_stack.pop() or else { continue }
-            if visited_traits.contains(trait_name) then { continue }
-            visited_traits.insert(trait_name)
-            when self.program.traits.get(trait_name) in {
-                .Some(trait_info) then {
-                    // Push parent traits in reverse order so we process them first
-                    let mutable pi = trait_info.parent_traits.count()
-                    while pi > 0(UInt) then {
-                        pi -= 1(UInt)
-                        work_stack.push(trait_info.parent_traits[pi].name)
-                    }
-                    for member in trait_info.members then {
-                        if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
-                            seen_methods.insert(member.name)
-                            ordered_members.push(member)
-                        }
-                    }
-                },
-                _ then {},
-            }
-        }
-
-        let bindings = self.trait_member_type_bindings(request)
         let mutable methods = List[MIRTraitVTableMethod].new()
+        let bindings = self.trait_member_type_bindings(request)
+        self.collect_instantiated_trait_members(request.trait_name, request.concrete_type, bindings, &mutable visited_traits, &mutable seen_methods, &mutable ordered_members)
         for member in ordered_members then {
-            methods.push(self.make_trait_vtable_method(self.apply_type_bindings_to_trait_member(member, bindings)))
+            methods.push(self.make_trait_vtable_method(member))
         }
         return methods
+    }
+
+    protected collect_instantiated_trait_members(
+        self,
+        trait_name String,
+        concrete_type Type,
+        bindings Dict[String, Type],
+        visited_traits *mutable Set[String],
+        seen_methods *mutable Set[String],
+        ordered_members *mutable List[TypedTraitMember],
+    ) Void = {
+        let visit_key = self.trait_binding_visit_key(trait_name, bindings)
+        if visited_traits.contains(visit_key) then { return }
+        visited_traits.insert(visit_key)
+
+        when self.program.traits.get(trait_name) in {
+            .Some(trait_info) then {
+                for parent in trait_info.parent_traits then {
+                    let parent_bindings = self.parent_trait_bindings(parent, concrete_type, bindings)
+                    self.collect_instantiated_trait_members(parent.name, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members)
+                }
+                for member in trait_info.members then {
+                    if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
+                        seen_methods.insert(member.name)
+                        ordered_members.push(self.apply_type_bindings_to_trait_member(member, bindings))
+                    }
+                }
+            },
+            _ then {},
+        }
+    }
+
+    protected trait_binding_visit_key(self, trait_name String, bindings Dict[String, Type]) String = {
+        let mutable key = trait_name
+        when self.program.traits.get(trait_name) in {
+            .Some(trait_info) then {
+                for type_param in trait_info.type_params then {
+                    key.push_string("<")
+                    when bindings.get(type_param.name) in {
+                        .Some(bound) then key.push_string(stable_type_key(bound)),
+                        .None() then key.push_string(type_param.name),
+                    }
+                    key.push_string(">")
+                }
+            },
+            .None() then {},
+        }
+        return key
+    }
+
+    protected parent_trait_bindings(self, parent ParentTraitConstraint, concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
+        let mutable result = Dict[String, Type].new()
+        for entry in bindings then {
+            result.insert(entry.first, entry.second)
+        }
+        result.insert("Self", concrete_type)
+
+        when self.program.traits.get(parent.name) in {
+            .Some(parent_info) then {
+                let mutable idx UInt = 0
+                while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
+                    result.insert(parent_info.type_params[idx].name, self.resolve_trait_type_node_with_bindings(parent.type_arg_nodes[idx], bindings))
+                    idx += 1
+                }
+            },
+            .None() then {},
+        }
+        return result
+    }
+
+    protected resolve_trait_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
+        return when node in {
+            .Identifier(name) then when bindings.get(name) in {
+                .Some(bound) then bound,
+                .None() then when name in {
+                    "Int" then Type.IntType(),
+                    "Int8" then Type.Int8Type(),
+                    "Int16" then Type.Int16Type(),
+                    "Int32" then Type.Int32Type(),
+                    "Int64" then Type.Int64Type(),
+                    "UInt" then Type.UIntType(),
+                    "UInt8" then Type.UInt8Type(),
+                    "UInt16" then Type.UInt16Type(),
+                    "UInt32" then Type.UInt32Type(),
+                    "UInt64" then Type.UInt64Type(),
+                    "Float32" then Type.Float32Type(),
+                    "Float64" then Type.Float64Type(),
+                    "Bool" then Type.BoolType(),
+                    "Void" then Type.VoidType(),
+                    "Never" then Type.NeverType(),
+                    "Self" then bindings.get("Self") or else Type.Unknown(),
+                    _ then Type.GenericParameter(name),
+                },
+            },
+            .Reference(inner, is_mutable) then {
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
+                yield if is_mutable then Type.MutableReferenceType(box(resolved_inner)) else Type.ReferenceType(box(resolved_inner))
+            },
+            .BorrowedReference(inner, is_mutable) then {
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
+                yield if is_mutable then Type.MutableBorrowedReferenceType(box(resolved_inner)) else Type.BorrowedReferenceType(box(resolved_inner))
+            },
+            .Pointer(inner, is_mutable) then {
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
+                yield if is_mutable then Type.MutablePointerType(box(resolved_inner)) else Type.PointerType(box(resolved_inner))
+            },
+            .WeakReference(inner, is_mutable) then {
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(*inner, bindings)
+                yield if is_mutable then Type.MutableWeakReferenceType(box(resolved_inner)) else Type.WeakReferenceType(box(resolved_inner))
+            },
+            .Generic(base, args) then {
+                let mutable resolved_args = List[* Type].new()
+                for arg in args then {
+                    resolved_args.push(box(self.resolve_trait_type_node_with_bindings(*arg, bindings)))
+                }
+                yield Type.GenericStruct(base, resolved_args)
+            },
+            .InferredSelf() then bindings.get("Self") or else Type.Unknown(),
+            .FunctionType(param_types, return_type) then {
+                let mutable resolved_params = List[* Type].new()
+                for param_type in param_types then {
+                    resolved_params.push(box(self.resolve_trait_type_node_with_bindings(*param_type, bindings)))
+                }
+                yield make_function_type(resolved_params, self.resolve_trait_type_node_with_bindings(*return_type, bindings))
+            },
+        }
     }
 
     protected trait_member_has_receiver(self, member TypedTraitMember) Bool = {
@@ -1524,6 +1626,8 @@ given MIRReferenceAllocationFunctionPromoter {
             .DowngradeMutRef(value, result_type) then MIRIntrinsic.DowngradeMutRef(box(self.promote_value(*value, Option[Type].None())), result_type),
             .UpgradeRef(value, result_type) then MIRIntrinsic.UpgradeRef(box(self.promote_value(*value, Option[Type].None())), result_type),
             .UpgradeMutRef(value, result_type) then MIRIntrinsic.UpgradeMutRef(box(self.promote_value(*value, Option[Type].None())), result_type),
+            .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then MIRIntrinsic.TraitObjectMatches(box(self.promote_value(*value, Option[Type].None())), trait_name, trait_type_args, concrete_type),
+            .TraitObjectDowncast(value, result_type) then MIRIntrinsic.TraitObjectDowncast(box(self.promote_value(*value, Option[Type].Some(result_type))), result_type),
             .InitMemory(pointer, value) then MIRIntrinsic.InitMemory(box(self.promote_value(*pointer, Option[Type].None())), box(self.promote_value(*value, Option[Type].Some(self.type_of_value(*value))))),
             .DeinitMemory(pointer) then MIRIntrinsic.DeinitMemory(box(self.promote_value(*pointer, Option[Type].None()))),
             .TakeMemory(pointer, result_type) then MIRIntrinsic.TakeMemory(box(self.promote_value(*pointer, Option[Type].None())), result_type),

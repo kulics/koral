@@ -1433,11 +1433,29 @@ given MIRFunctionBuilder {
                 let right_condition = self.lower_pattern_condition(subject_place, subject_type, right, false)
                 yield self.pattern_binary(left_condition, MIRBinaryOperator.LogicalOr(), right_condition)
             },
+            .TraitObjectType(target_type) then self.lower_trait_object_type_pattern_condition(subject_place, subject_type, target_type),
+            .TraitObjectTypeBinding(_, target_type) then self.lower_trait_object_type_pattern_condition(subject_place, subject_type, target_type),
             .StringLiteral(value) then self.pattern_string_compare(subject_place, subject_type, value),
             .RuneLiteral(_) then self.pattern_bool(false),
             .NotPattern(_) then self.pattern_bool(false),
         }
         return self.pattern_maybe_negate(operand, negated)
+    }
+
+    private lower_trait_object_type_pattern_condition(*mutable self, subject_place MIRPlace, subject_type Type, target_type Type) MIROperand = {
+        let trait_name = self.trait_object_pattern_trait_name(subject_type)
+        if trait_name.is_empty() then {
+            return self.pattern_bool(false)
+        }
+        let trait_args = self.trait_object_type_args(subject_type)
+        let concrete_type = when target_type in {
+            .ReferenceType(inner) then *inner,
+            .MutableReferenceType(inner) then *inner,
+            _ then Type.Unknown(),
+        }
+        let subject_value = MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow())
+        let match_value = MIRValue.Intrinsic(MIRIntrinsic.TraitObjectMatches(box(subject_value), trait_name, trait_args, concrete_type))
+        return self.materialize(match_value, Type.BoolType())
     }
 
     private pattern_bool(*self, value Bool) MIROperand = {
@@ -1720,6 +1738,17 @@ given MIRFunctionBuilder {
                     self.pattern_place_by_name.insert(binding_name, source_place)
                 }
             },
+            .TraitObjectTypeBinding(symbol, target_type) then {
+                let binding_name = self.context.symbol_name(*symbol)
+                let local = self.make_temporary(target_type, if binding_name.is_empty() then "trait_object_binding" else binding_name)
+                self.append_statement(MIRStatement.Declare(local.id))
+                self.append_statement(MIRStatement.Assign(
+                    MIRPlace.Local(local.id),
+                    MIRValue.Intrinsic(MIRIntrinsic.TraitObjectDowncast(box(MIRValue.PlaceRead(subject_place, MIROwnershipUse.Borrow())), target_type))
+                ))
+                self.pattern_place_by_def_id.insert(symbol.def_id.id, MIRPlace.Local(local.id))
+                self.pattern_place_by_name.insert(binding_name, MIRPlace.Local(local.id))
+            },
             .EnumCase(case_name, tag_index, elements) then {
                 let mutable case_info_opt = Option[EnumCaseInfo].None()
                 when matched_type in {
@@ -1837,7 +1866,19 @@ given MIRFunctionBuilder {
     private pattern_element_type(*self, pattern * TypedPattern) Type = {
         return when pattern in {
             .Variable(symbol) then symbol.symbol_type,
+            .TraitObjectType(target_type) then target_type,
+            .TraitObjectTypeBinding(_, target_type) then target_type,
             _ then Type.VoidType(),
+        }
+    }
+
+    private trait_object_pattern_trait_name(*self, t Type) String = {
+        let _ = self
+        return when t in {
+            .TraitObject(name, _) then name,
+            .ReferenceType(inner) then self.trait_object_pattern_trait_name(*inner),
+            .MutableReferenceType(inner) then self.trait_object_pattern_trait_name(*inner),
+            _ then "",
         }
     }
 

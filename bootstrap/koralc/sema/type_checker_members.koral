@@ -632,6 +632,10 @@ given TypeChecker {
             let member_type_scope = self.make_given_member_type_scope(target_type, type_params, m.type_params)
             let prev_scope = self.storage.current_scope
             self.storage.current_scope = member_type_scope
+            let effective_member_self_type = when target_type in {
+                .TraitObject(_, _) then Type.GenericParameter("Self"),
+                _ then target_type,
+            }
             let can_reuse_registered_signature = conformance_trait_name is .None()
                 and type_params.is_empty()
                 and m.type_params.is_empty()
@@ -644,11 +648,11 @@ given TypeChecker {
             } else Option[ReusedGivenMemberSignature].None()
             let typed_params = when reused_signature in {
                 .Some(signature) then signature.params,
-                .None() then self.check_params(m.params),
+                .None() then self.check_given_member_params(m.params, effective_member_self_type),
             }
             let ret = when reused_signature in {
                 .Some(signature) then signature.return_type,
-                .None() then self.resolve_type(m.return_type),
+                .None() then self.resolve_given_member_type(m.return_type, effective_member_self_type),
             }
             let typed_body = when m.body in {
                 .Some(b) then {

@@ -555,6 +555,11 @@ private let resolve_types_in_pattern(mono * Monomorphizer, pattern * TypedPatter
             }
             yield TypedPattern.StructPattern(type_name, new_elements)
         },
+        .TraitObjectType(target_type) then TypedPattern.TraitObjectType(resolve_parameterized_type(mono, target_type)),
+        .TraitObjectTypeBinding(symbol, target_type) then {
+            let resolved_symbol = box(Symbol(symbol.def_id, resolve_parameterized_type(mono, symbol.symbol_type), symbol.kind))
+            yield TypedPattern.TraitObjectTypeBinding(resolved_symbol, resolve_parameterized_type(mono, target_type))
+        },
         .AndPattern(left, right) then {
             yield TypedPattern.AndPattern(box(resolve_types_in_pattern(mono, left)), box(resolve_types_in_pattern(mono, right)))
         },
@@ -3011,13 +3016,18 @@ private let resolve_types_in_statement(mono * Monomorphizer, stmt * TypedStateme
             }
             yield TypedStatement.ReturnStmt(new_value, span)
         },
+        .BreakStmt(span) then {
+            yield TypedStatement.BreakStmt(span)
+        },
+        .ContinueStmt(span) then {
+            yield TypedStatement.ContinueStmt(span)
+        },
         .DeferStmt(expr, span) then {
             yield TypedStatement.DeferStmt(resolve_types_in_expression(mono, expr), span)
         },
         .BranchBreakStmt(expr, span) then {
             yield TypedStatement.BranchBreakStmt(resolve_types_in_expression(mono, expr), span)
         },
-        _ then stmt,
     }
 }
 
@@ -3473,7 +3483,8 @@ private let normalize_resolved_call_callee(
                     .Function() then resolved_callee,
                     _ then {
                         let stable_symbol = resolve_symbol_type(mono, original_symbol)
-                        yield box(TypedExpr(box(TypedExprKind.Variable(box(stable_symbol))), stable_symbol.symbol_type))
+                        let stable_symbol_ref = box(stable_symbol)
+                        yield box(TypedExpr(box(TypedExprKind.Variable(stable_symbol_ref)), stable_symbol.symbol_type))
                     },
                 },
                 _ then resolved_callee,
@@ -4467,11 +4478,16 @@ public let resolve_types_in_expression(mono * Monomorphizer, expr * TypedExpr) *
                 .Variable(original_symbol) then when original_symbol.kind in {
                     .Function() then when bound_callee.expr_kind in {
                         .Variable(bound_symbol) then {
-                            let stable_symbol = when bound_symbol.kind in {
-                                .Function() then bound_symbol,
-                                _ then resolve_symbol_type(mono, original_symbol),
+                            yield when bound_symbol.kind in {
+                                .Function() then {
+                                    yield box(TypedExpr(box(TypedExprKind.Variable(bound_symbol)), bound_symbol.symbol_type))
+                                },
+                                _ then {
+                                    let stable_symbol = resolve_symbol_type(mono, original_symbol)
+                                    let stable_symbol_ref = box(stable_symbol)
+                                    yield box(TypedExpr(box(TypedExprKind.Variable(stable_symbol_ref)), stable_symbol.symbol_type))
+                                },
                             }
-                            yield box(TypedExpr(box(TypedExprKind.Variable(box(stable_symbol))), stable_symbol.symbol_type))
                         },
                         _ then bound_callee,
                     },
@@ -9839,8 +9855,47 @@ public let resolve_types_in_global_node(mono * Monomorphizer, node * TypedDecl) 
             let resolved_target = resolve_parameterized_type(mono, target)
             yield TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
         },
-
-        // All other declarations: return unchanged.
-        _ then node,
+        .IntrinsicTypeDecl(access, name, span) then {
+            yield TypedDecl.IntrinsicTypeDecl(access, name, span)
+        },
+        .ForeignTypeDecl(access, name, fields, span, id) then {
+            let resolved_fields = when fields in {
+                .Some(existing_fields) then {
+                    let mutable updated_fields = List[TypedField].new()
+                    for field in existing_fields then {
+                        let resolved_type = resolve_parameterized_type(mono, field.field_type)
+                        updated_fields.push(TypedField(field.access, field.name, field.is_mutable, resolved_type, field.named))
+                    }
+                    yield Option[List[TypedField]].Some(updated_fields)
+                },
+                .None() then Option[List[TypedField]].None(),
+            }
+            yield TypedDecl.ForeignTypeDecl(access, name, resolved_fields, span, id)
+        },
+        .UsingDecl(access, path_segments, span) then {
+            yield TypedDecl.UsingDecl(access, path_segments, span)
+        },
+        .TraitDecl(access, name, members, span) then {
+            let mutable resolved_members = List[TypedTraitMember].new()
+            for member in members then {
+                let mutable resolved_params = List[TypedParam].new()
+                for param in member.params then {
+                    let resolved_type = resolve_parameterized_type(mono, param.param_type)
+                    resolved_params.push(TypedParam(param.name, param.is_mutable, resolved_type, param.named))
+                }
+                let resolved_return = resolve_parameterized_type(mono, member.return_type)
+                resolved_members.push(TypedTraitMember(member.name, resolved_params, resolved_return))
+            }
+            yield TypedDecl.TraitDecl(access, name, resolved_members, span)
+        },
+        .GenericFunctionDecl(access, name, span) then {
+            yield TypedDecl.GenericFunctionDecl(access, name, span)
+        },
+        .GenericTypeStructDecl(access, name, span) then {
+            yield TypedDecl.GenericTypeStructDecl(access, name, span)
+        },
+        .GenericTypeEnumDecl(access, name, span) then {
+            yield TypedDecl.GenericTypeEnumDecl(access, name, span)
+        },
     }
 }

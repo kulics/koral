@@ -182,6 +182,9 @@ Notes:
 - Type aliases must start with an uppercase letter.
 - `[]` is builtin syntax only for `String`, `List`, `Deque`, `*unsafe`, and `*unsafe mutable`; custom traits do not define subscript behavior.
 - `docs/grammar_preview.koral` is illustrative only and may lead the parser. For grammar-sensitive work, treat `docs/grammar.bnf`, parser code, and tests as authoritative.
+- Generic trait identity includes trait arguments. Do not compare only the base trait name on conformance, witness, vtable, or generic-bound paths.
+- Trait-object exact type patterns use `err *ConcreteType` / `*ConcreteType` and operate on the raw trait-object subject; they do not auto-deref to the concrete value type.
+- Trait-object exact type patterns are open-world checks. In `when`, they do not make a match exhaustive; keep a default `_` arm.
 
 ## Reference Creation Semantics (`&` / `box`)
 

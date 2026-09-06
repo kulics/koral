@@ -420,23 +420,37 @@ extension TypeChecker {
     return blanketGivenConstraints[cacheKey]
   }
 
-  func enforceTraitConformance(
+  private func validateCanonicalTraitRef(_ traitRef: CanonicalTraitRef) throws -> TraitDeclInfo {
+    try validateTraitName(traitRef.traitName)
+
+    guard let traitInfo = traits[traitRef.traitName] else {
+      throw SemanticError(.generic("Undefined trait: \(traitRef.traitName)"), span: currentSpan)
+    }
+
+    guard traitInfo.typeParameters.count == traitRef.traitTypeArgs.count else {
+      throw SemanticError(.generic(
+        "Trait \(traitRef.traitName) expects \(traitInfo.typeParameters.count) type arguments, got \(traitRef.traitTypeArgs.count)"
+      ), span: currentSpan)
+    }
+
+    return traitInfo
+  }
+
+  private func enforceTraitConformance(
     _ selfType: Type,
-    traitName: String,
+    traitRef: CanonicalTraitRef,
     context: String? = nil
   ) throws {
-    if traitName == "Any" {
+    if traitRef.traitName == "Any" {
       return
     }
 
-    if traitName == "Deref" {
-      // trait object does not satisfy Deref
+    if traitRef.traitName == "Deref" {
       if case .traitObject = selfType {
         throw SemanticError(.generic(
           "Trait object type '\(selfType)' does not satisfy 'Deref' constraint"
         ), span: currentSpan)
       }
-      // opaque type does not satisfy Deref
       if case .opaque = selfType {
         throw SemanticError(.generic(
           "Opaque type '\(selfType)' does not satisfy 'Deref' constraint"
@@ -449,79 +463,85 @@ extension TypeChecker {
         }
         throw SemanticError(.generic(msg), span: currentSpan)
       }
-      return  // All other types automatically satisfy Deref
-    }
-
-    if case .genericParameter(let paramName) = selfType,
-       hasTraitBound(paramName, traitName) {
       return
     }
 
-    // trait object self-conformance: traitObject("X") satisfies X bound
-    if case .traitObject(let toTraitName, _) = selfType {
-      if toTraitName == traitName {
-        // traitObject("ToString") satisfies ToString bound
+    if case .genericParameter(let paramName) = selfType {
+      let satisfiesBound = traitRef.traitTypeArgs.isEmpty
+        ? hasTraitBound(paramName, traitRef.traitName)
+        : hasTraitBound(paramName, traitName: traitRef.traitName, traitTypeArgs: traitRef.traitTypeArgs)
+      if satisfiesBound {
         return
       }
-      // Different traits don't satisfy each other (no upcasting in initial version)
+    }
+
+    if case .traitObject(let toTraitName, let toTraitArgs) = selfType {
+      let actualTrait = canonicalTraitRef(traitName: toTraitName, traitTypeArgs: toTraitArgs)
+      if actualTrait == traitRef {
+        return
+      }
       throw SemanticError(.generic(
-        "Trait object type '\(selfType)' does not satisfy '\(traitName)' constraint"
+        "Trait object type '\(selfType)' does not satisfy '\(traitRef)' constraint"
       ), span: currentSpan)
     }
 
-    // Check cache: skip redundant conformance checks for the same type/trait pair
-    let cacheKey = "\(selfType):\(traitName)"
-    if let passed = traitConformanceCache[cacheKey] {
-      if passed { return }
-      // If previously failed, fall through to generate proper error message
+    let cacheKey = traitConformanceCacheKey(selfType: selfType, traitRef: traitRef)
+    if let passed = traitConformanceCache[cacheKey], passed {
+      return
     }
 
-    try validateTraitName(traitName)
+    _ = try validateCanonicalTraitRef(traitRef)
 
-    // For type modifier types (ref/ptr/weakref), always validate via blanket given constraints.
-    // hasNominalConformance matches too broadly (generic parameter wildcards), so we must
-    // explicitly check that the inner type satisfies the required constraints.
     if let innerType = typeModifierInnerType(selfType) {
-      if case .genericParameter = innerType, traitName != "Deref" {
+      if case .genericParameter = innerType, traitRef.traitName != "Deref" {
         traitConformanceCache[cacheKey] = true
         return
       }
       let modifierBaseName = typeModifierBaseName(selfType)
       let modifierName = modifierBaseName.lowercased()
-      if let constraints = findBlanketGivenConstraints(baseName: modifierBaseName, traitName: traitName) {
-        // Recursively check inner type satisfies blanket given's constraints
+      if let constraints = findBlanketGivenConstraints(baseName: modifierBaseName, traitName: traitRef.traitName) {
         for constraint in constraints {
           do {
             try enforceTraitConformance(innerType, traitName: constraint)
           } catch {
             traitConformanceCache[cacheKey] = false
             throw SemanticError(.generic(
-              "Type '\(selfType)' does not satisfy trait '\(traitName)' because inner type '\(innerType)' does not implement '\(constraint)'"
+              "Type '\(selfType)' does not satisfy trait '\(traitRef)' because inner type '\(innerType)' does not implement '\(constraint)'"
             ), span: currentSpan)
           }
         }
         traitConformanceCache[cacheKey] = true
         return
       } else {
-        // No blanket given exists for this modifier + trait combination
         traitConformanceCache[cacheKey] = false
         throw SemanticError(.generic(
-          "Type '\(selfType)' does not satisfy trait '\(traitName)'. No blanket given exists for '\(modifierName)' and '\(traitName)'"
+          "Type '\(selfType)' does not satisfy trait '\(traitRef)'. No blanket given exists for '\(modifierName)' and '\(traitRef.traitName)'"
         ), span: currentSpan)
       }
     }
 
-    if !hasNominalConformance(selfType: selfType, traitName: traitName, traitTypeArgs: []) {
+    if !hasNominalConformance(selfType: selfType, traitRef: traitRef) {
       traitConformanceCache[cacheKey] = false
-      var msg = "Type \(selfType) does not explicitly implement trait \(traitName)"
+      var msg = "Type \(selfType) does not explicitly implement trait \(traitRef)"
       if let context {
         msg += " (\(context))"
       }
       throw SemanticError(.generic(msg), span: currentSpan)
     }
-    
-    // Cache successful conformance check
+
     traitConformanceCache[cacheKey] = true
+  }
+
+  func enforceTraitConformance(
+    _ selfType: Type,
+    traitName: String,
+    context: String? = nil
+  ) throws {
+    try enforceTraitConformance(
+      selfType,
+      traitRef: canonicalTraitRef(traitName: traitName),
+      context: context
+    )
   }
   
   /// Checks if a type conforms to a generic trait with specific type arguments.
@@ -537,49 +557,11 @@ extension TypeChecker {
     traitTypeArgs: [Type],
     context: String? = nil
   ) throws {
-    if traitName == "Any" {
-      return
-    }
-
-    // Check cache for generic trait conformance
-    let argsKey = traitTypeArgs.map { $0.description }.joined(separator: ",")
-    let cacheKey = "\(selfType):[\(argsKey)]\(traitName)"
-    if let passed = traitConformanceCache[cacheKey] {
-      if passed { return }
-    }
-
-    try validateTraitName(traitName)
-    
-    guard let traitInfo = traits[traitName] else {
-      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
-    }
-    
-    // Validate type argument count
-    guard traitInfo.typeParameters.count == traitTypeArgs.count else {
-      throw SemanticError(.generic(
-        "Trait \(traitName) expects \(traitInfo.typeParameters.count) type arguments, got \(traitTypeArgs.count)"
-      ), span: currentSpan)
-    }
-    
-    // Create type substitution map from trait type parameters to concrete types
-    var substitution: [String: Type] = [:]
-    for (i, param) in traitInfo.typeParameters.enumerated() {
-      substitution[param.name] = traitTypeArgs[i]
-    }
-    
-    _ = substitution
-
-    if !hasNominalConformance(selfType: selfType, traitName: traitName, traitTypeArgs: traitTypeArgs) {
-      let argsStr = traitTypeArgs.map { $0.description }.joined(separator: ", ")
-      var msg = "Type \(selfType) does not explicitly implement trait [\(argsStr)]\(traitName)"
-      if let context {
-        msg += " (\(context))"
-      }
-      throw SemanticError(.generic(msg), span: currentSpan)
-    }
-    
-    // Cache successful conformance check
-    traitConformanceCache[cacheKey] = true
+    try enforceTraitConformance(
+      selfType,
+      traitRef: canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs),
+      context: context
+    )
   }
 
   /// Computes the expected function type for a generic trait method with type substitution.

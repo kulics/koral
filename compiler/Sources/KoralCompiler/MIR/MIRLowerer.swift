@@ -4,6 +4,13 @@ final class MIRLowerer {
   private let program: MonomorphizedProgram
   private let context: CompilerContext
 
+  private struct InstantiatedTraitMethod {
+    let traitRef: CanonicalTraitRef
+    let methodName: String
+    let signature: TraitMethodSignature
+    let substitution: [String: Type]
+  }
+
   init(program: MonomorphizedProgram, context: CompilerContext) {
     self.program = program
     self.context = context
@@ -65,6 +72,7 @@ final class MIRLowerer {
       context: context,
       staticMethodLookup: program.staticMethodLookup,
       traits: program.traits,
+      conformanceWitnesses: program.conformanceWitnesses,
       receiverMethodDispatch: program.receiverMethodDispatch,
       escapeSummaries: [:]
     )
@@ -88,39 +96,150 @@ final class MIRLowerer {
   }
 
   private func makeTraitVTableMethods(for request: VtableRequest) -> [MIRTraitVTableMethod] {
-    guard let orderedMethods = try? SemaUtils.orderedTraitMethods(
-      request.traitName,
-      traits: program.traits,
-      currentLine: nil
-    ) else {
-      return []
+    let traitRef = CanonicalTraitRef(traitName: request.traitName, traitTypeArgs: request.traitTypeArgs)
+    if let witness = program.conformanceWitnesses[request.witnessKey] {
+      return witness.requirementSlots.map { slot in
+        MIRTraitVTableMethod(
+          name: slot.methodName,
+          returnType: slot.returnType,
+          parameters: slot.parameters.map {
+            MIRTraitVTableParameter(
+              name: $0.name,
+              type: $0.type,
+              isSelf: $0.name == "self"
+            )
+          },
+          selfByValue: isSelfByValueRequirementSlot(slot)
+        )
+      }
     }
-
-    let substitution = traitTypeParameterSubstitution(for: request)
-    return orderedMethods.map { methodName, signature in
-      let parameters = signature.parameters.map { parameter in
+    let orderedMethods = instantiatedTraitMethods(for: traitRef, concreteType: request.concreteType)
+    return orderedMethods.map { method in
+      let parameters = method.signature.parameters.map { parameter in
         MIRTraitVTableParameter(
           name: parameter.name,
-          type: resolveVTableTypeNode(parameter.type, traitTypeParamSubstitution: substitution),
+          type: resolveVTableTypeNode(parameter.type, traitTypeParamSubstitution: method.substitution),
           isSelf: parameter.name == "self"
         )
       }
       return MIRTraitVTableMethod(
-        name: methodName,
-        returnType: resolveVTableTypeNode(signature.returnType, traitTypeParamSubstitution: substitution),
+        name: method.methodName,
+        returnType: resolveVTableTypeNode(method.signature.returnType, traitTypeParamSubstitution: method.substitution),
         parameters: parameters,
-        selfByValue: isSelfByValueTraitSignature(signature)
+        selfByValue: isSelfByValueTraitSignature(method.signature)
       )
     }
   }
 
-  private func traitTypeParameterSubstitution(for request: VtableRequest) -> [String: Type] {
-    guard let traitInfo = program.traits[request.traitName], !traitInfo.typeParameters.isEmpty else {
-      return [:]
+  private func isSelfByValueRequirementSlot(_ slot: RequirementSlot) -> Bool {
+    guard let firstParam = slot.parameters.first, firstParam.name == "self" else {
+      return false
     }
-    var result: [String: Type] = [:]
-    for (index, parameter) in traitInfo.typeParameters.enumerated() where index < request.traitTypeArgs.count {
-      result[parameter.name] = request.traitTypeArgs[index]
+    switch firstParam.type {
+    case .reference,
+         .mutableReference,
+         .borrowedReference,
+         .mutableBorrowedReference,
+         .weakReference,
+         .mutableWeakReference,
+         .pointer,
+         .mutablePointer:
+      return false
+    default:
+      return true
+    }
+  }
+
+  private func instantiatedTraitMethods(
+    for traitRef: CanonicalTraitRef,
+    concreteType: Type
+  ) -> [InstantiatedTraitMethod] {
+    var ordered: [InstantiatedTraitMethod] = []
+    var seenMethods: Set<String> = []
+    var visitedTraits: Set<String> = []
+    collectInstantiatedTraitMethods(
+      for: traitRef,
+      concreteType: concreteType,
+      visitedTraits: &visitedTraits,
+      seenMethods: &seenMethods,
+      ordered: &ordered
+    )
+    return ordered
+  }
+
+  private func collectInstantiatedTraitMethods(
+    for traitRef: CanonicalTraitRef,
+    concreteType: Type,
+    visitedTraits: inout Set<String>,
+    seenMethods: inout Set<String>,
+    ordered: inout [InstantiatedTraitMethod]
+  ) {
+    let visitKey = "\(traitRef.cacheKey)|self=\(context.getDebugName(concreteType))"
+    guard visitedTraits.insert(visitKey).inserted,
+          let traitInfo = program.traits[traitRef.traitName] else {
+      return
+    }
+
+    let substitution = traitTypeParameterSubstitution(
+      traitName: traitRef.traitName,
+      traitTypeArgs: traitRef.traitTypeArgs,
+      concreteType: concreteType
+    )
+
+    for parent in traitInfo.superTraits {
+      guard let parentRef = instantiateTraitRef(parent, substitution: substitution) else {
+        continue
+      }
+      collectInstantiatedTraitMethods(
+        for: parentRef,
+        concreteType: concreteType,
+        visitedTraits: &visitedTraits,
+        seenMethods: &seenMethods,
+        ordered: &ordered
+      )
+    }
+
+    for method in traitInfo.methods where seenMethods.insert(method.name).inserted {
+      ordered.append(
+        InstantiatedTraitMethod(
+          traitRef: traitRef,
+          methodName: method.name,
+          signature: method,
+          substitution: substitution
+        )
+      )
+    }
+  }
+
+  private func instantiateTraitRef(
+    _ constraint: TraitConstraint,
+    substitution: [String: Type]
+  ) -> CanonicalTraitRef? {
+    switch constraint {
+    case .simple(let name):
+      return CanonicalTraitRef(traitName: name, traitTypeArgs: [])
+    case .generic(let base, let args):
+      let resolvedArgs = args.compactMap {
+        resolveVTableTypeNode($0, traitTypeParamSubstitution: substitution)
+      }
+      guard resolvedArgs.count == args.count else {
+        return nil
+      }
+      return CanonicalTraitRef(traitName: base, traitTypeArgs: resolvedArgs)
+    }
+  }
+
+  private func traitTypeParameterSubstitution(
+    traitName: String,
+    traitTypeArgs: [Type],
+    concreteType: Type
+  ) -> [String: Type] {
+    var result: [String: Type] = ["Self": concreteType]
+    guard let traitInfo = program.traits[traitName], !traitInfo.typeParameters.isEmpty else {
+      return result
+    }
+    for (index, parameter) in traitInfo.typeParameters.enumerated() where index < traitTypeArgs.count {
+      result[parameter.name] = traitTypeArgs[index]
     }
     return result
   }
@@ -183,7 +302,7 @@ final class MIRLowerer {
       let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: params, returns: resolvedReturn)
     case .inferredSelf:
-      return nil
+      return traitTypeParamSubstitution["Self"]
     }
   }
 
@@ -1323,6 +1442,20 @@ private final class MIRFunctionBuilder {
     switch pattern {
     case .wildcard, .variable:
       return .constant(.boolean(!negated))
+    case .traitObjectType(let targetType):
+      return lowerTraitObjectTypePatternCondition(
+        subjectValue: matchedValue,
+        subjectType: matchedType,
+        targetType: targetType,
+        negated: negated
+      )
+    case .traitObjectTypeBinding(_, let targetType):
+      return lowerTraitObjectTypePatternCondition(
+        subjectValue: matchedValue,
+        subjectType: matchedType,
+        targetType: targetType,
+        negated: negated
+      )
     case .booleanLiteral(let value):
       guard matchedType == .bool else { return nil }
       let subjectOperand = materialize(matchedValue, type: matchedType)
@@ -1427,6 +1560,35 @@ private final class MIRFunctionBuilder {
         negated: negated
       )
     }
+  }
+
+  private func lowerTraitObjectTypePatternCondition(
+    subjectValue: MIRValue,
+    subjectType: Type,
+    targetType: Type,
+    negated: Bool
+  ) -> MIROperand? {
+    guard let info = traitObjectPatternInfo(subjectType: subjectType, targetType: targetType) else {
+      return nil
+    }
+    let condition = materialize(
+      .intrinsic(
+        .traitObjectMatches(
+          value: subjectValue,
+          traitName: info.traitName,
+          traitTypeArguments: info.traitTypeArguments,
+          concreteType: info.concreteType
+        )
+      ),
+      type: .bool
+    )
+    if negated {
+      return materialize(
+        .unary(MIRUnaryOperation(operatorKind: .logicalNot, operand: condition, type: .bool)),
+        type: .bool
+      )
+    }
+    return condition
   }
 
   private func lowerCombinedPatternCondition(
@@ -2006,6 +2168,8 @@ private final class MIRFunctionBuilder {
     switch pattern {
     case .wildcard:
       return true
+    case .traitObjectType(let targetType):
+      return traitObjectPatternInfo(subjectType: matchedType, targetType: targetType) != nil
     case .booleanLiteral:
       return matchedType == .bool
     case .stringLiteral:
@@ -2032,6 +2196,8 @@ private final class MIRFunctionBuilder {
         && canLowerSimplePattern(right, subjectType: matchedType)
     case .notPattern(let inner):
       return canLowerSimplePattern(inner, subjectType: matchedType)
+    case .traitObjectTypeBinding:
+      return false
     default:
       return false
     }
@@ -2047,6 +2213,8 @@ private final class MIRFunctionBuilder {
     switch pattern {
     case .variable:
       return true
+    case .traitObjectTypeBinding(_, let targetType):
+      return traitObjectPatternInfo(subjectType: matchedType, targetType: targetType) != nil
     case .enumCase(_, let tagIndex, let elements):
       guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else {
@@ -2096,6 +2264,8 @@ private final class MIRFunctionBuilder {
           patternPlaceByDefId[symbol.defId.id] = matchedPlace
         }
       }
+    case .traitObjectTypeBinding(let symbol, let targetType):
+      assignTraitObjectPatternBinding(symbol: symbol, targetType: targetType, sourcePlace: matchedPlace)
     case .enumCase(let caseName, let tagIndex, let elements):
       guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else {
@@ -2215,6 +2385,14 @@ private final class MIRFunctionBuilder {
       }
       let sourcePlace = symbol.type == subjectType ? subjectPlace : matchedPlace
       append(.assign(destination, .placeRead(sourcePlace, ownership: .copy)))
+    case .traitObjectTypeBinding(let symbol, let targetType):
+      guard let destination = patternPlaceByDefId[symbol.defId.id] else {
+        return
+      }
+      append(.assign(
+        destination,
+        .intrinsic(.traitObjectDowncast(value: .placeRead(matchedPlace, ownership: .borrow), resultType: targetType))
+      ))
     case .enumCase(let caseName, let tagIndex, let elements):
       guard let cases = resolvedPatternEnumCases(for: matchedType),
             cases.indices.contains(tagIndex) else {
@@ -2250,8 +2428,38 @@ private final class MIRFunctionBuilder {
       assignPatternBindingLocals(pattern: right, subjectPlace: matchedPlace, subjectType: matchedType)
     case .orPattern(let left, let right):
       bindOrPatternVariables(left: left, right: right, subjectPlace: subjectPlace, subjectType: subjectType)
-    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .comparisonPattern, .notPattern:
+    case .wildcard, .booleanLiteral, .integerLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType:
       break
+    }
+  }
+
+  private func assignTraitObjectPatternBinding(symbol: Symbol, targetType: Type, sourcePlace: MIRPlace) {
+    let destination: MIRPlace
+    if let existing = patternPlaceByDefId[symbol.defId.id] {
+      destination = existing
+    } else {
+      let local = makeTemporary(type: targetType, nameHint: context.getName(symbol.defId) ?? "trait_object_binding")
+      append(.declare(local.id))
+      destination = .local(local.id)
+      patternPlaceByDefId[symbol.defId.id] = destination
+    }
+
+    append(.assign(
+      destination,
+      .intrinsic(.traitObjectDowncast(value: .placeRead(sourcePlace, ownership: .borrow), resultType: targetType))
+    ))
+  }
+
+  private func traitObjectPatternInfo(subjectType: Type, targetType: Type) -> (traitName: String, traitTypeArguments: [Type], concreteType: Type)? {
+    guard case .traitObject(let traitName, let traitTypeArguments) = subjectType else {
+      return nil
+    }
+
+    switch targetType {
+    case .reference(let concreteType), .mutableReference(let concreteType):
+      return (traitName, traitTypeArguments, concreteType)
+    default:
+      return nil
     }
   }
 

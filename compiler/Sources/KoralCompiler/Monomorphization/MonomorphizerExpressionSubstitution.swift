@@ -734,10 +734,12 @@ extension Monomorphizer {
 
             // Collect vtable request when concrete type is fully resolved
             if !context.containsGenericParameter(substitutedConcreteType) {
+                let traitRef = CanonicalTraitRef(traitName: traitName, traitTypeArgs: substitutedTraitTypeArgs)
                 vtableRequests.insert(VtableRequest(
                     concreteType: substitutedConcreteType,
                     traitName: traitName,
-                    traitTypeArgs: substitutedTraitTypeArgs
+                    traitTypeArgs: substitutedTraitTypeArgs,
+                    witnessKey: ConformanceWitness.key(selfType: substitutedConcreteType, traitRef: traitRef)
                 ))
             }
 
@@ -1028,6 +1030,17 @@ extension Monomorphizer {
         switch pattern {
         case .booleanLiteral, .integerLiteral, .stringLiteral, .wildcard:
             return pattern
+        case .traitObjectType(let targetType):
+            return .traitObjectType(targetType: substituteType(targetType, substitution: substitution))
+        case .traitObjectTypeBinding(let symbol, let targetType):
+            let newSymbol = copySymbolPreservingDefId(
+                symbol,
+                newType: substituteType(symbol.type, substitution: substitution)
+            )
+            return .traitObjectTypeBinding(
+                symbol: newSymbol,
+                targetType: substituteType(targetType, substitution: substitution)
+            )
             
         case .variable(let symbol):
             let newSymbol = copySymbolPreservingDefId(

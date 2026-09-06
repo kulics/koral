@@ -565,10 +565,42 @@ given TypeChecker {
         return when self.storage.generic_param_constraints.get(name) in {
             .Some(constraints) then {
                 for constraint in constraints then {
-                    if constraint.trait_name == trait_name and self.trait_args_match(constraint.type_args, trait_arg_types) then {
+                    if self.generic_constraint_satisfies_trait_bound(constraint, Type.GenericParameter(name), trait_name, trait_arg_types) then {
                         return true
                     }
-                    if trait_arg_types.is_empty() and self.storage.trait_registry.has_inheritance(constraint.trait_name, trait_name) then {
+                }
+                yield false
+            },
+            .None() then false,
+        }
+    }
+
+    protected generic_constraint_satisfies_trait_bound(self, constraint GenericConstraintBound, self_type Type, trait_name String, trait_arg_types List[Type]) Bool = {
+        if constraint.trait_name == trait_name then {
+            return trait_arg_types.is_empty() or self.trait_args_match(constraint.type_args, trait_arg_types)
+        }
+
+        return when self.storage.trait_registry.get(constraint.trait_name) in {
+            .Some(info) then {
+                let previous_scope = self.storage.current_scope
+                defer { self.storage.current_scope = previous_scope }
+
+                let child_scope = Scope.new_child(self.storage.current_scope)
+                child_scope.define_type("Self", self_type)
+                self.storage.current_scope = child_scope
+
+                let mutable index UInt = 0
+                while index < info.type_params.count() and index < constraint.type_args.count() then {
+                    child_scope.define_type(info.type_params[index], constraint.type_args[index])
+                    index += 1
+                }
+
+                for parent in info.parent_traits then {
+                    let mutable parent_args = List[Type].new()
+                    for arg_node in parent.type_arg_nodes then {
+                        parent_args.push(self.resolve_type(arg_node))
+                    }
+                    if self.generic_constraint_satisfies_trait_bound(GenericConstraintBound(parent.name, parent_args), self_type, trait_name, trait_arg_types) then {
                         return true
                     }
                 }

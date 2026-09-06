@@ -287,6 +287,46 @@ final class MIRVerifier {
          .upgradeRef(let value, _),
          .upgradeMutRef(let value, _):
       try verifyValue(value, in: function, localIDs: Set(function.locals.map(\.id)))
+    case .traitObjectMatches(let value, let traitName, let traitTypeArguments, let concreteType):
+      let localIDs = Set(function.locals.map(\.id))
+      try verifyValue(value, in: function, localIDs: localIDs)
+      try verifyConcrete(concreteType, in: function, description: "trait object match intrinsic has unresolved concrete type")
+      for argument in traitTypeArguments where context.containsGenericParameter(argument) {
+        try fail(function, "trait object match intrinsic has unresolved trait type argument \(context.getDebugName(argument))")
+      }
+      let typeResolver = MIRTypeResolver(function: function, context: context)
+      guard let valueType = typeResolver.type(of: value),
+            let actual = traitObjectReferenceInfo(valueType) else {
+        try fail(function, "trait object match intrinsic value is not a trait object")
+      }
+      if actual.traitName != traitName || actual.typeArguments != traitTypeArguments {
+        try fail(function, "trait object match intrinsic value type does not match intrinsic trait metadata")
+      }
+      let key = MIRTraitVTableKey(
+        concreteType: concreteType,
+        traitName: traitName,
+        traitTypeArguments: traitTypeArguments
+      )
+      guard traitVTableKeys.contains(key) else {
+        try fail(function, "trait object match intrinsic has no matching vtable \(render(key))")
+      }
+    case .traitObjectDowncast(let value, let resultType):
+      let localIDs = Set(function.locals.map(\.id))
+      try verifyValue(value, in: function, localIDs: localIDs)
+      try verifyConcrete(resultType, in: function, description: "trait object downcast intrinsic has unresolved result type")
+      let typeResolver = MIRTypeResolver(function: function, context: context)
+      guard let valueType = typeResolver.type(of: value),
+            traitObjectReferenceInfo(valueType) != nil else {
+        try fail(function, "trait object downcast intrinsic value is not a trait object")
+      }
+      switch resultType {
+      case .reference(let inner), .mutableReference(let inner):
+        if case .traitObject = inner {
+          try fail(function, "trait object downcast intrinsic result type must be a concrete reference")
+        }
+      default:
+        try fail(function, "trait object downcast intrinsic result is not a managed reference: \(context.getDebugName(resultType))")
+      }
     case .makeRef(let ptr, let owner, _),
          .makeMutRef(let ptr, let owner, _),
          .initMemory(let ptr, let owner):

@@ -30,6 +30,72 @@ public struct TypedExtensionMethodInfo {
     }
 }
 
+public struct RequirementSlotParameter {
+    public let name: String
+    public let mutable: Bool
+    public let type: Type
+    public let named: Bool
+
+    public init(name: String, mutable: Bool, type: Type, named: Bool) {
+        self.name = name
+        self.mutable = mutable
+        self.type = type
+        self.named = named
+    }
+}
+
+public struct RequirementSlot {
+    public let declaringTraitRef: CanonicalTraitRef
+    public let methodName: String
+    public let parameters: [RequirementSlotParameter]
+    public let returnType: Type
+    public let index: Int
+
+    public init(
+        declaringTraitRef: CanonicalTraitRef,
+        methodName: String,
+        parameters: [RequirementSlotParameter],
+        returnType: Type,
+        index: Int
+    ) {
+        self.declaringTraitRef = declaringTraitRef
+        self.methodName = methodName
+        self.parameters = parameters
+        self.returnType = returnType
+        self.index = index
+    }
+}
+
+public struct ConformanceWitness {
+    public let selfType: Type
+    public let traitRef: CanonicalTraitRef
+    public let directParentTraitRefs: [CanonicalTraitRef]
+    public let requirementSlots: [RequirementSlot]
+    public let localImplementationDefIdsByMethodName: [String: DefId]
+
+    public init(
+        selfType: Type,
+        traitRef: CanonicalTraitRef,
+        directParentTraitRefs: [CanonicalTraitRef],
+        requirementSlots: [RequirementSlot],
+        localImplementationDefIdsByMethodName: [String: DefId]
+    ) {
+        self.selfType = selfType
+        self.traitRef = traitRef
+        self.directParentTraitRefs = directParentTraitRefs
+        self.requirementSlots = requirementSlots
+        self.localImplementationDefIdsByMethodName = localImplementationDefIdsByMethodName
+    }
+
+    public static func key(selfType: Type, traitRef: CanonicalTraitRef) -> String {
+        "\(selfType):\(traitRef.cacheKey)"
+    }
+
+    public var key: String {
+        Self.key(selfType: selfType, traitRef: traitRef)
+    }
+}
+
 /// The output from the TypeChecker phase.
 /// Contains all information needed by the Monomorphizer to generate concrete code.
 public struct TypeCheckerOutput {
@@ -46,6 +112,10 @@ public struct TypeCheckerOutput {
     /// Contains all generic structs, enums, functions, and extension methods.
     public let genericTemplates: GenericTemplateRegistry
 
+    /// Explicit conformance witnesses collected during type checking.
+    /// Keyed by `ConformanceWitness.key(selfType:traitRef:)`.
+    public let conformanceWitnesses: [String: ConformanceWitness]
+
     /// Unified compiler context containing definition metadata and type information.
     public let context: CompilerContext
 
@@ -61,11 +131,13 @@ public struct TypeCheckerOutput {
         program: TypedProgram,
         instantiationRequests: Set<InstantiationRequest>,
         genericTemplates: GenericTemplateRegistry,
+        conformanceWitnesses: [String: ConformanceWitness],
         context: CompilerContext
     ) {
         self.program = program
         self.instantiationRequests = instantiationRequests
         self.genericTemplates = genericTemplates
+        self.conformanceWitnesses = conformanceWitnesses
         self.context = context
     }
 }

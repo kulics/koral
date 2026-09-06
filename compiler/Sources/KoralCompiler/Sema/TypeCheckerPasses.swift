@@ -291,6 +291,7 @@ extension TypeChecker {
         program: program,
         instantiationRequests: bodyCheckerOutput.instantiationRequests,
         genericTemplates: registry,
+        conformanceWitnesses: conformanceWitnesses,
         context: context
       )
     }
@@ -3134,6 +3135,24 @@ extension TypeChecker {
       let typedConformance = TypedTraitConformance(traitName: traitName, traitTypeArgs: traitArgTypes)
       for entry in typedMethodEntries {
         methodTraitConformanceByDefId[entry.typedMethod.identifier.defId] = typedConformance
+      }
+
+      if typeParams.isEmpty {
+        let traitRef = canonicalTraitRef(traitName: traitName, traitTypeArgs: traitArgTypes)
+        let parentTraitRefs = try directParentTraitRefs(for: traitRef, selfType: selfType)
+        let slots = try requirementSlots(for: traitRef, selfType: selfType)
+        var localImplementationDefIdsByMethodName: [String: DefId] = [:]
+        for info in methodInfos {
+          localImplementationDefIdsByMethodName[info.method.name] = info.symbol.defId
+        }
+        let witness = ConformanceWitness(
+          selfType: selfType,
+          traitRef: traitRef,
+          directParentTraitRefs: parentTraitRefs,
+          requirementSlots: slots,
+          localImplementationDefIdsByMethodName: localImplementationDefIdsByMethodName
+        )
+        conformanceWitnesses[witness.key] = witness
       }
 
       if !typeParams.isEmpty {
