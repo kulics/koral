@@ -322,7 +322,7 @@ given CodeGen {
             return false
         }
         for member in members then {
-            if self.resolve_method_def_id(normalized_concrete_type, trait_name, member.name) is .None() then {
+            if self.resolve_method_def_id(normalized_concrete_type, trait_name, member.name, List[Type].new()) is .None() then {
                 return false
             }
         }
@@ -343,7 +343,25 @@ given CodeGen {
 
     // ── 方法名解析 ────────────────────────────────────────────────────────────
 
-    resolve_method_def_id(self, concrete_type Type, trait_name String, method_name String) Option[DefId] = {
+    /// Convert List[* Type] to List[Type] for function calls
+    protected deref_type_list(self, types List[* Type]) List[Type] = {
+        let mutable result = List[Type].new()
+        for t in types then {
+            result.push(*t)
+        }
+        return result
+    }
+
+    resolve_method_def_id(self, concrete_type Type, trait_name String, method_name String, trait_type_args List[Type]) Option[DefId] = {
+        // Try with trait_type_args first if provided
+        if not trait_type_args.is_empty() then {
+            when self.lookup_trait_method_def_id_from_given_globals_with_args(concrete_type, trait_name, trait_type_args, method_name) in {
+                .Some(def_id) then { return Option[DefId].Some(def_id) },
+                .None() then {},
+            }
+        }
+        
+        // Fallback to lookup without trait_type_args
         when self.lookup_trait_method_def_id_from_given_globals(concrete_type, trait_name, method_name) in {
             .Some(def_id) then { return Option[DefId].Some(def_id) },
             .None() then {},
@@ -356,7 +374,7 @@ given CodeGen {
         when self.program.traits.get(trait_name) in {
             .Some(trait_info) then {
                 for parent_trait_name in trait_info.parent_traits then {
-                    when self.resolve_method_def_id(concrete_type, parent_trait_name.name, method_name) in {
+                    when self.resolve_method_def_id(concrete_type, parent_trait_name.name, method_name, trait_type_args) in {
                         .Some(def_id) then {
                             return Option[DefId].Some(def_id)
                         },
@@ -369,7 +387,7 @@ given CodeGen {
 
         let fallback_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
         if layout_key(fallback_concrete_type) <> layout_key(self.normalize_vtable_receiver_type(concrete_type)) then {
-            when self.resolve_method_def_id(fallback_concrete_type, trait_name, method_name) in {
+            when self.resolve_method_def_id(fallback_concrete_type, trait_name, method_name, trait_type_args) in {
                 .Some(def_id) then { return Option[DefId].Some(def_id) },
                 .None() then {},
             }
@@ -732,7 +750,7 @@ given CodeGen {
         let mutable idx UInt = 0
         while idx < members.count() then {
             let member = members[idx]
-            when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
+            when self.resolve_method_def_id(concrete_type, trait_name, member.name, List[Type].new()) in {
                 .Some(actual_method_def_id) then {
                     when self.context.get_function_type(actual_method_def_id) in {
                         .Some(raw_function_type) then {
@@ -1284,13 +1302,13 @@ given CodeGen {
             let mutable actual_method_def_ids = Dict[String, DefId].new()
 
             for member in ordered_members then {
-                let actual_method_def_id_opt = when self.resolve_method_def_id(concrete_type, trait_name, member.name) in {
+                let actual_method_def_id_opt = when self.resolve_method_def_id(concrete_type, trait_name, member.name, self.deref_type_list(req.trait_type_args)) in {
                     .Some(actual_method_def_id) then Option[DefId].Some(actual_method_def_id),
                     .None() then {
                         let fallback_concrete_type = self.unwrap_vtable_receiver_value_type(concrete_type)
                         yield if layout_key(fallback_concrete_type) == layout_key(concrete_type)
                             then Option[DefId].None()
-                            else self.resolve_method_def_id(fallback_concrete_type, trait_name, member.name)
+                            else self.resolve_method_def_id(fallback_concrete_type, trait_name, member.name, self.deref_type_list(req.trait_type_args))
                     },
                 }
                 when actual_method_def_id_opt in {

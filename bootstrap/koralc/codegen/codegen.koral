@@ -544,13 +544,24 @@ given CodeGen {
     }
 
     protected lookup_trait_method_def_id_from_given_globals(self, concrete_type Type, trait_name String, method_name String) Option[DefId] = {
+        return self.lookup_trait_method_def_id_from_given_globals_with_args(concrete_type, trait_name, List[Type].new(), method_name)
+    }
+
+    /// Look up trait method from given globals with trait type args checking
+    protected lookup_trait_method_def_id_from_given_globals_with_args(self, concrete_type Type, trait_name String, trait_type_args List[Type], method_name String) Option[DefId] = {
         let concrete_receiver_type = self.concretize_codegen_type(concrete_type)
         for global in self.program.globals then {
             when global in {
-                .Given(target_type, trait_conformance, _, methods) then {
+                .Given(target_type, trait_conformance, given_trait_type_args, methods) then {
                     let conformance = trait_conformance or else { continue }
                     if conformance <> trait_name then {
                         continue
+                    }
+                    // Check trait type args if provided
+                    if not trait_type_args.is_empty() then {
+                        if not self.trait_type_args_match(given_trait_type_args, trait_type_args) then {
+                            continue
+                        }
                     }
                     if not self.owner_types_match(target_type, concrete_receiver_type) then {
                         continue
@@ -567,6 +578,77 @@ given CodeGen {
             }
         }
         return Option[DefId].None()
+    }
+
+    /// Check if two lists of trait type args match
+    trait_type_args_match(self, actual List[Type], expected List[Type]) Bool = {
+        if actual.count() <> expected.count() then {
+            return false
+        }
+        let mutable i UInt = 0
+        while i < actual.count() then {
+            if self.type_stable_key(actual[i]) <> self.type_stable_key(expected[i]) then {
+                return false
+            }
+            i += 1
+        }
+        return true
+    }
+
+    /// Get a stable key for a type for comparison purposes
+    type_stable_key(self, t Type) String = {
+        return when t in {
+            .IntType() then "Int",
+            .Int8Type() then "Int8",
+            .Int16Type() then "Int16",
+            .Int32Type() then "Int32",
+            .Int64Type() then "Int64",
+            .UIntType() then "UInt",
+            .UInt8Type() then "UInt8",
+            .UInt16Type() then "UInt16",
+            .UInt32Type() then "UInt32",
+            .UInt64Type() then "UInt64",
+            .Float32Type() then "Float32",
+            .Float64Type() then "Float64",
+            .BoolType() then "Bool",
+            .VoidType() then "Void",
+            .NeverType() then "Never",
+            .StructureType(def_id) then self.context.get_name(def_id) or else "Struct_\(def_id.id)",
+            .EnumType(def_id) then self.context.get_name(def_id) or else "Enum_\(def_id.id)",
+            .GenericStruct(name, args) then {
+                let mutable arg_keys = String.new()
+                let mutable first = true
+                for arg in args then {
+                    if not first then { arg_keys.push_string(", ") }
+                    arg_keys.push_string(self.type_stable_key(*arg))
+                    first = false
+                }
+                return "\(name)[\(arg_keys)]"
+            },
+            .GenericEnum(name, args) then {
+                let mutable arg_keys = String.new()
+                let mutable first = true
+                for arg in args then {
+                    if not first then { arg_keys.push_string(", ") }
+                    arg_keys.push_string(self.type_stable_key(*arg))
+                    first = false
+                }
+                return "\(name)[\(arg_keys)]"
+            },
+            .ReferenceType(inner) then "*\(self.type_stable_key(*inner))",
+            .MutableReferenceType(inner) then "*mutable \(self.type_stable_key(*inner))",
+            .TraitObject(name, args) then {
+                let mutable arg_keys = String.new()
+                let mutable first = true
+                for arg in args then {
+                    if not first then { arg_keys.push_string(", ") }
+                    arg_keys.push_string(self.type_stable_key(*arg))
+                    first = false
+                }
+                return "TraitObject_\(name)[\(arg_keys)]"
+            },
+            _ then "Unknown",
+        }
     }
 
     protected lookup_receiver_method_def_id(self, receiver_type Type, method_name String) Option[DefId] = {

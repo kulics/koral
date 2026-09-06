@@ -672,14 +672,66 @@ public class Monomorphizer {
         // 构建静态方法查找表
         let staticMethodLookup = buildStaticMethodLookup(from: allNodes)
         
+        // Remap witness defIds to use monomorphized defIds
+        let remappedWitnesses = remapConformanceWitnesses(input.conformanceWitnesses)
+        
         return MonomorphizedProgram(
             globalNodes: allNodes,
             staticMethodLookup: staticMethodLookup,
             traits: input.genericTemplates.traits,
-            conformanceWitnesses: input.conformanceWitnesses,
+            conformanceWitnesses: remappedWitnesses,
             vtableRequests: vtableRequests,
             receiverMethodDispatch: receiverMethodDispatch
         )
+    }
+    
+    /// Remap witness defIds to use monomorphized defIds
+    /// This ensures that the witness uses the same defIds as the MIR
+    private func remapConformanceWitnesses(_ witnesses: [String: ConformanceWitness]) -> [String: ConformanceWitness] {
+        var remapped: [String: ConformanceWitness] = [:]
+        
+        for (key, witness) in witnesses {
+            var newImplMap: [String: DefId] = [:]
+            
+            for (methodName, originalDefId) in witness.localImplementationDefIdsByMethodName {
+                // Try to find the remapped defId
+                if let candidates = remappedFunctionDefIds[originalDefId], !candidates.isEmpty {
+                    // Find the candidate that matches the witness's selfType
+                    let selfTypeKey = witness.selfType.stableKey
+                    var matchedDefId: DefId? = nil
+                    
+                    for candidate in candidates {
+                        // Check if the candidate's symbol type has the right receiver type
+                        if let symbolType = context.getSymbolType(candidate.defId),
+                           case .function(let params, _) = symbolType,
+                           let firstParam = params.first {
+                            let paramKey = firstParam.type.stableKey
+                            if paramKey == selfTypeKey || paramKey.contains(selfTypeKey) {
+                                matchedDefId = candidate.defId
+                                break
+                            }
+                        }
+                    }
+                    
+                    // If no match found, use the first candidate as fallback
+                    newImplMap[methodName] = matchedDefId ?? candidates[0].defId
+                } else {
+                    // Keep the original defId if no remapping found
+                    newImplMap[methodName] = originalDefId
+                }
+            }
+            
+            let newWitness = ConformanceWitness(
+                selfType: witness.selfType,
+                traitRef: witness.traitRef,
+                directParentTraitRefs: witness.directParentTraitRefs,
+                requirementSlots: witness.requirementSlots,
+                localImplementationDefIdsByMethodName: newImplMap
+            )
+            remapped[key] = newWitness
+        }
+        
+        return remapped
     }
     
     /// 构建静态方法查找表
