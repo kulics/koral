@@ -66,7 +66,7 @@ given ClockTime as Parseable {
 }
 
 given Date {
-    public new(year: Int, month: Int, day: Int) Result[Date]
+    public new(year Int, month Int, day Int) Result[Date]
     public epoch() Date
 }
 

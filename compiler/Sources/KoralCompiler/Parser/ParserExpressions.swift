@@ -42,6 +42,33 @@ extension Parser {
     }
   }
 
+  private func calleeAllowsConstructorArgumentSyntax(_ callee: ExpressionNode) -> Bool {
+    switch callee {
+    case .identifier(let name):
+      return isValidTypeName(name)
+    case .genericInstantiation(let base, _):
+      return isValidTypeName(base)
+    default:
+      return false
+    }
+  }
+
+  private func rejectNonConstructorCallSyntax(arguments: [CallArg], span: SourceSpan) throws {
+    if arguments.contains(where: { $0.isDefaultFill }) {
+      throw ParserError.unexpectedToken(
+        span: span,
+        got: "Default-fill '...' is only valid in constructor calls"
+      )
+    }
+
+    if arguments.contains(where: { $0.label != nil }) {
+      throw ParserError.unexpectedToken(
+        span: span,
+        got: "Named labels are only allowed on struct and enum constructors; use positional arguments"
+      )
+    }
+  }
+
   private func tryParseMethodTypeArguments() throws -> [TypeNode]? {
     guard currentToken === .leftBracket else { return nil }
 
@@ -645,6 +672,7 @@ extension Parser {
             )
           }
           let arguments = try parseCallArgumentsList()
+          try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
           if methodTypeArgs.isEmpty {
             expr = .qualifiedMethodCall(
               base: qualifiedBase,
@@ -673,6 +701,7 @@ extension Parser {
             // This is TypeName.methodName - check for call
             if currentToken === .leftParen {
               let arguments = try parseCallArgumentsList()
+              try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
               if methodTypeArgs.isEmpty {
                 expr = .staticMethodCall(typeName: baseName, typeArgs: [], methodName: member, arguments: arguments)
               } else {
@@ -685,6 +714,7 @@ extension Parser {
           if case .genericInstantiation(let baseName, let typeArgs) = expr {
             if currentToken === .leftParen {
               let arguments = try parseCallArgumentsList()
+              try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
               if methodTypeArgs.isEmpty {
                 expr = .staticMethodCall(typeName: baseName, typeArgs: typeArgs, methodName: member, arguments: arguments)
               } else {
@@ -696,6 +726,7 @@ extension Parser {
 
           if !methodTypeArgs.isEmpty, currentToken === .leftParen {
             let arguments = try parseCallArgumentsList()
+            try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
             expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
             continue
           }
@@ -718,6 +749,7 @@ extension Parser {
         if !methodTypeArgs.isEmpty {
           if currentToken === .leftParen {
             let arguments = try parseCallArgumentsList()
+            try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
             expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments)
               continue
           }
@@ -821,6 +853,11 @@ extension Parser {
       }
 
       try match(.rightParen)
+
+      if !calleeAllowsConstructorArgumentSyntax(callee) {
+        try rejectNonConstructorCallSyntax(arguments: arguments, span: callee.span)
+      }
+
       return .call(callee: callee, arguments: arguments)
     }
   }
@@ -1329,7 +1366,7 @@ extension Parser {
   /// Parse for expression: for <pattern> in <iterable> then <body>
   private func forExpression() throws -> ExpressionNode {
     try match(.forKeyword)
-    let pattern = try parsePattern()
+    let pattern = try parseForBindingPattern()
     try match(.inKeyword)
     let iterable = try expression()
     try match(.thenKeyword)

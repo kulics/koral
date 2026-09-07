@@ -51,7 +51,7 @@ public let acosh[T FloatMath](x T) T
 
 public let atanh[T FloatMath](x T) T
 
-public let fma[T FloatingPoint](x T, mul: T, add: T) T
+public let fma[T FloatingPoint](x T, mul T, add T) T
 
 public let lerp[T FloatingPoint](a T, b T, t T) T
 
@@ -63,7 +63,7 @@ public let gamma[T FloatMath](x T) T
 
 public let log_gamma[T FloatMath](x T) T
 
-public let log[T FloatingPoint](x T, base: T) T
+public let log[T FloatingPoint](x T, base T) T
 
 public let gcd[T Integer](a T, b T) T
 

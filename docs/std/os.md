@@ -168,7 +168,7 @@ given File as Reader {
 }
 
 given File as Writer {
-    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public write(*self, from List[UInt8], range Range[UInt]) Result[UInt]
     public flush(*self) Result[Void]
 }
 

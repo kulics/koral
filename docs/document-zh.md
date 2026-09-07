@@ -7,12 +7,12 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 规范说明：
 
 - 本文档是面向使用者的语言参考。
-- 对语法敏感的问题，以 `docs/grammar.bnf` 和当前编译器行为为准。
-- 如果本文档示例与编译器行为不一致，应以编译器行为为真值，并同步修正文档。
+- 对语法敏感的问题，请结合本文档与 `docs/grammar.bnf` 一起阅读。
+- 如果本文档、BNF 与实现不一致，应修正实现和/或文档，使三者重新一致。
 
 ## 关键特性
 
-- 现代化、易于辨识的语法，支持可选分号和表达式导向控制流：`if`、`when`、`while`、`for` 都是表达式。单分支形式（无 `else`）产生 `Void`；双分支形式产生值。
+- 现代化、易于辨识的语法，支持可选分号和表达式导向控制流：`if`、`when`、`while`、`for` 都采用表达式形态的表面语法。其中 `if` 和 `when` 可以产值；`while` 与 `for` 始终产生 `Void`。
 - 基于引用计数、所有权分析和逃逸分析的自动内存管理。
 - 带有 Trait 约束的泛型系统，通过单态化实现零成本抽象。
 - 代数数据类型（结构体与枚举）配合穷尽式模式匹配。
@@ -277,7 +277,7 @@ a = 2  // 合法
 - 块中可以包含零条或多条语句。
 - 普通块表达式的默认类型是 `Void`。
 - `return`、`break`、`continue` 可以让块提前结束，因此对应块类型会变成 `Never`。
-- `yield <expression>` 不是通用的块返回机制；它只能出现在 `if` / `when` 表达式的分支 body 内，用于产出该分支的值并提前退出分支体。
+- `yield <expression>` 不是通用的块返回机制；它只能出现在最近的、会产值的 `if` / `when` 分支 body 内，用于产出该分支结果并提前退出分支体。
 - 不带表达式的 `break` 退出最近的 `while` 或 `for` 循环。
 - `yield` 和 `break` 不能穿透最内侧的可退出构造。这意味着 `yield`/`break` 不能穿越循环边界（例如在分支内的 `for`/`while` 循环中）或分支边界（例如在循环内的 `if`/`when` 表达式中）到达外层目标。
 - 以 `return`、`break` 或 `continue` 结尾的块类型为 `Never`。
@@ -888,7 +888,7 @@ let y = if x > 0 then "bigger" else if x == 0 then "equal" else "less"
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-当 `if`配合`else`且分支为块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `yield <expression>`；这也提供了分支内的 early exit。单分支 `if` 中不允许使用 `yield <expression>`。
+当 `if`配合`else`且分支为块时，这个块本身仍然默认是 `Void`。如果要让该分支给外层 `if` 表达式产值，需要在分支 body 中使用 `yield <expression>`；这也提供了分支内的 early exit。单分支 `if` 中不允许使用 `yield <expression>`，因为此时不存在分支结果目标。
 
 ```koral
 let label = if score >= 90 then {
@@ -1033,14 +1033,13 @@ for i in 0..5 then {
 }
 ```
 
-循环变量位置接受完整模式，可以直接解构元素：
+循环绑定位置接受与 `let` 相同的形状：单个绑定，或 `Pair` 解构绑定。每个绑定元素都支持 `_`、`mutable` 与可选类型标注。
 
 ```koral
-type Point(x Int, y Int)
-let points List[Point] = [Point(1, 2), Point(3, 4)]
+let pairs List[Pair[Int, Int]] = [Pair(1, 2), Pair(3, 4)]
 
-for Point(x, y) in points then {
-    println("x=" + to_string(x) + " y=" + to_string(y))
+for (left, right) in pairs then {
+    println((left + right).to_string())
 }
 ```
 
@@ -1232,6 +1231,8 @@ when b in {
 
 当在 `if` 或 `while` 语句的条件中使用时，`is` 在匹配成功后还可以将模式中的变量绑定到当前作用域；但在其他位置，`is` 只能做纯布尔测试，不能绑定变量。`when ... in` 使用自身的模式匹配机制，不通过 `is` 进行绑定。
 
+`is` 直接接受一个单独模式。如果需要在 `is` 下使用逻辑模式组合，需要显式写括号，以便和表达式层的 `and` / `or` / `not` 区分。
+
 ```koral
 let opt = Option[Int].Some(42)
 let has_value = opt is .Some(_)
@@ -1244,6 +1245,10 @@ if opt is .Some(v) then {
 // 比较模式
 if score is >= 60 then {
     println("passed")
+}
+
+if x is (0 or 1) then {
+    println("small")
 }
 
 // 条件中可继续组合普通布尔逻辑
@@ -1315,6 +1320,7 @@ let b = Button(label: "OK", height: 50, width: 100)
 构造器标签遵循这些规则：
 
 - 只允许用于 struct 和 enum 构造。
+- 不允许用于普通静态方法调用，例如 `Type.make(...)`。
 - 标签按字段名匹配，而不是按位置匹配。
 - 允许重排。
 - 不允许在同一次构造中混用位置参数和标签参数。
@@ -1326,6 +1332,7 @@ type Shape {
 }
 
 let s = Shape.Line(end: Point(1, 1), start: Point(0, 0))
+// Date.new(year: 2024, month: 1, day: 1)    // 非法：静态方法仍然只接受位置参数
 ```
 
 当遗漏字段的类型提供明显默认值时，构造器可以在末尾使用 `...`：

@@ -93,7 +93,7 @@ given ByteBuffer as Reader {
 }
 
 given ByteBuffer as Writer {
-    public write(*self, from: List[UInt8], range Range[UInt]) Result[UInt]
+    public write(*self, from List[UInt8], range Range[UInt]) Result[UInt]
     public flush(*self) Result[Void]
 }
 
@@ -111,6 +111,6 @@ given Reader {
 }
 
 given Writer {
-    public write_all(*self, from: List[UInt8], range Range[UInt]) Result[Void]
+    public write_all(*self, from List[UInt8], range Range[UInt]) Result[Void]
 }
 ```

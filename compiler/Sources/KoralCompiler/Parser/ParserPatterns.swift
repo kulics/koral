@@ -52,6 +52,13 @@ extension Parser {
   private func parseOrPattern() throws -> PatternNode {
     let startSpan = currentSpan
     var left = try parseAndPattern()
+
+    if currentToken === .pipe {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: "Pattern separator '|' is not supported; use 'or'"
+      )
+    }
     
     while currentToken === .orKeyword {
       try match(.orKeyword)

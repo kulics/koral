@@ -710,7 +710,58 @@ given TypeChecker {
         return self.empty_typed_block(Type.Unknown())
     }
 
-    protected lower_for_expr(self, pattern PatternNode, iterable * Expr, body * Expr, scope Scope) TypedExpr = {
+    protected lower_for_binding_pattern_shape(self, pattern ForBindingPattern) PatternNode = {
+        return when pattern in {
+            .Single(binding) then self.lower_for_binding_element_shape(binding),
+            .Pair(first, second, span) then {
+                let mutable elements = List[PatternElement].new()
+                elements.push(PatternElement(Option[String].None(), box(self.lower_for_binding_element_shape(first))))
+                elements.push(PatternElement(Option[String].None(), box(self.lower_for_binding_element_shape(second))))
+                yield PatternNode.StructPattern("Pair", elements, span)
+            },
+        }
+    }
+
+    protected lower_for_binding_element_shape(self, binding PairBindingElement) PatternNode = {
+        let _ = self
+        if binding.is_discard then {
+            return PatternNode.Wildcard(binding.span)
+        }
+        return PatternNode.Variable(binding.name, binding.is_mutable, binding.span)
+    }
+
+    protected for_pair_binding_types(self, element_type Type, span SourceSpan) Pair[Type, Type] = {
+        let first_type = self.get_pair_binding_type(element_type, "first")
+        let second_type = self.get_pair_binding_type(element_type, "second")
+        return when first_type in {
+            .Some(first) then when second_type in {
+                .Some(second) then Pair[Type, Type](first, second),
+                .None() then {
+                    self.push_diagnostic_at_span("Type mismatch: expected Pair, got \(type_to_string(element_type))", span)
+                    yield Pair[Type, Type](Type.Unknown(), Type.Unknown())
+                },
+            },
+            .None() then {
+                self.push_diagnostic_at_span("Type mismatch: expected Pair, got \(type_to_string(element_type))", span)
+                yield Pair[Type, Type](Type.Unknown(), Type.Unknown())
+            },
+        }
+    }
+
+    protected bind_for_binding_pattern(self, pattern ForBindingPattern, element_type Type, scope Scope) Void = {
+        when pattern in {
+            .Single(binding) then {
+                let _ = self.bind_pair_let_symbol(binding, element_type, scope)
+            },
+            .Pair(first, second, span) then {
+                let pair_types = self.for_pair_binding_types(element_type, span)
+                let _ = self.bind_pair_let_symbol(first, pair_types.first, scope)
+                let _ = self.bind_pair_let_symbol(second, pair_types.second, scope)
+            },
+        }
+    }
+
+    protected lower_for_expr(self, pattern ForBindingPattern, iterable * Expr, body * Expr, scope Scope) TypedExpr = {
         let typed_iter = self.check_expr_scoped_ref(iterable, .None(), scope)
         let mutable for_scope = Scope.new_child(scope)
         let iterable_type = when typed_iter.expr_type in {
@@ -753,9 +804,7 @@ given TypeChecker {
                 self.enforce_explicit_generic_trait_conformance(iterable_type, "Iterable", iterable_trait_args)
             }
         }
-        let pattern_ref = box(pattern)
-        self.check_for_loop_pattern_exhaustiveness(pattern_ref, iter_item_type)
-        self.bind_pattern_vars(pattern_ref, iter_item_type, for_scope)
+        self.bind_for_binding_pattern(pattern, iter_item_type, for_scope)
         let prev_in_loop = self.storage.in_loop
         self.storage.in_loop = true
         self.storage.loop_depth = self.storage.loop_depth + 1
@@ -775,12 +824,13 @@ given TypeChecker {
         let iterator_symbol = self.make_expr_temp_symbol("__for_iter", iterator_init.expr_type, VariableKind.MutableValue())
         let iterator_var = make_typed_expr(TypedExprKind.Variable(iterator_symbol), iterator_symbol.symbol_type)
         let next_call = self.lower_receiver_method_call_expr(iterator_var, "next", List[* TypedExpr].new())
+        let user_pattern = self.lower_for_binding_pattern_shape(pattern)
         let loop_pattern = if self.extract_option_result_inner(next_call.expr_type) is not .Unknown() then {
             let mutable wrapped = List[PatternElement].new()
-            wrapped.push(PatternElement(Option[String].None(), box(pattern)))
+            wrapped.push(PatternElement(Option[String].None(), box(user_pattern)))
             yield PatternNode.EnumCase("Some", wrapped, unknown_span())
         } else {
-            yield pattern
+            yield user_pattern
         }
         let while_stmt = self.lower_while_pattern_from_typed(next_call, loop_pattern, typed_body, for_scope)
 

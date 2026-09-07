@@ -313,6 +313,54 @@ public class Parser {
     return PairBindingElement(name: name, type: type, mutable: mutable, isDiscard: false, span: elemSpan)
   }
 
+  func parseForBindingPattern() throws -> BindingPatternNode {
+    let startSpan = currentSpan
+
+    if currentToken === .leftParen {
+      try match(.leftParen)
+      let first = try parsePairBindingElement()
+      try match(.comma)
+      let second = try parsePairBindingElement()
+      try match(.rightParen)
+      return .pair(first: first, second: second, span: startSpan)
+    }
+
+    let binding = try parseForBindingElement()
+    return .binding(binding)
+  }
+
+  private func parseForBindingElement() throws -> PairBindingElement {
+    let elemSpan = currentSpan
+
+    if case .identifier("_") = currentToken {
+      try match(.identifier("_"))
+      return PairBindingElement(name: "_", type: nil, mutable: false, isDiscard: true, span: elemSpan)
+    }
+
+    var mutable = false
+    if currentToken === .mutableKeyword {
+      try match(.mutableKeyword)
+      mutable = true
+    }
+
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
+    }
+
+    if !isValidVariableName(name) {
+      throw ParserError.invalidVariableName(span: currentSpan, name: name)
+    }
+
+    try match(.identifier(name))
+
+    var type: TypeNode? = nil
+    if currentToken !== .inKeyword {
+      type = try parseType()
+    }
+
+    return PairBindingElement(name: name, type: type, mutable: mutable, isDiscard: false, span: elemSpan)
+  }
+
 
   // MARK: - Utility Methods
 

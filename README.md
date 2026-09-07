@@ -9,8 +9,8 @@ This repository contains the compiler, standard library, formatter, language doc
 Reference note:
 
 - `README.md` is a high-level overview, not the canonical grammar document.
-- For syntax-sensitive details, use `docs/grammar.bnf` and current compiler behavior as the source of truth.
-- If this README disagrees with the compiler, prefer compiler behavior and update the README.
+- For syntax-sensitive details, use `docs/grammar.bnf` together with the language reference in `docs/document.md` and `docs/document-zh.md`.
+- When implementation and docs drift, resolve the mismatch by updating the implementation and/or the documents so they converge.
 
 ## The Core Idea: ARC + Escape Analysis
 
@@ -41,7 +41,7 @@ let shared_point = heap_point
 ## Language Highlights
 
 - **No GC, No Manual `free`**: Automatic memory management based on reference counting and escape analysis.
-- **Expression-Oriented Control Flow**: `if` and `when` can be expressions or statements; blocks can produce values in expression contexts; `while` and `for` keep the same surface style but remain statement-only.
+- **Expression-Oriented Control Flow**: `if`, `when`, `while`, and `for` share the same expression surface syntax; `if` and `when` may produce branch values, while `while` and `for` always produce `Void`.
 - **Zero-Cost Abstractions**: Generics with trait constraints and monomorphization.
 - **Algebraic Data Types**: Structs and enums with exhaustive pattern matching.
 - **C Interop**: Foreign function interface (FFI) and a C backend for broad platform compatibility.
@@ -194,7 +194,7 @@ let result = list.iterator()
 - `when` expressions/statements for exhaustive pattern matching
 - `defer` for deterministic cleanup
 - `break`, `continue`, `return`, `yield`
-- `yield expression` inside `if` / `when` expression branch bodies for branch values and early branch exit
+- `yield expression` inside the nearest value-producing `if` / `when` branch body for branch values and early branch exit
 
 ### Pattern Matching
 
@@ -213,7 +213,7 @@ let result = list.iterator()
 ### Functions and Lambdas
 
 - Top-level and generic functions
-- Constructor labels and default-fill: `type Point(x Int, y Int)` constructed as `Point(x: 1, y: 2)` or `Point(x: 1, ...)`
+- Constructor labels and default-fill: `type Point(x Int, y Int)` constructed as `Point(x: 1, y: 2)` or `Point(x: 1, ...)`; ordinary static methods remain positional-only
 - Lambda expressions: `(x Int) Int -> x * 2`
 - Closures with captured variables
 - Literals: strings use `"..."`; rune literals use `'...'` (default `Rune`, can infer to `UInt8` in explicit byte context)

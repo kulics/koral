@@ -322,6 +322,44 @@ public struct PairBindingElement {
   public let span: SourceSpan
 }
 
+private func bindingElementDescription(_ binding: PairBindingElement) -> String {
+  if binding.isDiscard {
+    return "_"
+  }
+
+  var parts: [String] = []
+  if binding.mutable {
+    parts.append("mutable")
+  }
+  parts.append(binding.name)
+  if let type = binding.type {
+    parts.append(type.description)
+  }
+  return parts.joined(separator: " ")
+}
+
+/// A let-style binding pattern used by `for ... in ...`.
+public enum BindingPatternNode: CustomStringConvertible {
+  case binding(PairBindingElement)
+  case pair(first: PairBindingElement, second: PairBindingElement, span: SourceSpan)
+
+  public var span: SourceSpan {
+    switch self {
+    case .binding(let binding): return binding.span
+    case .pair(_, _, let span): return span
+    }
+  }
+
+  public var description: String {
+    switch self {
+    case .binding(let binding):
+      return bindingElementDescription(binding)
+    case .pair(let first, let second, _):
+      return "(\(bindingElementDescription(first)), \(bindingElementDescription(second)))"
+    }
+  }
+}
+
 public indirect enum StatementNode {
   case variableDeclaration(
     name: String, type: TypeNode?, value: ExpressionNode, mutable: Bool, span: SourceSpan)
@@ -510,8 +548,8 @@ public indirect enum ExpressionNode {
   /// - methodName: The method name (e.g., "empty", "new")
   /// - arguments: The method arguments
   case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [CallArg])
-  /// For loop expression: for <pattern> = <iterable> then <body>
-  case forExpression(pattern: PatternNode, iterable: ExpressionNode, body: ExpressionNode)
+  /// For loop expression: for <binding-pattern> in <iterable> then <body>
+  case forExpression(pattern: BindingPatternNode, iterable: ExpressionNode, body: ExpressionNode)
   /// Range expression with operator and operands
   /// - operator: The range operator type
   /// - left: Left operand (nil for To, Until, Full)

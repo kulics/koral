@@ -1361,7 +1361,7 @@ given Int8 {
 }
 
 given SliceSpec {
-    public new(offset: UInt, len: UInt) SliceSpec
+    public new(offset UInt, len UInt) SliceSpec
     public start(self) UInt
     public end(self) UInt
     public len(self) UInt
@@ -1791,6 +1791,6 @@ given[T Ord, U Ord] Pair[T, U] as Ord {
 }
 
 given Ord {
-    public clamp(self, min: Self, max: Self) Self
+    public clamp(self, min Self, max Self) Self
 }
 ```

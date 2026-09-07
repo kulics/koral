@@ -7555,7 +7555,7 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Type checks a for expression and desugars it to let + while + match.
-  /// for <pattern> = <iterable> then <body>
+  /// for <binding-pattern> in <iterable> then <body>
   /// becomes:
   /// let mutable __koral_iter_N = <iterable>.iterator() then  // or just <iterable> if it's already an iterator
   ///   while true then
@@ -7564,7 +7564,7 @@ extension TypeChecker {
   ///       .None then break
   ///     }
   func inferForExpression(
-    pattern: PatternNode,
+    pattern: BindingPatternNode,
     iterable: ExpressionNode,
     body: ExpressionNode
   ) throws -> TypedExpressionNode {
@@ -7586,10 +7586,9 @@ extension TypeChecker {
         traitTypeArgs: [elementType],
         context: "for-in iterator check"
       )
-      // The expression itself is an iterator, use it directly
-      try checkForLoopPatternExhaustiveness(pattern: pattern, elementType: elementType)
+      let typedPattern = try typeCheckForBindingPattern(pattern, elementType: elementType)
       return try desugarForLoop(
-        pattern: pattern,
+        pattern: typedPattern,
         typedIterable: typedIterable,
         iteratorType: iterableType,
         elementType: elementType,
@@ -7626,13 +7625,11 @@ extension TypeChecker {
       traitTypeArgs: [elementType, iteratorType],
       context: "for-in iterable check"
     )
-    
-    // 6. Check pattern exhaustiveness against element type
-    try checkForLoopPatternExhaustiveness(pattern: pattern, elementType: elementType)
+    let typedPattern = try typeCheckForBindingPattern(pattern, elementType: elementType)
     
     // 7. Desugar the for loop
     return try desugarForLoop(
-      pattern: pattern,
+      pattern: typedPattern,
       typedIterable: typedIterable,
       iteratorType: iteratorType,
       elementType: elementType,
@@ -7667,42 +7664,59 @@ extension TypeChecker {
     }
   }
 
-  /// Checks that the for loop pattern is exhaustive for the element type.
-  private func checkForLoopPatternExhaustiveness(pattern: PatternNode, elementType: Type) throws {
-    // For simple variable bindings and wildcards, they are always exhaustive
+  private func typeCheckForBindingPattern(
+    _ pattern: BindingPatternNode,
+    elementType: Type
+  ) throws -> TypedPattern {
     switch pattern {
-    case .variable, .wildcard:
-      return
-    case .enumCase:
-      throw SemanticError(.generic(
-        "For loop pattern must be exhaustive for element type \(elementType). Use a simple variable binding."
-      ), span: currentSpan)
-    case .booleanLiteral, .integerLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral:
-      throw SemanticError(.generic(
-        "For loop pattern must be exhaustive. Literal patterns are not exhaustive."
-      ), span: currentSpan)
-    case .comparisonPattern:
-      throw SemanticError(.generic(
-        "For loop pattern must be exhaustive. Comparison patterns are not exhaustive."
-      ), span: currentSpan)
-    case .traitObjectType, .traitObjectTypeBinding:
-      throw SemanticError(.generic(
-        "For loop pattern must be exhaustive. Trait object type patterns are not exhaustive."
-      ), span: currentSpan)
-    case .andPattern, .orPattern, .notPattern:
-      throw SemanticError(.generic(
-        "For loop pattern must be exhaustive. Pattern combinators are not exhaustive."
-      ), span: currentSpan)
-    case .structPattern:
-      throw SemanticError(.generic(
-        "For loop pattern must be exhaustive. Struct destructuring patterns are not exhaustive."
-      ), span: currentSpan)
+    case .binding(let binding):
+      return try typeCheckForBindingElement(binding, expectedType: elementType)
+    case .pair(let first, let second, let span):
+      guard case .genericStruct(let templateName, let typeArgs) = elementType,
+            templateName == "Pair",
+            typeArgs.count == 2 else {
+        throw SemanticError(.typeMismatch(expected: "Pair", got: elementType.description), span: span)
+      }
+
+      return .structPattern(
+        typeName: "Pair",
+        elements: [
+          try typeCheckForBindingElement(first, expectedType: typeArgs[0]),
+          try typeCheckForBindingElement(second, expectedType: typeArgs[1]),
+        ]
+      )
     }
+  }
+
+  private func typeCheckForBindingElement(
+    _ binding: PairBindingElement,
+    expectedType: Type
+  ) throws -> TypedPattern {
+    var bindingType = expectedType
+
+    if let typeNode = binding.type {
+      let annotatedType = try resolveTypeNode(typeNode)
+      if annotatedType != expectedType {
+        throw SemanticError(.typeMismatch(
+          expected: annotatedType.description,
+          got: expectedType.description
+        ), span: binding.span)
+      }
+      bindingType = annotatedType
+    }
+
+    if binding.isDiscard {
+      return .wildcard
+    }
+
+    let kind: VariableKind = binding.mutable ? .MutableValue : .Value
+    let symbol = makeLocalSymbol(name: binding.name, type: bindingType, kind: .variable(kind))
+    return .variable(symbol: symbol)
   }
 
   /// Desugars a for loop into let + while + match.
   func desugarForLoop(
-    pattern: PatternNode,
+    pattern: TypedPattern,
     typedIterable: TypedExpressionNode,
     iteratorType: Type,
     elementType: Type,
@@ -7743,7 +7757,6 @@ extension TypeChecker {
       let whenExpr = try buildForLoopWhenExpression(
         nextCall: nextCall,
         pattern: pattern,
-        elementType: elementType,
         body: body
       )
       
@@ -7834,12 +7847,11 @@ extension TypeChecker {
   /// Builds the match expression for the for loop body.
   func buildForLoopWhenExpression(
     nextCall: TypedExpressionNode,
-    pattern: PatternNode,
-    elementType: Type,
+    pattern: TypedPattern,
     body: ExpressionNode
   ) throws -> TypedExpressionNode {
     // Build Some case pattern with the user's pattern
-    let somePattern = try buildSomePattern(userPattern: pattern, elementType: elementType)
+    let somePattern = buildSomePattern(userPattern: pattern)
     
     // Type check the body in a new scope with pattern bindings
     let typedBody = try withNewScope {
@@ -7878,10 +7890,9 @@ extension TypeChecker {
   }
 
   /// Builds the Some pattern wrapping the user's pattern.
-  func buildSomePattern(userPattern: PatternNode, elementType: Type) throws -> TypedPattern {
-    let innerPattern = try convertPatternToTypedPattern(userPattern, expectedType: elementType)
+  func buildSomePattern(userPattern: TypedPattern) -> TypedPattern {
     // Some has tag index 1 (None is 0, Some is 1 in Option)
-    return .enumCase(caseName: "Some", tagIndex: 1, elements: [innerPattern])
+    return .enumCase(caseName: "Some", tagIndex: 1, elements: [userPattern])
   }
 
   /// Converts an AST pattern to a typed pattern.

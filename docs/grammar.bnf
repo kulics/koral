@@ -212,8 +212,8 @@
 
 <defer-statement> ::= "defer" <expression> ";"?
 // Semantic restriction: `yield <expression>` is only valid inside the body of
-// an `if` or `when` expression branch. It produces the value of the enclosing
-// branch expression and supports early exit from that branch body.
+// the nearest value-producing `if` or `when` branch. It produces that branch
+// result and supports early exit from the branch body.
 // Plain `break` (without expression) exits the nearest enclosing `while`/`for` loop.
 
 <expression-statement> ::= <expression> ";"?
@@ -233,10 +233,12 @@
 
 <if-expression> ::= "if" <expression> "then" <expression> ("else" <expression>)?
 <while-expression> ::= "while" <expression> "then" <expression>
-<for-expression> ::= "for" <match-pattern> "in" <expression> "then" <expression>
+<for-expression> ::= "for" <for-binding-pattern> "in" <expression> "then" <expression>
 <when-expression> ::= "when" <expression> "in" "{" <match-arm-list> "}"
 <match-arm-list> ::= <match-arm> ("," <match-arm>)* ","?
 <match-arm> ::= <match-pattern> "then" <expression>
+<for-binding-pattern> ::= <pair-binding>
+                        | "(" <pair-binding> "," <pair-binding> ")"
 
 // ============================================================================
 // Binary Expressions (by precedence, lowest to highest)
@@ -248,17 +250,17 @@
 <or-else-expression> ::= <or-expression> ("or" "else" <or-expression>)*
 // "or else" is value coalescing for Option/Result types
 
-<and-then-expression> ::= <or-expression> ("and" "then" <or-expression>)*
-// "and then" is optional chaining / value transformation for Option/Result types
+<or-expression> ::= <and-then-expression> ("or" <and-then-expression>)*
 
-<or-expression> ::= <and-expression> ("or" <and-expression>)*
+<and-then-expression> ::= <and-expression> ("and" "then" <and-expression>)*
+// "and then" is optional chaining / value transformation for Option/Result types
 
 <and-expression> ::= <not-expression> ("and" <not-expression>)*
 <not-expression> ::= "not" <is-expression> | <is-expression>
 
 <is-expression> ::= <bitwise-or-expression>
-                  | <bitwise-or-expression> "is" <pattern>
-                  | <bitwise-or-expression> "is" "not" <pattern>
+                  | <bitwise-or-expression> "is" <is-pattern>
+                  | <bitwise-or-expression> "is" "not" <is-pattern>
 
 <bitwise-or-expression> ::= <bitwise-xor-expression> ("|" <bitwise-xor-expression>)*
 <bitwise-xor-expression> ::= <bitwise-and-expression> ("^" <bitwise-and-expression>)*
@@ -339,7 +341,6 @@
 // 限定方法调用：消歧义，指定 trait。可选地附带 trait 实参与方法级泛型参数。
 // 例: (n as Tag).plus_ten()  /  (b as Transform[Int]).apply[Out](f)
 <qualified-method-suffix> ::= "." <identifier> ("[" <type-list> "]")? "(" <argument-list>? ")"
-<qualified-base-expression> ::= "(" <expression> "as" <type> ")"
 
 <argument> ::= <identifier> ":" <expression>
              | "..."
@@ -358,6 +359,7 @@
 
 <primary-expression> ::= <literal>
                        | <identifier>
+                       | <type-identifier>
                        | "self"
                        | "it"
                        | <implicit-member-expression>
@@ -365,7 +367,10 @@
                        | <block-expression>
                        | <lambda-expression>
                        | <pair-literal>
+                       | <qualified-base-expression>
                        | "(" <expression> ")"
+
+<qualified-base-expression> ::= "(" <expression> "as" <type> ")"
 
 <pair-literal> ::= "(" <expression> "," <expression> ")"
 
@@ -405,10 +410,11 @@
 // Patterns
 // ============================================================================
 
-<pattern> ::= <primary-pattern>
-           | <comparison-pattern>
-// Used by `is` expressions. Logical pattern combinators are not allowed here.
-// Comparison patterns (e.g. `>= 60`, `> 10`) are allowed in `is` expressions.
+<is-pattern> ::= <primary-pattern>
+               | <comparison-pattern>
+               | "(" <match-pattern> ")"
+// `is` / `is not` accept a single pattern directly.
+// Logical pattern combinators under `is` must be grouped explicitly with parentheses.
 
 <match-pattern> ::= <or-pattern>
 // Used only by `when ... in` arms. Logical pattern combinators remain supported here.
@@ -430,7 +436,7 @@
                     | <pair-pattern>                          // pair destructuring pattern
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
-                    | "(" <pattern> ")"                       // parenthesized pattern (grouping)
+                    | "(" <match-pattern> ")"                 // parenthesized grouped match-pattern
 
 <trait-object-type-binding-pattern> ::= "mutable"? <identifier> <trait-object-type-pattern>
 // Binding exact trait-object implementation type pattern.
@@ -451,7 +457,7 @@
                           | <type-identifier> "[" <type-list> "]"
 // Generic concrete nominal type pattern, e.g. ParseError[Int].
 
-<pair-pattern> ::= "(" <pattern> "," <pattern> ")"
+<pair-pattern> ::= "(" <match-pattern> "," <match-pattern> ")"
 
 <struct-pattern> ::= <type-identifier> "(" <pattern-arg-list>? ")"
 // Struct destructuring pattern: matches a struct value and destructures its fields by position.
@@ -470,8 +476,8 @@
 
 <enum-case-pattern> ::= "." <type-identifier> ("(" <pattern-arg-list>? ")")?
 // 模式语法独立于构造语法；零字段 enum case 模式可写为 .None
-<pattern-arg> ::= <identifier> ":" <pattern>    // named pattern argument
-                | <pattern>                      // positional pattern argument
+<pattern-arg> ::= <identifier> ":" <match-pattern>    // named pattern argument
+                | <match-pattern>                      // positional pattern argument
 <pattern-arg-list> ::= <pattern-arg> ("," <pattern-arg>)* ","?
 
 // ============================================================================
@@ -600,6 +606,6 @@
 // - A newline may continue only when:
 //   1. The next token is a grammar join token (`and`, `or`, `is`, `then`, `else`, including `and then`, `or else`, `or return`)
 //   2. The next token is `.` or `->`
-//   3. The parser is still inside unclosed `()`, `[]`, or `{}` grouping
+//   3. The parser is still inside unclosed `()` or `[]` grouping
 // - Blank lines and comments do not change this by themselves
 // - Ordinary operators such as `+`, `*`, `==`, `<<`, and `..` do not join across newlines

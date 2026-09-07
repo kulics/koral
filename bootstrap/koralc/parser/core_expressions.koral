@@ -588,6 +588,29 @@ given Parser {
         return .Ok(args)
     }
 
+    protected reject_non_constructor_call_args(self, args List[* Expr]) Result[List[* Expr]] = {
+        for arg in args then {
+            when arg in {
+                .NamedArgument(label, _, _) then {
+                    if label == "..." then {
+                        return .Error(box("Default-fill '...' is only valid in constructor calls"))
+                    }
+                    return .Error(box("Named labels are only allowed on struct and enum constructors; use positional arguments"))
+                },
+                _ then {},
+            }
+        }
+        return .Ok(args)
+    }
+
+    protected call_target_allows_constructor_argument_syntax(self, callee * Expr) Bool = {
+        return when callee in {
+            .Identifier(name, _) then self.is_upper_first(name),
+            .GenericInstantiation(base, _, _) then self.is_upper_first(base),
+            _ then false,
+        }
+    }
+
     protected parse_control_flow_body(*mutable self) Result[* Expr] = {
         return self.parse_expression_checked("control-flow body")
     }
@@ -969,8 +992,8 @@ given Parser {
 
         while true then {
             when self.current().kind in {
-                .Pipe() then { self.advance() },
                 .KwOr() then { self.advance() },
+                .Pipe() then { return .Error(box("Pattern separator '|' is not supported; use 'or'")) },
                 _ then { break },
             }
             let right = self.parse_pattern_and(stop_on_in) or return
@@ -1139,10 +1162,64 @@ given Parser {
         return .Ok(box(Expr.WhileExpr(condition, body, span)))
     }
 
+    protected parse_for_binding_element(*mutable self) Result[PairBindingElement] = {
+        let start = self.current()
+
+        if start.kind is .Identifier(name) and name == "_" then {
+            self.advance()
+            return .Ok(PairBindingElement("_", false, Option[TypeNode].None(), true, self.span_from_start(start)))
+        }
+
+        let mutable is_mut = false
+        if self.current().kind is .KwMut() then {
+            is_mut = true
+            self.advance()
+        }
+
+        let name = self.expect_identifier("for binding") or return
+        if not self.is_valid_value_name(name) then {
+            return .Error(box(self.invalid_variable_name_error(name)))
+        }
+
+        let mutable type_name = Option[TypeNode].None()
+        when self.current().kind in {
+            .KwIn() then {},
+            _ then {
+                type_name = .Some(self.parse_type() or else {
+                    return .Error(box("parse for binding type error"))
+                })
+            },
+        }
+
+        return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)))
+    }
+
+    protected parse_for_binding_pattern(*mutable self) Result[ForBindingPattern] = {
+        let start = self.current()
+
+        if self.current().kind is .LParen() then {
+            self.advance()
+            let first = self.parse_pair_binding_element() or return
+            if self.current().kind is not .Comma() then {
+                return .Error(box("Expected ',' in for binding pattern"))
+            }
+            self.advance()
+            let second = self.parse_pair_binding_element() or return
+            if self.current().kind is not .RParen() then {
+                return .Error(box("Expected ')' in for binding pattern"))
+            }
+            self.advance()
+            return .Ok(ForBindingPattern.Pair(first, second, self.span_from_start(start)))
+        }
+
+        let binding = self.parse_for_binding_element() or return
+        return .Ok(ForBindingPattern.Single(binding))
+    }
+
     protected parse_for_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         self.advance()
-        let pattern = self.collect_pattern_until_in() or return
+        let pattern = self.parse_for_binding_pattern() or return
 
         let _ = self.expect_kw_in("for expression") or return
 
@@ -1207,31 +1284,60 @@ given Parser {
         when base in {
             .MemberPath(receiver_base, path, _) then {
                 if path.is_empty() then {
+                    when self.reject_non_constructor_call_args(args) in {
+                        .Ok(_) then {},
+                        .Error(e) then { return .Error(e) },
+                    }
                     return .Ok(box(Expr.Call(base, args, self.span_from_expr_start(base))))
                 }
                 let member = path[path.count() - 1]
                 let receiver_expr = self.member_path_call_receiver_expr(receiver_base, path)
                 return when receiver_expr in {
                     .Identifier(type_name, _) then {
+                        when self.reject_non_constructor_call_args(args) in {
+                            .Ok(_) then {},
+                            .Error(e) then { return .Error(e) },
+                        }
                         let expr = if self.is_upper_first(type_name)
                             then box(Expr.StaticMethodCall(type_name, List[* TypeNode].new(), member, args, self.span_from_expr_start(base)))
                             else box(Expr.Call(base, args, self.span_from_expr_start(base)))
                         yield Result[* Expr].Ok(expr)
                     },
                     .GenericInstantiation(type_name, type_args, _) then {
+                        when self.reject_non_constructor_call_args(args) in {
+                            .Ok(_) then {},
+                            .Error(e) then { return .Error(e) },
+                        }
                         yield Result[* Expr].Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base))))
                     },
                     .MemberPath(_, _, _) then {
+                        when self.reject_non_constructor_call_args(args) in {
+                            .Ok(_) then {},
+                            .Error(e) then { return .Error(e) },
+                        }
                         let expr = when self.extract_static_dispatch_receiver(receiver_expr) in {
                             .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))),
                             .None() then box(Expr.Call(base, args, self.span_from_expr_start(base))),
                         }
                         yield Result[* Expr].Ok(expr)
                     },
-                    _ then Result[* Expr].Ok(box(Expr.Call(base, args, self.span_from_expr_start(base)))),
+                    _ then {
+                        when self.reject_non_constructor_call_args(args) in {
+                            .Ok(_) then {},
+                            .Error(e) then { return .Error(e) },
+                        }
+                        yield Result[* Expr].Ok(box(Expr.Call(base, args, self.span_from_expr_start(base))))
+                    },
                 }
             },
             _ then {},
+        }
+
+        if not self.call_target_allows_constructor_argument_syntax(base) then {
+            when self.reject_non_constructor_call_args(args) in {
+                .Ok(_) then {},
+                .Error(e) then { return .Error(e) },
+            }
         }
         return .Ok(box(Expr.Call(base, args, self.span_from_expr_start(base))))
     }
@@ -1318,6 +1424,10 @@ given Parser {
                     .RParen() then { self.advance() },
                     _ then { return .Error(box("Expected ')' after qualified method call arguments")) },
                 }
+                when self.reject_non_constructor_call_args(args) in {
+                    .Ok(_) then {},
+                    .Error(e) then { return .Error(e) },
+                }
 
                 return if method_type_args.is_empty()
                     then .Ok(box(Expr.QualifiedMethodCall(qualified_base, trait_type, member, args, self.span_from_expr_start(base))))
@@ -1340,6 +1450,10 @@ given Parser {
                 .RParen() then { self.advance() },
                 _ then { return .Error(box("Expected ')' after static method call arguments")) },
             }
+            when self.reject_non_constructor_call_args(args) in {
+                .Ok(_) then {},
+                .Error(e) then { return .Error(e) },
+            }
             return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))))
         }
 
@@ -1349,6 +1463,10 @@ given Parser {
             when self.current().kind in {
                 .RParen() then { self.advance() },
                 _ then { return .Error(box("Expected ')' after generic method call arguments")) },
+            }
+            when self.reject_non_constructor_call_args(args) in {
+                .Ok(_) then {},
+                .Error(e) then { return .Error(e) },
             }
             return .Ok(box(Expr.GenericMethodCall(base, method_type_args, member, args, self.span_from_expr_start(base))))
         }

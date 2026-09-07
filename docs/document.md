@@ -7,12 +7,12 @@ Through carefully designed syntax rules, this language can effectively reduce re
 Specification note:
 
 - This document is the user-facing language reference.
-- For grammar-sensitive questions, `docs/grammar.bnf` and current compiler behavior are authoritative.
-- If examples in this document and compiler behavior disagree, treat compiler behavior as the source of truth and update the documentation accordingly.
+- For grammar-sensitive questions, read this document together with `docs/grammar.bnf`.
+- If examples in this document, the BNF, and the implementation disagree, update the implementation and/or the documents so they converge.
 
 ## Key Features
 
-- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` are always expressions. Single-branch forms (without `else`) produce `Void`; dual-branch forms produce a value.
+- Modern, easy-to-scan syntax with optional semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` all use expression-form surface syntax. `if` and `when` may produce values; `while` and `for` always produce `Void`.
 - Automatic memory management based on reference counting, ownership analysis, and escape analysis.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
@@ -261,7 +261,7 @@ Block rules:
 - A block contains zero or more statements.
 - A plain block's default type is `Void`.
 - `return`, `break`, and `continue` can end the block early and therefore give that block type `Never`.
-- `yield <expression>` is not a general block-return mechanism. It is only valid inside the body of an `if` or `when` expression branch, where it produces the value of that branch and exits the branch body early.
+- `yield <expression>` is not a general block-return mechanism. It is only valid inside the body of the nearest value-producing `if` or `when` branch, where it produces that branch result and exits the branch body early.
 - Plain `break` (without expression) exits the nearest enclosing `while` or `for` loop.
 - `yield` and `break` cannot penetrate through the innermost exitable construct. This means `yield`/`break` cannot cross a loop boundary (e.g., inside a `for`/`while` inside a branch) or a branch boundary (e.g., inside an `if`/`when` expression inside a loop) to reach an outer target.
 - A block ending with `return`, `break`, or `continue` has type `Never`.
@@ -850,7 +850,7 @@ When we don't need to handle the `else` branch, we can omit it. In that case the
 let main() Void = if 1 == 1 then println("yes")
 ```
 
-When an `if` with `else` uses a block branch, that block still defaults to `Void`. Use `yield <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early. `yield <expression>` is not valid in single-branch `if` bodies.
+When an `if` with `else` uses a block branch, that block still defaults to `Void`. Use `yield <expression>` to produce the value of the enclosing `if` expression and to exit that branch body early. `yield <expression>` is not valid in single-branch `if` bodies because there is no branch-result target.
 
 ```koral
 let label = if score >= 90 then {
@@ -993,14 +993,13 @@ for i in 0..5 then {
 }
 ```
 
-The loop variable position accepts a full pattern, so you can destructure elements directly:
+The loop binding position accepts the same shapes as `let`: a single binding or a `Pair` destructuring binding. Each element may use `_`, `mutable`, and an optional type annotation.
 
 ```koral
-type Point(x Int, y Int)
-let points List[Point] = [Point(1, 2), Point(3, 4)]
+let pairs List[Pair[Int, Int]] = [Pair(1, 2), Pair(3, 4)]
 
-for Point(x, y) in points then {
-    println("x=" + to_string(x) + " y=" + to_string(y))
+for (left, right) in pairs then {
+    println((left + right).to_string())
 }
 ```
 
@@ -1192,6 +1191,8 @@ The `is` operator checks whether a value matches a pattern, and the result is al
 
 When used in the condition of an `if` or `while` statement, a successful `is` match can also bind variables from the pattern into the current scope. Outside those condition contexts, `is` may only perform a boolean test and may not introduce bindings. The `when ... in` construct uses its own pattern matching on the matched value and does not use `is` for binding.
 
+`is` accepts a single pattern directly. If you need logical pattern combinators under `is`, group them explicitly with parentheses so the parser can distinguish them from expression-level `and` / `or` / `not`.
+
 ```koral
 let opt = Option[Int].Some(42)
 let has_value = opt is .Some(_)
@@ -1204,6 +1205,10 @@ if opt is .Some(v) then {
 // Comparison pattern
 if score is >= 60 then {
     println("passed")
+}
+
+if x is (0 or 1) then {
+    println("small")
 }
 
 // Standard boolean composition still works in conditions
@@ -1275,6 +1280,7 @@ let b = Button(label: "OK", height: 50, width: 100)
 Constructor labels follow these rules:
 
 - They are valid only on struct and enum constructors.
+- They are not valid on ordinary static method calls such as `Type.make(...)`.
 - Labeled constructor arguments match by field name, not by position.
 - Reordering is allowed.
 - Positional and labeled constructor arguments may not be mixed.
@@ -1286,6 +1292,7 @@ type Shape {
 }
 
 let s = Shape.Line(end: Point(1, 1), start: Point(0, 0))
+// Date.new(year: 2024, month: 1, day: 1)    // invalid: static methods remain positional-only
 ```
 
 When omitted fields have obvious defaults, constructors may end with trailing `...`.
