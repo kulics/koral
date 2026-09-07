@@ -1490,6 +1490,12 @@ Rules:
 - They require parentheses; bare `.Name` is not a valid implicit member expression.
 - If the compiler cannot infer the expected type, the expression is rejected.
 
+Design note:
+
+- Enum cases remain data constructors semantically, but Koral gives implicit member expressions a uniform explicit construction or call surface.
+- In expression position, zero-field enum cases therefore still use `.Name()` rather than bare `.Name()` omission.
+- Pattern syntax is separate from construction syntax, so zero-field enum case patterns may still be written as `.Name`.
+
 ```koral
 // Enum construction — omit the Option[Int] prefix
 let a Option[Int] = .Some(42)

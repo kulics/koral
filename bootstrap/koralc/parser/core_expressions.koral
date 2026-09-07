@@ -333,17 +333,16 @@ given Parser {
                 let span = self.span_from_start(t)
                 self.advance() // consume '.'
                 let member_name = self.expect_identifier("implicit member name") or return
-                let mutable call_args = List[* Expr].new()
-                let cur_kind = self.current().kind
-                let has_lparen = when cur_kind in { .LParen() then true, _ then false }
                 let no_newline = not self.current().has_newline_before
-                if has_lparen and no_newline then {
-                    self.advance() // consume '('
-                    call_args = self.parse_argument_list_until_rparen("implicit member call") or return
-                    when self.current().kind in {
-                        .RParen() then { self.advance() },
-                        _ then { return .Error(box("Expected ')' after implicit member call arguments")) },
-                    }
+                if not (self.current().kind is .LParen() and no_newline) then {
+                    return .Error(box("Expected '(' after implicit member name"))
+                }
+
+                self.advance() // consume '('
+                let call_args = self.parse_argument_list_until_rparen("implicit member call") or return
+                when self.current().kind in {
+                    .RParen() then { self.advance() },
+                    _ then { return .Error(box("Expected ')' after implicit member call arguments")) },
                 }
                 return .Ok(box(Expr.ImplicitMemberExpr(member_name, call_args, span)))
             },
