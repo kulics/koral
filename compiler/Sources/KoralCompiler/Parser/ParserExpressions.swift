@@ -49,11 +49,15 @@ extension Parser {
     case .genericInstantiation(let base, _):
       return isValidTypeName(base)
     case .memberPath(_, let path):
-      return path.last.map(isValidTypeName) ?? false
+        return memberPathAllowsConstructorArgumentSyntax(path)
     default:
       return false
     }
   }
+
+    private func memberPathAllowsConstructorArgumentSyntax(_ path: [String]) -> Bool {
+      path.last.map(isValidTypeName) ?? false
+    }
 
   private func rejectNonConstructorCallSyntax(arguments: [CallArg], span: SourceSpan) throws {
     if arguments.contains(where: { $0.isDefaultFill }) {
