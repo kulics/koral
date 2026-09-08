@@ -1266,10 +1266,6 @@ extension TypeChecker {
       if typedArg.type != param.type {
         if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: param.type) {
           typedArg = flavorConversion
-        } else if let implicitRef = try makeImplicitReference(typedArg, expectedType: param.type) {
-          typedArg = implicitRef
-        } else if let implicitDeref = makeImplicitDereference(typedArg, expectedType: param.type) {
-          typedArg = implicitDeref
         } else if canWidenMutableReference(typedArg, expectedType: param.type) {
           // ref mutable → ref widening: pass through unchanged
         } else {

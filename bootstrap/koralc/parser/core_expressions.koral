@@ -607,6 +607,21 @@ given Parser {
         return when callee in {
             .Identifier(name, _) then self.is_upper_first(name),
             .GenericInstantiation(base, _, _) then self.is_upper_first(base),
+            .MemberPath(_, path, _) then if not path.is_empty()
+                then self.is_upper_first(path[path.count() - 1])
+                else false,
+            _ then false,
+        }
+    }
+
+    protected member_call_allows_constructor_argument_syntax(self, receiver_expr * Expr, member String) Bool = {
+        if not self.is_upper_first(member) then {
+            return false
+        }
+        return when receiver_expr in {
+            .Identifier(type_name, _) then self.is_upper_first(type_name),
+            .GenericInstantiation(type_name, _, _) then self.is_upper_first(type_name),
+            .MemberPath(_, _, _) then self.extract_static_dispatch_receiver(receiver_expr) is .Some(_),
             _ then false,
         }
     }
@@ -1292,11 +1307,14 @@ given Parser {
                 }
                 let member = path[path.count() - 1]
                 let receiver_expr = self.member_path_call_receiver_expr(receiver_base, path)
+                let allows_constructor_args = self.member_call_allows_constructor_argument_syntax(receiver_expr, member)
                 return when receiver_expr in {
                     .Identifier(type_name, _) then {
-                        when self.reject_non_constructor_call_args(args) in {
-                            .Ok(_) then {},
-                            .Error(e) then { return .Error(e) },
+                        if not allows_constructor_args then {
+                            when self.reject_non_constructor_call_args(args) in {
+                                .Ok(_) then {},
+                                .Error(e) then { return .Error(e) },
+                            }
                         }
                         let expr = if self.is_upper_first(type_name)
                             then box(Expr.StaticMethodCall(type_name, List[* TypeNode].new(), member, args, self.span_from_expr_start(base)))
@@ -1304,16 +1322,20 @@ given Parser {
                         yield Result[* Expr].Ok(expr)
                     },
                     .GenericInstantiation(type_name, type_args, _) then {
-                        when self.reject_non_constructor_call_args(args) in {
-                            .Ok(_) then {},
-                            .Error(e) then { return .Error(e) },
+                        if not allows_constructor_args then {
+                            when self.reject_non_constructor_call_args(args) in {
+                                .Ok(_) then {},
+                                .Error(e) then { return .Error(e) },
+                            }
                         }
                         yield Result[* Expr].Ok(box(Expr.StaticMethodCall(type_name, type_args, member, args, self.span_from_expr_start(base))))
                     },
                     .MemberPath(_, _, _) then {
-                        when self.reject_non_constructor_call_args(args) in {
-                            .Ok(_) then {},
-                            .Error(e) then { return .Error(e) },
+                        if not allows_constructor_args then {
+                            when self.reject_non_constructor_call_args(args) in {
+                                .Ok(_) then {},
+                                .Error(e) then { return .Error(e) },
+                            }
                         }
                         let expr = when self.extract_static_dispatch_receiver(receiver_expr) in {
                             .Some(receiver) then box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))),
@@ -1450,9 +1472,11 @@ given Parser {
                 .RParen() then { self.advance() },
                 _ then { return .Error(box("Expected ')' after static method call arguments")) },
             }
-            when self.reject_non_constructor_call_args(args) in {
-                .Ok(_) then {},
-                .Error(e) then { return .Error(e) },
+            if not self.is_upper_first(member) then {
+                when self.reject_non_constructor_call_args(args) in {
+                    .Ok(_) then {},
+                    .Error(e) then { return .Error(e) },
+                }
             }
             return .Ok(box(Expr.StaticMethodCall(receiver.type_name, receiver.type_args, member, args, self.span_from_expr_start(base))))
         }

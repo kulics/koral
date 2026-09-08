@@ -9,10 +9,33 @@ given MIRLowerer {
     public new(program *mutable MonomorphizedProgram, context * CompilerContext) MIRLowerer =
         MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false)
 
+    protected unique_vtable_requests(self) List[VtableRequest] = {
+        let _ = self
+        let mutable seen = Set[String].new()
+        let mutable unique = List[VtableRequest].new()
+        for request in self.program.vtable_requests then {
+            let mutable key = stable_type_key(request.concrete_type)
+            key.push_string("|")
+            key.push_string(request.trait_name)
+            let mutable i UInt = 0
+            while i < request.trait_type_args.count() then {
+                key.push_string("|")
+                key.push_string(stable_type_key(*request.trait_type_args[i]))
+                i += 1
+            }
+            if seen.contains(key) then {
+                continue
+            }
+            seen.insert(key)
+            unique.push(request)
+        }
+        return unique
+    }
+
     public metadata_program(self) * MIRProgram = {
         let mutable globals_reversed = List[MIRGlobal].new()
 
-        for request in self.program.vtable_requests then {
+        for request in self.unique_vtable_requests() then {
             globals_reversed.push(MIRGlobal.TraitVTable(self.make_trait_vtable(request)))
         }
 
@@ -657,6 +680,7 @@ type MIRReferenceAllocationFunctionPromoter(
     local_types_by_id Dict[UInt, Type],
     local_storages_by_id Dict[UInt, MIRStorage],
     escaping_locals Set[UInt],
+    escaping_value_locals Set[UInt],
     temporary_local_ids Set[UInt],
     temporary_value_sources_by_id Dict[UInt, MIRValue],
     escape_summaries_by_def_id Dict[UInt, MIREscapeSummary],
@@ -806,6 +830,53 @@ private let compute_escaping_locals_for_function(function * MIRFunction, summari
             _ then {},
         }
     }
+    let mutable changed = true
+    while changed then {
+        changed = false
+        for block in function.blocks then {
+            for statement in block.statements then {
+                when statement in {
+                    .Assign(dest, value) then {
+                        when dest in {
+                            .Local(dest_id) then {
+                                if escaping.contains(dest_id.raw_value) then {
+                                    when value in {
+                                        .Operand(.Local(src_id)) then {
+                                            if not escaping.contains(src_id.raw_value) then {
+                                                escaping.insert(src_id.raw_value)
+                                                changed = true
+                                            }
+                                        },
+                                        .PlaceRead(.Local(src_id), _) then {
+                                            if not escaping.contains(src_id.raw_value) then {
+                                                escaping.insert(src_id.raw_value)
+                                                changed = true
+                                            }
+                                        },
+                                        _ then {},
+                                    }
+                                }
+                            },
+                            _ then {},
+                        }
+                    },
+                    _ then {},
+                }
+            }
+        }
+    }
+    return escaping
+}
+
+private let compute_escaping_value_locals_for_function(function * MIRFunction) Set[UInt] = {
+    let mutable escaping = Set[UInt].new()
+    for block in function.blocks then {
+        when block.terminator in {
+            .ReturnValue(.Some(.Local(local_id))) then { escaping.insert(local_id.raw_value) },
+            _ then {},
+        }
+    }
+
     let mutable changed = true
     while changed then {
         changed = false
@@ -1181,6 +1252,12 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
             yield false
         },
         .EnumTag(tag) then mir_value_contains_stack_borrow_ref(*(tag.subject)),
+        .Lambda(lambda) then {
+            if not lambda.capture_sources.is_empty() then {
+                return true
+            }
+            yield false
+        },
         .Intrinsic(node) then when node in {
             .InitMemory(_, value) then mir_value_contains_stack_borrow_ref(*value),
             .SpawnThread(_, _, closure, _) then mir_value_contains_stack_borrow_ref(*closure),
@@ -1359,6 +1436,7 @@ given MIRReferenceAllocationFunctionPromoter {
     ) MIRReferenceAllocationFunctionPromoter = {
         let mutable local_types_by_id = Dict[UInt, Type].new()
         let mutable local_storages_by_id = Dict[UInt, MIRStorage].new()
+        let escaping_value_locals = compute_escaping_value_locals_for_function(function)
         for local in function.locals then {
             local_types_by_id.insert(local.id.raw_value, local.local_type)
             local_storages_by_id.insert(local.id.raw_value, local.storage)
@@ -1374,6 +1452,7 @@ given MIRReferenceAllocationFunctionPromoter {
             local_types_by_id,
             local_storages_by_id,
             escaping_locals,
+            escaping_value_locals,
             temporary_local_ids,
             temporary_value_sources_by_id,
             escape_summaries_by_def_id,
@@ -1467,6 +1546,21 @@ given MIRReferenceAllocationFunctionPromoter {
                 yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.promote_value(*(call.receiver), Option[Type].None())), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
             },
             .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.promote_value(*(tag.subject), Option[Type].None())), tag.enum_type)),
+            .Lambda(lambda) then {
+                let mutable escaping_lambda = false
+                when destination_place in {
+                    .Some(dp) then when dp in {
+                        .Local(local_id) then {
+                            if self.escaping_value_locals.contains(local_id.raw_value) then {
+                                escaping_lambda = true
+                            }
+                        },
+                        _ then {},
+                    },
+                    .None() then {},
+                }
+                yield if escaping_lambda then MIRValue.Lambda(self.rewrite_escaping_mutable_lambda(lambda)) else value
+            },
             .Ref(place, kind, .StackBorrow()) then {
                 if is_member_path_place(place) then {
                     return value
@@ -1502,6 +1596,178 @@ given MIRReferenceAllocationFunctionPromoter {
             }
         }
         return promoted
+    }
+
+    protected rewrite_escaping_mutable_lambda(*mutable self, lambda MIRLambda) MIRLambda = {
+        let mutable rewritten_capture_symbols = Dict[UInt, Symbol].new()
+        let mutable rewritten_captures = List[* Symbol].new()
+        let mutable index UInt = 0
+        while index < lambda.captures.count() then {
+            let capture = lambda.captures[index]
+            let source = lambda.capture_sources[index]
+            let rewritten = self.rewrite_escaping_mutable_capture_symbol(capture, source)
+            if rewritten.symbol_type <> capture.symbol_type then {
+                rewritten_capture_symbols.insert(capture.def_id.id, rewritten)
+            }
+            rewritten_captures.push(box(rewritten))
+            index += 1
+        }
+        let rewritten_function = self.rewrite_lambda_capture_function(lambda.function, rewritten_capture_symbols)
+        return MIRLambda(lambda.params, rewritten_captures, lambda.capture_sources, rewritten_function, lambda.lambda_type)
+    }
+
+    protected rewrite_escaping_mutable_capture_symbol(*self, capture * Symbol, source MIRPlace) Symbol = {
+        return when capture.kind in {
+            .Variable(variable_kind) then when variable_kind in {
+                .MutableReference() then when capture.symbol_type in {
+                    .MutableReferenceType(inner) then {
+                        let source_type = self.type_of_place(source)
+                        yield if source_type == *inner
+                            then Symbol(capture.def_id, source_type, SymbolKind.Variable(VariableKind.MutableValue()))
+                            else *capture
+                    },
+                    _ then *capture,
+                },
+                _ then *capture,
+            },
+            _ then *capture,
+        }
+    }
+
+    protected rewrite_lambda_capture_function(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) * MIRFunction = {
+        let rewritten_local_ids = self.rewritten_capture_local_ids(function, rewritten_capture_symbols)
+        let mutable locals = List[* MIRLocal].new()
+        for local in function.locals then {
+            let updated_local = when local.symbol in {
+                .Some(symbol) then when rewritten_capture_symbols.get(symbol.def_id.id) in {
+                    .Some(rewritten_symbol) then {
+                        let local_mutability = if rewritten_symbol.is_mutable() then MIRMutability.Mutable() else MIRMutability.Immutable()
+                        if local.storage is .Capture() then {
+                            yield MIRLocal(local.id, local.name, rewritten_symbol.symbol_type, local_mutability, local.storage, Option[* Symbol].Some(box(rewritten_symbol)))
+                        }
+                        yield *local
+                    },
+                    .None() then *local,
+                },
+                .None() then *local,
+            }
+            locals.push(box(updated_local))
+        }
+        let mutable blocks = List[* MIRBasicBlock].new()
+        for block in function.blocks then {
+            let mutable statements = List[* MIRStatement].new()
+            for statement in block.statements then {
+                statements.push(box(self.rewrite_capture_statement(*statement, rewritten_local_ids)))
+            }
+            blocks.push(box(MIRBasicBlock(block.id, statements, self.rewrite_capture_terminator(block.terminator, rewritten_local_ids))))
+        }
+        return box(MIRFunction(
+            function.identifier,
+            function.params,
+            function.return_type,
+            function.kind,
+            function.entry_block,
+            locals,
+            blocks,
+            function.temporary_value_sources_by_local,
+        ))
+    }
+
+    protected rewritten_capture_local_ids(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) Set[UInt] = {
+        let _ = self
+        let mutable ids = Set[UInt].new()
+        for local in function.locals then {
+            when local.symbol in {
+                .Some(symbol) then if rewritten_capture_symbols.get(symbol.def_id.id) is .Some(_) and local.storage is .Capture() then {
+                    ids.insert(local.id.raw_value)
+                },
+                .None() then {},
+            }
+        }
+        return ids
+    }
+
+    protected rewrite_capture_statement(*self, statement MIRStatement, rewritten_local_ids Set[UInt]) MIRStatement = {
+        return when statement in {
+            .Assign(place, value) then MIRStatement.Assign(self.rewrite_capture_place(place, rewritten_local_ids), self.rewrite_capture_value(value, rewritten_local_ids)),
+            .CompoundAssign(assignment) then MIRStatement.CompoundAssign(MIRCompoundAssignment(self.rewrite_capture_place(assignment.target, rewritten_local_ids), assignment.operator_kind, self.rewrite_capture_value(assignment.value, rewritten_local_ids))),
+            .Drop(place) then MIRStatement.Drop(self.rewrite_capture_place(place, rewritten_local_ids)),
+            .Retain(value) then MIRStatement.Retain(self.rewrite_capture_value(value, rewritten_local_ids)),
+            .Release(value) then MIRStatement.Release(self.rewrite_capture_value(value, rewritten_local_ids)),
+            .Evaluate(value) then MIRStatement.Evaluate(self.rewrite_capture_value(value, rewritten_local_ids)),
+            _ then statement,
+        }
+    }
+
+    protected rewrite_capture_terminator(*self, terminator MIRTerminator, rewritten_local_ids Set[UInt]) MIRTerminator = {
+        let _ = self
+        let _ = rewritten_local_ids
+        return terminator
+    }
+
+    protected rewrite_capture_place(*self, place MIRPlace, rewritten_local_ids Set[UInt]) MIRPlace = {
+        return when place in {
+            .Field(base, field) then MIRPlace.Field(box(self.rewrite_capture_place(*base, rewritten_local_ids)), field),
+            .EnumPayload(base, case_name, field_name, field_index, field_type) then {
+                yield MIRPlace.EnumPayload(box(self.rewrite_capture_place(*base, rewritten_local_ids)), case_name, field_name, field_index, field_type)
+            },
+            .Deref(base, pointee) then {
+                let rewritten_base = self.rewrite_capture_value(*base, rewritten_local_ids)
+                yield when rewritten_base in {
+                    .PlaceRead(inner_place, _) then when inner_place in {
+                        .Local(local_id) then if rewritten_local_ids.contains(local_id.raw_value)
+                            then MIRPlace.Local(local_id)
+                            else MIRPlace.Deref(box(rewritten_base), pointee),
+                        _ then MIRPlace.Deref(box(rewritten_base), pointee),
+                    },
+                    .Operand(.Local(local_id)) then if rewritten_local_ids.contains(local_id.raw_value)
+                        then MIRPlace.Local(local_id)
+                        else MIRPlace.Deref(box(rewritten_base), pointee),
+                    _ then MIRPlace.Deref(box(rewritten_base), pointee),
+                }
+            },
+            .PointerElement(base, element) then MIRPlace.PointerElement(box(self.rewrite_capture_value(*base, rewritten_local_ids)), element),
+            _ then place,
+        }
+    }
+
+    protected rewrite_capture_value(*self, value MIRValue, rewritten_local_ids Set[UInt]) MIRValue = {
+        return when value in {
+            .PlaceRead(place, ownership) then MIRValue.PlaceRead(self.rewrite_capture_place(place, rewritten_local_ids), ownership),
+            .Call(call) then {
+                let mutable args = List[* MIRValue].new()
+                for argument in call.arguments then {
+                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)))
+                }
+                yield MIRValue.Call(MIRCall(call.callee, args, call.argument_ownerships, call.result_type))
+            },
+            .Aggregate(aggregate) then {
+                let mutable fields = List[* MIRValue].new()
+                for field in aggregate.fields then {
+                    fields.push(box(self.rewrite_capture_value(*field, rewritten_local_ids)))
+                }
+                yield MIRValue.Aggregate(MIRAggregate(aggregate.aggregate_type, fields, aggregate.field_ownerships))
+            },
+            .EnumCase(construction) then {
+                let mutable args = List[* MIRValue].new()
+                for argument in construction.arguments then {
+                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)))
+                }
+                yield MIRValue.EnumCase(MIREnumConstruction(construction.enum_type, construction.case_name, args))
+            },
+            .EnumTag(tag) then MIRValue.EnumTag(MIREnumTag(box(self.rewrite_capture_value(*tag.subject, rewritten_local_ids)), tag.enum_type)),
+            .TraitObjectConversion(conversion) then MIRValue.TraitObjectConversion(MIRTraitObjectConversion(box(self.rewrite_capture_value(*conversion.inner, rewritten_local_ids)), conversion.source_ownership, conversion.trait_name, conversion.trait_type_args, conversion.concrete_type, conversion.result_type)),
+            .TraitMethodCall(call) then {
+                let mutable args = List[* MIRValue].new()
+                for argument in call.arguments then {
+                    args.push(box(self.rewrite_capture_value(*argument, rewritten_local_ids)))
+                }
+                yield MIRValue.TraitMethodCall(MIRTraitMethodCall(box(self.rewrite_capture_value(*call.receiver, rewritten_local_ids)), call.receiver_ownership, call.trait_name, call.trait_type_args, call.method_name, call.method_index, args, call.argument_ownerships, call.result_type))
+            },
+            .Ref(place, kind, allocation) then MIRValue.Ref(self.rewrite_capture_place(place, rewritten_local_ids), kind, allocation),
+            .Pointer(place) then MIRValue.Pointer(self.rewrite_capture_place(place, rewritten_local_ids)),
+            _ then value,
+        }
     }
 
     protected promote_call_arguments(*mutable self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {

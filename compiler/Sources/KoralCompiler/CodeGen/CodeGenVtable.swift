@@ -65,26 +65,6 @@ extension CodeGen {
 
     return nil
   }
-
-  private func sanitizeTraitMangleToken(_ raw: String) -> String {
-    String(raw.map { ch in
-      if ch.isLetter || ch.isNumber || ch == "_" {
-        return ch
-      }
-      return "_"
-    })
-  }
-
-  private func traitImplementationTag(traitName: String, traitTypeArgs: [Type]) -> String {
-    let traitPart = sanitizeTraitMangleToken(traitName)
-    guard !traitTypeArgs.isEmpty else {
-      return traitPart
-    }
-    let argsPart = traitTypeArgs
-      .map { sanitizeTraitMangleToken($0.stableKey) }
-      .joined(separator: "_")
-    return "\(traitPart)_\(argsPart)"
-  }
   
   /// Resolves the actual C function name for a concrete type's trait method implementation.
   ///
@@ -103,21 +83,6 @@ extension CodeGen {
     traitTypeArgs: [Type],
     methodName: String
   ) -> String? {
-    let typeQualifiedName: String?
-    switch concreteType {
-    case .structure(let defId):
-      typeQualifiedName = context.getQualifiedName(defId) ?? context.getName(defId)
-    case .`enum`(let defId):
-      typeQualifiedName = context.getQualifiedName(defId) ?? context.getName(defId)
-    default:
-      typeQualifiedName = nil
-    }
-
-    let compositeTraitTag = traitImplementationTag(traitName: traitName, traitTypeArgs: traitTypeArgs)
-    let compositeTraitMethodName = typeQualifiedName.map { qualifiedTypeName in
-      "\(qualifiedTypeName)_trait_\(compositeTraitTag)_\(methodName)"
-    }
-
     if let witnessDefId = resolveMethodDefIdFromWitness(
       concreteType: concreteType,
       traitName: traitName,
@@ -129,50 +94,6 @@ extension CodeGen {
       }
     }
 
-    // Strategy 1: Search through MIR given globals for a matching method.
-    for node in mirProgram.globals {
-      guard case .given(let type, let trait, let methods) = node else { continue }
-      guard type == concreteType else { continue }
-
-      if let trait {
-        if trait.traitName != traitName {
-          continue
-        }
-        if trait.traitTypeArgs != traitTypeArgs {
-          continue
-        }
-      }
-      
-      for method in methods {
-        let logicalMethodName = mirProgram.receiverMethodDispatch[method.defId]?.methodName
-          ?? context.getName(method.defId)
-          ?? ""
-        if logicalMethodName == methodName {
-          return cIdentifier(for: method)
-        }
-
-        let emittedMethodSymbolName = context.getName(method.defId) ?? ""
-        if let compositeTraitMethodName, emittedMethodSymbolName == compositeTraitMethodName {
-          return cIdentifier(for: method)
-        }
-      }
-    }
-    
-    // Strategy 2: Use staticMethodLookup table
-    let typeName: String?
-    switch concreteType {
-    case .structure(let defId):
-      typeName = context.getName(defId)
-    case .`enum`(let defId):
-      typeName = context.getName(defId)
-    default:
-      typeName = nil
-    }
-    
-    if let typeName = typeName {
-      return lookupStaticMethod(typeName: typeName, methodName: methodName)
-    }
-    
     return nil
   }
 

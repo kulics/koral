@@ -10,6 +10,14 @@ struct MIRVerificationError: Error, CustomStringConvertible, LocalizedError {
 final class MIRVerifier {
   private let program: MIRProgram
   private var context: CompilerContext { program.context }
+  private lazy var traitVTablesByKey: [MIRTraitVTableKey: MIRTraitVTable] = {
+    var result: [MIRTraitVTableKey: MIRTraitVTable] = [:]
+    for global in program.globals {
+      guard case .traitVTable(let vtable) = global else { continue }
+      result[vtable.key] = vtable
+    }
+    return result
+  }()
   private lazy var traitVTableKeys: Set<MIRTraitVTableKey> = Set(
     program.globals.compactMap { global in
       guard case .traitVTable(let vtable) = global else { return nil }
@@ -52,6 +60,47 @@ final class MIRVerifier {
       }
       for argument in vtable.traitTypeArguments where context.containsGenericParameter(argument) {
         throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): unresolved trait type argument")
+      }
+      let traitRef = CanonicalTraitRef(traitName: vtable.traitName, traitTypeArgs: vtable.traitTypeArguments)
+      let witnessKey = ConformanceWitness.key(selfType: vtable.concreteType, traitRef: traitRef)
+      guard let witness = program.conformanceWitnesses[witnessKey] else {
+        throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): missing conformance witness")
+      }
+      if witness.requirementSlots.count != vtable.methods.count {
+        throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): witness slot count does not match vtable method count")
+      }
+      for (slot, method) in zip(witness.requirementSlots, vtable.methods) {
+        if slot.index < 0 || slot.index >= vtable.methods.count {
+          throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): invalid witness slot index \(slot.index)")
+        }
+        if slot.index >= 0 && vtable.methods[slot.index].name != slot.methodName {
+          throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): witness slot \(slot.index) does not align with method '\(slot.methodName)'")
+        }
+        if method.name != slot.methodName {
+          throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName): vtable method order does not match witness order")
+        }
+        if method.parameters.count != slot.parameters.count {
+          throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): parameter count does not match witness slot")
+        }
+        for (parameter, slotParameter) in zip(method.parameters, slot.parameters) {
+          guard let parameterType = parameter.type else {
+            throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): missing parameter type")
+          }
+          if parameter.name != slotParameter.name || parameter.isSelf != (slotParameter.name == "self") || parameterType != slotParameter.type {
+            throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): parameter metadata does not match witness slot")
+          }
+        }
+        if method.returnType != slot.returnType {
+          throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): return type does not match witness slot")
+        }
+        if witness.localImplementationDefIdsByMethodName[method.name] == nil &&
+            !witness.directParentTraitRefs.contains(where: { parent in
+              parent.traitName == slot.declaringTraitRef.traitName && parent.traitTypeArgs == slot.declaringTraitRef.traitTypeArgs
+            }) &&
+            slot.declaringTraitRef.traitName == witness.traitRef.traitName &&
+            slot.declaringTraitRef.traitTypeArgs == witness.traitRef.traitTypeArgs {
+          throw MIRVerificationError(message: "MIR verification failed in trait vtable \(vtable.traitName).\(method.name): requirement slot has no implementation witness")
+        }
       }
     default:
       break
@@ -443,6 +492,21 @@ final class MIRVerifier {
     }
     if receiver.traitName != call.traitName || receiver.typeArguments != call.traitTypeArguments {
       try fail(function, "trait method call receiver type does not match call trait metadata")
+    }
+    let candidateTables = traitVTablesByKey.values.filter {
+      $0.traitName == call.traitName && $0.traitTypeArguments == call.traitTypeArguments
+    }
+    if candidateTables.isEmpty {
+      try fail(function, "trait method call has no vtable inventory for trait metadata")
+    }
+    for vtable in candidateTables {
+      if call.methodIndex >= vtable.methods.count {
+        try fail(function, "trait method call method index \(call.methodIndex) is out of range for vtable \(render(vtable.key))")
+      }
+      let slot = vtable.methods[call.methodIndex]
+      if slot.name != call.methodName {
+        try fail(function, "trait method call method index \(call.methodIndex) resolves to '\(slot.name)', not '\(call.methodName)'")
+      }
     }
     for (index, argument) in call.arguments.enumerated() {
       if typeResolver.type(of: argument) == nil {

@@ -481,74 +481,21 @@ given TypeChecker {
     }
 
     protected lower_while_condition_with_bindings(self, condition * Expr, body * Expr, outer_span SourceSpan) Option[* Expr] = {
-        if self.check_or_branches_for_bindings(condition) then {
-            return Option[* Expr].Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(false, outer_span)), body, outer_span)))
-        }
-
-        if not self.condition_requires_pattern_lowering(condition) then {
-            return Option[* Expr].None()
-        }
-
         if not self.condition_contains_is_expression(condition) then {
             return Option[* Expr].None()
         }
 
-        when condition in {
-            .IsExpr(_, _, _) then {
-                return Option[* Expr].Some(self.make_while_expr_from_condition(condition, body, outer_span))
-            },
-            _ then {},
+        let break_block = self.make_break_block_expr(outer_span)
+        let lowered_body_opt = self.lower_if_condition_with_bindings(
+            condition,
+            body,
+            Option[* Expr].Some(break_block),
+            outer_span
+        )
+        return when lowered_body_opt in {
+            .Some(lowered_body) then Option[* Expr].Some(box(Expr.WhileExpr(box(Expr.BoolLiteral(true, outer_span)), lowered_body, outer_span))),
+            .None() then Option[* Expr].None(),
         }
-
-        let mutable clauses = List[* Expr].new()
-        self.flatten_and_chain_into(condition, &mutable clauses)
-
-        let mutable first_pattern_idx Option[UInt] = .None()
-        let mutable idx UInt = 0
-        while idx < clauses.count() then {
-            let clause = clauses[idx]
-            when clause in {
-                .IsExpr(_, pattern, _) then {
-                    if self.pattern_contains_bindings(box(pattern)) then {
-                        first_pattern_idx = .Some(idx)
-                        break
-                    }
-                },
-                _ then {},
-            }
-            idx += 1
-        }
-
-        when first_pattern_idx in {
-            .None() then { return Option[* Expr].None() },
-            _ then {},
-        }
-
-        let first_idx = when first_pattern_idx in {
-            .Some(v) then v,
-            .None() then 0(UInt),
-        }
-
-        let mutable lowered_body = body
-        let mutable i = clauses.count()
-        while i > 0 then {
-            i -= 1
-            if i == first_idx then {
-                continue
-            }
-            let clause = clauses[i]
-            let clause_span = self.expr_condition_span(clause)
-            let break_block = self.make_break_block_expr(clause_span)
-            lowered_body = self.make_if_expr_from_condition(
-                clause,
-                lowered_body,
-                Option[* Expr].Some(break_block),
-                clause_span
-            )
-        }
-
-        let first_clause = clauses[first_idx]
-        return Option[* Expr].Some(self.make_while_expr_from_condition(first_clause, lowered_body, outer_span))
     }
 
     protected make_break_block_expr(self, span SourceSpan) * Expr = {

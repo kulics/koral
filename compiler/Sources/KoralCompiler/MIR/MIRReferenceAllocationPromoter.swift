@@ -248,6 +248,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
   private let context: CompilerContext
   private let resolver: MIRTypeResolver
   private let escapingLocals: Set<MIRLocalID>
+  private let escapingValueLocals: Set<MIRLocalID>
   private let temporaryLocalIds: Set<MIRLocalID>
 
   init(
@@ -266,6 +267,7 @@ private final class MIRReferenceAllocationFunctionPromoter {
     self.context = context
     self.resolver = MIRTypeResolver(function: function, context: context)
     self.escapingLocals = Self.computeLocalsFlowingToLambdaCaptures(function: function)
+    self.escapingValueLocals = Self.computeEscapingValueLocals(function: function)
     self.temporaryLocalIds = Set(function.locals.filter({ $0.storage == .temporary }).map(\.id))
   }
 
@@ -318,6 +320,131 @@ private final class MIRReferenceAllocationFunctionPromoter {
       }
     }
     return escaping
+  }
+
+  private static func computeEscapingValueLocals(function: MIRFunction) -> Set<MIRLocalID> {
+    var escaping: Set<MIRLocalID> = []
+    for block in function.blocks {
+      if case .returnValue(let operand?) = block.terminator,
+         case .local(let localID) = operand {
+        escaping.insert(localID)
+      }
+    }
+
+    var changed = true
+    while changed {
+      changed = false
+      for block in function.blocks {
+        for statement in block.statements {
+          guard case .assign(let dest, let value) = statement,
+                case .local(let destID) = dest,
+                escaping.contains(destID) else {
+            continue
+          }
+          for localID in localDependencies(of: value) {
+            if escaping.insert(localID).inserted {
+              changed = true
+            }
+          }
+        }
+      }
+    }
+
+    return escaping
+  }
+
+  private static func localDependencies(of value: MIRValue) -> Set<MIRLocalID> {
+    var result: Set<MIRLocalID> = []
+
+    func collect(place: MIRPlace) {
+      switch place {
+      case .local(let localID):
+        result.insert(localID)
+      case .field(let base, _), .enumPayload(let base, _, _, _, _):
+        collect(place: base)
+      case .deref(let base, _), .pointerElement(let base, _):
+        collect(value: base)
+      case .global:
+        break
+      }
+    }
+
+    func collect(operand: MIROperand) {
+      if case .local(let localID) = operand {
+        result.insert(localID)
+      }
+    }
+
+    func collect(value: MIRValue) {
+      switch value {
+      case .operand(let operand):
+        collect(operand: operand)
+      case .placeRead(let place, _), .ref(let place, _, _), .pointer(let place):
+        collect(place: place)
+      case .binary(let operation):
+        collect(operand: operation.left)
+        collect(operand: operation.right)
+      case .unary(let operation):
+        collect(operand: operation.operand)
+      case .call(let call):
+        collect(operand: call.callee)
+        for argument in call.arguments {
+          collect(value: argument)
+        }
+      case .aggregate(let aggregate):
+        for field in aggregate.fields {
+          collect(value: field)
+        }
+      case .enumCase(let construction):
+        for argument in construction.arguments {
+          collect(value: argument)
+        }
+      case .enumTag(let tag):
+        collect(value: tag.subject)
+      case .traitObjectConversion(let conversion):
+        collect(value: conversion.inner)
+      case .traitMethodCall(let call):
+        collect(value: call.receiver)
+        for argument in call.arguments {
+          collect(value: argument)
+        }
+      case .cast(let operand, _):
+        collect(operand: operand)
+      case .intrinsic(let intrinsic):
+        switch intrinsic {
+        case .allocMemory(let count, _):
+          collect(value: count)
+        case .deallocMemory(let ptr), .deinitMemory(let ptr), .takeMemory(let ptr, _):
+          collect(value: ptr)
+        case .copyMemory(let dest, let source, let count), .moveMemory(let dest, let source, let count):
+          collect(value: dest)
+          collect(value: source)
+          collect(value: count)
+        case .isUniqueMutable(let value), .refCount(let value), .downgradeRef(let value, _), .downgradeMutRef(let value, _), .upgradeRef(let value, _), .upgradeMutRef(let value, _):
+          collect(value: value)
+        case .traitObjectMatches(let value, _, _, let concreteType):
+          collect(value: value)
+          _ = concreteType
+        case .traitObjectDowncast(let value, _):
+          collect(value: value)
+        case .makeRef(let ptr, let owner, _), .makeMutRef(let ptr, let owner, _), .initMemory(let ptr, let owner):
+          collect(value: ptr)
+          collect(value: owner)
+        case .nullPtr:
+          break
+        case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
+          collect(value: outHandle)
+          collect(value: outTid)
+          collect(value: closure)
+          collect(value: stackSize)
+        }
+      case .lambda:
+        break
+      }
+    }
+
+    collect(value: value)
+    return result
   }
 
 
@@ -444,7 +571,16 @@ private final class MIRReferenceAllocationFunctionPromoter {
           enumType: tag.enumType
         )
       )
-    case .lambda, .binary, .unary, .operand, .placeRead, .pointer, .cast:
+    case .lambda(let lambda):
+      if let destinationPlace,
+         case .local(let localID) = destinationPlace,
+         escapingValueLocals.contains(localID),
+         lambda.captures.contains(where: { $0.captureKind == .byMutReference }) {
+        recursivelyPromoted = .lambda(rewriteEscapingMutableCaptures(in: lambda))
+      } else {
+        recursivelyPromoted = value
+      }
+    case .binary, .unary, .operand, .placeRead, .pointer, .cast:
       recursivelyPromoted = value
     case .ref(let place, let kind, .stackBorrow):
       let destIsTemp = destinationPlace.map { isTemporaryLocal($0) } ?? false
@@ -466,6 +602,22 @@ private final class MIRReferenceAllocationFunctionPromoter {
       return recursivelyPromoted
     }
     return promoteDirectReferences(in: recursivelyPromoted)
+  }
+
+  private func rewriteEscapingMutableCaptures(in lambda: MIRLambda) -> MIRLambda {
+    let rewrittenCaptures = lambda.captures.map { capture -> CapturedVariable in
+      guard capture.captureKind == .byMutReference else {
+        return capture
+      }
+      return CapturedVariable(symbol: capture.symbol, captureKind: .byValue)
+    }
+    return MIRLambda(
+      parameters: lambda.parameters,
+      captures: rewrittenCaptures,
+      captureSources: lambda.captureSources,
+      function: lambda.function,
+      type: lambda.type
+    )
   }
 
   private func promoteCallArguments(_ arguments: [MIRValue], callee: MIROperand) -> [MIRValue] {

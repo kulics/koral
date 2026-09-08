@@ -32,6 +32,40 @@ public indirect enum PatternSpace {
             return fields.allSatisfy { $0.isEmpty }
         }
     }
+
+    public func structurallyEquals(_ other: PatternSpace) -> Bool {
+        switch (self, other) {
+        case (.empty, .empty):
+            return true
+        case (.full(let lhs), .full(let rhs)):
+            return lhs == rhs
+        case (.boolValues(let lhs), .boolValues(let rhs)):
+            return lhs == rhs
+        case (.constructor(let lhsName, let lhsFields), .constructor(let rhsName, let rhsFields)):
+            guard lhsName == rhsName, lhsFields.count == rhsFields.count else {
+                return false
+            }
+            return zip(lhsFields, rhsFields).allSatisfy { $0.structurallyEquals($1) }
+        case (.enumCases(let lhsTypeName, let lhsCases), .enumCases(let rhsTypeName, let rhsCases)):
+            guard lhsTypeName == rhsTypeName,
+                  Set(lhsCases.keys) == Set(rhsCases.keys) else {
+                return false
+            }
+            for key in lhsCases.keys {
+                guard let lhsFields = lhsCases[key],
+                      let rhsFields = rhsCases[key],
+                      lhsFields.count == rhsFields.count else {
+                    return false
+                }
+                if !zip(lhsFields, rhsFields).allSatisfy({ $0.structurallyEquals($1) }) {
+                    return false
+                }
+            }
+            return true
+        default:
+            return false
+        }
+    }
     
     /// Get descriptions of missing cases for error messages
     public func missingCases() -> [String] {
@@ -40,17 +74,62 @@ public indirect enum PatternSpace {
             return []
         case .full(let type):
             return [type.description]
-        case .enumCases(_, let cases):
-            return cases.keys.sorted().map { ".\($0)" }
+        case .enumCases:
+            return missingPatternFragments()
         case .boolValues(let remaining):
             return remaining.map { String($0) }.sorted()
         case .constructor(let caseName, let fields):
-            let fieldDescs = fields.flatMap { $0.missingCases() }
-            if fieldDescs.isEmpty {
-                return [".\(caseName)"]
-            }
-            return [".\(caseName)(\(fieldDescs.joined(separator: ", ")))"]
+            return Self.renderConstructorMissing(caseName: caseName, fields: fields)
         }
+    }
+
+    private func missingPatternFragments() -> [String] {
+        switch self {
+        case .empty:
+            return []
+        case .full:
+            return ["_"]
+        case .boolValues(let remaining):
+            if remaining == Set([true, false]) {
+                return ["_"]
+            }
+            return remaining.map { String($0) }.sorted()
+        case .constructor(let caseName, let fields):
+            return Self.renderConstructorMissing(caseName: caseName, fields: fields)
+        case .enumCases(_, let cases):
+            return cases.keys.sorted().flatMap { caseName in
+                Self.renderConstructorMissing(caseName: caseName, fields: cases[caseName] ?? [])
+            }
+        }
+    }
+
+    private static func renderConstructorMissing(caseName: String, fields: [PatternSpace]) -> [String] {
+        let combinations = combineFieldMissingCases(fields.map { $0.missingPatternFragments() })
+        if combinations.isEmpty {
+            return [".\(caseName)"]
+        }
+        return combinations.map { ".\(caseName)(\($0.joined(separator: ", ")))" }
+    }
+
+    private static func combineFieldMissingCases(_ fieldFragments: [[String]]) -> [[String]] {
+        guard !fieldFragments.isEmpty else {
+            return []
+        }
+
+        var result: [[String]] = [[]]
+        for fragments in fieldFragments {
+            guard !fragments.isEmpty else {
+                return []
+            }
+            var next: [[String]] = []
+            for prefix in result {
+                for fragment in fragments {
+                    next.append(prefix + [fragment])
+                }
+            }
+            result = next
+        }
+        return result
     }
 }
 
@@ -242,10 +321,15 @@ extension PatternSpace {
             }
             return result
             
-        case .genericEnum(_, _):
-            // For generic enums, we need the resolved cases
-            // This will be handled by the checker which has access to scope
-            return nil
+        case .genericEnum(let templateName, _):
+            guard let defId = context.defIdMap.lookupGenericEnumTemplateDefId(templateName) else {
+                return nil
+            }
+            var result: [String: [PatternSpace]] = [:]
+            for c in context.getEnumCases(defId) ?? [] {
+                result[c.name] = c.parameters.map { PatternSpace.full($0.type) }
+            }
+            return result
             
         default:
             return nil

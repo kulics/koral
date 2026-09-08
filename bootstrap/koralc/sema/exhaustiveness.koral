@@ -11,6 +11,13 @@ public type ExhaustivenessChecker(
     span SourceSpan,
 )
 
+private type PatternSpace {
+    Full(type_value Type),
+    Empty(),
+    EnumCases(type_name String, cases Dict[String, List[* PatternSpace]]),
+    BoolValues(has_true Bool, has_false Bool),
+}
+
 given ExhaustivenessChecker {
     public new(
         subject_type Type,
@@ -27,6 +34,22 @@ given ExhaustivenessChecker {
     public check(self) Result[Void] = {
         // 先检查不可达模式
         let _ = self.check_unreachable_patterns() or return
+
+        when self.initial_finite_pattern_space() in {
+            .Some(space) then {
+                let mutable remaining = space
+                for p in self.patterns.iterator() then {
+                    remaining = self.subtract_pattern(remaining, p, self.subject_type)
+                }
+                if not self.pattern_space_is_empty(remaining) then {
+                    let type_name = self.exhaustiveness_type_name()
+                    let message = self.non_exhaustive_match_message_from_patterns(type_name, self.pattern_space_missing_cases(remaining))
+                    return Result[Void].Error(box(message))
+                }
+                return Result[Void].Ok({})
+            },
+            .None() then {},
+        }
 
         // 检查是否有通配符/绑定模式（catchall）
         let mutable has_catchall = false
@@ -176,6 +199,7 @@ given ExhaustivenessChecker {
         let mutable catchall_pattern_desc = ""
         let pattern_count = self.patterns.count()
         let mutable pattern_index UInt = 0
+        let mutable remaining_space = self.initial_finite_pattern_space()
 
         for p in self.patterns.iterator() then {
             if self.is_synthetic_trailing_wildcard(p, pattern_index, pattern_count) then {
@@ -195,23 +219,38 @@ given ExhaustivenessChecker {
                 }
             }
 
-            // 收集当前模式中的 enum case 名称
-            let pattern_cases = collect_enum_cases(p)
-
-            if not pattern_cases.is_empty() then {
-                // 检查是否有已覆盖的 case
-                for case_name in pattern_cases.iterator() then {
-                    if covered_cases.contains(case_name) then {
-                        let message = unreachable_case_covered_message(case_name)
+            when remaining_space in {
+                .Some(space) then {
+                    let reduced = self.subtract_pattern(space, p, self.subject_type)
+                    if self.can_precisely_subtract_pattern(space, p, self.subject_type)
+                       and self.pattern_space_equals(space, reduced)
+                    then {
+                        let mutable message = "Unreachable pattern: already covered by previous patterns"
                         return Result[Void].Error(box(message))
                     }
-                }
-                // 检查是否所有 enum case 已被覆盖
-                if self.is_enum_fully_covered(covered_cases) then {
-                    return Result[Void].Error(box("Unreachable pattern: all enum cases are already covered"))
-                }
-                for case_name in pattern_cases.iterator() then {
-                    covered_cases.insert(case_name)
+                    remaining_space = Option[PatternSpace].Some(reduced)
+                },
+                .None() then {},
+            }
+
+            if remaining_space is .None() then {
+                // Legacy fallback for non-finite domains where we still only
+                // have top-level enum-case names.
+                let pattern_cases = collect_enum_cases(p)
+
+                if not pattern_cases.is_empty() then {
+                    for case_name in pattern_cases.iterator() then {
+                        if covered_cases.contains(case_name) then {
+                            let message = unreachable_case_covered_message(case_name)
+                            return Result[Void].Error(box(message))
+                        }
+                    }
+                    if self.is_enum_fully_covered(covered_cases) then {
+                        return Result[Void].Error(box("Unreachable pattern: all enum cases are already covered"))
+                    }
+                    for case_name in pattern_cases.iterator() then {
+                        covered_cases.insert(case_name)
+                    }
                 }
             }
 
@@ -239,6 +278,409 @@ given ExhaustivenessChecker {
         }
 
         return Result[Void].Ok({})
+    }
+
+    private initial_finite_pattern_space(self) Option[PatternSpace] = {
+        return when self.subject_type in {
+            .EnumType(def_id) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), self.context.get_enum_cases(def_id))),
+            .GenericEnum(template_name, _) then {
+                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
+                    .None() then Option[List[EnumCaseInfo]].None(),
+                }
+                yield when maybe_cases in {
+                    .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(template_name, Option[List[EnumCaseInfo]].Some(cases))),
+                    .None() then Option[PatternSpace].None(),
+                }
+            },
+            .BoolType() then Option[PatternSpace].Some(PatternSpace.BoolValues(true, true)),
+            _ then Option[PatternSpace].None(),
+        }
+    }
+
+    private enum_pattern_space(self, type_name String, maybe_cases Option[List[EnumCaseInfo]]) PatternSpace = {
+        let _ = self
+        let mutable cases = Dict[String, List[* PatternSpace]].new()
+        when maybe_cases in {
+            .Some(all_cases) then {
+                for case_info in all_cases then {
+                    let mutable fields = List[* PatternSpace].new()
+                    for param in case_info.params then {
+                        fields.push(box(self.full_space_for_type(param.param_type)))
+                    }
+                    cases.insert(case_info.name, fields)
+                }
+            },
+            .None() then {},
+        }
+        return PatternSpace.EnumCases(type_name, cases)
+    }
+
+    private full_space_for_type(self, t Type) PatternSpace = {
+        return when t in {
+            .BoolType() then PatternSpace.BoolValues(true, true),
+            .EnumType(def_id) then self.enum_pattern_space(self.context.type_display_name(t), self.context.get_enum_cases(def_id)),
+            .GenericEnum(template_name, _) then {
+                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
+                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
+                    .None() then Option[List[EnumCaseInfo]].None(),
+                }
+                yield self.enum_pattern_space(template_name, maybe_cases)
+            },
+            _ then PatternSpace.Full(t),
+        }
+    }
+
+    private pattern_space_is_empty(self, space PatternSpace) Bool = {
+        let _ = self
+        return when space in {
+            .Empty() then true,
+            .Full(_) then false,
+            .BoolValues(has_true, has_false) then not has_true and not has_false,
+            .EnumCases(_, cases) then cases.is_empty(),
+        }
+    }
+
+    private pattern_space_equals(self, lhs PatternSpace, rhs PatternSpace) Bool = {
+        let _ = self
+        return when lhs in {
+            .Empty() then rhs is .Empty(),
+            .Full(left_t) then when rhs in {
+                .Full(right_t) then left_t == right_t,
+                _ then false,
+            },
+            .BoolValues(left_true, left_false) then when rhs in {
+                .BoolValues(right_true, right_false) then left_true == right_true and left_false == right_false,
+                _ then false,
+            },
+            .EnumCases(left_name, left_cases) then when rhs in {
+                .EnumCases(right_name, right_cases) then {
+                    if left_name <> right_name or left_cases.count() <> right_cases.count() then {
+                        return false
+                    }
+                    for entry in left_cases.iterator() then {
+                        let case_name = entry.first
+                        let left_fields = entry.second
+                        let right_fields = right_cases.get(case_name) or else { return false }
+                        if left_fields.count() <> right_fields.count() then {
+                            return false
+                        }
+                        let mutable idx UInt = 0
+                        while idx < left_fields.count() then {
+                            if not self.pattern_space_equals(*left_fields[idx], *right_fields[idx]) then {
+                                return false
+                            }
+                            idx += 1
+                        }
+                    }
+                    yield true
+                },
+                _ then false,
+            },
+        }
+    }
+
+    private subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) PatternSpace = {
+        return when pattern in {
+            .Wildcard() then PatternSpace.Empty(),
+            .Variable(_) then PatternSpace.Empty(),
+            .BoolLiteral(value) then self.subtract_bool(space, value),
+            .EnumCase(case_name, _, elements) then self.subtract_enum_case(space, case_name, elements, subject_type),
+            .OrPattern(left, right) then {
+                let after_left = self.subtract_pattern(space, left, subject_type)
+                yield self.subtract_pattern(after_left, right, subject_type)
+            },
+            .AndPattern(left, right) then {
+                let after_left = self.subtract_pattern(space, left, subject_type)
+                yield self.subtract_pattern(after_left, right, subject_type)
+            },
+            _ then space,
+        }
+    }
+
+    private can_precisely_subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) Bool = {
+        return when pattern in {
+            .Wildcard() then true,
+            .Variable(_) then true,
+            .BoolLiteral(_) then space is .BoolValues(_, _),
+            .EnumCase(case_name, _, elements) then {
+                let case_fields = when space in {
+                    .Full(_) then self.enum_case_map_for_type(subject_type).get(case_name),
+                    .EnumCases(_, cases) then cases.get(case_name),
+                    _ then Option[List[* PatternSpace]].None(),
+                } or else { return false }
+                if self.pattern_elements_all_catchall(elements) then {
+                    return true
+                }
+                if case_fields.count() <> elements.count() then {
+                    return false
+                }
+                let mutable idx UInt = 0
+                while idx < elements.count() then {
+                    let field_space = *case_fields[idx]
+                    let field_type = self.pattern_space_type(field_space)
+                    if not self.can_precisely_subtract_pattern(field_space, elements[idx].pattern, field_type) then {
+                        return false
+                    }
+                    idx += 1
+                }
+                yield true
+            },
+            .OrPattern(left, right) then self.can_precisely_subtract_pattern(space, left, subject_type)
+                and self.can_precisely_subtract_pattern(space, right, subject_type),
+            .AndPattern(left, right) then self.can_precisely_subtract_pattern(space, left, subject_type)
+                and self.can_precisely_subtract_pattern(space, right, subject_type),
+            _ then false,
+        }
+    }
+
+    private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
+        let _ = self
+        return when space in {
+            .BoolValues(has_true, has_false) then {
+                let next_true = if value then false else has_true
+                let next_false = if value then has_false else false
+                yield if not next_true and not next_false then PatternSpace.Empty() else PatternSpace.BoolValues(next_true, next_false)
+            },
+            _ then space,
+        }
+    }
+
+    private subtract_enum_case(self, space PatternSpace, case_name String, elements List[* TypedPatternElement], subject_type Type) PatternSpace = {
+        let mutable cases = when space in {
+            .Full(_) then self.enum_case_map_for_type(subject_type),
+            .EnumCases(_, existing) then existing,
+            _ then { return space },
+        }
+        let case_fields = cases.get(case_name) or else { return space }
+        let covers_entire_case = self.pattern_elements_all_catchall(elements)
+        if covers_entire_case then {
+            let _ = cases.remove(case_name)
+        } else {
+            let new_fields = self.subtract_pattern_fields(case_fields, elements)
+            if self.pattern_space_list_all_empty(new_fields) then {
+                let _ = cases.remove(case_name)
+            } else {
+                cases.insert(case_name, new_fields)
+            }
+        }
+        if cases.is_empty() then {
+            return PatternSpace.Empty()
+        }
+        return when space in {
+            .EnumCases(type_name, _) then PatternSpace.EnumCases(type_name, cases),
+            .Full(_) then PatternSpace.EnumCases(self.exhaustiveness_type_name(), cases),
+            _ then space,
+        }
+    }
+
+    private enum_case_map_for_type(self, t Type) Dict[String, List[* PatternSpace]] = {
+        let mutable cases = Dict[String, List[* PatternSpace]].new()
+        let maybe_cases = when t in {
+            .EnumType(def_id) then self.context.get_enum_cases(def_id),
+            .GenericEnum(template_name, _) then when self.generic_templates.lookup_enum(template_name) in {
+                .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
+                .None() then Option[List[EnumCaseInfo]].None(),
+            },
+            _ then Option[List[EnumCaseInfo]].None(),
+        }
+        when maybe_cases in {
+            .Some(all_cases) then {
+                for case_info in all_cases then {
+                    let mutable fields = List[* PatternSpace].new()
+                    for param in case_info.params then {
+                        fields.push(box(self.full_space_for_type(param.param_type)))
+                    }
+                    cases.insert(case_info.name, fields)
+                }
+            },
+            .None() then {},
+        }
+        return cases
+    }
+
+    private subtract_pattern_fields(self, fields List[* PatternSpace], elements List[* TypedPatternElement]) List[* PatternSpace] = {
+        if fields.count() <> elements.count() then {
+            return fields
+        }
+        let mutable result = List[* PatternSpace].new()
+        let mutable idx UInt = 0
+        while idx < fields.count() then {
+            let field_space = *fields[idx]
+            let element = elements[idx]
+            let field_type = self.pattern_space_type(field_space)
+            result.push(box(self.subtract_pattern(field_space, element.pattern, field_type)))
+            idx += 1
+        }
+        return result
+    }
+
+    private pattern_space_type(self, space PatternSpace) Type = {
+        let _ = self
+        return when space in {
+            .Full(t) then t,
+            .BoolValues(_, _) then Type.BoolType(),
+            .EnumCases(_, _) then Type.Unknown(),
+            _ then Type.Unknown(),
+        }
+    }
+
+    private pattern_elements_all_catchall(self, elements List[* TypedPatternElement]) Bool = {
+        let _ = self
+        for element in elements then {
+            if not is_catchall(element.pattern) then {
+                return false
+            }
+        }
+        return true
+    }
+
+    private pattern_space_list_all_empty(self, spaces List[* PatternSpace]) Bool = {
+        for space in spaces then {
+            if not self.pattern_space_is_empty(*space) then {
+                return false
+            }
+        }
+        return true
+    }
+
+    private pattern_space_missing_cases(self, space PatternSpace) List[String] = {
+        return when space in {
+            .Empty() then List[String].new(),
+            .Full(t) then {
+                let mutable out = List[String].new()
+                out.push(type_to_string(t))
+                yield out
+            },
+            .BoolValues(has_true, has_false) then {
+                let mutable out = List[String].new()
+                if has_true then { out.push("true") }
+                if has_false then { out.push("false") }
+                yield out
+            },
+            .EnumCases(_, cases) then {
+                let mutable out = List[String].new()
+                let mutable names = List[String].new()
+                for entry in cases.iterator() then { names.push(entry.first) }
+                names.sort()
+                for case_name in names then {
+                    let fields = cases.get(case_name) or else List[* PatternSpace].new()
+                    let rendered = self.render_missing_constructor(case_name, fields)
+                    for value in rendered then { out.push(value) }
+                }
+                yield out
+            },
+        }
+    }
+
+    private render_missing_constructor(self, case_name String, fields List[* PatternSpace]) List[String] = {
+        let _ = self
+        if fields.is_empty() then {
+            let mutable out = List[String].new()
+            out.push(".")
+            out[0(UInt)].push_string(case_name)
+            return out
+        }
+        let mutable field_options = List[List[String]].new()
+        for field in fields then {
+            field_options.push(self.pattern_space_missing_fragments(*field))
+        }
+        let combinations = self.combine_missing_field_options(field_options)
+        let mutable out = List[String].new()
+        for combo in combinations then {
+            let mutable rendered = "."
+            rendered.push_string(case_name)
+            rendered.push_byte('(')
+            let mutable first = true
+            for fragment in combo then {
+                if not first then { rendered.push_string(", ") }
+                rendered.push_string(fragment)
+                first = false
+            }
+            rendered.push_byte(')')
+            out.push(rendered)
+        }
+        return out
+    }
+
+    private pattern_space_missing_fragments(self, space PatternSpace) List[String] = {
+        return when space in {
+            .Empty() then List[String].new(),
+            .Full(_) then {
+                let mutable out = List[String].new()
+                out.push("_")
+                yield out
+            },
+            .BoolValues(has_true, has_false) then {
+                let mutable out = List[String].new()
+                if has_true and has_false then {
+                    out.push("_")
+                    return out
+                }
+                if has_true then { out.push("true") }
+                if has_false then { out.push("false") }
+                yield out
+            },
+            .EnumCases(_, cases) then {
+                let mutable out = List[String].new()
+                let mutable names = List[String].new()
+                for entry in cases.iterator() then { names.push(entry.first) }
+                names.sort()
+                for case_name in names then {
+                    let fields = cases.get(case_name) or else List[* PatternSpace].new()
+                    let rendered = self.render_missing_constructor(case_name, fields)
+                    for value in rendered then { out.push(value) }
+                }
+                yield out
+            },
+        }
+    }
+
+    private combine_missing_field_options(self, options List[List[String]]) List[List[String]] = {
+        if options.is_empty() then {
+            return List[List[String]].new()
+        }
+        let mutable result = List[List[String]].new()
+        result.push(List[String].new())
+        for values in options then {
+            if values.is_empty() then {
+                return List[List[String]].new()
+            }
+            let mutable next = List[List[String]].new()
+            for prefix in result then {
+                for value in values then {
+                    let mutable combined = List[String].new()
+                    for existing in prefix then { combined.push(existing) }
+                    combined.push(value)
+                    next.push(combined)
+                }
+            }
+            result = next
+        }
+        return result
+    }
+
+    private exhaustiveness_type_name(self) String = {
+        return when self.subject_type in {
+            .EnumType(_) then self.context.type_display_name(self.subject_type),
+            .GenericEnum(template_name, _) then template_name,
+            .BoolType() then "Bool",
+            _ then type_to_string(self.subject_type),
+        }
+    }
+
+    private non_exhaustive_match_message_from_patterns(self, type_name String, missing List[String]) String = {
+        let _ = self
+        let mutable msg = "Non-exhaustive match on type '"
+        msg.push_string(type_name)
+        msg.push_string("': missing cases ")
+        let mutable first = true
+        for c in missing then {
+            if not first then { msg.push_string(", ") }
+            msg.push_string(c)
+            first = false
+        }
+        return msg
     }
 
     private is_synthetic_trailing_wildcard(self, pattern * TypedPattern, pattern_index UInt, pattern_count UInt) Bool = {

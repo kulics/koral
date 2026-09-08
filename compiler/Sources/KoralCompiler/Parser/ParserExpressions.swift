@@ -48,6 +48,8 @@ extension Parser {
       return isValidTypeName(name)
     case .genericInstantiation(let base, _):
       return isValidTypeName(base)
+    case .memberPath(_, let path):
+      return path.last.map(isValidTypeName) ?? false
     default:
       return false
     }

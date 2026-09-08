@@ -397,8 +397,12 @@ extension TypeChecker {
   }
 
   func implicitReferenceInnerMatches(_ expectedInner: Type, actualType: Type) -> Bool {
-    if expectedInner == actualType || expectedInner.canonical == actualType.canonical {
+    if expectedInner == actualType {
       return true
+    }
+
+    if let (expectedNested, actualNested) = expectedInner.compatibleIndirectionInners(with: actualType) {
+      return implicitReferenceInnerMatches(expectedNested, actualType: actualNested)
     }
 
     switch (expectedInner, actualType) {
@@ -1400,107 +1404,33 @@ extension TypeChecker {
     condition: ExpressionNode,
     body: ExpressionNode
   ) throws -> TypedStatementNode? {
-    // First check for illegal uses in `or` and `not`
-    try checkOrBranchesForBindings(condition)
-
-    // Check if lowering is needed. Even unbound `is` in condition context should
-    // preserve the subject until the loop branch decision completes.
     guard conditionContainsIsExpression(condition) else {
       return nil
     }
 
-    // Case 1: Direct `isExpression` with bindings
-    if case .isExpression(let subject, let pattern, _) = condition {
-      return try inferTypedWhilePatternStatement(
-        subject: subject,
-        pattern: pattern,
-        bodyBuilder: {
-          try self.inferCheckedStatementBodyExpression(body)
-        }
-      )
+    let previousLoopDepth = loopDepth
+    loopDepth += 1
+    exitableConstructStack.append(.loop)
+    defer {
+      loopDepth = previousLoopDepth
+      if !exitableConstructStack.isEmpty { exitableConstructStack.removeLast() }
     }
 
-    // Case 2: `and` chain containing `isExpression` with bindings
-    let clauses = flattenAndChain(condition)
-
-    // For while loops with `and` chains containing `is` with bindings:
-    // - The first `is` with bindings becomes the whilePatternExpression
-    // - Clauses BEFORE it become guards that break before the pattern match
-    // - Clauses AFTER it become guards inside the pattern match body
-    //
-    // For `while a > 0 and x is .Some(v) and v > 0 then body`:
-    // → `while x is .Some(v) then { if not(a > 0) then break; if v > 0 then body else break }`
-    //
-    // Wait - that's wrong. `a > 0` should be checked BEFORE the pattern match.
-    // Since whilePatternExpression evaluates the subject each iteration,
-    // we need conditions before the `is` to be checked first.
-    //
-    // Correct lowering: all non-first-is clauses become nested if guards inside the body,
-    // processed in order. Clauses before the first `is` break if false (checked first in body).
-    // The first `is` with bindings is the while pattern.
-    // Clauses after the first `is` are checked after bindings are available.
-
-    // Find the first `is` with bindings
-    guard let firstIsIndex = clauses.firstIndex(where: {
-      if case .isExpression(_, let pattern, _) = $0 {
-        return untypedPatternContainsBindings(pattern)
-      }
-      return false
-    }) else {
+    let breakExpr = makeBreakBlock(span: condition.span)
+    guard let loweredBody = try lowerIfConditionWithBindings(
+      condition: condition,
+      thenBranch: body,
+      elseBranch: breakExpr,
+      expectedType: nil,
+      usage: .statement
+    ) else {
       return nil
     }
 
-    // The first `is` with bindings becomes the whilePatternExpression
-    if case .isExpression(let subject, let pattern, _) = clauses[firstIsIndex] {
-      return try inferTypedWhilePatternStatement(
-        subject: subject,
-        pattern: pattern,
-        bodyBuilder: {
-          let remainingClauses = Array(clauses[..<firstIsIndex]) + Array(clauses[(firstIsIndex + 1)...])
-
-          func buildGuardChain(from index: Int) throws -> TypedExpressionNode {
-            if index == remainingClauses.count {
-              return try self.inferCheckedStatementBodyExpression(body)
-            }
-
-            let clause = remainingClauses[index]
-            let breakExpr = self.makeBreakBlock(span: clause.span)
-
-            if case .isExpression(let nextSubject, let nextPattern, _) = clause {
-              return try self.inferTypedIfPatternExpression(
-                subject: nextSubject,
-                pattern: nextPattern,
-                thenBuilder: { _ in try buildGuardChain(from: index + 1) },
-                elseBranch: breakExpr,
-                expectedType: nil,
-                usage: .statement
-              )
-            }
-
-            let typedCondition = try self.inferTypedExpression(clause)
-            if typedCondition.type != .bool {
-              throw SemanticError.typeMismatch(
-                expected: "Bool", got: typedCondition.type.description)
-            }
-            let typedThen = try buildGuardChain(from: index + 1)
-            let typedBreak = try self.inferTypedExpression(
-              breakExpr,
-              expectedType: typedThen.type == .never ? nil : typedThen.type
-            )
-            return try self.buildTypedIfExpression(
-              condition: typedCondition,
-              thenBranch: typedThen,
-              elseBranch: typedBreak,
-              expectedType: typedThen.type == .never ? nil : typedThen.type
-            )
-          }
-
-          return try buildGuardChain(from: 0)
-        }
-      )
-    }
-
-    return nil
+    return .whileStatement(
+      condition: .booleanLiteral(value: true, type: .bool),
+      body: loweredBody
+    )
   }
 
   // MARK: - Main Expression Type Inference
