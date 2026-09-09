@@ -60,27 +60,9 @@ given ExhaustivenessChecker {
         }
         // 按主题类型分支检查穷举性
         when self.subject_type in {
-            .EnumType(def_id) then {
-                return self.check_enum_exhaustiveness(def_id, has_catchall)
-            },
+            .EnumType(_) then {},
             .GenericEnum(template_name, _) then {
-                // 泛型 Enum 类型：通过 GenericTemplateRegistry 查找模板，再用 def_id 获取 case 列表
-                let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
-                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
-                    .None() then Option[List[EnumCaseInfo]].None(),
-                }
-                when maybe_cases in {
-                    .Some(all_cases) then {
-                        return self.check_enum_cases_exhaustiveness(template_name, all_cases, has_catchall)
-                    },
-                    .None() then {
-                        if has_catchall then {
-                            return Result[Void].Ok({})
-                        }
-                        let message = self.missing_catchall_message(template_name)
-                        return Result[Void].Error(box(message))
-                    },
-                }
+                let _ = template_name
             },
             .GenericStruct(_, _) then {
                 if not has_catchall then {
@@ -192,7 +174,6 @@ given ExhaustivenessChecker {
 
     // 检查不可达模式（已被前面模式完全覆盖的分支）
     private check_unreachable_patterns(self) Result[Void] = {
-        let mutable covered_cases = Set[String].new()
         let mutable covered_trait_object_types = Set[String].new()
         let mutable has_catchall = false
         let mutable catchall_is_struct = false
@@ -233,27 +214,6 @@ given ExhaustivenessChecker {
                 .None() then {},
             }
 
-            if remaining_space is .None() then {
-                // Legacy fallback for non-finite domains where we still only
-                // have top-level enum-case names.
-                let pattern_cases = collect_enum_cases(p)
-
-                if not pattern_cases.is_empty() then {
-                    for case_name in pattern_cases.iterator() then {
-                        if covered_cases.contains(case_name) then {
-                            let message = unreachable_case_covered_message(case_name)
-                            return Result[Void].Error(box(message))
-                        }
-                    }
-                    if self.is_enum_fully_covered(covered_cases) then {
-                        return Result[Void].Error(box("Unreachable pattern: all enum cases are already covered"))
-                    }
-                    for case_name in pattern_cases.iterator() then {
-                        covered_cases.insert(case_name)
-                    }
-                }
-            }
-
             let pattern_trait_types = collect_trait_object_types(p)
             if not pattern_trait_types.is_empty() then {
                 for type_name in pattern_trait_types.iterator() then {
@@ -282,7 +242,10 @@ given ExhaustivenessChecker {
 
     private initial_finite_pattern_space(self) Option[PatternSpace] = {
         return when self.subject_type in {
-            .EnumType(def_id) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), self.context.get_enum_cases(def_id))),
+            .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
+                .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), Option[List[EnumCaseInfo]].Some(cases))),
+                .None() then Option[PatternSpace].None(),
+            },
             .GenericEnum(template_name, _) then {
                 let maybe_cases = when self.generic_templates.lookup_enum(template_name) in {
                     .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
@@ -747,59 +710,6 @@ given ExhaustivenessChecker {
         return names
     }
 
-    // 检查 Enum 类型的穷举性
-    private check_enum_exhaustiveness(self, def_id DefId, has_catchall Bool) Result[Void] = {
-        if has_catchall then {
-            return Result[Void].Ok({})
-        }
-
-        // 获取所有 case
-        let all_cases = when self.context.get_enum_cases(def_id) in {
-            .None() then {
-                // 无法获取 case 列表，跳过检查
-                return Result[Void].Ok({})
-            },
-            .Some(cases) then cases,
-        }
-
-        let type_name = self.context.type_display_name(self.subject_type)
-        return self.check_enum_cases_exhaustiveness(type_name, all_cases, has_catchall)
-    }
-
-    // 通用 enum case 穷举性检查（支持 EnumType 和 GenericEnum）
-    private check_enum_cases_exhaustiveness(self, type_name String, all_cases List[EnumCaseInfo], has_catchall Bool) Result[Void] = {
-        if has_catchall then {
-            return Result[Void].Ok({})
-        }
-
-        // 收集被覆盖的 case（递归处理 or 模式）
-        let mutable covered = Set[String].new()
-        for p in self.patterns.iterator() then {
-            let pattern_cases = collect_enum_cases(p)
-            for case_name in pattern_cases.iterator() then {
-                covered.insert(case_name)
-            }
-        }
-
-        // 找出缺失的 case
-        let mutable missing = List[String].new()
-        for case_info in all_cases then {
-            if not covered.contains(case_info.name) then {
-                missing.push(case_info.name)
-            }
-        }
-
-        // 按字母顺序排序缺失的 case
-        missing.sort()
-
-        if missing.count() > 0 then {
-            let message = self.non_exhaustive_match_message(type_name, missing, true)
-            return Result[Void].Error(box(message))
-        }
-
-        return Result[Void].Ok({})
-    }
-
     // 检查 Bool 类型的穷举性
     private check_bool_exhaustiveness(self, has_catchall Bool) Result[Void] = {
         if has_catchall then {
@@ -929,35 +839,6 @@ private let unreachable_after_pattern_message(pattern_desc String) String = {
     msg.push_string(pattern_desc)
     msg.push_string("' is unreachable")
     return msg
-}
-
-private let unreachable_case_covered_message(case_name String) String = {
-    let mutable msg = "Unreachable pattern: case '"
-    msg.push_string(case_name)
-    msg.push_string("' is already covered")
-    return msg
-}
-
-// 递归收集 or 模式中覆盖的 enum case 名称
-public let collect_enum_cases(pattern * TypedPattern) Set[String] = {
-    let mutable covered = Set[String].new()
-    when pattern in {
-        .EnumCase(case_name, _, _) then {
-            covered.insert(case_name)
-        },
-        .OrPattern(left, right) then {
-            let left_cases = collect_enum_cases(left)
-            for case_name in left_cases.iterator() then {
-                covered.insert(case_name)
-            }
-            let right_cases = collect_enum_cases(right)
-            for case_name in right_cases.iterator() then {
-                covered.insert(case_name)
-            }
-        },
-        _ then {},
-    }
-    return covered
 }
 
 public let collect_trait_object_types(pattern * TypedPattern) Set[String] = {

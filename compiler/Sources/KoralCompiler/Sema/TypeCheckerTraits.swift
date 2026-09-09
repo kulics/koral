@@ -5,15 +5,67 @@ import Foundation
 
 extension TypeChecker {
 
+  func qualifiedTraitKey(_ name: String, modulePath: [String]) -> String {
+    guard !modulePath.isEmpty else { return name }
+    return modulePath.joined(separator: ".") + "." + name
+  }
+
+  func traitInfo(_ name: String, modulePath: [String]) -> TraitDeclInfo? {
+    if let info = qualifiedTraits[qualifiedTraitKey(name, modulePath: modulePath)] {
+      return info
+    }
+    return traits[name]
+  }
+
+  func visibleTraitInfo(_ name: String) -> TraitDeclInfo? {
+    return traitInfo(name, modulePath: currentModulePath)
+  }
+
+  func validateTraitInheritanceGraph(_ traitName: String) throws {
+    var visited: Set<String> = []
+    var stack: [String] = []
+    try validateTraitInheritanceGraph(traitName, visited: &visited, stack: &stack)
+  }
+
+  private func validateTraitInheritanceGraph(
+    _ traitName: String,
+    visited: inout Set<String>,
+    stack: inout [String]
+  ) throws {
+    if let cycleStart = stack.firstIndex(of: traitName) {
+      let cycle = Array(stack[cycleStart...] + [traitName]).joined(separator: " -> ")
+      throw SemanticError(.generic("Cyclic trait inheritance: \(cycle)"), span: currentSpan)
+    }
+    guard visited.insert(traitName).inserted else {
+      return
+    }
+    guard let traitInfo = visibleTraitInfo(traitName) else {
+      return
+    }
+
+    stack.append(traitName)
+    defer { _ = stack.popLast() }
+
+    for parent in traitInfo.superTraits {
+      try validateTraitInheritanceGraph(parent.baseName, visited: &visited, stack: &stack)
+    }
+  }
+
   // Wrapper for shared utility function from SemaUtils.swift
   private func resolveTraitName(from node: TypeNode) throws -> String {
     return try SemaUtils.resolveTraitName(from: node)
   }
 
   func validateTraitName(_ name: String) throws {
-    try SemaUtils.validateTraitName(name, traits: traits, currentLine: currentLine)
+    if SemaUtils.isBuiltinTrait(name) {
+      return
+    }
+    guard let traitInfo = visibleTraitInfo(name) else {
+      let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+      throw SemanticError(.generic("Undefined trait: \(name)"), span: span)
+    }
 
-    let traitModulePath = traits[name]?.modulePath ?? []
+    let traitModulePath = traitInfo.modulePath
     if traitModulePath.isEmpty || traitModulePath == currentModulePath {
       return
     }
@@ -32,12 +84,48 @@ extension TypeChecker {
   }
 
   func flattenedTraitMethods(_ traitName: String) throws -> [String: TraitMethodSignature] {
-    if let cached = flattenedTraitMethodsCache[traitName] {
+    let modulePath = visibleTraitInfo(traitName)?.modulePath ?? currentModulePath
+    let cacheKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+    if let cached = flattenedTraitMethodsCache[cacheKey] {
       return cached
     }
-    let result = try SemaUtils.flattenedTraitMethods(traitName, traits: traits, currentLine: currentLine)
-    flattenedTraitMethodsCache[traitName] = result
+    var visited: Set<String> = []
+    let result = try flattenedTraitMethodsHelper(traitName, modulePath: modulePath, visited: &visited)
+    flattenedTraitMethodsCache[cacheKey] = result
     return result
+  }
+
+  private func flattenedTraitMethodsHelper(
+    _ traitName: String,
+    modulePath: [String],
+    visited: inout Set<String>
+  ) throws -> [String: TraitMethodSignature] {
+    let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+    if visited.contains(visitKey) {
+      return [:]
+    }
+    visited.insert(visitKey)
+
+    if SemaUtils.isBuiltinTrait(traitName) {
+      return [:]
+    }
+
+    guard let decl = traitInfo(traitName, modulePath: modulePath) else {
+      let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
+    }
+
+    var methods: [String: TraitMethodSignature] = [:]
+    for parent in decl.superTraits {
+      let parentMethods = try flattenedTraitMethodsHelper(parent.baseName, modulePath: decl.modulePath, visited: &visited)
+      for (name, sig) in parentMethods {
+        methods[name] = sig
+      }
+    }
+    for method in decl.methods {
+      methods[method.name] = method
+    }
+    return methods
   }
 
   func canonicalTraitRef(traitName: String, traitTypeArgs: [Type] = []) -> CanonicalTraitRef {
@@ -63,7 +151,7 @@ extension TypeChecker {
 
   func traitTypeSubstitution(for traitRef: CanonicalTraitRef, selfType: Type) -> [String: Type] {
     var substitution: [String: Type] = ["Self": selfType]
-    guard let traitInfo = traits[traitRef.traitName] else {
+    guard let traitInfo = visibleTraitInfo(traitRef.traitName) else {
       return substitution
     }
     for (index, parameter) in traitInfo.typeParameters.enumerated() where index < traitRef.traitTypeArgs.count {
@@ -73,7 +161,7 @@ extension TypeChecker {
   }
 
   func directParentTraitRefs(for traitRef: CanonicalTraitRef, selfType: Type) throws -> [CanonicalTraitRef] {
-    guard let traitInfo = traits[traitRef.traitName] else {
+    guard let traitInfo = visibleTraitInfo(traitRef.traitName) else {
       return []
     }
     let substitution = traitTypeSubstitution(for: traitRef, selfType: selfType)
@@ -96,7 +184,7 @@ extension TypeChecker {
         try collect(parent)
       }
 
-      guard let traitInfo = traits[current.traitName] else {
+      guard let traitInfo = visibleTraitInfo(current.traitName) else {
         return
       }
       let substitution = traitTypeSubstitution(for: current, selfType: selfType)
@@ -184,6 +272,24 @@ extension TypeChecker {
     selfTypeForInheritance: Type,
     matching expected: CanonicalTraitRef
   ) -> CanonicalTraitRef? {
+    var visited: Set<String> = []
+    return resolvedInheritedTraitRef(
+      from: actual,
+      selfTypeForInheritance: selfTypeForInheritance,
+      matching: expected,
+      visited: &visited
+    )
+  }
+
+  private func resolvedInheritedTraitRef(
+    from actual: CanonicalTraitRef,
+    selfTypeForInheritance: Type,
+    matching expected: CanonicalTraitRef,
+    visited: inout Set<String>
+  ) -> CanonicalTraitRef? {
+    guard visited.insert(actual.cacheKey).inserted else {
+      return nil
+    }
     if actual == expected {
       return actual
     }
@@ -204,7 +310,8 @@ extension TypeChecker {
       if let matched = resolvedInheritedTraitRef(
         from: parentRef,
         selfTypeForInheritance: selfTypeForInheritance,
-        matching: expected
+        matching: expected,
+        visited: &visited
       ) {
         return matched
       }
@@ -218,6 +325,24 @@ extension TypeChecker {
     selfTypeForInheritance: Type,
     matchingTraitName traitName: String
   ) -> CanonicalTraitRef? {
+    var visited: Set<String> = []
+    return resolvedInheritedTraitRef(
+      from: actual,
+      selfTypeForInheritance: selfTypeForInheritance,
+      matchingTraitName: traitName,
+      visited: &visited
+    )
+  }
+
+  private func resolvedInheritedTraitRef(
+    from actual: CanonicalTraitRef,
+    selfTypeForInheritance: Type,
+    matchingTraitName traitName: String,
+    visited: inout Set<String>
+  ) -> CanonicalTraitRef? {
+    guard visited.insert(actual.cacheKey).inserted else {
+      return nil
+    }
     if actual.traitName == traitName {
       return actual
     }
@@ -238,7 +363,8 @@ extension TypeChecker {
       if let matched = resolvedInheritedTraitRef(
         from: parentRef,
         selfTypeForInheritance: selfTypeForInheritance,
-        matchingTraitName: traitName
+        matchingTraitName: traitName,
+        visited: &visited
       ) {
         return matched
       }
@@ -280,11 +406,19 @@ extension TypeChecker {
   
   /// Checks if a trait inherits from another trait (directly or transitively).
   private func hasTraitInheritance(_ traitName: String, _ targetTrait: String) -> Bool {
+    var visited: Set<String> = []
+    return hasTraitInheritance(traitName, targetTrait, visited: &visited)
+  }
+
+  private func hasTraitInheritance(_ traitName: String, _ targetTrait: String, visited: inout Set<String>) -> Bool {
+    guard visited.insert(traitName).inserted else {
+      return false
+    }
     if traitName == targetTrait {
       return true
     }
     
-    guard let traitInfo = traits[traitName] else {
+    guard let traitInfo = visibleTraitInfo(traitName) else {
       return false
     }
     
@@ -293,7 +427,7 @@ extension TypeChecker {
     }
     
     for superTrait in traitInfo.superTraits {
-      if hasTraitInheritance(superTrait.baseName, targetTrait) {
+      if hasTraitInheritance(superTrait.baseName, targetTrait, visited: &visited) {
         return true
       }
     }
@@ -330,10 +464,10 @@ extension TypeChecker {
         func bindAncestorParams(_ traitName: String, substitution: [String: Type]) {
           guard !visited.contains(traitName) else { return }
           visited.insert(traitName)
-          guard let info = traits[traitName] else { return }
+          guard let info = self.traitInfo(traitName, modulePath: traitInfo.modulePath) else { return }
           for parent in info.superTraits {
             let parentName = parent.baseName
-            guard let parentInfo = traits[parentName] else { continue }
+            guard let parentInfo = self.traitInfo(parentName, modulePath: info.modulePath) else { continue }
             if case .generic(_, let argNodes) = parent, !parentInfo.typeParameters.isEmpty {
               for (i, typeParam) in parentInfo.typeParameters.enumerated() {
                 if i < argNodes.count {
@@ -410,38 +544,43 @@ extension TypeChecker {
   /// Returns (isObjectSafe, reasons) where reasons lists why it's not safe.
   /// Uses objectSafetyCache for memoization and visited set for cycle detection.
   func checkObjectSafety(_ traitName: String) throws -> (Bool, [String]) {
-    if let cached = objectSafetyCache[traitName] {
+    let modulePath = visibleTraitInfo(traitName)?.modulePath ?? currentModulePath
+    let cacheKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+    if let cached = objectSafetyCache[cacheKey] {
       return cached
     }
     var visited: Set<String> = []
-    let result = try checkObjectSafetyHelper(traitName, visited: &visited)
-    objectSafetyCache[traitName] = result
+    let result = try checkObjectSafetyHelper(traitName, modulePath: modulePath, visited: &visited)
+    objectSafetyCache[cacheKey] = result
     return result
   }
 
   private func checkObjectSafetyHelper(
     _ traitName: String,
+    modulePath: [String],
     visited: inout Set<String>
   ) throws -> (Bool, [String]) {
+    let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
     // Cycle detection: if already in the check chain, treat as safe to avoid infinite recursion
-    if visited.contains(traitName) {
+    if visited.contains(visitKey) {
       return (true, [])
     }
-    visited.insert(traitName)
+    visited.insert(visitKey)
 
     // Cache hit
-    if let cached = objectSafetyCache[traitName] {
+    if let cached = objectSafetyCache[visitKey] {
       return cached
     }
 
-    guard let traitInfo = traits[traitName] else {
+    guard let traitInfo = traitInfo(traitName, modulePath: modulePath) else {
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
 
     var reasons: [String] = []
 
     // Check all methods (including inherited)
-    let allMethods = try flattenedTraitMethods(traitName)
+    var flattenVisited: Set<String> = []
+    let allMethods = try flattenedTraitMethodsHelper(traitName, modulePath: modulePath, visited: &flattenVisited)
 
     for (name, method) in allMethods {
       // Rule 1: method must not have generic type parameters
@@ -469,14 +608,14 @@ extension TypeChecker {
 
     // Check parent traits' object safety (using visited to prevent cycles)
     for superTrait in traitInfo.superTraits {
-      let (parentSafe, parentReasons) = try checkObjectSafetyHelper(superTrait.baseName, visited: &visited)
+      let (parentSafe, parentReasons) = try checkObjectSafetyHelper(superTrait.baseName, modulePath: traitInfo.modulePath, visited: &visited)
       if !parentSafe {
         reasons.append(contentsOf: parentReasons.map { "inherited from \(superTrait.baseName): \($0)" })
       }
     }
 
     let result = (reasons.isEmpty, reasons)
-    objectSafetyCache[traitName] = result
+    objectSafetyCache[visitKey] = result
     return result
   }
 
@@ -516,20 +655,23 @@ extension TypeChecker {
   /// Returns an ordered list of trait methods for vtable layout.
   /// Parent trait methods come first (in declaration order), then the trait's own methods.
   func orderedTraitMethods(_ traitName: String) throws -> [(name: String, signature: TraitMethodSignature)] {
+    let modulePath = visibleTraitInfo(traitName)?.modulePath ?? currentModulePath
     var visited: Set<String> = []
-    return try orderedTraitMethodsHelper(traitName, visited: &visited)
+    return try orderedTraitMethodsHelper(traitName, modulePath: modulePath, visited: &visited)
   }
 
   private func orderedTraitMethodsHelper(
     _ traitName: String,
+    modulePath: [String],
     visited: inout Set<String>
   ) throws -> [(name: String, signature: TraitMethodSignature)] {
-    if visited.contains(traitName) { return [] }
-    visited.insert(traitName)
+    let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+    if visited.contains(visitKey) { return [] }
+    visited.insert(visitKey)
 
     if SemaUtils.isBuiltinTrait(traitName) { return [] }
 
-    guard let decl = traits[traitName] else {
+    guard let decl = traitInfo(traitName, modulePath: modulePath) else {
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
 
@@ -538,7 +680,7 @@ extension TypeChecker {
 
     // Parent trait methods first
     for parent in decl.superTraits {
-      let parentMethods = try orderedTraitMethodsHelper(parent.baseName, visited: &visited)
+      let parentMethods = try orderedTraitMethodsHelper(parent.baseName, modulePath: decl.modulePath, visited: &visited)
       for entry in parentMethods where !seen.contains(entry.name) {
         result.append(entry)
         seen.insert(entry.name)
@@ -592,7 +734,7 @@ extension TypeChecker {
     }
     visited.insert(traitName)
 
-    guard let traitInfo = traits[traitName] else {
+    guard let traitInfo = visibleTraitInfo(traitName) else {
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
 

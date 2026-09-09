@@ -407,7 +407,7 @@ extension TypeChecker {
   }
 
   private func inferTraitTypeArgsForReceiver(_ receiverType: Type, traitName: String) throws -> [Type]? {
-    guard let traitInfo = traits[traitName] else {
+    guard let traitInfo = visibleTraitInfo(traitName) else {
       return nil
     }
     if traitInfo.typeParameters.isEmpty {
@@ -916,7 +916,7 @@ extension TypeChecker {
           
           // Bind trait type parameters to their actual type arguments
           // For example, for [T]Iterator with constraint [A]Iterator, bind T -> A
-          if let traitInfo = traits[traitName] {
+          if let traitInfo = visibleTraitInfo(traitName) {
             if case .generic(_, let argNodes) = traitConstraint {
               for (i, typeParam) in traitInfo.typeParameters.enumerated() {
                 if i < argNodes.count {

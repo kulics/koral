@@ -805,28 +805,34 @@ given TypeChecker {
         checked_parameters Option[List[Symbol]],
         checked_return_type Option[Type],
     ) Void = {
-        if self.storage.global_scope.lookup(name) is .Some(sym) then {
-            when self.storage.generic_templates.lookup_function(name) in {
+        if self.lookup_current_file_symbol(name) is .Some(sym) then {
+            let qualified_name = qualified_trait_key(self.storage.module_path, name)
+            when self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) in {
                 .Some(existing) then {
                     let new_checked_body = when checked_body in {
                         .Some(_) then checked_body,
                         .None() then existing.checked_body,
+                    }
+                    let new_checked_parameters = when checked_parameters in {
+                        .Some(_) then checked_parameters,
+                        .None() then existing.checked_parameters,
                     }
                     let new_checked_return_type = when checked_return_type in {
                         .Some(_) then checked_return_type,
                         .None() then existing.checked_return_type,
                     }
                     let updated = GenericFunctionTemplate(
-                        existing.def_id,
-                        existing.name,
-                        self.copy_template_type_params(existing.type_parameters),
-                        self.copy_template_params(existing.parameters),
-                        self.copy_type_node(existing.return_type),
+                        sym.def_id,
+                        name,
+                        self.to_template_type_params(type_params),
+                        self.to_template_params(params),
+                        self.copy_type_node(return_type),
                         self.copy_optional_checked_body(new_checked_body),
-                        self.copy_optional_symbols(checked_parameters),
+                        self.copy_optional_symbols(new_checked_parameters),
                         self.copy_optional_type(new_checked_return_type),
                     )
                     self.storage.generic_templates.function_templates.insert(name, box(updated))
+                    self.storage.generic_templates.function_templates.insert(qualified_name, box(updated))
                 },
                 .None() then {
                     let template = GenericFunctionTemplate(
@@ -840,6 +846,7 @@ given TypeChecker {
                         checked_return_type,
                     )
                     self.storage.generic_templates.function_templates.insert(name, box(template))
+                    self.storage.generic_templates.function_templates.insert(qualified_name, box(template))
                 },
             }
         }

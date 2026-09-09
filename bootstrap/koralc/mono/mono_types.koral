@@ -437,7 +437,11 @@ public let args_have_generic_parameter(args List[* Type]) Bool = {
 //
 public let instantiate_struct(mono * Monomorphizer, template GenericStructTemplate, args List[* Type]) Type = {
     if args.count() <> template.type_parameters.count() then {
-        panic("Monomorphization error: struct type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
+        mono.report_monomorphization_error(
+            template.def_id,
+            "Monomorphization error: struct type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())"
+        )
+        return Type.Unknown()
     }
 
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
@@ -474,7 +478,11 @@ public let instantiate_struct(mono * Monomorphizer, template GenericStructTempla
 
     // d. Check instantiating_types for direct cycle detection.
     if mono.storage.instantiating_types.contains(layout_name) then {
-        panic("Monomorphization error: direct recursive struct '\(layout_name)' — a struct field cannot have the same type as the struct itself (use a reference instead)")
+        mono.report_monomorphization_error(
+            template.def_id,
+            "Monomorphization error: direct recursive struct '\(layout_name)' — a struct field cannot have the same type as the struct itself (use a reference instead)"
+        )
+        return concrete_type
     }
 
     // e. Add to instantiating_types.
@@ -500,7 +508,10 @@ public let instantiate_struct(mono * Monomorphizer, template GenericStructTempla
         when resolved_type in {
             .StructureType(field_def_id) then {
                 if mono.storage.context.get_name(field_def_id) is .Some(field_type_name) and field_type_name == layout_name then {
-                    panic("Monomorphization error: direct recursive struct '\(layout_name)' — field '\(field.name)' has the same type as the struct itself (use a reference instead)")
+                    mono.report_monomorphization_error(
+                        template.def_id,
+                        "Monomorphization error: direct recursive struct '\(layout_name)' — field '\(field.name)' has the same type as the struct itself (use a reference instead)"
+                    )
                 }
             },
             _ then {},
@@ -593,7 +604,11 @@ public let instantiate_struct(mono * Monomorphizer, template GenericStructTempla
 //
 public let instantiate_enum(mono * Monomorphizer, template GenericEnumTemplate, args List[* Type]) Type = {
     if args.count() <> template.type_parameters.count() then {
-        panic("Monomorphization error: enum type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())")
+        mono.report_monomorphization_error(
+            template.def_id,
+            "Monomorphization error: enum type arg arity mismatch for \(template.name) - expected \(template.type_parameters.count()), got \(args.count())"
+        )
+        return Type.Unknown()
     }
 
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
@@ -630,7 +645,11 @@ public let instantiate_enum(mono * Monomorphizer, template GenericEnumTemplate, 
 
     // d. Check instantiating_types for direct cycle detection.
     if mono.storage.instantiating_types.contains(layout_name) then {
-        panic("Monomorphization error: direct recursive enum '\(layout_name)' — an enum case parameter cannot have the same type as the enum itself (use a reference instead)")
+        mono.report_monomorphization_error(
+            template.def_id,
+            "Monomorphization error: direct recursive enum '\(layout_name)' — an enum case parameter cannot have the same type as the enum itself (use a reference instead)"
+        )
+        return concrete_type
     }
 
     // e. Add to instantiating_types.
@@ -658,7 +677,10 @@ public let instantiate_enum(mono * Monomorphizer, template GenericEnumTemplate, 
             when resolved_type in {
                 .EnumType(param_def_id) then {
                     if mono.storage.context.get_name(param_def_id) is .Some(param_type_name) and param_type_name == layout_name then {
-                        panic("Monomorphization error: direct recursive enum '\(layout_name)' — case '\(case_.name)' parameter '\(param.name)' has the same type as the enum itself (use a reference instead)")
+                        mono.report_monomorphization_error(
+                            template.def_id,
+                            "Monomorphization error: direct recursive enum '\(layout_name)' — case '\(case_.name)' parameter '\(param.name)' has the same type as the enum itself (use a reference instead)"
+                        )
                     }
                 },
                 _ then {},

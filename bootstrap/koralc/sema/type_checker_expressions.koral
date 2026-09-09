@@ -762,7 +762,7 @@ given TypeChecker {
                 yield when self.split_member_path_call_callee(callee) in {
                     .Some(parts) then {
                         let raw_typed_receiver = self.check_expr_core_ref(parts.first, .None(), scope)
-                    let normalized_receiver_type = self.canonicalize_alias_type(self.concretize_default_literal_type(raw_typed_receiver.expr_type))
+                    let normalized_receiver_type = self.concretize_default_literal_type(raw_typed_receiver.expr_type)
                     let typed_receiver = if self.same_expr_type(raw_typed_receiver.expr_type, normalized_receiver_type)
                         then raw_typed_receiver
                         else make_typed_expr_ref(raw_typed_receiver.expr_kind, normalized_receiver_type)
@@ -958,6 +958,16 @@ given TypeChecker {
         return self.same_expr_type(self.apply_type_bindings(expected_pattern, bindings), actual_type)
     }
 
+    protected report_trait_flatten_failure(self, trait_name String, method_name String, error * Error) Void = {
+        let mutable message = "failed to flatten trait "
+        message.push_string(trait_name)
+        message.push_string(" while resolving method '")
+        message.push_string(method_name)
+        message.push_string("': ")
+        message.push_string(error.message())
+        self.push_diagnostic(message)
+    }
+
     protected find_trait_constraint_for_method(self, base_type Type, method_name String) Option[String] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[String].None()
@@ -1005,7 +1015,7 @@ given TypeChecker {
                                     return Option[String].Some(cn)
                                 }
                             },
-                            .Error(_) then {},
+                            .Error(e) then self.report_trait_flatten_failure(cn, method_name, e),
                         }
                     }
                 }
@@ -1035,7 +1045,7 @@ given TypeChecker {
                                 return Option[String].Some(trait_name)
                             }
                         },
-                        .Error(_) then {},
+                        .Error(e) then self.report_trait_flatten_failure(trait_name, method_name, e),
                     }
                     if self.lookup_method_signature(trait_name, method_name) is .Some(_) then {
                         return Option[String].Some(trait_name)

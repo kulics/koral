@@ -133,7 +133,7 @@ given TypeChecker {
             false,
             List[*mutable BranchBreakTarget].new(),
             List[ExitableConstruct].new(),
-            ConstraintSolver.new(),
+            ConstraintSolver.new(context),
             TraitRegistry.new(),
             Dict[String, List[GenericConstraintBound]].new(),
             box(GenericTemplateRegistry.new()),
@@ -193,6 +193,16 @@ given TypeChecker {
 
     protected push_diagnostic(self, message String) Void = {
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message))
+    }
+
+    protected report_pass2_decl_consistency_error(self, decl_kind String, name String, detail String) Void = {
+        let mutable message = "internal consistency error while collecting "
+        message.push_string(decl_kind)
+        message.push_string(" '")
+        message.push_string(name)
+        message.push_string("': ")
+        message.push_string(detail)
+        self.push_diagnostic(message)
     }
 
     protected sema_progress_debug_enabled(self) Bool = {
@@ -405,6 +415,10 @@ given TypeChecker {
             name,
             TraitDeclInfo(name, self.to_template_type_params(type_params), parent_constraints, raw_members, typed_members, self.storage.module_path)
         )
+        self.storage.generic_templates.traits.insert(
+            qualified_trait_key(self.storage.module_path, name),
+            TraitDeclInfo(name, self.to_template_type_params(type_params), parent_constraints, raw_members, typed_members, self.storage.module_path)
+        )
     }
 
     protected template_checked_body(self, body Option[* TypedExpr], retain_checked_template_bodies Bool) Option[* TypedExpr] = {
@@ -479,7 +493,16 @@ given TypeChecker {
         let def_kind = when kind in {
             .Function() then DefKind.Function(),
             .Variable(_) then DefKind.Variable(),
-            .TypeSymbol() then panic("make_top_level_symbol: use make_top_level_type_symbol for type symbols"),
+            .TypeSymbol() then when symbol_type in {
+                .StructureType(_) then DefKind.TypeDef(TypeDefKind.Structure()),
+                .EnumType(_) then DefKind.TypeDef(TypeDefKind.Enum()),
+                .OpaqueType(_) then DefKind.TypeDef(TypeDefKind.Opaque()),
+                .TraitObject(_, _) then DefKind.TypeDef(TypeDefKind.Trait()),
+                _ then {
+                    self.report_pass2_decl_consistency_error("type symbol", name, "cannot infer top-level type kind from symbol type '")
+                    yield DefKind.TypeDef(TypeDefKind.Structure())
+                },
+            },
             .Module() then DefKind.Module(),
         }
         let def_id = self.get_or_allocate_top_level_def_id(name, def_kind, access, span)
@@ -728,9 +751,74 @@ given TypeChecker {
     }
 
     protected same_expr_type(self, left Type, right Type) Bool = {
-        let normalized_left = self.canonicalize_alias_type(self.concretize_default_literal_type(left))
-        let normalized_right = self.canonicalize_alias_type(self.concretize_default_literal_type(right))
-        return normalized_left == normalized_right
+        let normalized_left = self.concretize_default_literal_type(left)
+        let normalized_right = self.concretize_default_literal_type(right)
+        if normalized_left == normalized_right then {
+            return true
+        }
+        if self.nominal_instantiation_matches_generic(normalized_left, normalized_right) then {
+            return true
+        }
+        if self.nominal_instantiation_matches_generic(normalized_right, normalized_left) then {
+            return true
+        }
+        return false
+    }
+
+    protected nominal_instantiation_matches_generic(self, nominal Type, generic_candidate Type) Bool = {
+        return when nominal in {
+            .StructureType(def_id) then when generic_candidate in {
+                .GenericStruct(expected_template, expected_args) then {
+                    let template_name = self.context().get_template_name(def_id) or else {
+                        return false
+                    }
+                    if template_name <> expected_template then {
+                        return false
+                    }
+                    let actual_args = self.context().get_type_arguments(def_id) or else {
+                        return false
+                    }
+                    if actual_args.count() <> expected_args.count() then {
+                        return false
+                    }
+                    let mutable index UInt = 0
+                    while index < actual_args.count() then {
+                        if not self.same_expr_type(actual_args[index], *expected_args[index]) then {
+                            return false
+                        }
+                        index += 1
+                    }
+                    yield true
+                },
+                _ then false,
+            },
+            .EnumType(def_id) then when generic_candidate in {
+                .GenericEnum(expected_template, expected_args) then {
+                    let template_name = self.context().get_template_name(def_id) or else {
+                        return false
+                    }
+                    if template_name <> expected_template then {
+                        return false
+                    }
+                    let actual_args = self.context().get_type_arguments(def_id) or else {
+                        return false
+                    }
+                    if actual_args.count() <> expected_args.count() then {
+                        return false
+                    }
+                    let mutable index UInt = 0
+                    while index < actual_args.count() then {
+                        if not self.same_expr_type(actual_args[index], *expected_args[index]) then {
+                            return false
+                        }
+                        index += 1
+                    }
+                    yield true
+                },
+                _ then false,
+            },
+            _ then false,
+        }
     }
 
     protected canonicalize_alias_type(self, t Type) Type = {
@@ -1392,8 +1480,10 @@ given TypeChecker {
     protected collect_decl_signature(*mutable self, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
-                let resolved_type = self.lookup_current_file_type_symbol(name)
-                    or else panic("TypeChecker pass2 error: missing struct symbol for \(name)")
+                let resolved_type = self.lookup_current_file_type_symbol(name) or else {
+                    self.report_pass2_decl_consistency_error("struct declaration", name, "missing struct symbol")
+                    return
+                }
                 if type_params.is_empty() then {
                     self.storage.generic_templates.concrete_struct_types.insert(name, resolved_type)
                 } else when resolved_type in {
@@ -1407,7 +1497,10 @@ given TypeChecker {
                             GenericStructTemplate(def_id, name, self.to_template_type_params(type_params), template_fields)
                         )
                     },
-                    _ then panic("TypeChecker pass2 error: generic struct symbol for \(name) is not a structure"),
+                    _ then {
+                        self.report_pass2_decl_consistency_error("struct declaration", name, "generic struct symbol is not a structure")
+                        return
+                    },
                 }
                 if resolved_type is .StructureType(def_id) then {
                     let mutable sf = List[StructField].new()
@@ -1424,12 +1517,15 @@ given TypeChecker {
                     let mutable context = self.context()
                     context.set_struct_fields(def_id, sf)
                 } else {
-                    panic("TypeChecker pass2 error: struct declaration \(name) resolved to non-structure type")
+                    self.report_pass2_decl_consistency_error("struct declaration", name, "resolved to non-structure type")
+                    return
                 }
             },
             .TypeEnumDecl(access, name, type_params, cases, span) then {
-                let resolved_type = self.lookup_current_file_type_symbol(name)
-                    or else panic("TypeChecker pass2 error: missing enum symbol for \(name)")
+                let resolved_type = self.lookup_current_file_type_symbol(name) or else {
+                    self.report_pass2_decl_consistency_error("enum declaration", name, "missing enum symbol")
+                    return
+                }
                 if type_params.is_empty() then {
                     self.storage.generic_templates.concrete_enum_types.insert(name, resolved_type)
                 } else when resolved_type in {
@@ -1447,7 +1543,10 @@ given TypeChecker {
                             GenericEnumTemplate(def_id, name, self.to_template_type_params(type_params), template_cases)
                         )
                     },
-                    _ then panic("TypeChecker pass2 error: generic enum symbol for \(name) is not an enum"),
+                    _ then {
+                        self.report_pass2_decl_consistency_error("enum declaration", name, "generic enum symbol is not an enum")
+                        return
+                    },
                 }
                 if resolved_type is .EnumType(def_id) then {
                     let mutable uc = List[EnumCaseInfo].new()
@@ -1472,7 +1571,8 @@ given TypeChecker {
                     let mutable context = self.context()
                     context.set_enum_cases(def_id, uc)
                 } else {
-                    panic("TypeChecker pass2 error: enum declaration \(name) resolved to non-enum type")
+                    self.report_pass2_decl_consistency_error("enum declaration", name, "resolved to non-enum type")
+                    return
                 }
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span) then {

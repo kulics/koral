@@ -474,6 +474,9 @@ protected type MonomorphizerStorage(
 
     // ── Shared metadata context ─────────────────────────────────────────────
     context CompilerContext,
+
+    // ── Diagnostics ─────────────────────────────────────────────────────────
+    mutable diagnostics DiagnosticCollector,
 )
 
 // ── Monomorphizer ─────────────────────────────────────────────────────────────
@@ -688,6 +691,18 @@ private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs 
 }
 
 given Monomorphizer {
+    public diagnostics(self) DiagnosticCollector = self.storage.diagnostics
+
+    protected report_monomorphization_error(*self, def_id DefId, message String) Void = {
+        let file_path = self.storage.context.get_source_file(def_id) or else ""
+        let span = self.storage.context.get_span(def_id) or else unknown_span()
+        self.storage.diagnostics.push(make_diagnostic_at(DiagnosticStage.Other(), file_path, message, span))
+    }
+
+    protected report_monomorphization_internal_error(*self, message String) Void = {
+        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Other(), "", message))
+    }
+
     protected receiver_method_dispatch_info(*self, def_id DefId) Option[ReceiverMethodDispatchInfo] = {
         return self.storage.receiver_method_dispatch.get(def_id)
     }
@@ -821,6 +836,7 @@ given Monomorphizer {
             Option[Type].None(),
             // shared metadata context
             input.context,
+            DiagnosticCollector.new(),
         ))
         return Monomorphizer(s)
     }
@@ -1050,7 +1066,8 @@ given Monomorphizer {
 // ── Work-queue loop ───────────────────────────────────────────────────
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
-                panic("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
+                self.report_monomorphization_internal_error("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
+                break
             }
 
             processed_iterations += 1
@@ -1058,17 +1075,24 @@ given Monomorphizer {
                 // removed noisy progress logging
             }
             if processed_iterations > 200000 then {
-                panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
+                self.report_monomorphization_internal_error("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
+                break
             }
 
             // Recursion depth guard
             if self.storage.current_recursion_depth > 100 then {
-                panic("Monomorphization recursion depth exceeded 100 — possible infinite generic instantiation")
+                self.report_monomorphization_internal_error("Monomorphization recursion depth exceeded 100 — possible infinite generic instantiation")
+                break
             }
 
             // Take the first request from the queue
-            let req = self.storage.pending_requests.pop() or else {
-                panic("Monomorphization pending queue unexpectedly empty")
+            let req_opt = self.storage.pending_requests.pop()
+            if req_opt is .None() then {
+                self.report_monomorphization_internal_error("Monomorphization pending queue unexpectedly empty")
+                break
+            }
+            let req = req_opt or else {
+                continue
             }
             let key = req.deduplication_key()
             // removed noisy phase logging
@@ -1176,7 +1200,8 @@ given Monomorphizer {
         // ── Final trait-placeholder resolution loop ───────────────────────────
         while not self.storage.pending_requests.is_empty() then {
             if self.storage.pending_requests.count() > 50000 then {
-                panic("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
+                self.report_monomorphization_internal_error("Monomorphization pending queue exceeded 50000 entries — possible infinite instantiation loop")
+                break
             }
 
             processed_iterations += 1
@@ -1184,11 +1209,17 @@ given Monomorphizer {
                 // removed noisy progress logging
             }
             if processed_iterations > 200000 then {
-                panic("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
+                self.report_monomorphization_internal_error("Monomorphization request limit exceeded (200000) — possible infinite instantiation loop")
+                break
             }
 
-            let req = self.storage.pending_requests.pop() or else {
-                panic("Monomorphization pending queue unexpectedly empty")
+            let req_opt = self.storage.pending_requests.pop()
+            if req_opt is .None() then {
+                self.report_monomorphization_internal_error("Monomorphization pending queue unexpectedly empty")
+                break
+            }
+            let req = req_opt or else {
+                continue
             }
             let key = req.deduplication_key()
             // removed noisy phase logging
@@ -1317,6 +1348,7 @@ given Monomorphizer {
             0,
             Option[Type].None(),
             *context,
+            DiagnosticCollector.new(),
         ))
         let mutable mono = Monomorphizer(s)
         let resolved = resolve_types_in_expression(&mutable mono, expr)

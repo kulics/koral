@@ -139,6 +139,7 @@ public class TypeChecker {
   var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
 
   var traits: [String: TraitDeclInfo] = [:]
+  var qualifiedTraits: [String: TraitDeclInfo] = [:]
   // Trait tool methods declared via `given Trait { ... }`.
   var traitToolBlocks: [String: [TraitToolBlock]] = [:]
   // Explicit nominal conformances.

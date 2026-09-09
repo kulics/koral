@@ -8,6 +8,14 @@ private type ReusedGivenMemberSignature(
 
 given TypeChecker {
 
+    protected report_concrete_body_recheck_failure(self, source ConcreteExprSource, context String, error * Error) Void = {
+        let mutable message = "failed to recheck "
+        message.push_string(context)
+        message.push_string(": ")
+        message.push_string(error.message())
+        self.push_expr_diagnostic(source.body, message)
+    }
+
     protected function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new()
         for param in params then {
@@ -392,7 +400,7 @@ given TypeChecker {
     protected resolve_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
-                when self.storage.trait_registry.check_object_safety(trait_name) in {
+                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
@@ -416,7 +424,7 @@ given TypeChecker {
     protected resolve_mutable_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
-                when self.storage.trait_registry.check_object_safety(trait_name) in {
+                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
@@ -440,7 +448,7 @@ given TypeChecker {
     protected resolve_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
-                when self.storage.trait_registry.check_object_safety(trait_name) in {
+                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
@@ -464,7 +472,7 @@ given TypeChecker {
     protected resolve_mutable_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
-                when self.storage.trait_registry.check_object_safety(trait_name) in {
+                when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
                     .Ok(is_safe) then {
                         if not is_safe then {
                             self.storage.diagnostics.push(
@@ -872,7 +880,8 @@ given TypeChecker {
             },
             .Error(e) then {
                 self.storage.constraint_solver.clear_debug_state()
-                panic("failed to recheck concrete given body: \(e.message())")
+                self.report_concrete_body_recheck_failure(source, "concrete given body", e)
+                yield self.empty_typed_block(Type.Unknown())
             },
         }
         self.storage.current_scope = prev_scope
@@ -930,7 +939,8 @@ given TypeChecker {
             },
             .Error(e) then {
                 self.storage.constraint_solver.clear_debug_state()
-                panic("failed to recheck concrete function body: \(e.message())")
+                self.report_concrete_body_recheck_failure(source, "concrete function body", e)
+                yield self.empty_typed_block(Type.Unknown())
             },
         }
         self.storage.current_scope = prev_scope

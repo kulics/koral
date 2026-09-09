@@ -3,11 +3,12 @@ public type MIRLowerer(
     context * CompilerContext,
     mutable pending_work_items List[* MIRFunctionWorkItem],
     mutable streaming_nodes_prepared Bool,
+    mutable diagnostics DiagnosticCollector,
 )
 
 given MIRLowerer {
     public new(program *mutable MonomorphizedProgram, context * CompilerContext) MIRLowerer =
-        MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false)
+        MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false, DiagnosticCollector.new())
 
     protected unique_vtable_requests(self) List[VtableRequest] = {
         let _ = self
@@ -203,8 +204,12 @@ given MIRLowerer {
                             .Some(source) then {
                                 let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                 let rechecked = checker.recheck_concrete_function_body(params, return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                let resolved = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
-                                yield resolved
+                                yield if checker.has_errors() then {
+                                    self.diagnostics.merge(checker.storage.diagnostics)
+                                    yield body
+                                } else {
+                                    yield Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rechecked))
+                                }
                             },
                             .None() then body,
                         },
@@ -235,8 +240,12 @@ given MIRLowerer {
                                 if self.should_lower_function(symbol) then {
                                     let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                    let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
-                                    methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                    if checker.has_errors() then {
+                                        self.diagnostics.merge(checker.storage.diagnostics)
+                                    } else {
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                    }
                                 }
                             },
                             .None() then when member_ref.body in {
@@ -273,8 +282,12 @@ given MIRLowerer {
                                 if self.should_lower_function(symbol) then {
                                     let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                    let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
-                                    methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                    if checker.has_errors() then {
+                                        self.diagnostics.merge(checker.storage.diagnostics)
+                                    } else {
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                    }
                                 }
                             },
                             .None() then when member_ref.body in {
@@ -309,8 +322,12 @@ given MIRLowerer {
                                 if self.should_lower_function(symbol) then {
                                     let mutable checker = TypeChecker.new(self.program.global_scope, *(self.context), source.source_file)
                                     let rebuilt = checker.recheck_concrete_given_member_body(target_type, member_ref.params, member_ref.return_type, source, self.program.import_graph, self.program.generic_templates, self.program.method_table, self.program.trait_registry, self.program.conformance_index)
-                                    let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
-                                    methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                    if checker.has_errors() then {
+                                        self.diagnostics.merge(checker.storage.diagnostics)
+                                    } else {
+                                        let resolved_body = Monomorphizer.resolve_program_body_expression(self.program, self.context, box(rebuilt))
+                                        methods_reversed.push(box(MIRFunctionWorkItem(symbol, member_ref.params, member_ref.return_type, kind, resolved_body)))
+                                    }
                                 }
                             },
                             .None() then when member_ref.body in {
@@ -437,31 +454,49 @@ given MIRLowerer {
         let mutable seen_methods = Set[String].new()
         let mutable methods = List[MIRTraitVTableMethod].new()
         let bindings = self.trait_member_type_bindings(request)
-        self.collect_instantiated_trait_members(request.trait_name, request.concrete_type, bindings, &mutable visited_traits, &mutable seen_methods, &mutable ordered_members)
+        let preferred_module_path = self.type_module_path(request.concrete_type)
+        self.collect_instantiated_trait_members(request.trait_name, preferred_module_path, request.concrete_type, bindings, &mutable visited_traits, &mutable seen_methods, &mutable ordered_members)
         for member in ordered_members then {
             methods.push(self.make_trait_vtable_method(member))
         }
         return methods
     }
 
+    protected type_module_path(self, t Type) List[String] = {
+        return when t in {
+            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            _ then List[String].new(),
+        }
+    }
+
+    protected trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
+        return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
+            .Some(info) then Option[TraitDeclInfo].Some(info),
+            .None() then self.program.traits.get(trait_name),
+        }
+    }
+
     protected collect_instantiated_trait_members(
         self,
         trait_name String,
+        preferred_module_path List[String],
         concrete_type Type,
         bindings Dict[String, Type],
         visited_traits *mutable Set[String],
         seen_methods *mutable Set[String],
         ordered_members *mutable List[TypedTraitMember],
     ) Void = {
-        let visit_key = self.trait_binding_visit_key(trait_name, bindings)
+        let visit_key = self.trait_binding_visit_key(trait_name, preferred_module_path, bindings)
         if visited_traits.contains(visit_key) then { return }
         visited_traits.insert(visit_key)
 
-        when self.program.traits.get(trait_name) in {
+        when self.trait_info(trait_name, preferred_module_path) in {
             .Some(trait_info) then {
                 for parent in trait_info.parent_traits then {
-                    let parent_bindings = self.parent_trait_bindings(parent, concrete_type, bindings)
-                    self.collect_instantiated_trait_members(parent.name, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members)
+                    let parent_bindings = self.parent_trait_bindings(parent, trait_info.module_path, concrete_type, bindings)
+                    self.collect_instantiated_trait_members(parent.name, trait_info.module_path, concrete_type, parent_bindings, visited_traits, seen_methods, ordered_members)
                 }
                 for member in trait_info.members then {
                     if self.trait_member_has_receiver(member) and not seen_methods.contains(member.name) then {
@@ -474,9 +509,9 @@ given MIRLowerer {
         }
     }
 
-    protected trait_binding_visit_key(self, trait_name String, bindings Dict[String, Type]) String = {
-        let mutable key = trait_name
-        when self.program.traits.get(trait_name) in {
+    protected trait_binding_visit_key(self, trait_name String, preferred_module_path List[String], bindings Dict[String, Type]) String = {
+        let mutable key = qualified_trait_key(preferred_module_path, trait_name)
+        when self.trait_info(trait_name, preferred_module_path) in {
             .Some(trait_info) then {
                 for type_param in trait_info.type_params then {
                     key.push_string("<")
@@ -492,14 +527,14 @@ given MIRLowerer {
         return key
     }
 
-    protected parent_trait_bindings(self, parent ParentTraitConstraint, concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
+    protected parent_trait_bindings(self, parent ParentTraitConstraint, preferred_module_path List[String], concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
         let mutable result = Dict[String, Type].new()
         for entry in bindings then {
             result.insert(entry.first, entry.second)
         }
         result.insert("Self", concrete_type)
 
-        when self.program.traits.get(parent.name) in {
+        when self.trait_info(parent.name, preferred_module_path) in {
             .Some(parent_info) then {
                 let mutable idx UInt = 0
                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count() then {
@@ -580,7 +615,8 @@ given MIRLowerer {
     protected trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new()
         bindings.insert("Self", request.concrete_type)
-        when self.program.traits.get(request.trait_name) in {
+        let preferred_module_path = self.type_module_path(request.concrete_type)
+        when self.trait_info(request.trait_name, preferred_module_path) in {
             .Some(trait_info) then {
                 let mutable index UInt = 0
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count() then {

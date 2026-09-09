@@ -6,6 +6,37 @@ import Foundation
 
 extension TypeChecker {
 
+  private func visibleGenericFunctionTemplate(_ name: String) -> GenericFunctionTemplate? {
+    func template(for defId: DefId) -> GenericFunctionTemplate? {
+      guard case .genericTemplate(.function)? = defIdMap.getKind(defId),
+            let info = defIdMap.getGenericFunctionTemplateInfo(defId) else {
+        return nil
+      }
+      return GenericFunctionTemplate(
+        defId: defId,
+        typeParameters: info.typeParameters,
+        parameters: info.parameters,
+        returnType: info.returnType,
+        body: info.body,
+        checkedBody: info.checkedBody,
+        checkedParameters: info.checkedParameters,
+        checkedReturnType: info.checkedReturnType
+      )
+    }
+
+    if let fileScopedDefId = defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: currentSourceFile),
+       let template = template(for: fileScopedDefId) {
+      return template
+    }
+
+    if let moduleScopedDefId = defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: nil),
+       let template = template(for: moduleScopedDefId) {
+      return template
+    }
+
+    return currentScope.lookupGenericFunctionTemplate(name)
+  }
+
   private func isASCIITypeStyleIdentifier(_ name: String) -> Bool {
     guard !name.isEmpty else { return false }
     for scalar in name.unicodeScalars {
@@ -3601,7 +3632,7 @@ extension TypeChecker {
     // Check if it is a constructor call OR implicit generic function call
     if case .identifier(let name) = callee {
       // 1. Try Generic Function Template (Implicit Inference)
-      if let template = currentScope.lookupGenericFunctionTemplate(name) {
+      if let template = visibleGenericFunctionTemplate(name) {
         try rejectNonConstructorCallArguments(callArgs)
         return try inferImplicitGenericFunctionCall(
           template: template,
@@ -3902,7 +3933,7 @@ extension TypeChecker {
         arguments: typedArguments,
         type: genericType
       )
-    } else if let template = currentScope.lookupGenericFunctionTemplate(base) {
+    } else if let template = visibleGenericFunctionTemplate(base) {
       if let callArgs {
         try rejectNonConstructorCallArguments(callArgs)
       }
@@ -5453,7 +5484,7 @@ extension TypeChecker {
             continue
           }
           
-          let traitInfo = traits[traitName]
+          let traitInfo = visibleTraitInfo(traitName)
           var traitTypeArgs: [Type] = []
           if case .generic(_, let argNodes) = traitConstraint {
             for argNode in argNodes {
@@ -5524,7 +5555,7 @@ extension TypeChecker {
           return nil
         }
 
-        let traitInfo = traits[traitName]
+        let traitInfo = visibleTraitInfo(traitName)
         let traitObjType: Type = .traitObject(traitName: traitName, typeArgs: traitTypeArgs)
 
         // Resolve the method type with Self replaced by the trait object type
@@ -5999,7 +6030,7 @@ extension TypeChecker {
               continue
             }
             
-            let traitInfo = traits[traitName]
+            let traitInfo = visibleTraitInfo(traitName)
             var traitTypeArgs: [Type] = []
             if case .generic(_, let argNodes) = traitConstraint {
               for argNode in argNodes {

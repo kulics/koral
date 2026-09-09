@@ -4451,7 +4451,8 @@ public let resolve_types_in_expression(mono * Monomorphizer, expr * TypedExpr) *
                     _ then declared_resolved_type,
                 }
             if bound_callee.expr_kind is .AndExpr(_, _) or bound_callee.expr_kind is .OrExpr(_, _) then {
-                panic("mono produced invalid call callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())")
+                mono.report_monomorphization_internal_error("mono produced invalid call callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())")
+                return box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved_type))
             }
             when callee.expr_kind in {
                 .Variable(original_symbol) then when original_symbol.kind in {
@@ -4467,7 +4468,8 @@ public let resolve_types_in_expression(mono * Monomorphizer, expr * TypedExpr) *
                             _ then false,
                         }
                         if not bound_is_callable then {
-                            panic("mono invalid function callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())")
+                            mono.report_monomorphization_internal_error("mono invalid function callee: original=\(mono_debug_expr_kind(callee)) resolved=\(mono_debug_expr_kind(new_callee)) bound=\(mono_debug_expr_kind(bound_callee)) result=\(layout_key(resolved_type)) args=\(new_args.count().to_string())")
+                            return box(TypedExpr(box(TypedExprKind.Block(List[* TypedStatement].new())), resolved_type))
                         }
                     },
                     _ then {},
@@ -5312,13 +5314,14 @@ private let bind_generic_function_call_callee(
             let template = when template_opt in {
                 .Some(t) then t,
                 .None() then {
+                    let preferred_module_path = mono.storage.context.get_module_path(symbol.def_id) or else List[String].new()
                     let symbol_name = mono.storage.context.symbol_name(*symbol)
-                    let by_symbol_name = when mono.storage.generic_templates.resolve_function_name(symbol_name) in {
+                    let by_symbol_name = when mono.storage.generic_templates.resolve_function_name_in_module(symbol_name, preferred_module_path) in {
                         .Some(resolved_name) then mono.storage.generic_templates.lookup_function(resolved_name),
                         .None() then Option[* GenericFunctionTemplate].None(),
                     }
                     let by_def_name = when mono.storage.context.get_name(symbol.def_id) in {
-                        .Some(def_name) then when mono.storage.generic_templates.resolve_function_name(def_name) in {
+                        .Some(def_name) then when mono.storage.generic_templates.resolve_function_name_in_module(def_name, preferred_module_path) in {
                             .Some(resolved_name) then mono.storage.generic_templates.lookup_function(resolved_name),
                             .None() then Option[* GenericFunctionTemplate].None(),
                         },
@@ -8398,7 +8401,8 @@ private let resolve_static_method_call_to_call(
         .None() then {
             let receiver_aliases = static_method_receiver_aliases_for_type_resolution(mono, new_receiver_type)
             let alias_text = join_strings(receiver_aliases, ",")
-            panic("Unresolved static method call before MIR: \(method_name) on \(type_to_string(new_receiver_type)) aliases=\(alias_text)")
+            mono.report_monomorphization_error(method.def_id, "Unresolved static method call before MIR: \(method_name) on \(type_to_string(new_receiver_type)) aliases=\(alias_text)")
+            return TypedExprKind.Block(List[* TypedStatement].new())
         },
     }
     let callee_expr = box(TypedExpr(

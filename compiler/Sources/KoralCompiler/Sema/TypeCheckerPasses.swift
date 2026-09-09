@@ -791,7 +791,7 @@ extension TypeChecker {
       
     case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span):
       self.currentSpan = span
-      if traits[name] != nil {
+      if let existing = traits[name], existing.modulePath == currentModulePath {
         throw SemanticError.duplicateDefinition(name, span: span)
       }
       
@@ -808,7 +808,7 @@ extension TypeChecker {
       for parent in superTraits {
         resolvedSuperTraits.append(try SemaUtils.resolveTraitConstraint(from: parent))
       }
-      traits[name] = TraitDeclInfo(
+      let traitInfo = TraitDeclInfo(
         name: name,
         typeParameters: typeParameters,
         superTraits: resolvedSuperTraits,
@@ -816,6 +816,8 @@ extension TypeChecker {
         access: access,
         modulePath: currentModulePath
       )
+      traits[name] = traitInfo
+      qualifiedTraits[qualifiedTraitKey(name, modulePath: currentModulePath)] = traitInfo
       // Track std library traits
       if isStdLib {
         stdLibTypes.insert(name)
@@ -1109,9 +1111,9 @@ extension TypeChecker {
       // not as a trait tool block.
       if typeParams.isEmpty,
         let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
-        traits[traitConstraint.baseName] != nil {
+        visibleTraitInfo(traitConstraint.baseName) != nil {
         let traitName = traitConstraint.baseName
-        guard let traitInfo = traits[traitName] else {
+        guard let traitInfo = visibleTraitInfo(traitName) else {
           throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
         }
 
@@ -1917,7 +1919,7 @@ extension TypeChecker {
       try markNotDerefType(typeParams: typeParams, typeNode: typeNode, traitName: traitName, span: span)
       return nil
       
-    case .traitDeclaration(_, let typeParameters, let superTraits, _, _, let span):
+    case .traitDeclaration(let name, let typeParameters, let superTraits, _, _, let span):
       self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
       try withNewScope {
@@ -1928,6 +1930,8 @@ extension TypeChecker {
             param.name, type: .genericParameter(name: param.name))
         }
         try recordGenericTraitBounds(typeParameters)
+
+        var seenParentTraits: Set<String> = []
 
         for parent in superTraits {
           let constraint = try SemaUtils.resolveTraitConstraint(from: parent)
@@ -1946,7 +1950,15 @@ extension TypeChecker {
               _ = try resolveTypeNode(arg)
             }
           }
+          let resolvedParent = try resolveCanonicalTraitRef(from: constraint)
+          if !seenParentTraits.insert(resolvedParent.cacheKey).inserted {
+            throw SemanticError(
+              .generic("Duplicate parent trait '\(resolvedParent)' in trait '\(name)'"),
+              span: span
+            )
+          }
         }
+        try validateTraitInheritanceGraph(name)
       }
       return nil
 
@@ -2626,7 +2638,7 @@ extension TypeChecker {
       let traitName = traitConstraint.baseName
       try validateTraitName(traitName)
 
-      guard let traitInfo = traits[traitName] else {
+      guard let traitInfo = visibleTraitInfo(traitName) else {
         throw SemanticError(.generic("Undefined trait: \(traitName)"), span: span)
       }
 

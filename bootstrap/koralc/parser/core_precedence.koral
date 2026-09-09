@@ -74,7 +74,7 @@ given Parser {
     }
 
     protected invalid_comparison_chain_error(self) Result[* Expr] = {
-        return .Error(box("Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."))
+        return .Error(self.parser_error("Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."))
     }
 
     protected parse_factor(*mutable self) Result[* Expr] = {
@@ -490,36 +490,36 @@ given Parser {
     protected parse_trait_member(*mutable self) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public())
         let name = self.expect_identifier("trait member") or else {
-            return .Error(box("parse trait member error"))
+            return .Error(self.parser_error("parse trait member error"))
         }
         if not self.is_valid_value_name(name) then {
-            return .Error(box(self.invalid_function_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse trait member type parameter error"))
+            return .Error(self.parser_error("parse trait member type parameter error"))
         }
 
         when self.current().kind in {
             .LParen() then { self.advance() },
-            _ then { return .Error(box("Expected '(' in trait member declaration")) },
+            _ then { return .Error(self.parser_error("Expected '(' in trait member declaration")) },
         }
 
         let params = self.parse_param_list() or return
 
         when self.current().kind in {
             .RParen() then { self.advance() },
-            _ then { return .Error(box("Expected ')' after trait member parameters")) },
+            _ then { return .Error(self.parser_error("Expected ')' after trait member parameters")) },
         }
 
         if not self.is_type_start() then {
-            return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+            return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"))
         }
         let return_type = self.parse_type() or else {
-            return .Error(box("parse trait member return type error"))
+            return .Error(self.parser_error("parse trait member return type error"))
         }
 
         if self.current().kind is .Assign() then {
-            return .Error(box("trait member cannot have a body"))
+            return .Error(self.parser_error("trait member cannot have a body"))
         }
 
         return .Ok(TraitMember(name, type_params, access, params, return_type))
@@ -528,47 +528,47 @@ given Parser {
     protected parse_given_member(*mutable self, allow_body Bool) Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.Protected())
         let name = self.expect_identifier("given member") or else {
-            return .Error(box("parse given member error"))
+            return .Error(self.parser_error("parse given member error"))
         }
         if not self.is_valid_value_name(name) then {
-            return .Error(box(self.invalid_function_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse given member type parameter error"))
+            return .Error(self.parser_error("parse given member type parameter error"))
         }
 
         when self.current().kind in {
             .LParen() then { self.advance() },
-            _ then { return .Error(box("Expected '(' in given member declaration")) },
+            _ then { return .Error(self.parser_error("Expected '(' in given member declaration")) },
         }
 
         let params = self.parse_param_list() or return
 
         when self.current().kind in {
             .RParen() then { self.advance() },
-            _ then { return .Error(box("Expected ')' after given member parameters")) },
+            _ then { return .Error(self.parser_error("Expected ')' after given member parameters")) },
         }
 
         if self.current().kind is .Assign() then {
-            return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+            return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"))
         }
         if not self.is_type_start() then {
-            return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+            return .Error(self.parser_error("Missing return type: function and method declarations must explicitly declare a return type"))
         }
         let return_type = self.parse_type() or else {
-            return .Error(box("parse given member return type error"))
+            return .Error(self.parser_error("parse given member return type error"))
         }
 
         let mutable body = Option[* Expr].None()
         if self.current().kind is .Assign() then {
             if not allow_body then {
-                return .Error(box("intrinsic given member cannot have a body"))
+                return .Error(self.parser_error("intrinsic given member cannot have a body"))
             }
             self.advance()
             let expr = self.parse_expression_checked("given member body") or else {
                 let mutable message = "parse given member body error: "
-                message.push_string(it.message())
-                return .Error(box(message))
+                message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
+                return .Error(self.parser_error_without_span(message))
             }
             body = .Some(expr)
         }
@@ -589,11 +589,14 @@ given Parser {
                     self.advance()
                 },
                 .Eof() then {
-                    return .Error(box("Unexpected EOF in trait declaration"))
+                    return .Error(self.parser_error("Unexpected EOF in trait declaration"))
                 },
                 _ then {
                     let member = self.parse_trait_member() or else {
-                        return .Error(box("parse trait member error"))
+                        let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it)
+                        let mutable message = "parse trait member error: "
+                        message.push_string(nested.message)
+                        return .Error(self.parser_error_at(message, self.current()))
                     }
                     // 分号可选
                     self.consume_semicolon()
@@ -618,12 +621,14 @@ given Parser {
                     self.advance()
                 },
                 .Eof() then {
-                    return .Error(box("Unexpected EOF in given declaration"))
+                    return .Error(self.parser_error("Unexpected EOF in given declaration"))
                 },
                 _ then {
                     let member = self.parse_given_member(allow_body) or else {
-                        let t = self.current()
-                        return .Error(box("parse given member error at \(t.line):\(t.column) (token: \(token_text(t))): \(it.message())"))
+                        let nested = wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it)
+                        let mutable message = "parse given member error: "
+                        message.push_string(nested.message)
+                        return .Error(self.parser_error_at(message, self.current()))
                     }
                     // 分号可选
                     self.consume_semicolon()
@@ -642,7 +647,7 @@ given Parser {
         if self.current().kind is .LBrace() then {
             self.advance()
         } else {
-            return .Error(box("Expected '{' after module path in using declaration"))
+            return .Error(self.parser_error("Expected '{' after module path in using declaration"))
         }
 
         while true then {
@@ -653,7 +658,7 @@ given Parser {
                 },
                 .Range() then {
                     if not items.is_empty() then {
-                        return .Error(box("'..' must be the only item in a module import list"))
+                        return .Error(self.parser_error("'..' must be the only item in a module import list"))
                     }
                     self.advance()
                     items.push(UsingModuleItem(UsingModuleItemKind.AllPublic(), Option[String].None(), Option[String].None()))
@@ -661,22 +666,22 @@ given Parser {
                 },
                 .Identifier(name) then {
                     if saw_all_public then {
-                        return .Error(box("'..' must not be combined with other imports"))
+                        return .Error(self.parser_error("'..' must not be combined with other imports"))
                     }
                     self.advance()
                     let alias = when self.current().kind in {
                         .KwAs() then {
                             self.advance()
                             let alias_name = self.expect_identifier("using alias") or else {
-                                return .Error(box("parse declaration error"))
+                                return .Error(self.parser_error("parse declaration error"))
                             }
                             let name_is_upper = self.is_upper_first(name)
                             let alias_is_upper = self.is_upper_first(alias_name)
                             if name_is_upper <> alias_is_upper then {
                                 if name_is_upper then {
-                                    return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase"))
+                                    return .Error(self.parser_error_without_span("Using alias '\(alias_name)' is invalid: alias must start with an uppercase letter because referenced identifier '\(name)' starts with uppercase"))
                                 }
-                                return .Error(box("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"))
+                                return .Error(self.parser_error_without_span("Using alias '\(alias_name)' is invalid: alias must start with a lowercase letter because referenced identifier '\(name)' starts with lowercase"))
                             }
                             yield Option[String].Some(alias_name)
                         },
@@ -685,26 +690,26 @@ given Parser {
                     items.push(UsingModuleItem(UsingModuleItemKind.Symbol(), Option[String].Some(name), alias))
                 },
                 _ then {
-                    return .Error(box("Expected import item in using declaration"))
+                    return .Error(self.parser_error("Expected import item in using declaration"))
                 },
             }
 
             when self.current().kind in {
                 .Comma() then {
                     if saw_all_public then {
-                        return .Error(box("'..' must not be combined with other imports"))
+                        return .Error(self.parser_error("'..' must not be combined with other imports"))
                     }
                     self.advance()
                 },
                 .RBrace() then {},
                 _ then {
-                    return .Error(box("Expected ',' or '}' in using declaration"))
+                    return .Error(self.parser_error("Expected ',' or '}' in using declaration"))
                 },
             }
         }
 
         if items.is_empty() then {
-            return .Error(box("using declaration requires at least one import item"))
+            return .Error(self.parser_error("using declaration requires at least one import item"))
         }
 
         return .Ok(items)
@@ -715,13 +720,13 @@ given Parser {
         self.advance()
 
         if has_explicit_access then {
-            return .Error(box("access modifier on using declaration is not supported"))
+            return .Error(self.parser_error("access modifier on using declaration is not supported"))
         }
         if is_foreign then {
-            return .Error(box("Unexpected token: using"))
+            return .Error(self.parser_error_at("Unexpected token: using", self.current()))
         }
         if is_intrinsic then {
-            return .Error(box("intrinsic using declaration is not supported"))
+            return .Error(self.parser_error("intrinsic using declaration is not supported"))
         }
 
         // Check if the next token is a string literal → file-based using
@@ -730,7 +735,7 @@ given Parser {
                 self.advance()
 
                 if self.current().kind is .KwAs() then {
-                    return .Error(box("file merge syntax no longer supports aliases; declare a module in koral.json instead"))
+                    return .Error(self.parser_error("file merge syntax no longer supports aliases; declare a module in koral.json instead"))
                 }
 
                 self.consume_semicolon()
@@ -742,30 +747,30 @@ given Parser {
         let mutable path_segments = List[String].new()
         when self.current().kind in {
             .KwSelfType() then {
-                return .Error(box("Unexpected token: Self"))
+                return .Error(self.parser_error_at("Unexpected token: Self", self.current()))
             },
             .Identifier(name) then {
                 self.advance()
                 if self.current().kind is not .DoubleColon() and self.current().kind is not .LBrace() then {
-                    return .Error(box("Unexpected token: Identifier(\(name))"))
+                    return .Error(self.parser_error_at("Unexpected token: Identifier(\(name))", self.current()))
                 }
                 if not self.is_valid_module_segment_name(name) then {
-                    return .Error(box(self.invalid_module_name_error(name)))
+                    return .Error(self.parser_error_without_span(self.invalid_module_name_error(name)))
                 }
                 path_segments.push(module_file_name_to_identifier(name))
             },
             _ then {
-                return .Error(box("using declaration requires a module path like std::io { Reader }"))
+                return .Error(self.parser_error("using declaration requires a module path like std::io { Reader }"))
             },
         }
 
         while self.current().kind is .DoubleColon() then {
             self.advance()
             let segment = self.expect_identifier("module path segment") or else {
-                return .Error(box("parse declaration error"))
+                return .Error(self.parser_error("parse declaration error"))
             }
             if not self.is_valid_module_segment_name(segment) then {
-                return .Error(box(self.invalid_module_name_error(segment)))
+                return .Error(self.parser_error_without_span(self.invalid_module_name_error(segment)))
             }
             path_segments.push(module_file_name_to_identifier(segment))
         }
@@ -780,24 +785,24 @@ given Parser {
         self.advance()
         let name = self.expect_identifier("trait declaration") or return
         if not self.is_upper_first(name) then {
-            return .Error(box(self.invalid_type_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_type_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse trait type parameter error"))
+            return .Error(self.parser_error("parse trait type parameter error"))
         }
 
         let mutable parents = List[TypeNode].new()
         let has_lbrace = when self.current().kind in { .LBrace() then true, _ then false }
         if not has_lbrace then {
             let parent = self.parse_type() or else {
-                return .Error(box("parse trait parent type error"))
+                return .Error(self.parser_error("parse trait parent type error"))
             }
             parents.push(parent)
 
             while self.current().kind is .KwAnd() then {
                 self.advance()
                 let next_parent = self.parse_type() or else {
-                    return .Error(box("parse trait parent type error"))
+                    return .Error(self.parser_error("parse trait parent type error"))
                 }
                 parents.push(next_parent)
             }
@@ -805,7 +810,7 @@ given Parser {
 
         when self.current().kind in {
             .LBrace() then { self.advance() },
-            _ then { return .Error(box("Expected '{' in trait declaration")) },
+            _ then { return .Error(self.parser_error("Expected '{' in trait declaration")) },
         }
 
         let members = self.parse_trait_members() or return
@@ -818,17 +823,17 @@ given Parser {
         let start = self.current()
         self.advance()
         let type_params = self.parse_type_parameters() or else {
-            return .Error(box("parse given type parameter error"))
+            return .Error(self.parser_error("parse given type parameter error"))
         }
         let target_type = self.parse_type() or else {
-            return .Error(box("parse given target type error"))
+            return .Error(self.parser_error("parse given target type error"))
         }
 
         if self.current().kind is .KwNot() then {
             self.advance()
             let trait_name = self.expect_identifier("given not trait declaration") or return
             if not self.is_upper_first(trait_name) then {
-                return .Error(box(self.invalid_type_name_error(trait_name)))
+                return .Error(self.parser_error_without_span(self.invalid_type_name_error(trait_name)))
             }
             self.consume_semicolon()
             let base = Decl.GivenNotTraitDecl(target_type, type_params, trait_name, self.span_from_start(start))
@@ -839,14 +844,14 @@ given Parser {
         if self.current().kind is .KwAs() then {
             self.advance()
             let parsed_trait_type = self.parse_type() or else {
-                return .Error(box("parse given trait type error"))
+                return .Error(self.parser_error("parse given trait type error"))
             }
             trait_type = .Some(parsed_trait_type)
         }
 
         when self.current().kind in {
             .LBrace() then { self.advance() },
-            _ then { return .Error(box("Expected '{' in given declaration")) },
+            _ then { return .Error(self.parser_error("Expected '{' in given declaration")) },
         }
 
         let members = self.parse_given_members(not is_intrinsic) or return
@@ -861,7 +866,7 @@ given Parser {
         let flags = self.parse_decl_flags()
 
         when flags.invalid_access_message in {
-            .Some(message) then { return .Error(box(message)) },
+            .Some(message) then { return .Error(self.parser_error_without_span(message)) },
             .None() then {},
         }
 
@@ -884,13 +889,16 @@ given Parser {
             },
             .KwGiven() then {
                 if flags.has_explicit_access then {
-                    return .Error(box("access modifier on given declaration is not supported"))
+                    return .Error(self.parser_error("access modifier on given declaration is not supported"))
                 }
                 return self.parse_given_decl(flags.access, flags.is_foreign, flags.is_intrinsic)
             },
             _ then {
                 let t = self.current()
-                return .Error(box("Unexpected top-level token '\(token_text(t))' at \(t.line):\(t.column)"))
+                let mutable message = "Unexpected top-level token '"
+                message.push_string(token_text(t))
+                message.push_byte('\'')
+                return .Error(self.parser_error_at(message, t))
             },
         }
     }
@@ -916,7 +924,7 @@ given Parser {
             }
             if is_using then {
                 if has_non_using_decl then {
-                    return .Error(box("Using declarations must appear before other declarations"))
+                    return .Error(self.parser_error("Using declarations must appear before other declarations"))
                 }
             } else {
                 has_non_using_decl = true
@@ -937,7 +945,9 @@ given Parser {
         }
 
         let parts = self.parse_interpolated_parts(value) or else {
-            return .Error(box("Invalid interpolated string: \(it.message())"))
+            let mutable message = "Invalid interpolated string: "
+            message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
+            return .Error(self.parser_error_without_span(message))
         }
 
         let mutable literal_value = String.new()
@@ -1024,15 +1034,17 @@ given Parser {
                     }
 
                     if depth <> 0 then {
-                        return .Error(box("Unterminated interpolation in string literal"))
+                        return .Error(self.parser_error_without_span("Unterminated interpolation in string literal"))
                     }
 
                     if expr_source.trim_ascii().is_empty() then {
-                        return .Error(box("empty interpolation expression"))
+                        return .Error(self.parser_error_without_span("empty interpolation expression"))
                     }
 
                     let expr = self.parse_embedded_expression(expr_source) or else {
-                        return .Error(box("Invalid interpolation expression: \(it.message())"))
+                        let mutable message = "Invalid interpolation expression: "
+                        message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
+                        return .Error(self.parser_error_without_span(message))
                     }
                     parts.push(InterpolatedStringPart.Expression(box(*expr)))
                     continue
@@ -1061,16 +1073,20 @@ given Parser {
 
     protected parse_embedded_expression(*mutable self, expr_source String) Result[* Expr] = {
         let tokens = lex(expr_source) or else {
-            return .Error(box("lex failed: \(it.message())"))
+            let mutable message = "lex failed: "
+            message.push_string(it.message())
+            return .Error(self.parser_error_without_span(message))
         }
 
-        let mutable nested = Parser.new(tokens)
+        let mutable nested = Parser.new_in_file(tokens, self.file_path)
         let expr = nested.parse_expression() or else {
-            return .Error(box("parse failed: \(it.message())"))
+            let mutable message = "parse failed: "
+            message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
+            return .Error(self.parser_error_without_span(message))
         }
 
         if not nested.is_eof() then {
-            return .Error(box("trailing tokens in interpolation expression"))
+            return .Error(self.parser_error_without_span("trailing tokens in interpolation expression"))
         }
 
         return .Ok(expr)
@@ -1173,4 +1189,12 @@ let token_text(token Token) String = {
 public let parse(tokens List[Token]) Result[Program] = {
     let mutable parser = Parser.new(tokens)
     return parser.parse_program()
+}
+
+public let parse_in_file(tokens List[Token], file_path String) Result[Program] = {
+    let mutable parser = Parser.new_in_file(tokens, file_path)
+    return when parser.parse_program() in {
+        .Ok(program) then Result[Program].Ok(program),
+        .Error(error) then Result[Program].Error(box(wrap_error_as_diagnostic(DiagnosticStage.Parser(), file_path, error))),
+    }
 }

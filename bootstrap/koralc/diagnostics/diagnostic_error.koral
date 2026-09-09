@@ -12,6 +12,75 @@ public type DiagnosticError(
     span Option[SourceSpan],
 )
 
+private let diagnostic_stage_text(stage DiagnosticStage) String = {
+    return when stage in {
+        .Lexer() then "lexer error",
+        .Parser() then "syntax error",
+        .Semantic() then "error",
+        .Other() then "error",
+    }
+}
+
+private let normalized_diagnostic_message(stage DiagnosticStage, file_path String, rendered String) String = {
+    let mutable stage_prefix = diagnostic_stage_text(stage)
+    stage_prefix.push_string(": ")
+    if rendered.starts_with(stage_prefix) then {
+        return rendered.substring(stage_prefix.count()..)
+    }
+
+    if not file_path.is_empty() and rendered.starts_with(file_path) then {
+        let remainder = rendered.substring(file_path.count()..)
+        if remainder.starts_with(": ") then {
+            let candidate = remainder.substring(2..)
+            if candidate.starts_with(stage_prefix) then {
+                return candidate.substring(stage_prefix.count()..)
+            }
+        }
+
+        let mutable location_stage_needle = ": "
+        location_stage_needle.push_string(diagnostic_stage_text(stage))
+        location_stage_needle.push_string(": ")
+        when remainder.find(location_stage_needle) in {
+            .Some(idx) then {
+                return remainder.substring(idx + location_stage_needle.count()..)
+            },
+            .None() then {},
+        }
+    }
+
+    return rendered
+}
+
+given DiagnosticError as Error {
+    public message(*self) String = {
+        let mutable location = self.file_path
+        when self.span in {
+            .Some(span) then if is_known_span(span) then {
+                if location.is_empty() then {
+                    location = span.start.line.to_string()
+                } else {
+                    location.push_byte(':')
+                    location.push_string(span.start.line.to_string())
+                }
+                location.push_byte(':')
+                location.push_string(span.start.column.to_string())
+            },
+            .None() then {},
+        }
+
+        let mutable out = if location.is_empty() then diagnostic_stage_text(self.stage) else location
+        if location.is_empty() then {
+            out.push_string(": ")
+        } else {
+            out.push_string(": ")
+            out.push_string(diagnostic_stage_text(self.stage))
+            out.push_string(": ")
+        }
+        out.push_string(self.message)
+        return out
+    }
+}
+
 private type UIntParseResult(
     value UInt,
     next_index UInt,
@@ -84,4 +153,14 @@ public let make_diagnostic(stage DiagnosticStage, file_path String, message Stri
 public let make_diagnostic_at(stage DiagnosticStage, file_path String, message String, span SourceSpan) DiagnosticError = {
     let diagnostic_span = if is_known_span(span) then Option[SourceSpan].Some(span) else find_first_line_col(message)
     return DiagnosticError(stage, file_path, message, diagnostic_span)
+}
+
+public let wrap_error_as_diagnostic(stage DiagnosticStage, file_path String, error * Error) DiagnosticError = {
+    let rendered = error.message()
+    let message = normalized_diagnostic_message(stage, file_path, rendered)
+    let span = when find_first_line_col(rendered) in {
+        .Some(found) then Option[SourceSpan].Some(found),
+        .None() then find_first_line_col(message),
+    }
+    return DiagnosticError(stage, file_path, message, span)
 }

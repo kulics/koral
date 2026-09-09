@@ -27,7 +27,7 @@ extension TypeChecker {
       return try self.resolveTypeNode(node)
     }
 
-    if case .identifier(let name) = inner, traits[name] != nil {
+    if case .identifier(let name) = inner, visibleTraitInfo(name) != nil {
       let (safe, reasons) = try checkObjectSafety(name)
       if !safe {
         throw SemanticError(.generic(
@@ -37,7 +37,7 @@ extension TypeChecker {
       return wrap(.traitObject(traitName: name, typeArgs: []), mutable)
     }
 
-    if case .generic(let base, let args) = inner, traits[base] != nil {
+    if case .generic(let base, let args) = inner, visibleTraitInfo(base) != nil {
       let (safe, reasons) = try checkObjectSafety(base)
       if !safe {
         throw SemanticError(.generic(
@@ -152,7 +152,7 @@ extension TypeChecker {
         try checkTypeVisibility(type: t, typeName: name)
         return t
       }
-      if traits[name] != nil {
+      if visibleTraitInfo(name) != nil {
         throw SemanticError.invalidOperation(op: "use trait as type", type1: name, type2: "")
       }
       throw SemanticError.undefinedType(name)

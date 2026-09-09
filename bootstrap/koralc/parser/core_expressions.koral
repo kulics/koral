@@ -157,7 +157,7 @@ given Parser {
         if self.current().kind is .LParen() then {
             self.advance()
         } else {
-            return .Error(box("Expected '(' in lambda expression"))
+            return .Error(self.parser_error("Expected '(' in lambda expression"))
         }
 
         let mutable params = List[LambdaParam].new()
@@ -169,21 +169,21 @@ given Parser {
             }
 
             let name = self.expect_identifier("lambda parameter") or else {
-                return .Error(box("parse lambda parameter error"))
+                return .Error(self.parser_error("parse lambda parameter error"))
             }
             if not self.is_valid_value_name(name) then {
-                return .Error(box(self.invalid_parameter_name_error(name)))
+                return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(name)))
             }
 
             if self.current().kind is .Colon() then {
-                return .Error(box("Lambda parameters use 'name Type', not 'name: Type'"))
+                return .Error(self.parser_error("Lambda parameters use 'name Type', not 'name: Type'"))
             }
 
             // Optional type annotation
             let mutable type_ann = Option[TypeNode].None()
             if self.is_type_start() then {
                 let t = self.parse_type() or else {
-                    return .Error(box("parse lambda parameter type error"))
+                    return .Error(self.parser_error("parse lambda parameter type error"))
                 }
                 type_ann = Option[TypeNode].Some(t)
             }
@@ -193,13 +193,13 @@ given Parser {
             when self.current().kind in {
                 .Comma() then { self.advance() },
                 .RParen() then {},
-                _ then { return .Error(box("Expected ',' or ')' in lambda parameter list")) },
+                _ then { return .Error(self.parser_error("Expected ',' or ')' in lambda parameter list")) },
             }
         }
 
         when self.current().kind in {
             .RParen() then { self.advance() },
-            _ then { return .Error(box("Expected ')' after lambda parameters")) },
+            _ then { return .Error(self.parser_error("Expected ')' after lambda parameters")) },
         }
 
         // Optional return type
@@ -208,7 +208,7 @@ given Parser {
         if not has_arrow then {
             if self.is_type_start() then {
                 let t = self.parse_type() or else {
-                    return .Error(box("parse lambda return type error"))
+                    return .Error(self.parser_error("parse lambda return type error"))
                 }
                 return_type = Option[TypeNode].Some(t)
             }
@@ -216,11 +216,11 @@ given Parser {
 
         when self.current().kind in {
             .Arrow() then { self.advance() },
-            _ then { return .Error(box("Expected '->' in lambda expression")) },
+            _ then { return .Error(self.parser_error("Expected '->' in lambda expression")) },
         }
 
         let body = self.parse_expression() or else {
-            return .Error(box("parse lambda body error"))
+            return .Error(self.parser_error("parse lambda body error"))
         }
 
         return .Ok(box(Expr.LambdaExpr(params, return_type, body, self.span_from_start(start))))
@@ -247,7 +247,7 @@ given Parser {
                 nanos_expr = box(Expr.ArithmeticExpr(box(Expr.IntegerLiteral(value, span)), ArithmeticOperator.Remainder(), box(Expr.IntegerLiteral("1000000000", span)), span))
             },
             _ then {
-                return .Error(box("unsupported duration suffix: \(unit)"))
+                return .Error(self.parser_error_without_span("unsupported duration suffix: \(unit)"))
             },
         }
 
@@ -335,14 +335,14 @@ given Parser {
                 let member_name = self.expect_identifier("implicit member name") or return
                 let no_newline = not self.current().has_newline_before
                 if not (self.current().kind is .LParen() and no_newline) then {
-                        return .Error(box("Unexpected token: \(token_text(self.current())), expected: '(' after implicit member name"))
+                    return .Error(self.parser_error("Unexpected token: \(token_text(self.current())), expected: '(' after implicit member name"))
                 }
 
                 self.advance() // consume '('
                 let call_args = self.parse_argument_list_until_rparen("implicit member call") or return
                 when self.current().kind in {
                     .RParen() then { self.advance() },
-                    _ then { return .Error(box("Expected ')' after implicit member call arguments")) },
+                    _ then { return .Error(self.parser_error("Expected ')' after implicit member call arguments")) },
                 }
                 return .Ok(box(Expr.ImplicitMemberExpr(member_name, call_args, span)))
             },
@@ -358,13 +358,13 @@ given Parser {
             .RangeLess() then {
                 self.advance()
                 if not self.can_continue_range_bound_after_newline() then {
-                    return .Error(box("Unexpected token: \(token_text(self.current()))"))
+                    return .Error(self.parser_error("Unexpected token: \(token_text(self.current()))"))
                 }
                 let rhs = self.parse_unary() or return
                 return .Ok(box(Expr.RangeExpr(RangeOperator.ToOpen(), Option[* Expr].None(), Option[* Expr].Some(rhs), self.span_from_start(t))))
             },
             _ then {
-                return .Error(box("Unexpected token: \(token_text(t))"))
+                return .Error(self.parser_error_at("Unexpected token: \(token_text(t))", t))
             },
         }
     }
@@ -456,7 +456,7 @@ given Parser {
                 let has_rparen = when self.current().kind in { .RParen() then true, _ then false }
                 if not has_rparen then {
                     self.leave_line_join_grouping()
-                    return .Error(box("Expected ')'"))
+                    return .Error(self.parser_error("Expected ')'"))
                 }
                 self.advance()
                 self.leave_line_join_grouping()
@@ -475,7 +475,7 @@ given Parser {
                 let has_rparen = when self.current().kind in { .RParen() then true, _ then false }
                 if not has_rparen then {
                     self.leave_line_join_grouping()
-                    return .Error(box("Expected ')' after trait qualification"))
+                    return .Error(self.parser_error("Expected ')' after trait qualification"))
                 }
                 self.advance()
                 self.leave_line_join_grouping()
@@ -488,7 +488,7 @@ given Parser {
             },
             _ then {
                 self.leave_line_join_grouping()
-                return .Error(box("Expected ')'"))
+                return .Error(self.parser_error("Expected ')'"))
             },
         }
     }
@@ -497,7 +497,7 @@ given Parser {
         let start = self.current()
         when self.current().kind in {
             .LBrace() then { self.advance() },
-            _ then { return .Error(box("Expected '{' to start block")) },
+            _ then { return .Error(self.parser_error("Expected '{' to start block")) },
         }
 
         self.parse_debug("block begin")
@@ -524,7 +524,7 @@ given Parser {
                     self.advance()
                     let expr = self.parse_expression_checked("named \(context) argument") or else {
                         self.restore_state(saved)
-                        return .Error(box("parse named argument error"))
+                        return .Error(self.parser_error("parse named argument error"))
                     }
                     return .Ok(box(Expr.NamedArgument(label, expr, self.span_from_start(start))))
                 }
@@ -547,7 +547,7 @@ given Parser {
                     self.advance()
                     let pattern = self.parse_pattern_or(stop_on_in) or else {
                         self.restore_state(saved)
-                        return .Error(box("parse named pattern argument error"))
+                        return .Error(self.parser_error("parse named pattern argument error"))
                     }
                     return .Ok(PatternElement(Option[String].Some(label), box(pattern)))
                 }
@@ -593,9 +593,9 @@ given Parser {
             when arg in {
                 .NamedArgument(label, _, _) then {
                     if label == "..." then {
-                        return .Error(box("Default-fill '...' is only valid in constructor calls"))
+                        return .Error(self.parser_error_without_span("Default-fill '...' is only valid in constructor calls"))
                     }
-                    return .Error(box("Named labels are only allowed on struct and enum constructors; use positional arguments"))
+                    return .Error(self.parser_error_without_span("Named labels are only allowed on struct and enum constructors; use positional arguments"))
                 },
                 _ then {},
             }
@@ -640,7 +640,7 @@ given Parser {
                 return .Ok(t)
             },
             _ then {
-                return .Error(box("Expected 'then' in \(context) at \(t.line):\(t.column)"))
+                return .Error(self.parser_error_at("Expected 'then' in \(context)", t))
             },
         }
     }
@@ -653,7 +653,7 @@ given Parser {
                 return .Ok(t)
             },
             _ then {
-                return .Error(box("Expected 'in' in \(context) at \(t.line):\(t.column)"))
+                return .Error(self.parser_error_at("Expected 'in' in \(context)", t))
             },
         }
     }
@@ -666,7 +666,7 @@ given Parser {
                 return .Ok(t)
             },
             _ then {
-                return .Error(box("Expected '{' to start \(context) at \(t.line):\(t.column)"))
+                return .Error(self.parser_error_at("Expected '{' to start \(context)", t))
             },
         }
     }
@@ -683,7 +683,7 @@ given Parser {
 
         if self.index == arm_start_index then {
             let t = self.current()
-            return .Error(box("Parser made no progress in when arm at \(t.line):\(t.column) (token: \(token_text(t)))"))
+            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", "when arm", t), t))
         }
 
         return .Ok(WhenArm(pattern, body))
@@ -698,7 +698,7 @@ given Parser {
                     break
                 },
                 .Eof() then {
-                    return .Error(box("Unexpected EOF in when expression"))
+                    return .Error(self.parser_error("Unexpected EOF in when expression"))
                 },
                 _ then {
                     let arm = self.parse_when_arm() or return
@@ -741,16 +741,16 @@ given Parser {
 
         when self.current().kind in {
             .Eof() then {
-                return .Error(box("Unexpected EOF while parsing pattern"))
+                return .Error(self.parser_error("Unexpected EOF while parsing pattern"))
             },
             .KwThen() then {
                 if not stop_on_in then {
-                    return .Error(box("Expected pattern before 'then'"))
+                    return .Error(self.parser_error("Expected pattern before 'then'"))
                 }
             },
             .KwIn() then {
                 if stop_on_in then {
-                    return .Error(box("Expected pattern before 'in'"))
+                    return .Error(self.parser_error("Expected pattern before 'in'"))
                 }
             },
             _ then {},
@@ -782,7 +782,7 @@ given Parser {
                         yield v
                     }
                     else {
-                        return .Error(box("Expected integer literal after '-' in negative pattern"))
+                        return .Error(self.parser_error("Expected integer literal after '-' in negative pattern"))
                     }
                 yield PatternNode.NegativeIntegerLiteral(value, self.span_from_start(start))
             },
@@ -811,7 +811,7 @@ given Parser {
                         yield if is_negative then "-\(v)" else v
                     }
                     else {
-                        return .Error(box("Expected integer literal after '>' in comparison pattern"))
+                        return .Error(self.parser_error("Expected integer literal after '>' in comparison pattern"))
                     }
                 yield PatternNode.ComparisonPattern(ComparisonPatternOperator.Greater(), value, self.span_from_start(start))
             },
@@ -828,7 +828,7 @@ given Parser {
                         yield if is_negative then "-\(v)" else v
                     }
                     else {
-                        return .Error(box("Expected integer literal after '<' in comparison pattern"))
+                        return .Error(self.parser_error("Expected integer literal after '<' in comparison pattern"))
                     }
                 yield PatternNode.ComparisonPattern(ComparisonPatternOperator.Less(), value, self.span_from_start(start))
             },
@@ -845,7 +845,7 @@ given Parser {
                         yield if is_negative then "-\(v)" else v
                     }
                     else {
-                        return .Error(box("Expected integer literal after '>=' in comparison pattern"))
+                        return .Error(self.parser_error("Expected integer literal after '>=' in comparison pattern"))
                     }
                 yield PatternNode.ComparisonPattern(ComparisonPatternOperator.GreaterEqual(), value, self.span_from_start(start))
             },
@@ -862,7 +862,7 @@ given Parser {
                         yield if is_negative then "-\(v)" else v
                     }
                     else {
-                        return .Error(box("Expected integer literal after '<=' in comparison pattern"))
+                        return .Error(self.parser_error("Expected integer literal after '<=' in comparison pattern"))
                     }
                 yield PatternNode.ComparisonPattern(ComparisonPatternOperator.LessEqual(), value, self.span_from_start(start))
             },
@@ -898,14 +898,14 @@ given Parser {
                             }
                             when self.current().kind in {
                                 .RParen() then { self.advance() },
-                                _ then { return .Error(box("Expected ')' in struct destructuring pattern")) },
+                                _ then { return .Error(self.parser_error("Expected ')' in struct destructuring pattern")) },
                             }
                         }
                         parsed_pattern = PatternNode.StructPattern(name, elements, self.span_from_start(start))
                     }
                 }
                 if not self.is_upper_first(name) and not self.is_valid_value_name(name) then {
-                    return .Error(box(self.invalid_variable_name_error(name)))
+                    return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
                 }
                 yield parsed_pattern
             },
@@ -913,7 +913,7 @@ given Parser {
                 self.advance()
                 let case_name = self.expect_identifier("enum case pattern") or return
                 if not self.is_upper_first(case_name) then {
-                    return .Error(box(self.invalid_enum_case_name_error(case_name)))
+                    return .Error(self.parser_error_without_span(self.invalid_enum_case_name_error(case_name)))
                 }
                 let mutable elements = List[PatternElement].new()
 
@@ -933,7 +933,7 @@ given Parser {
                         }
                         when self.current().kind in {
                             .RParen() then { self.advance() },
-                            _ then { return .Error(box("Expected ')' in enum case pattern")) },
+                            _ then { return .Error(self.parser_error("Expected ')' in enum case pattern")) },
                         }
                     }
                 }
@@ -950,7 +950,7 @@ given Parser {
                     let second = self.parse_pattern_or(stop_on_in) or return
                     when self.current().kind in {
                         .RParen() then { self.advance() },
-                        _ then { return .Error(box("Expected ')' in pair pattern")) },
+                        _ then { return .Error(self.parser_error("Expected ')' in pair pattern")) },
                     }
                     let mutable elements = List[PatternElement].new()
                     elements.push(PatternElement(Option[String].None(), box(first)))
@@ -959,13 +959,13 @@ given Parser {
                 } else {
                     when self.current().kind in {
                         .RParen() then { self.advance() },
-                        _ then { return .Error(box("Expected ')' in pattern")) },
+                        _ then { return .Error(self.parser_error("Expected ')' in pattern")) },
                     }
                 }
                 yield parsed_pattern
             },
             _ then {
-                return .Error(box("Unexpected token in pattern: \(token_text(self.current()))"))
+                return .Error(self.parser_error("Unexpected token in pattern: \(token_text(self.current()))"))
             },
         }
         return .Ok(node)
@@ -1001,7 +1001,7 @@ given Parser {
         while true then {
             when self.current().kind in {
                 .KwOr() then { self.advance() },
-                .Pipe() then { return .Error(box("Pattern separator '|' is not supported; use 'or'")) },
+                .Pipe() then { return .Error(self.parser_error("Pattern separator '|' is not supported; use 'or'")) },
                 _ then { break },
             }
             let right = self.parse_pattern_and(stop_on_in) or return
@@ -1015,7 +1015,7 @@ given Parser {
         let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
-            _ then { return .Error(box("Expected 'then' after pattern")) },
+            _ then { return .Error(self.parser_error("Expected 'then' after pattern")) },
         }
     }
 
@@ -1028,7 +1028,7 @@ given Parser {
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
             .Semicolon() then { return .Ok(pattern) },
-            _ then { return .Error(box("Expected ';' or 'then' after pattern")) },
+            _ then { return .Error(self.parser_error("Expected ';' or 'then' after pattern")) },
         }
     }
 
@@ -1036,7 +1036,7 @@ given Parser {
         let pattern = self.parse_pattern_or(true) or return
         when self.current().kind in {
             .KwIn() then { return .Ok(pattern) },
-            _ then { return .Error(box("Expected 'in' after pattern")) },
+            _ then { return .Error(self.parser_error("Expected 'in' after pattern")) },
         }
     }
 
@@ -1078,7 +1078,7 @@ given Parser {
                     .Colon() then { self.advance() },
                     _ then {
                         self.leave_line_join_grouping()
-                        return .Error(box("Expected ':' in dict literal entry"))
+                        return .Error(self.parser_error("Expected ':' in dict literal entry"))
                     },
                 }
                 let value = self.parse_expression() or else {
@@ -1092,7 +1092,7 @@ given Parser {
                 .RBracket() then { self.advance() },
                 _ then {
                     self.leave_line_join_grouping()
-                    return .Error(box("Expected ']' after dict literal"))
+                    return .Error(self.parser_error("Expected ']' after dict literal"))
                 },
             }
             self.leave_line_join_grouping()
@@ -1118,7 +1118,7 @@ given Parser {
             .RBracket() then { self.advance() },
             _ then {
                 self.leave_line_join_grouping()
-                return .Error(box("Expected ']' after collection literal"))
+                return .Error(self.parser_error("Expected ']' after collection literal"))
             },
         }
         self.leave_line_join_grouping()
@@ -1186,7 +1186,7 @@ given Parser {
 
         let name = self.expect_identifier("for binding") or return
         if not self.is_valid_value_name(name) then {
-            return .Error(box(self.invalid_variable_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
         }
 
         let mutable type_name = Option[TypeNode].None()
@@ -1194,7 +1194,7 @@ given Parser {
             .KwIn() then {},
             _ then {
                 type_name = .Some(self.parse_type() or else {
-                    return .Error(box("parse for binding type error"))
+                    return .Error(self.parser_error("parse for binding type error"))
                 })
             },
         }
@@ -1209,12 +1209,12 @@ given Parser {
             self.advance()
             let first = self.parse_pair_binding_element() or return
             if self.current().kind is not .Comma() then {
-                return .Error(box("Expected ',' in for binding pattern"))
+                return .Error(self.parser_error("Expected ',' in for binding pattern"))
             }
             self.advance()
             let second = self.parse_pair_binding_element() or return
             if self.current().kind is not .RParen() then {
-                return .Error(box("Expected ')' in for binding pattern"))
+                return .Error(self.parser_error("Expected ')' in for binding pattern"))
             }
             self.advance()
             return .Ok(ForBindingPattern.Pair(first, second, self.span_from_start(start)))
@@ -1244,11 +1244,11 @@ given Parser {
         return when base in {
             .Identifier(name, _) then {
                 let type_args = self.parse_type_arg_list() or else {
-                    return .Error(box("parse generic application type arguments error"))
+                    return .Error(self.parser_error("parse generic application type arguments error"))
                 }
                 yield .Ok(box(Expr.GenericInstantiation(name, type_args, self.span_from_expr_start(base))))
             },
-            _ then .Error(box("generic application requires a type-like base expression")),
+            _ then .Error(self.parser_error_without_span("generic application requires a type-like base expression")),
         }
     }
 
@@ -1287,7 +1287,7 @@ given Parser {
         let args = self.parse_argument_list_until_rparen("call") or return
         when self.current().kind in {
             .RParen() then { self.advance() },
-            _ then { return .Error(box("Expected ')' after call arguments")) },
+            _ then { return .Error(self.parser_error("Expected ')' after call arguments")) },
         }
         when base in {
             .MemberPath(receiver_base, path, _) then {
@@ -1362,7 +1362,7 @@ given Parser {
         self.enter_line_join_grouping()
         if self.current().kind is .RBracket() then {
             self.leave_line_join_grouping()
-            return .Error(box("Subscript expression requires one index argument"))
+            return .Error(self.parser_error("Subscript expression requires one index argument"))
         }
         let index = self.parse_expression_checked("subscript index") or else {
             self.leave_line_join_grouping()
@@ -1370,13 +1370,13 @@ given Parser {
         }
         if self.current().kind is .Comma() then {
             self.leave_line_join_grouping()
-            return .Error(box("Subscript expression supports exactly one index"))
+            return .Error(self.parser_error("Subscript expression supports exactly one index"))
         }
         when self.current().kind in {
             .RBracket() then { self.advance() },
             _ then {
                 self.leave_line_join_grouping()
-                return .Error(box("Expected ']' after subscript argument"))
+                return .Error(self.parser_error("Expected ']' after subscript argument"))
             },
         }
         self.leave_line_join_grouping()
@@ -1411,13 +1411,13 @@ given Parser {
         // 0b/0o/0x literals cannot be floating-point forms like 0b101.1.
         if base is .IntegerLiteral(value, _) and self.current().kind is .IntegerLiteral(_) then {
             if value.starts_with("0b") then {
-                return .Error(box("0b literals do not support floating point"))
+                return .Error(self.parser_error_without_span("0b literals do not support floating point"))
             }
             if value.starts_with("0o") then {
-                return .Error(box("0o literals do not support floating point"))
+                return .Error(self.parser_error_without_span("0o literals do not support floating point"))
             }
             if value.starts_with("0x") then {
-                return .Error(box("0x literals do not support floating point"))
+                return .Error(self.parser_error_without_span("0x literals do not support floating point"))
             }
         }
 
@@ -1432,12 +1432,12 @@ given Parser {
             .TraitQualificationExpr(qualified_base, trait_type, _) then {
                 when self.current().kind in {
                     .LParen() then { self.advance() },
-                    _ then { return .Error(box("Expected '(' after qualified method name")) },
+                    _ then { return .Error(self.parser_error("Expected '(' after qualified method name")) },
                 }
                 let args = self.parse_argument_list_until_rparen("qualified method call") or return
                 when self.current().kind in {
                     .RParen() then { self.advance() },
-                    _ then { return .Error(box("Expected ')' after qualified method call arguments")) },
+                    _ then { return .Error(self.parser_error("Expected ')' after qualified method call arguments")) },
                 }
                 when self.reject_non_constructor_call_args(args) in {
                     .Ok(_) then {},
@@ -1464,7 +1464,7 @@ given Parser {
             let args = self.parse_argument_list_until_rparen("static method call") or return
             when self.current().kind in {
                 .RParen() then { self.advance() },
-                _ then { return .Error(box("Expected ')' after static method call arguments")) },
+                _ then { return .Error(self.parser_error("Expected ')' after static method call arguments")) },
             }
             if not allows_constructor_args then {
                 when self.reject_non_constructor_call_args(args) in {
@@ -1480,7 +1480,7 @@ given Parser {
             let args = self.parse_argument_list_until_rparen("generic method call") or return
             when self.current().kind in {
                 .RParen() then { self.advance() },
-                _ then { return .Error(box("Expected ')' after generic method call arguments")) },
+                _ then { return .Error(self.parser_error("Expected ')' after generic method call arguments")) },
             }
             when self.reject_non_constructor_call_args(args) in {
                 .Ok(_) then {},
@@ -1490,7 +1490,7 @@ given Parser {
         }
 
         if not method_type_args.is_empty() then {
-            return .Error(box("Expected '(' after generic method name"))
+            return .Error(self.parser_error("Expected '(' after generic method name"))
         }
 
         let member_path = self.append_member_path_segment(base, member)

@@ -417,10 +417,9 @@ given TypeChecker {
                 self.validate_trait_parent_type_arguments_in_scope(parents, trait_scope)
                 // 注册 Trait 到 TraitRegistry
                 let mutable parent_constraints = List[ParentTraitConstraint].new()
-                let mutable parent_names = List[String].new()
+                let mutable seen_parent_keys = List[String].new()
                 for p in parents then {
                     let pname = self.type_node_name(p)
-                    parent_names.push(pname)
                     let type_arg_nodes = when p in {
                         .Generic(_, args) then {
                             let mutable nodes = List[TypeNode].new()
@@ -431,10 +430,41 @@ given TypeChecker {
                         },
                         _ then List[TypeNode].new(),
                     }
+                    let parent_key = when p in {
+                        .Generic(_, args) then {
+                            let mutable out = "["
+                            let mutable first = true
+                            for arg in args then {
+                                if not first then { out.push_string(", ") }
+                                first = false
+                                let resolved_arg = self.resolve_type_in_scope(*arg, trait_scope)
+                                out.push_string(self.display_type_name(resolved_arg))
+                            }
+                            out.push_string("]")
+                            out.push_string(pname)
+                            yield out
+                        },
+                        _ then pname,
+                    }
+                    if self.string_list_contains(seen_parent_keys, parent_key) then {
+                        self.storage.diagnostics.push(make_diagnostic(
+                            DiagnosticStage.Semantic(),
+                            self.storage.file_path,
+                            "Duplicate parent trait '\(parent_key)' in trait '\(name)'"
+                        ))
+                        continue
+                    }
+                    seen_parent_keys.push(parent_key)
                     parent_constraints.push(ParentTraitConstraint(pname, type_arg_nodes))
                 }
                 let typed_members = self.check_trait_members(members, type_params)
                 self.register_trait_metadata(name, type_params, parent_constraints, members, typed_members)
+                when self.storage.trait_registry.validate_inheritance_graph(name) in {
+                    .Ok(_) then {},
+                    .Error(message) then {
+                        self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, message.message()))
+                    },
+                }
                 self.restore_generic_constraints(generic_constraint_snapshot)
                 yield TypedDecl.TraitDecl(access, name, typed_members, span)
             },
@@ -500,7 +530,7 @@ given TypeChecker {
                     }
                     // 检查 Trait 一致性
                     let checker = TraitChecker.new(&mutable (self.storage.trait_registry), &mutable (self.storage.method_table))
-                    when self.storage.trait_registry.get(trait_name) in {
+                    when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
                         .Some(info) then {
                             for parent in info.parent_traits then {
                                 if parent.type_arg_nodes.is_empty() then {
@@ -516,7 +546,7 @@ given TypeChecker {
                                     // Generic parent trait — resolve args with explicit substitution.
                                     let mutable parent_bindings = Dict[String, Type].new()
                                     parent_bindings.insert("Self", resolved_target)
-                                    when self.storage.trait_registry.get(trait_name) in {
+                                    when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
                                         .Some(ti) then {
                                             let targs = resolved_trait_args
                                             let mutable tidx UInt = 0
@@ -553,7 +583,7 @@ given TypeChecker {
                         },
                         .None() then {},
                     }
-                    if checker.check_conformance(resolved_target, trait_name, typed_members, span) is .Error(e) then {
+                    if checker.check_conformance_in_module(resolved_target, trait_name, typed_members, span, self.storage.module_path) is .Error(e) then {
                         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.storage.file_path, e.message()))
                     }
                     if not self.contains_generic_parameter(resolved_target) then {
@@ -640,7 +670,7 @@ given TypeChecker {
         if actual_count == 0(UInt) then {
             return
         }
-        when self.storage.trait_registry.get(trait_name) in {
+        when self.storage.trait_registry.get_in_module(trait_name, self.storage.module_path) in {
             .Some(info) then {
                 let expected_count = info.type_params.count()
                 if expected_count <> actual_count then {

@@ -252,38 +252,89 @@ public class Unifier {
     ///   - type: 要检查的类型
     /// - Returns: 如果类型变量出现在类型中返回 true
     public func occurs(_ tv: TypeVariable, in type: Type) -> Bool {
+        var visited = Set<Type>()
+        return occurs(tv, in: type, visited: &visited)
+    }
+
+    private func occurs(_ tv: TypeVariable, in type: Type, visited: inout Set<Type>) -> Bool {
         let resolved = resolve(type)
+
+        // Recursive nominal types can revisit the same instantiated shape.
+        if !visited.insert(resolved).inserted {
+            return false
+        }
         
         switch resolved {
         case .typeVariable(let otherTV):
             return unionFind.find(tv) == unionFind.find(otherTV)
             
         case .function(let params, let ret):
-            return params.contains { occurs(tv, in: $0.type) } || occurs(tv, in: ret)
+            for param in params {
+                if occurs(tv, in: param.type, visited: &visited) {
+                    return true
+                }
+            }
+            return occurs(tv, in: ret, visited: &visited)
             
         case .genericStruct(_, let args):
-            return args.contains { occurs(tv, in: $0) }
+            for arg in args {
+                if occurs(tv, in: arg, visited: &visited) {
+                    return true
+                }
+            }
+            return false
             
         case .genericEnum(_, let args):
-            return args.contains { occurs(tv, in: $0) }
+            for arg in args {
+                if occurs(tv, in: arg, visited: &visited) {
+                    return true
+                }
+            }
+            return false
             
         case .reference(let inner):
-            return occurs(tv, in: inner)
+            return occurs(tv, in: inner, visited: &visited)
         case .mutableReference(let inner):
-            return occurs(tv, in: inner)
+            return occurs(tv, in: inner, visited: &visited)
+        case .borrowedReference(let inner):
+            return occurs(tv, in: inner, visited: &visited)
+        case .mutableBorrowedReference(let inner):
+            return occurs(tv, in: inner, visited: &visited)
+        case .weakReference(let inner):
+            return occurs(tv, in: inner, visited: &visited)
+        case .mutableWeakReference(let inner):
+            return occurs(tv, in: inner, visited: &visited)
             
         case .pointer(let elem):
-            return occurs(tv, in: elem)
+            return occurs(tv, in: elem, visited: &visited)
         case .mutablePointer(let elem):
-            return occurs(tv, in: elem)
+            return occurs(tv, in: elem, visited: &visited)
             
         case .structure(let defId):
-            return (context.getStructMembers(defId) ?? []).contains { occurs(tv, in: $0.type) }
+            for member in context.getStructMembers(defId) ?? [] {
+                if occurs(tv, in: member.type, visited: &visited) {
+                    return true
+                }
+            }
+            return false
             
         case .`enum`(let defId):
-            return (context.getEnumCases(defId) ?? []).contains { c in
-                c.parameters.contains { occurs(tv, in: $0.type) }
+            for enumCase in context.getEnumCases(defId) ?? [] {
+                for parameter in enumCase.parameters {
+                    if occurs(tv, in: parameter.type, visited: &visited) {
+                        return true
+                    }
+                }
             }
+            return false
+
+        case .traitObject(_, let typeArgs):
+            for typeArg in typeArgs {
+                if occurs(tv, in: typeArg, visited: &visited) {
+                    return true
+                }
+            }
+            return false
             
         default:
             return false

@@ -10,6 +10,7 @@ private type ParseDeclFlags(
 
 public type Parser(
     tokens List[Token],
+    file_path String,
     mutable index UInt,
     mutable line_join_grouping_depth UInt,
 )
@@ -32,8 +33,10 @@ given Parser {
     protected format_context_position_error(self, prefix String, context String, token Token) String = {
         let mutable text = prefix
         text.push_string(context)
-        text.push_string(" at ")
-        text.push_string(self.token_position_text(token))
+        if self.file_path.is_empty() then {
+            text.push_string(" at ")
+            text.push_string(self.token_position_text(token))
+        }
         return text
     }
 
@@ -43,6 +46,23 @@ given Parser {
         text.push_string(token_text(token))
         text.push_byte(')')
         return text
+    }
+
+    protected parser_error_at(self, message String, token Token) * Error = {
+        return box(make_diagnostic_at(
+            DiagnosticStage.Parser(),
+            self.file_path,
+            message,
+            self.token_span(token)
+        ))
+    }
+
+    protected parser_error(self, message String) * Error = {
+        return self.parser_error_at(message, self.current())
+    }
+
+    protected parser_error_without_span(self, message String) * Error = {
+        return box(make_diagnostic(DiagnosticStage.Parser(), self.file_path, message))
     }
 
     protected previous_token(self) Option[Token] = {
@@ -175,7 +195,11 @@ given Parser {
     }
 
     public new(tokens List[Token]) Parser = {
-        return Parser(tokens, 0, 0(UInt))
+        return Parser(tokens, "", 0, 0(UInt))
+    }
+
+    public new_in_file(tokens List[Token], file_path String) Parser = {
+        return Parser(tokens, file_path, 0, 0(UInt))
     }
 
     protected current(self) Token = {
@@ -418,7 +442,7 @@ given Parser {
 
     protected require_no_line_break_before_rhs(*mutable self) Result[Void] = {
         if self.current().has_newline_before and not self.is_inside_line_join_grouping() then {
-            return Result[Void].Error(box("Unexpected token: \(token_text(self.current()))"))
+            return Result[Void].Error(self.parser_error("Unexpected token: \(token_text(self.current()))"))
         }
         return Result[Void].Ok({})
     }
@@ -470,7 +494,7 @@ given Parser {
             self.advance()
             return .Ok(name)
         }
-        return .Error(box(self.format_context_position_error("Expected identifier for ", label, t)))
+        return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", label, t), t))
     }
 
     protected parse_decl_flags(*mutable self) ParseDeclFlags = {
@@ -563,7 +587,7 @@ given Parser {
 
     protected wrap_decl(self, access AccessModifier, is_foreign Bool, is_intrinsic Bool, base Decl) Result[Decl] = {
         if is_foreign and is_intrinsic then {
-            return .Error(box("foreign and intrinsic cannot be used together"))
+            return .Error(self.parser_error_without_span("foreign and intrinsic cannot be used together"))
         }
 
         if is_foreign then {
@@ -572,13 +596,13 @@ given Parser {
                 .LetDecl(_, name, is_mutable, type_name, _, span) then
                     when type_name in {
                         .Some(tn) then Result[Decl].Ok(Decl.ForeignLetDecl(access, name, is_mutable, tn, span)),
-                        .None() then Result[Decl].Error(box("foreign let declaration requires explicit type")),
+                        .None() then Result[Decl].Error(self.parser_error_without_span("foreign let declaration requires explicit type")),
                     },
                 .TypeStructDecl(_, name, _, fields, span) then .Ok(Decl.ForeignTypeDecl(access, name, Option[String].None(), Option[List[Field]].Some(fields), span)),
-                .GivenDecl(_, _, _, _) then .Error(box("foreign given declaration is not supported")),
-                .GivenTraitDecl(_, _, _, _, _) then .Error(box("foreign given declaration is not supported")),
-                .GivenNotTraitDecl(_, _, _, _) then .Error(box("foreign given declaration is not supported")),
-                _ then .Error(box("unsupported foreign declaration kind")),
+                .GivenDecl(_, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
+                .GivenTraitDecl(_, _, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
+                .GivenNotTraitDecl(_, _, _, _) then .Error(self.parser_error_without_span("foreign given declaration is not supported")),
+                _ then .Error(self.parser_error_without_span("unsupported foreign declaration kind")),
             }
         }
 
@@ -586,10 +610,10 @@ given Parser {
             return when base in {
                 .FunctionDecl(_, name, type_params, params, return_type, _, span) then .Ok(Decl.IntrinsicFunctionDecl(access, name, type_params, params, return_type, span)),
                 .GivenDecl(target_type, type_params, members, span) then .Ok(Decl.IntrinsicGivenDecl(target_type, type_params, members, span)),
-                .GivenTraitDecl(_, _, _, _, _) then .Error(box("intrinsic given trait declaration is not supported")),
-                .GivenNotTraitDecl(_, _, _, _) then .Error(box("intrinsic given declaration is not supported")),
+                .GivenTraitDecl(_, _, _, _, _) then .Error(self.parser_error_without_span("intrinsic given trait declaration is not supported")),
+                .GivenNotTraitDecl(_, _, _, _) then .Error(self.parser_error_without_span("intrinsic given declaration is not supported")),
                 .TypeStructDecl(_, name, type_params, _, span) then .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, span)),
-                _ then .Error(box("unsupported intrinsic declaration kind")),
+                _ then .Error(self.parser_error_without_span("unsupported intrinsic declaration kind")),
             }
         }
         return .Ok(base)
@@ -609,7 +633,7 @@ given Parser {
     protected parse_type_arg_list(*mutable self) Result[List[* TypeNode]] = {
         when self.current().kind in {
             .LBracket() then { self.advance() },
-            _ then { return .Error(box("Expected '[' to start type argument list")) },
+            _ then { return .Error(self.parser_error("Expected '[' to start type argument list")) },
         }
 
         let mutable args = List[* TypeNode].new()
@@ -619,7 +643,7 @@ given Parser {
                 break
             }
             let arg = self.parse_type() or else {
-                return .Error(box("parse type argument error"))
+                return .Error(self.parser_error("parse type argument error"))
             }
             args.push(box(arg))
 
@@ -629,7 +653,7 @@ given Parser {
                 },
                 .RBracket() then {},
                 _ then {
-                    return .Error(box("Expected ',' or ']' in type argument list"))
+                    return .Error(self.parser_error("Expected ',' or ']' in type argument list"))
                 },
             }
         }
@@ -640,7 +664,7 @@ given Parser {
     protected parse_function_type_param_list(*mutable self) Result[List[* TypeNode]] = {
         when self.current().kind in {
             .LParen() then { self.advance() },
-            _ then { return .Error(box("Expected '(' to start function type parameter list")) },
+            _ then { return .Error(self.parser_error("Expected '(' to start function type parameter list")) },
         }
 
         let mutable params = List[* TypeNode].new()
@@ -650,7 +674,7 @@ given Parser {
                 break
             }
             let param_type = self.parse_type() or else {
-                return .Error(box("parse type error"))
+                return .Error(self.parser_error("parse type error"))
             }
             params.push(box(param_type))
 
@@ -660,7 +684,7 @@ given Parser {
                 },
                 .RParen() then {},
                 _ then {
-                    return .Error(box("Expected ',' or ')' in function type parameter list"))
+                    return .Error(self.parser_error("Expected ',' or ')' in function type parameter list"))
                 },
             }
         }
@@ -675,7 +699,7 @@ given Parser {
                 if self.current().kind is .Star() then {
                     self.advance()
                 } else {
-                    return .Error(box("Expected '*' after '?'"))
+                    return .Error(self.parser_error("Expected '*' after '?'"))
                 }
                 let mutable is_mutable = false
                 if self.current().kind is .KwMut() then {
@@ -683,7 +707,7 @@ given Parser {
                     is_mutable = true
                 }
                 let inner = self.parse_type() or else {
-                    return .Error(box("parse type error"))
+                    return .Error(self.parser_error("parse type error"))
                 }
                 return .Ok(TypeNode.WeakReference(box(inner), is_mutable))
             },
@@ -697,7 +721,7 @@ given Parser {
                         is_mutable = true
                     }
                     let inner = self.parse_type() or else {
-                        return .Error(box("parse type error"))
+                        return .Error(self.parser_error("parse type error"))
                     }
                     return .Ok(TypeNode.Pointer(box(inner), is_mutable))
                 }
@@ -707,7 +731,7 @@ given Parser {
                     is_mutable = true
                 }
                 let inner = self.parse_type() or else {
-                    return .Error(box("parse type error"))
+                    return .Error(self.parser_error("parse type error"))
                 }
                 return .Ok(TypeNode.Reference(box(inner), is_mutable))
             },
@@ -721,18 +745,18 @@ given Parser {
                 if module_or_name == "Func" then {
                     if self.current().kind is .LParen() then {
                         let param_types = self.parse_function_type_param_list() or else {
-                            return .Error(box("parse type error"))
+                            return .Error(self.parser_error("parse type error"))
                         }
                         if not self.is_type_start() then {
-                            return .Error(box("Function type must include a return type, e.g. Func(Int, String) Bool"))
+                            return .Error(self.parser_error_without_span("Function type must include a return type, e.g. Func(Int, String) Bool"))
                         }
                         let return_type = self.parse_type() or else {
-                            return .Error(box("parse type error"))
+                            return .Error(self.parser_error("parse type error"))
                         }
                         return .Ok(TypeNode.FunctionType(param_types, box(return_type)))
                     }
                     if self.current().kind is .LBracket() then {
-                        return .Error(box("Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"))
+                        return .Error(self.parser_error_without_span("Use Func(T1, T2) ReturnType instead of legacy Func[T1, T2, ReturnType]"))
                     }
                 }
 
@@ -740,12 +764,12 @@ given Parser {
                     let mutable message = "Type name '"
                     message.push_string(module_or_name)
                     message.push_string("' must start with an uppercase letter")
-                    return .Error(box(message))
+                    return .Error(self.parser_error_without_span(message))
                 }
 
                 if self.current().kind is .LBracket() then {
                     let args = self.parse_type_arg_list() or else {
-                        return .Error(box("parse type error"))
+                        return .Error(self.parser_error("parse type error"))
                     }
                     return .Ok(TypeNode.Generic(module_or_name, args))
                 }
@@ -753,7 +777,7 @@ given Parser {
                 return .Ok(TypeNode.Identifier(module_or_name))
             },
             _ then {
-                return .Error(box("Expected type"))
+                return .Error(self.parser_error("Expected type"))
             },
         }
     }
@@ -780,14 +804,14 @@ given Parser {
                     yield name
                 },
                 _ then {
-                    return .Error(box(self.format_context_position_error("Expected identifier for ", "type parameter", self.current())))
+                    return .Error(self.parser_error_at(self.format_context_position_error("Expected identifier for ", "type parameter", self.current()), self.current()))
                 },
             }
 
             // Reject lifetime parameters in generic parameter lists
             let is_lifetime_param = param_name.starts_with("'")
             if is_lifetime_param then {
-                return .Error(box("Lifetime syntax has been removed. Use *T/*mutable T for managed references."))
+                return .Error(self.parser_error_without_span("Lifetime syntax has been removed. Use *T/*mutable T for managed references."))
             }
             if not self.is_type_start() then {
                 let t = self.current()
@@ -795,18 +819,18 @@ given Parser {
                 message.push_string(param_name)
                 message.push_string("' requires a constraint at ")
                 message.push_string(self.token_position_text(t))
-                return .Error(box(message))
+                return .Error(self.parser_error_at(message, t))
             }
             let mutable constraints = List[* TypeNode].new()
             let first_constraint = self.parse_type() or else {
-                return .Error(box("parse type parameter constraint error"))
+                return .Error(self.parser_error("parse type parameter constraint error"))
             }
             constraints.push(box(first_constraint))
 
             while self.current().kind is .KwAnd() then {
                 self.advance()
                 let next_constraint = self.parse_type() or else {
-                    return .Error(box("parse type parameter constraint error"))
+                    return .Error(self.parser_error("parse type parameter constraint error"))
                 }
                 constraints.push(box(next_constraint))
             }
@@ -819,7 +843,7 @@ given Parser {
                 },
                 .RBracket() then {},
                 _ then {
-                    return .Error(box("Expected ',' or ']' in type parameter list"))
+                    return .Error(self.parser_error("Expected ',' or ']' in type parameter list"))
                 },
             }
         }
@@ -854,35 +878,35 @@ given Parser {
                     let self_type = TypeNode.Reference(box(TypeNode.InferredSelf()), is_mutable)
                     params.push(Param("self", false, self_type, false))
                 } else {
-                    return .Error(box("Expected 'self' after '*' in receiver"))
+                    return .Error(self.parser_error("Expected 'self' after '*' in receiver"))
                 }
             } else if self.current().kind is .KwSelf() then {
                 self.advance()
                 let mutable self_type = TypeNode.InferredSelf()
                 if self.current().kind is .KwSelfType() then {
-                    return .Error(box("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
+                    return .Error(self.parser_error_without_span("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
                 }
                 if self.is_type_start() then {
-                    return .Error(box("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
+                    return .Error(self.parser_error_without_span("Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"))
                 }
                 params.push(Param("self", false, self_type, false))
             } else {
                 let name = self.expect_identifier("parameter") or else {
-                    return .Error(box("parse parameter error"))
+                    return .Error(self.parser_error("parse parameter error"))
                 }
                 if not self.is_valid_value_name(name) then {
-                    return .Error(box(self.invalid_parameter_name_error(name)))
+                    return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(name)))
                 }
 
                 if self.current().kind is .Colon() then {
-                    return .Error(box("Function parameters use 'name Type', not 'name: Type'"))
+                    return .Error(self.parser_error_without_span("Function parameters use 'name Type', not 'name: Type'"))
                 }
 
                 if not self.is_type_start() then {
-                    return .Error(box("parameter type is required"))
+                    return .Error(self.parser_error("parameter type is required"))
                 }
                 let param_type = self.parse_type() or else {
-                    return .Error(box("parse parameter type error"))
+                    return .Error(self.parser_error("parse parameter type error"))
                 }
 
                 params.push(Param(name, is_mut, param_type, false))
@@ -896,10 +920,10 @@ given Parser {
                     return .Ok(params)
                 },
                 .Eof() then {
-                    return .Error(box("Unexpected EOF in parameter list"))
+                    return .Error(self.parser_error("Unexpected EOF in parameter list"))
                 },
                 _ then {
-                    return .Error(box("Expected ',' or ')' in parameter list"))
+                    return .Error(self.parser_error("Expected ',' or ')' in parameter list"))
                 },
             }
         }
@@ -920,20 +944,20 @@ given Parser {
         let name = self.expect_identifier("let declaration") or return
         if self.current().kind is .LParen() then {
             if not self.is_valid_value_name(name) then {
-                return .Error(box(self.invalid_function_name_error(name)))
+                return .Error(self.parser_error_without_span(self.invalid_function_name_error(name)))
             }
         } else if not self.is_valid_value_name(name) then {
-            return .Error(box(self.invalid_variable_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or return
 
         if self.current().kind is .LParen() then {
             if is_mut then {
-                return .Error(box("Function declaration cannot use mutable before name"))
+                return .Error(self.parser_error_without_span("Function declaration cannot use mutable before name"))
             }
 
             if is_foreign and not type_params.is_empty() then {
-                return .Error(box("foreign function does not support generics"))
+                return .Error(self.parser_error_without_span("foreign function does not support generics"))
             }
 
             self.advance()
@@ -941,26 +965,26 @@ given Parser {
 
             when self.current().kind in {
                 .RParen() then {},
-                _ then { return .Error(box("Expected ')' after parameters")) },
+                _ then { return .Error(self.parser_error("Expected ')' after parameters")) },
             }
             self.advance()
 
             if self.current().kind is .Assign() then {
-                return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+                return .Error(self.parser_error_without_span("Missing return type: function and method declarations must explicitly declare a return type"))
             }
             if not self.is_type_start() then {
-                return .Error(box("Missing return type: function and method declarations must explicitly declare a return type"))
+                return .Error(self.parser_error_without_span("Missing return type: function and method declarations must explicitly declare a return type"))
             }
             let return_type = self.parse_type() or else {
-                return .Error(box("parse function return type error"))
+                return .Error(self.parser_error("parse function return type error"))
             }
 
             if is_foreign or is_intrinsic then {
                 if self.current().kind is .Assign() then {
                     if is_foreign then {
-                        return .Error(box("foreign function cannot have a body"))
+                        return .Error(self.parser_error_without_span("foreign function cannot have a body"))
                     }
-                    return .Error(box("intrinsic function declaration should not have body"))
+                    return .Error(self.parser_error_without_span("intrinsic function declaration should not have body"))
                 }
                 self.consume_semicolon()
                 let span = self.span_from_start(start)
@@ -974,7 +998,7 @@ given Parser {
                         break
                     },
                     .Eof() then {
-                        return .Error(box("Unexpected EOF in function declaration"))
+                        return .Error(self.parser_error("Unexpected EOF in function declaration"))
                     },
                     _ then {
                         self.advance()
@@ -991,15 +1015,15 @@ given Parser {
 
         // Variable declaration
         if not type_params.is_empty() then {
-            return .Error(box("variable declaration cannot use type parameters"))
+            return .Error(self.parser_error_without_span("variable declaration cannot use type parameters"))
         }
 
         if is_foreign then {
             if not self.is_type_start() then {
-                return .Error(box("foreign let declaration requires explicit type"))
+                return .Error(self.parser_error_without_span("foreign let declaration requires explicit type"))
             }
             let foreign_type = self.parse_type() or else {
-                return .Error(box("parse foreign let type error"))
+                return .Error(self.parser_error("parse foreign let type error"))
             }
             self.consume_semicolon()
             let span = self.span_from_start(start)
@@ -1010,17 +1034,17 @@ given Parser {
         let mutable type_name = Option[TypeNode].None()
         if self.is_type_start() then {
             let parsed = self.parse_type() or else {
-                return .Error(box("parse let declaration type error"))
+                return .Error(self.parser_error("parse let declaration type error"))
             }
             type_name = .Some(parsed)
         }
 
         // expect '='
         if self.current().kind is .Eof() then {
-            return .Error(box("Expected '=' in let declaration"))
+            return .Error(self.parser_error("Expected '=' in let declaration"))
         }
         if not (self.current().kind is .Assign()) then {
-            return .Error(box("Expected '=' in let declaration, got \(token_text(self.current()))"))
+            return .Error(self.parser_error("Expected '=' in let declaration, got \(token_text(self.current()))"))
         }
         self.advance()
         let initializer = self.parse_expression_checked("let declaration initializer") or return
@@ -1043,7 +1067,7 @@ given Parser {
 
         let name = self.expect_identifier("type declaration") or return
         if not self.is_upper_first(name) then {
-            return .Error(box(self.invalid_type_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_type_name_error(name)))
         }
         let type_params = self.parse_type_parameters() or return
 
@@ -1051,7 +1075,7 @@ given Parser {
             .Assign() then {
                 self.advance()
                 let target = self.parse_type() or else {
-                    return .Error(box("parse type alias target error"))
+                    return .Error(self.parser_error("parse type alias target error"))
                 }
                 self.consume_semicolon()
                 let base = Decl.TypeAliasDecl(access, name, target, self.span_from_start(start))
@@ -1067,7 +1091,7 @@ given Parser {
                             break
                         },
                         .Eof() then {
-                            return .Error(box("Unexpected EOF in struct declaration"))
+                            return .Error(self.parser_error("Unexpected EOF in struct declaration"))
                         },
                         _ then {
                             let field_access = self.parse_access_modifier(AccessModifier.Public())
@@ -1079,14 +1103,14 @@ given Parser {
 
                             let field_name = self.expect_identifier("field name") or return
                             if not self.is_valid_value_name(field_name) then {
-                                return .Error(box(self.invalid_field_name_error(field_name)))
+                                return .Error(self.parser_error_without_span(self.invalid_field_name_error(field_name)))
                             }
                             if self.current().kind is .Colon() then {
-                                return .Error(box("Constructor field declarations use 'name Type', not 'name: Type'"))
+                                return .Error(self.parser_error_without_span("Constructor field declarations use 'name Type', not 'name: Type'"))
                             }
 
                             let field_type = self.parse_type() or else {
-                                return .Error(box("parse field type error"))
+                                return .Error(self.parser_error("parse field type error"))
                             }
 
                             fields.push(Field(field_access, field_name, field_mut, field_type, false))
@@ -1111,7 +1135,7 @@ given Parser {
                         self.consume_semicolon()
                         return .Ok(Decl.ForeignTypeDecl(access, name, foreign_cname, Option[List[Field]].None(), self.span_from_start(start)))
                     }
-                    return .Error(box("foreign type must use an empty body: {}"))
+                    return .Error(self.parser_error_without_span("foreign type must use an empty body: {}"))
                 }
                 self.advance()
                 let mutable cases = List[EnumCase].new()
@@ -1122,12 +1146,12 @@ given Parser {
                             break
                         },
                         .Eof() then {
-                            return .Error(box("Unexpected EOF in enum declaration"))
+                            return .Error(self.parser_error("Unexpected EOF in enum declaration"))
                         },
                         _ then {
                             let case_name = self.expect_identifier("enum case") or return
                             if not self.is_upper_first(case_name) then {
-                                return .Error(box(self.invalid_enum_case_name_error(case_name)))
+                                return .Error(self.parser_error_without_span(self.invalid_enum_case_name_error(case_name)))
                             }
                             let mutable case_fields = List[EnumCaseField].new()
 
@@ -1140,18 +1164,18 @@ given Parser {
                                             break
                                         },
                                         .Eof() then {
-                                            return .Error(box("Unexpected EOF in enum payload"))
+                                            return .Error(self.parser_error("Unexpected EOF in enum payload"))
                                         },
                                         _ then {
                                             let payload_name = self.expect_identifier("enum payload name") or return
                                             if not self.is_valid_value_name(payload_name) then {
-                                                return .Error(box(self.invalid_parameter_name_error(payload_name)))
+                                                return .Error(self.parser_error_without_span(self.invalid_parameter_name_error(payload_name)))
                                             }
                                             if self.current().kind is .Colon() then {
-                                                return .Error(box("Enum payload field declarations use 'name Type', not 'name: Type'"))
+                                                return .Error(self.parser_error_without_span("Enum payload field declarations use 'name Type', not 'name: Type'"))
                                             }
                                             let payload_type = self.parse_type() or else {
-                                                return .Error(box("parse enum payload type error"))
+                                                return .Error(self.parser_error("parse enum payload type error"))
                                             }
                                             case_fields.push(EnumCaseField(payload_name, payload_type, false))
                                             when self.current().kind in {
@@ -1160,7 +1184,7 @@ given Parser {
                                                 },
                                                 .RParen() then {},
                                                 _ then {
-                                                    return .Error(box("Expected ',' or ')' in enum payload"))
+                                                    return .Error(self.parser_error("Expected ',' or ')' in enum payload"))
                                                 },
                                             }
                                         },
@@ -1181,22 +1205,22 @@ given Parser {
             },
             .Semicolon() then {
                 if is_foreign then {
-                    return .Error(box("foreign type cannot be declared without a body"))
+                    return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"))
                 }
                 if is_intrinsic then {
                     self.consume_semicolon()
                     return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)))
                 }
-                return .Error(box("Expected '=', '(' or '{' after type name"))
+                return .Error(self.parser_error("Expected '=', '(' or '{' after type name"))
             },
             _ then {
                 if is_foreign then {
-                    return .Error(box("foreign type cannot be declared without a body"))
+                    return .Error(self.parser_error_without_span("foreign type cannot be declared without a body"))
                 }
                 if is_intrinsic then {
                     return .Ok(Decl.IntrinsicTypeDecl(access, name, type_params, self.span_from_start(start)))
                 }
-                return .Error(box("Expected '=', '(' or '{' after type name"))
+                return .Error(self.parser_error("Expected '=', '(' or '{' after type name"))
             },
         }
     }
@@ -1217,20 +1241,20 @@ given Parser {
 
         let name = self.expect_identifier("let statement") or return
         if not self.is_valid_value_name(name) then {
-            return .Error(box(self.invalid_variable_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
         }
 
         let mutable type_name = Option[TypeNode].None()
         if self.is_type_start() then {
             let parsed_type_name = self.parse_type() or else {
-                return .Error(box("parse let statement type error"))
+                return .Error(self.parser_error("parse let statement type error"))
             }
             type_name = .Some(parsed_type_name)
         }
 
         // skip to '='
         if self.current().kind is .Eof() then {
-            return .Error(box("Expected '=' in let statement"))
+            return .Error(self.parser_error("Expected '=' in let statement"))
         }
 
         self.advance()
@@ -1248,19 +1272,19 @@ given Parser {
         let first = self.parse_pair_binding_element() or return
 
         if self.current().kind is not .Comma() then {
-            return .Error(box("Expected ',' in pair let statement"))
+            return .Error(self.parser_error("Expected ',' in pair let statement"))
         }
         self.advance()
 
         let second = self.parse_pair_binding_element() or return
 
         if self.current().kind is not .RParen() then {
-            return .Error(box("Expected ')' in pair let statement"))
+            return .Error(self.parser_error("Expected ')' in pair let statement"))
         }
         self.advance()
 
         if self.current().kind is .Eof() then {
-            return .Error(box("Expected '=' in pair let statement"))
+            return .Error(self.parser_error("Expected '=' in pair let statement"))
         }
         self.advance()
 
@@ -1285,7 +1309,7 @@ given Parser {
 
         let name = self.expect_identifier("pair let binding") or return
         if not self.is_valid_value_name(name) then {
-            return .Error(box(self.invalid_variable_name_error(name)))
+            return .Error(self.parser_error_without_span(self.invalid_variable_name_error(name)))
         }
 
         let mutable type_name = Option[TypeNode].None()
@@ -1294,7 +1318,7 @@ given Parser {
             .RParen() then {},
             _ then {
                 let parsed_type_name = self.parse_type() or else {
-                    return .Error(box("parse pair let binding type error"))
+                    return .Error(self.parser_error("parse pair let binding type error"))
                 }
                 type_name = .Some(parsed_type_name)
             },
@@ -1333,7 +1357,7 @@ given Parser {
             .CaretAssign() then .Ok(.Some(CompoundAssignmentOperator.BitXorAssign())),
             .LeftShiftAssign() then .Ok(.Some(CompoundAssignmentOperator.LeftShiftAssign())),
             .RightShiftAssign() then .Ok(.Some(CompoundAssignmentOperator.RightShiftAssign())),
-            _ then .Error(box("token is not an assignment operator")),
+            _ then .Error(self.parser_error_without_span("token is not an assignment operator")),
         }
     }
 
@@ -1344,7 +1368,7 @@ given Parser {
         let parsed_expr = self.parse_expression() or return
         if self.index == before then {
             let t = self.current()
-            return .Error(box(self.format_progress_error("Parser made no progress while parsing ", context, t)))
+            return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress while parsing ", context, t), t))
         }
         let mutable expr = parsed_expr
         if self.should_continue_postfix_after_expression() then {
@@ -1365,7 +1389,7 @@ given Parser {
                 .Eof() then {
                     let mutable message = "Unexpected EOF in "
                     message.push_string(context)
-                    return .Error(box(message))
+                    return .Error(self.parser_error(message))
                 },
                 _ then {
                     let before = self.index
@@ -1373,7 +1397,7 @@ given Parser {
                     let parsed = self.parse_statement_postfix_continuations(parsed_statement) or return
                     if self.index == before then {
                         let t = self.current()
-                        return .Error(box(self.format_progress_error("Parser made no progress in ", context, t)))
+                        return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", context, t), t))
                     }
                     statements.push(parsed)
                 },
@@ -1391,7 +1415,7 @@ given Parser {
                 let callee = box(Expr.MemberPath(base, path, span))
                 yield Result[* Expr].Ok(box(Expr.Call(callee, args, span)))
             },
-            _ then Result[* Expr].Error(box("Expected postfix continuation expression")),
+            _ then Result[* Expr].Error(self.parser_error_without_span("Expected postfix continuation expression")),
         }
     }
 
@@ -1445,7 +1469,7 @@ given Parser {
                     self.consume_semicolon()
                     return .Ok(Statement.BreakStmt(self.span_from_start(start)))
                 }
-                return .Error(box("Expected statement terminator after 'break'"))
+                return .Error(self.parser_error("Expected statement terminator after 'break'"))
             },
             .KwContinue() then {
                 self.advance()
@@ -1466,7 +1490,7 @@ given Parser {
 
                 if self.is_assignment_operator() then {
                     let op = self.parse_assignment_operator() or else {
-                        return .Error(box("Unknown assignment operator"))
+                        return .Error(self.parser_error_without_span("Unknown assignment operator"))
                     }
                     self.advance()
                     let rhs = self.parse_expression_checked("assignment right-hand side") or return

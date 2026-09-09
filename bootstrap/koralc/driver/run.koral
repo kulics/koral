@@ -158,13 +158,13 @@ private let print_usage() Void = {
 // Shared: lex + parse source text.
 // On error, prints a diagnostic and returns None.
 private let parse_source(file_path String, source String) Option[Program] = {
-    let tokens = lex(source) or else {
-        eprintln(format_cli_diagnostic(make_diagnostic(DiagnosticStage.Lexer(), file_path, it.message()), file_path))
+    let tokens = lex_in_file(source, file_path) or else {
+        eprintln(it.message())
         return Option[Program].None()
     }
 
-    let program = parse(tokens) or else {
-        eprintln(format_cli_diagnostic(make_diagnostic(DiagnosticStage.Parser(), file_path, it.message()), file_path))
+    let program = parse_in_file(tokens, file_path) or else {
+        eprintln(it.message())
         return Option[Program].None()
     }
 
@@ -764,7 +764,13 @@ private let build_c_output_path(artifact_base_name String, default_output_dir Pa
     }
 }
 
-private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program * TypedProgram, phase_prefix String) Pair[* MIRProgram, CompilerContext] = {
+type MIRLoweringOutput(
+    mir_program Option[* MIRProgram],
+    context CompilerContext,
+    diagnostics DiagnosticCollector,
+)
+
+private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program * TypedProgram, display_name String) MIRLoweringOutput = {
     let mutable context = result.context
 
     let mutable mono = Monomorphizer.new_with_inputs(
@@ -779,12 +785,26 @@ private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program 
         result.conformance_index,
     )
     let mutable mono_program = (&mutable mono).monomorphize()
+    if mono.diagnostics().has_errors() then {
+        context.drop_concrete_bodies()
+        context.drop_codegen_unused_metadata()
+        return MIRLoweringOutput(Option[* MIRProgram].None(), context, mono.diagnostics())
+    }
 
     let mutable lowerer = MIRLowerer.new(&mutable mono_program, &mutable context)
     let mir_program = lowerer.lower()
+    if lowerer.diagnostics.has_errors() then {
+        context.drop_concrete_bodies()
+        context.drop_codegen_unused_metadata()
+        return MIRLoweringOutput(Option[* MIRProgram].Some(mir_program), context, lowerer.diagnostics)
+    }
     let verifier = MIRVerifier.new(mir_program)
+    let mutable diagnostics = lowerer.diagnostics
     let _ = verifier.verify() or else {
-        panic(it.message())
+        diagnostics.push(make_diagnostic(DiagnosticStage.Other(), display_name, it.message()))
+        context.drop_concrete_bodies()
+        context.drop_codegen_unused_metadata()
+        return MIRLoweringOutput(Option[* MIRProgram].Some(mir_program), context, diagnostics)
     }
 
     // MIR lowering has consumed the concrete body caches; release them
@@ -792,7 +812,7 @@ private let lower_mir_after_typecheck(result * BodyCheckerOutput, typed_program 
     context.drop_concrete_bodies()
     context.drop_codegen_unused_metadata()
 
-    return Pair[* MIRProgram, CompilerContext](mir_program, context)
+    return MIRLoweringOutput(Option[* MIRProgram].Some(mir_program), context, DiagnosticCollector.new())
 }
 
 type EmitCGenerationInput(
@@ -834,12 +854,20 @@ private let prepare_emit_c_generation_input(options InvocationOptions, phase_pre
         return Option[EmitCGenerationInput].None()
     }
 
-    let lowered = lower_mir_after_typecheck(&result, &typed_program, phase_prefix)
+    let lowered = lower_mir_after_typecheck(&result, &typed_program, display_name)
+    if lowered.diagnostics.has_errors() then {
+        print_user_focused_diagnostic_records(lowered.diagnostics, display_name)
+        return Option[EmitCGenerationInput].None()
+    }
+    let mir_program = lowered.mir_program or else {
+        eprintln("\(phase_prefix): MIR program unavailable after successful monomorphization")
+        return Option[EmitCGenerationInput].None()
+    }
     return Option[EmitCGenerationInput].Some(EmitCGenerationInput(
         output_path,
         linked_libraries,
-        lowered.first,
-        lowered.second,
+        mir_program,
+        lowered.context,
     ))
 }
 

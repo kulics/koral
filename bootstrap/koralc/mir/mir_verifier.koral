@@ -486,7 +486,7 @@ given MIRVerifier {
         if receiver_info.first <> call.trait_name or not self.type_list_equals(receiver_info.second, call.trait_type_args) then {
             return self.fail(function, "trait method call receiver type does not match call trait metadata")
         }
-        let ordered_names = self.ordered_trait_method_names(call.trait_name)
+        let ordered_names = self.ordered_trait_method_names_in_module(call.trait_name, self.function_module_path(function))
         if ordered_names.is_empty() then {
             return self.fail(function, "trait method call references unknown trait metadata")
         }
@@ -536,23 +536,39 @@ given MIRVerifier {
     }
 
     private ordered_trait_method_names(self, trait_name String) List[String] = {
+        return self.ordered_trait_method_names_in_module(trait_name, List[String].new())
+    }
+
+    private ordered_trait_method_names_in_module(self, trait_name String, preferred_module_path List[String]) List[String] = {
         let mutable ordered = List[String].new()
         let mutable seen = Set[String].new()
         let mutable visited = Set[String].new()
-        self.collect_ordered_trait_method_names(trait_name, &mutable ordered, &mutable seen, &mutable visited)
+        self.collect_ordered_trait_method_names(trait_name, preferred_module_path, &mutable ordered, &mutable seen, &mutable visited)
         return ordered
     }
 
-    private collect_ordered_trait_method_names(self, trait_name String, ordered *mutable List[String], seen *mutable Set[String], visited *mutable Set[String]) Void = {
+    private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
+        return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
+            .Some(info) then Option[TraitDeclInfo].Some(info),
+            .None() then self.program.traits.get(trait_name),
+        }
+    }
+
+    private function_module_path(self, function * MIRFunction) List[String] = {
+        return self.program.context.get_module_path(function.identifier.def_id) or else List[String].new()
+    }
+
+    private collect_ordered_trait_method_names(self, trait_name String, preferred_module_path List[String], ordered *mutable List[String], seen *mutable Set[String], visited *mutable Set[String]) Void = {
         let _ = self
-        if visited.contains(trait_name) then {
+        let visit_key = qualified_trait_key(preferred_module_path, trait_name)
+        if visited.contains(visit_key) then {
             return
         }
-        visited.insert(trait_name)
-        when self.program.traits.get(trait_name) in {
+        visited.insert(visit_key)
+        when self.trait_info(trait_name, preferred_module_path) in {
             .Some(info) then {
                 for parent in info.parent_traits then {
-                    self.collect_ordered_trait_method_names(parent.name, ordered, seen, visited)
+                    self.collect_ordered_trait_method_names(parent.name, info.module_path, ordered, seen, visited)
                 }
                 for member in info.raw_members then {
                     if not seen.contains(member.name) then {

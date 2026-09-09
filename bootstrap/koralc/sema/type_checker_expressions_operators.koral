@@ -142,8 +142,8 @@ given TypeChecker {
         }
         let left_raw_t = typed_left.expr_type
         let right_raw_t = typed_right.expr_type
-        let left_t = self.canonicalize_alias_type(self.concretize_default_literal_type(left_raw_t))
-        let right_t = self.canonicalize_alias_type(self.concretize_default_literal_type(right_raw_t))
+        let left_t = self.concretize_default_literal_type(left_raw_t)
+        let right_t = self.concretize_default_literal_type(right_raw_t)
         if left_t is .NeverType() or right_t is .NeverType() then {
             return make_typed_expr(TypedExprKind.ArithmeticExpr(box(typed_left), op, box(typed_right)), Type.NeverType())
         }
@@ -433,6 +433,19 @@ given TypeChecker {
         }
     }
 
+    protected collect_lambda_param_names(self, params List[TypedParam], names *mutable Set[String]) Void = {
+        for param in params then {
+            names.insert(param.name)
+        }
+    }
+
+    protected collect_pair_binding_name(self, binding PairBindingElement, names *mutable Set[String]) Void = {
+        if binding.is_discard or binding.name == "_" then {
+            return
+        }
+        names.insert(binding.name)
+    }
+
     protected validate_lambda_captures_in_stmt(self, stmt * TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids *mutable Set[UInt]) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
@@ -493,8 +506,13 @@ given TypeChecker {
                     self.report_borrowed_lambda_capture(symbol, reported_ids)
                 }
             },
-            .LambdaExpr(_, _, _) then {
-                // Nested lambdas validate captures in their own typing path.
+            .LambdaExpr(params, _, body_ref) then {
+                let mutable nested_local_names = Set[String].new()
+                for name in local_names.iterator() then {
+                    nested_local_names.insert(name)
+                }
+                self.collect_lambda_param_names(params, &mutable nested_local_names)
+                self.validate_lambda_captures_in_expr(body_ref, nested_local_names, local_ids, reported_ids)
             },
             .Block(statements) then {
                 let mutable block_local_names = Set[String].new()

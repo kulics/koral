@@ -41,6 +41,7 @@ given TraitRegistry {
 
     public register(*mutable self, info TraitInfo) Void = {
         self.traits.insert(info.name, info)
+        self.traits.insert(qualified_trait_key(info.module_path, info.name), info)
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new()
         self.object_safety_cache = Dict[String, Bool].new()
     }
@@ -49,15 +50,58 @@ given TraitRegistry {
         return self.traits.get(name)
     }
 
+    public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
+        let qualified = qualified_trait_key(module_path, name)
+        return when self.traits.get(qualified) in {
+            .Some(info) then Option[TraitInfo].Some(info),
+            .None() then self.traits.get(name),
+        }
+    }
+
+    public validate_inheritance_graph(self, trait_name String) Result[Void] = {
+        let mutable visited = List[String].new()
+        let mutable stack = List[String].new()
+        return self.validate_inheritance_graph_internal(trait_name, &mutable visited, &mutable stack)
+    }
+
+    private validate_inheritance_graph_internal(self, trait_name String, visited *mutable List[String], stack *mutable List[String]) Result[Void] = {
+        if stack.contains(trait_name) then {
+            let mutable cycle = stack.join_to_string(" -> ")
+            if not cycle.is_empty() then {
+                cycle.push_string(" -> ")
+            }
+            cycle.push_string(trait_name)
+            return Result[Void].Error(box("Cyclic trait inheritance: \(cycle)"))
+        }
+        if visited.contains(trait_name) then {
+            return Result[Void].Ok({})
+        }
+        let info = self.traits.get(trait_name) or else {
+            return Result[Void].Ok({})
+        }
+        stack.push(trait_name)
+        for parent in info.parent_traits then {
+            let _ = self.validate_inheritance_graph_internal(parent.name, visited, stack) or return
+        }
+        let _ = stack.pop()
+        visited.push(trait_name)
+        return Result[Void].Ok({})
+    }
+
     // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
     // 同名方法以最近定义的 Trait 为准
     public flatten_methods(*mutable self, trait_name String) Result[Dict[String, TypedTraitMember]] = {
+        return self.flatten_methods_in_module(trait_name, List[String].new())
+    }
+
+    public flatten_methods_in_module(*mutable self, trait_name String, module_path List[String]) Result[Dict[String, TypedTraitMember]] = {
+        let cache_key = qualified_trait_key(module_path, trait_name)
         // 检查缓存
-        if self.flattened_cache.get(trait_name) is .Some(cached) then {
+        if self.flattened_cache.get(cache_key) is .Some(cached) then {
             return Result[Dict[String, TypedTraitMember]].Ok(cached)
         }
 
-        when self.traits.get(trait_name) in {
+        when self.get_in_module(trait_name, module_path) in {
             .None() then {
                 let mutable message = "Trait '"
                 message.push_string(trait_name)
@@ -69,13 +113,15 @@ given TraitRegistry {
 
                 // 先收集父 Trait 的方法（子 Trait 方法会覆盖）
                 for parent_name in info.parent_traits then {
-                    when self.flatten_methods(parent_name.name) in {
+                    when self.flatten_methods_in_module(parent_name.name, info.module_path) in {
                         .Ok(parent_methods) then {
                             for entry in parent_methods then {
                                 result.insert(entry.first, entry.second)
                             }
                         },
-                        .Error(_) then {},
+                        .Error(e) then {
+                            return Result[Dict[String, TypedTraitMember]].Error(e)
+                        },
                     }
                 }
 
@@ -84,7 +130,7 @@ given TraitRegistry {
                     result.insert(m.name, m)
                 }
 
-                self.flattened_cache.insert(trait_name, result)
+                self.flattened_cache.insert(cache_key, result)
                 return Result[Dict[String, TypedTraitMember]].Ok(result)
             },
         }
@@ -93,11 +139,16 @@ given TraitRegistry {
     // 检查 Trait 是否对象安全
     // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
     public check_object_safety(*mutable self, trait_name String) Result[Bool] = {
-        if self.object_safety_cache.get(trait_name) is .Some(cached) then {
+        return self.check_object_safety_in_module(trait_name, List[String].new())
+    }
+
+    public check_object_safety_in_module(*mutable self, trait_name String, module_path List[String]) Result[Bool] = {
+        let cache_key = qualified_trait_key(module_path, trait_name)
+        if self.object_safety_cache.get(cache_key) is .Some(cached) then {
             return Result[Bool].Ok(cached)
         }
 
-        let methods = self.flatten_methods(trait_name) or return
+        let methods = self.flatten_methods_in_module(trait_name, module_path) or return
         let mutable is_safe = true
         for entry in methods then {
             let m = entry.second
@@ -123,7 +174,7 @@ given TraitRegistry {
                 }
             }
         }
-        self.object_safety_cache.insert(trait_name, is_safe)
+        self.object_safety_cache.insert(cache_key, is_safe)
         return Result[Bool].Ok(is_safe)
     }
 
@@ -179,12 +230,21 @@ given TraitRegistry {
 
     // 检查 Trait 继承传递性：trait_name 是否继承自 target
     public has_inheritance(self, trait_name String, target String) Bool = {
+        let mutable visited = Set[String].new()
+        return self.has_inheritance_internal(trait_name, target, &mutable visited)
+    }
+
+    private has_inheritance_internal(self, trait_name String, target String, visited *mutable Set[String]) Bool = {
+        if visited.contains(trait_name) then {
+            return false
+        }
+        visited.insert(trait_name)
         if trait_name == target then { return true }
         when self.traits.get(trait_name) in {
             .None() then { return false },
             .Some(info) then {
                 for parent in info.parent_traits then {
-                    if self.has_inheritance(parent.name, target) then { return true }
+                    if self.has_inheritance_internal(parent.name, target, visited) then { return true }
                 }
                 return false
             },
@@ -214,11 +274,22 @@ given TraitChecker {
         members List[* TypedGivenMember],
         span SourceSpan,
     ) Result[Void] = {
+        return self.check_conformance_in_module(target_type, trait_name, members, span, List[String].new())
+    }
+
+    public check_conformance_in_module(
+        self,
+        target_type Type,
+        trait_name String,
+        members List[* TypedGivenMember],
+        span SourceSpan,
+        module_path List[String],
+    ) Result[Void] = {
         // 仅检查当前 trait 自身的方法 requirement。
         // 父 trait 的显式实现在 TypeChecker 中单独检查。
-        let required_methods = when self.registry.get(trait_name) in {
+        let required_methods = when self.registry.get_in_module(trait_name, module_path) in {
             .None() then {
-                return Result[Void].Ok({})
+                return Result[Void].Error(box("Undefined trait: \(trait_name)"))
             },
             .Some(info) then {
                 let mutable own = Dict[String, TypedTraitMember].new()
@@ -337,8 +408,19 @@ given TraitChecker {
         all_given_traits List[String],
         span SourceSpan,
     ) Result[Void] = {
-        when self.registry.get(trait_name) in {
-            .None() then { return Result[Void].Ok({}) },
+        return self.check_parent_traits_satisfied_in_module(target_type, trait_name, all_given_traits, span, List[String].new())
+    }
+
+    public check_parent_traits_satisfied_in_module(
+        self,
+        target_type Type,
+        trait_name String,
+        all_given_traits List[String],
+        span SourceSpan,
+        module_path List[String],
+    ) Result[Void] = {
+        when self.registry.get_in_module(trait_name, module_path) in {
+            .None() then { return Result[Void].Error(box("Undefined trait: \(trait_name)")) },
             .Some(info) then {
                 for parent in info.parent_traits then {
                     let mutable found = false

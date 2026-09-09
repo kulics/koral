@@ -1440,7 +1440,10 @@ given TypeChecker {
                     return make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
                 }
 
-                let fn_lookup = self.storage.global_scope.lookup(base)
+                let fn_lookup = when self.lookup_current_file_symbol(base) in {
+                    .Some(sym) then Option[Symbol].Some(sym),
+                    .None() then self.storage.global_scope.lookup(base),
+                }
                 yield when fn_lookup in {
                     .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
                     .None() then {
@@ -1835,7 +1838,12 @@ given TypeChecker {
                 let typed_inner_ref = box(typed_inner)
                 when inner_expected in {
                     .Some(expected_inner) then {
-                        if not self.same_expr_type(typed_inner.expr_type, expected_inner)
+                        let suppress_trait_object_mismatch = when expected_inner in {
+                            .TraitObject(trait_name, _) then self.can_convert_to_trait_object(typed_inner.expr_type, trait_name),
+                            _ then false,
+                        }
+                        if not suppress_trait_object_mismatch
+                           and not self.same_expr_type(typed_inner.expr_type, expected_inner)
                            and not self.contains_generic_parameter(expected_inner)
                            and not self.is_unresolved_expr_type(typed_inner.expr_type)
                            and not self.is_unresolved_expr_type(expected_inner) then {

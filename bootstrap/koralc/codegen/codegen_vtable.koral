@@ -102,7 +102,7 @@ given CodeGen {
         let mutable bindings = Dict[String, Type].new()
         bindings.insert("Self", concrete_type)
 
-        when self.program.traits.get(trait_name) in {
+        when self.trait_info(trait_name, self.type_module_path(concrete_type)) in {
             .Some(info) then {
                 let mutable idx UInt = 0
                 while idx < info.type_params.count() and idx < trait_type_args.count() then {
@@ -158,7 +158,7 @@ given CodeGen {
                         .None() then Type.Unknown(),
                     }
                 },
-                .None() then when self.program.traits.get(name) in {
+                .None() then when self.trait_info(name, self.type_module_path(bindings.get("Self") or else Type.Unknown())) in {
                     .Some(_) then self.trait_object_type_from_name(name),
                     .None() then Type.Unknown(),
                 },
@@ -371,7 +371,7 @@ given CodeGen {
             .None() then {},
         }
 
-        when self.program.traits.get(trait_name) in {
+        when self.trait_info(trait_name, self.type_module_path(concrete_type)) in {
             .Some(trait_info) then {
                 for parent_trait_name in trait_info.parent_traits then {
                     when self.resolve_method_def_id(concrete_type, parent_trait_name.name, method_name, trait_type_args) in {
@@ -386,6 +386,26 @@ given CodeGen {
         }
 
         return Option[DefId].None()
+    }
+
+    protected type_module_path(self, t Type) List[String] = {
+        return when t in {
+            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
+            .ReferenceType(inner) then self.type_module_path(*inner),
+            .MutableReferenceType(inner) then self.type_module_path(*inner),
+            .BorrowedReferenceType(inner) then self.type_module_path(*inner),
+            .MutableBorrowedReferenceType(inner) then self.type_module_path(*inner),
+            _ then List[String].new(),
+        }
+    }
+
+    protected trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
+        return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
+            .Some(info) then Option[TraitDeclInfo].Some(info),
+            .None() then self.program.traits.get(trait_name),
+        }
     }
 
     protected require_bound_method_symbol(

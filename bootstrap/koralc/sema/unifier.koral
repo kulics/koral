@@ -210,13 +210,14 @@ private let unification_type_summary_with_depth(t Type, depth UInt) String = {
 
 // 合一器，持有 UnionFind 并查集。
 public type Unifier(
+    context CompilerContext,
     mutable union_find UnionFind,
 )
 
 given Unifier {
 
-    public new() Unifier = {
-        return Unifier(UnionFind.new())
+    public new(context CompilerContext) Unifier = {
+        return Unifier(context, UnionFind.new())
     }
 
     // 核心合一方法。
@@ -555,7 +556,16 @@ given Unifier {
     // Occurs check：检查类型变量 tv_id 是否出现在类型 t 中。
     // 防止产生无限类型（如 T = List<T>）。
     private occurs_check(*mutable self, tv_id UInt, t Type) Bool = {
+        let mutable visited = Set[Type].new()
+        return self.occurs_check_internal(tv_id, t, &mutable visited)
+    }
+
+    private occurs_check_internal(*mutable self, tv_id UInt, t Type, visited *mutable Set[Type]) Bool = {
         let t_resolved = self.resolve(t)
+        if visited.contains(t_resolved) then {
+            return false
+        }
+        visited.insert(t_resolved)
         when t_resolved in {
             .TypeVar(tv_ref) then {
                 return (*tv_ref).id == tv_id
@@ -563,35 +573,41 @@ given Unifier {
             .FunctionType(params, ret) then {
                 let mutable i = 0(UInt)
                 while i < params.count() then {
-                    if self.occurs_check(tv_id, (*params[i]).param_type) then {
+                    if self.occurs_check_internal(tv_id, (*params[i]).param_type, visited) then {
                         return true
                     }
                     i += 1(UInt)
                 }
-                return self.occurs_check(tv_id, *ret)
+                return self.occurs_check_internal(tv_id, *ret, visited)
             },
             .ReferenceType(inner) then {
-                return self.occurs_check(tv_id, *inner)
+                return self.occurs_check_internal(tv_id, *inner, visited)
             },
             .MutableReferenceType(inner) then {
-                return self.occurs_check(tv_id, *inner)
+                return self.occurs_check_internal(tv_id, *inner, visited)
+            },
+            .BorrowedReferenceType(inner) then {
+                return self.occurs_check_internal(tv_id, *inner, visited)
+            },
+            .MutableBorrowedReferenceType(inner) then {
+                return self.occurs_check_internal(tv_id, *inner, visited)
             },
             .PointerType(inner) then {
-                return self.occurs_check(tv_id, *inner)
+                return self.occurs_check_internal(tv_id, *inner, visited)
             },
             .MutablePointerType(inner) then {
-                return self.occurs_check(tv_id, *inner)
+                return self.occurs_check_internal(tv_id, *inner, visited)
             },
             .WeakReferenceType(inner) then {
-                return self.occurs_check(tv_id, *inner)
+                return self.occurs_check_internal(tv_id, *inner, visited)
             },
             .MutableWeakReferenceType(inner) then {
-                return self.occurs_check(tv_id, *inner)
+                return self.occurs_check_internal(tv_id, *inner, visited)
             },
             .GenericStruct(_, args) then {
                 let mutable i = 0(UInt)
                 while i < args.count() then {
-                    if self.occurs_check(tv_id, (*args[i])) then {
+                    if self.occurs_check_internal(tv_id, (*args[i]), visited) then {
                         return true
                     }
                     i += 1(UInt)
@@ -601,7 +617,52 @@ given Unifier {
             .GenericEnum(_, args) then {
                 let mutable i = 0(UInt)
                 while i < args.count() then {
-                    if self.occurs_check(tv_id, (*args[i])) then {
+                    if self.occurs_check_internal(tv_id, (*args[i]), visited) then {
+                        return true
+                    }
+                    i += 1(UInt)
+                }
+                return false
+            },
+            .StructureType(def_id) then {
+                return when self.context.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mutable i = 0(UInt)
+                        while i < fields.count() then {
+                            if self.occurs_check_internal(tv_id, fields[i].field_type, visited) then {
+                                return true
+                            }
+                            i += 1(UInt)
+                        }
+                        yield false
+                    },
+                    .None() then false,
+                }
+            },
+            .EnumType(def_id) then {
+                return when self.context.get_enum_cases(def_id) in {
+                    .Some(cases) then {
+                        let mutable case_index = 0(UInt)
+                        while case_index < cases.count() then {
+                            let params = cases[case_index].params
+                            let mutable param_index = 0(UInt)
+                            while param_index < params.count() then {
+                                if self.occurs_check_internal(tv_id, params[param_index].param_type, visited) then {
+                                    return true
+                                }
+                                param_index += 1(UInt)
+                            }
+                            case_index += 1(UInt)
+                        }
+                        yield false
+                    },
+                    .None() then false,
+                }
+            },
+            .TraitObject(_, args) then {
+                let mutable i = 0(UInt)
+                while i < args.count() then {
+                    if self.occurs_check_internal(tv_id, (*args[i]), visited) then {
                         return true
                     }
                     i += 1(UInt)
