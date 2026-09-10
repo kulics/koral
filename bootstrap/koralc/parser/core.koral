@@ -229,6 +229,24 @@ given Parser {
         return self.tokens[self.index + 1].kind is .Colon()
     }
 
+    protected current_labeled_argument_name(self, allow_underscore Bool) Option[String] = {
+        return when self.current().kind in {
+            .Identifier(label) then {
+                if self.is_upper_first(label) then {
+                    return Option[String].None()
+                }
+                if not allow_underscore and label == "_" then {
+                    return Option[String].None()
+                }
+                if self.next_is_colon() then {
+                    return Option[String].Some(label)
+                }
+                yield Option[String].None()
+            },
+            _ then Option[String].None(),
+        }
+    }
+
     protected next_is_then(self) Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false
@@ -241,6 +259,17 @@ given Parser {
             return false
         }
         return self.tokens[self.index + 1].kind is .KwElse()
+    }
+
+    protected lookahead_lambda_return_clause(*mutable self, start_index UInt) Bool = {
+        let saved = self.save_state()
+        self.restore_state(start_index)
+        let looks_like_return_type = when self.parse_type() in {
+            .Ok(_) then true,
+            .Error(_) then false,
+        }
+        self.restore_state(saved)
+        return looks_like_return_type
     }
 
     protected next_is_return(self) Bool = {
@@ -257,8 +286,8 @@ given Parser {
         }
     }
 
-    // 检查 token 是否是表达式开始（用于区分类型转换和括号表达式）
-    protected is_expr_start_token(self, kind TokenKind) Bool = {
+    // Range bounds start at the comparison-operand layer, not the full expression grammar.
+    protected can_start_range_bound(self, kind TokenKind) Bool = {
         return when kind in {
             .Identifier(_) then true,
             .IntegerLiteral(_) then true,
@@ -271,15 +300,16 @@ given Parser {
             .LParen() then true,
             .LBrace() then true,
             .LBracket() then true,
-            .KwNot() then true,
             .Minus() then true,
             .Tilde() then true,
+            .Star() then true,
+            .Ampersand() then true,
             .KwIf() then true,
             .KwWhile() then true,
             .KwFor() then true,
             .KwWhen() then true,
-            .KwLet() then true,
             .KwSelf() then true,
+            .KwIt() then true,
             .Dot() then true,
             _ then false,
         }
@@ -477,6 +507,16 @@ given Parser {
         // 换行自动终止不需要消耗 token
     }
 
+    protected can_omit_control_statement_value(self) Bool = self.should_terminate_statement()
+
+    protected expect_statement_terminator_after(*mutable self, keyword String) Result[Void] = {
+        if self.should_terminate_statement() then {
+            self.consume_statement_terminator()
+            return .Ok({})
+        }
+        return .Error(self.parser_error("Expected statement terminator after '\(keyword)'"))
+    }
+
     protected can_continue_dot_postfix(self) Bool = self.current().kind is .Dot()
 
     protected should_continue_postfix_after_expression(self) Bool = {
@@ -569,10 +609,22 @@ given Parser {
                     self.advance()
                 },
                 .KwForeign() then {
+                    if is_foreign then {
+                        if invalid_access_message is .None() then {
+                            invalid_access_message = .Some("Duplicate declaration modifier: foreign")
+                        }
+                        break
+                    }
                     is_foreign = true
                     self.advance()
                 },
                 .KwIntrinsic() then {
+                    if is_intrinsic then {
+                        if invalid_access_message is .None() then {
+                            invalid_access_message = .Some("Duplicate declaration modifier: intrinsic")
+                        }
+                        break
+                    }
                     is_intrinsic = true
                     self.advance()
                 },
@@ -1258,10 +1310,7 @@ given Parser {
         }
 
         self.advance()
-        let mutable value = self.parse_expression_checked("let statement value") or return
-        if self.should_continue_postfix_after_expression() then {
-            value = self.parse_postfix_suffixes(value) or return
-        }
+        let value = self.parse_expression_checked("let statement value") or return
         self.consume_semicolon()
         return .Ok(Statement.LetStmt(name, is_mut, type_name, value, self.span_from_start(start)))
     }
@@ -1393,8 +1442,7 @@ given Parser {
                 },
                 _ then {
                     let before = self.index
-                    let parsed_statement = self.parse_statement() or return
-                    let parsed = self.parse_statement_postfix_continuations(parsed_statement) or return
+                    let parsed = self.parse_statement() or return
                     if self.index == before then {
                         let t = self.current()
                         return .Error(self.parser_error_at(self.format_progress_error("Parser made no progress in ", context, t), t))
@@ -1406,39 +1454,6 @@ given Parser {
         return .Ok(statements)
     }
 
-    protected apply_statement_postfix_continuation(self, base * Expr, continuation * Expr) Result[* Expr] = {
-        return when continuation in {
-            .ImplicitMemberExpr(member_name, args, _) then {
-                let span = expr_span(continuation)
-                let mutable path = List[String].new()
-                path.push(member_name)
-                let callee = box(Expr.MemberPath(base, path, span))
-                yield Result[* Expr].Ok(box(Expr.Call(callee, args, span)))
-            },
-            _ then Result[* Expr].Error(self.parser_error_without_span("Expected postfix continuation expression")),
-        }
-    }
-
-    protected parse_statement_postfix_continuations(*mutable self, statement Statement) Result[Statement] = {
-        let mutable current = statement
-        while self.can_continue_dot_postfix() then {
-            self.parse_debug("statement postfix continuation")
-            let continuation = self.parse_expression_checked("statement postfix continuation") or return
-            current = when current in {
-                .LetStmt(name, is_mutable, type_name, value, span) then {
-                    let updated = self.apply_statement_postfix_continuation(value, continuation) or return
-                    yield Statement.LetStmt(name, is_mutable, type_name, updated, span)
-                },
-                .ExprStmt(expr, span) then {
-                    let updated = self.apply_statement_postfix_continuation(expr, continuation) or return
-                    yield Statement.ExprStmt(updated, span)
-                },
-                _ then { return .Ok(current) },
-            }
-        }
-        return .Ok(current)
-    }
-
     protected parse_statement(*mutable self) Result[Statement] = {
         let start = self.current()
         self.parse_debug("statement dispatch")
@@ -1448,13 +1463,12 @@ given Parser {
             },
             .KwReturn() then {
                 self.advance()
-                // return 后面如果是分号、右括号、或换行（自动终止），则返回 None
-                if self.should_terminate_statement() then {
-                    self.consume_semicolon()
+                if self.can_omit_control_statement_value() then {
+                    self.consume_statement_terminator()
                     return .Ok(Statement.ReturnStmt(Option[* Expr].None(), self.span_from_start(start)))
                 }
                 let value = self.parse_expression_checked("return statement value") or return
-                self.consume_semicolon()
+                self.consume_statement_terminator()
                 return .Ok(Statement.ReturnStmt(.Some(value), self.span_from_start(start)))
             },
             .KwYield() then {
@@ -1465,15 +1479,12 @@ given Parser {
             },
             .KwBreak() then {
                 self.advance()
-                if self.should_terminate_statement() then {
-                    self.consume_semicolon()
-                    return .Ok(Statement.BreakStmt(self.span_from_start(start)))
-                }
-                return .Error(self.parser_error("Expected statement terminator after 'break'"))
+                let _ = self.expect_statement_terminator_after("break") or return
+                return .Ok(Statement.BreakStmt(self.span_from_start(start)))
             },
             .KwContinue() then {
                 self.advance()
-                self.consume_semicolon()
+                let _ = self.expect_statement_terminator_after("continue") or return
                 return .Ok(Statement.ContinueStmt(self.span_from_start(start)))
             },
             .KwDefer() then {
@@ -1483,10 +1494,7 @@ given Parser {
                 return .Ok(Statement.DeferStmt(value, self.span_from_start(start)))
             },
             _ then {
-                let mutable value = self.parse_expression_checked("statement expression") or return
-                if self.should_continue_postfix_after_expression() then {
-                    value = self.parse_postfix_suffixes(value) or return
-                }
+                let value = self.parse_expression_checked("statement expression") or return
 
                 if self.is_assignment_operator() then {
                     let op = self.parse_assignment_operator() or else {

@@ -2,6 +2,26 @@
 using std::os { IntoPath, read_text_file }
 
 given TypeChecker {
+    protected typed_generic_function_callee_for_call(self, callee * Expr) Option[TypedExpr] = {
+        return when callee in {
+            .GenericInstantiation(base, _, _) then {
+                if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(base) is .Some(_) then {
+                    return Option[TypedExpr].None()
+                }
+
+                let fn_lookup = when self.lookup_current_file_symbol(base) in {
+                    .Some(sym) then Option[Symbol].Some(sym),
+                    .None() then self.storage.global_scope.lookup(base),
+                }
+                yield when fn_lookup in {
+                    .Some(sym) then Option[TypedExpr].Some(make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type)),
+                    .None() then Option[TypedExpr].None(),
+                }
+            },
+            _ then Option[TypedExpr].None(),
+        }
+    }
+
     protected generic_function_template_for_callee(self, callee * TypedExpr) Option[* GenericFunctionTemplate] = {
         return when callee.expr_kind in {
             .Variable(sym) then {

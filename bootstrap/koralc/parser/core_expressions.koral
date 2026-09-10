@@ -14,7 +14,7 @@ private type StaticDispatchReceiver(
 )
 
 given Parser {
-    protected is_lambda_expression(self) Bool = {
+    protected is_lambda_expression(*mutable self) Bool = {
         // Must start with (
         when self.current().kind in {
             .LParen() then {},
@@ -29,50 +29,9 @@ given Parser {
                 .RParen() then {
                     // () followed by optional type then ->
                     i += 1
-                    // skip optional return type (identifier or [...])
-                    if i < self.tokens.count() then {
-                        when self.tokens[i].kind in {
-                            .Arrow() then { return true },
-                            .Identifier(_) then {
-                                i += 1
-                                if i < self.tokens.count() then {
-                                    when self.tokens[i].kind in {
-                                        .Arrow() then { return true },
-                                        _ then {},
-                                    }
-                                }
-                            },
-                            .LBracket() then {
-                                // skip [...] type arg list
-                                let mutable depth UInt = 1
-                                i += 1
-                                while i < self.tokens.count() and depth > 0 then {
-                                    when self.tokens[i].kind in {
-                                        .LBracket() then { depth += 1 },
-                                        .RBracket() then { depth -= 1 },
-                                        .Eof() then { return false },
-                                        _ then {},
-                                    }
-                                    i += 1
-                                }
-                                // after [...] expect identifier (type name)
-                                if i < self.tokens.count() then {
-                                    when self.tokens[i].kind in {
-                                        .Identifier(_) then { i += 1 },
-                                        _ then {},
-                                    }
-                                }
-                                if i < self.tokens.count() then {
-                                    when self.tokens[i].kind in {
-                                        .Arrow() then { return true },
-                                        _ then {},
-                                    }
-                                }
-                            },
-                            _ then {},
-                        }
-                    }
-                    return false
+                    if i >= self.tokens.count() then { return false }
+                    if self.tokens[i].kind is .Arrow() then { return true }
+                    return self.lookahead_lambda_return_clause(i)
                 },
                 _ then {},
             }
@@ -80,13 +39,6 @@ given Parser {
 
         // Non-empty params: first token must be an identifier (param name)
         if i >= self.tokens.count() then { return false }
-        when self.tokens[i].kind in {
-            .Identifier(_) then {},
-            _ then { return false },
-        }
-
-        // Scan forward: skip param list (name [Type], ...) looking for ) then optional type then ->
-        // We do a simple scan: skip until matching ) at depth 0
         let mutable depth UInt = 1  // we already consumed the opening (
         i += 1  // skip first identifier
         while i < self.tokens.count() and depth > 0 then {
@@ -106,48 +58,9 @@ given Parser {
         if depth > 0 then { return false }
         i += 1  // skip )
 
-        // skip optional return type
-        if i < self.tokens.count() then {
-            when self.tokens[i].kind in {
-                .Arrow() then { return true },
-                .Identifier(_) then {
-                    i += 1
-                    if i < self.tokens.count() then {
-                        when self.tokens[i].kind in {
-                            .Arrow() then { return true },
-                            _ then {},
-                        }
-                    }
-                },
-                .LBracket() then {
-                    let mutable d UInt = 1
-                    i += 1
-                    while i < self.tokens.count() and d > 0 then {
-                        when self.tokens[i].kind in {
-                            .LBracket() then { d += 1 },
-                            .RBracket() then { d -= 1 },
-                            .Eof() then { return false },
-                            _ then {},
-                        }
-                        i += 1
-                    }
-                    if i < self.tokens.count() then {
-                        when self.tokens[i].kind in {
-                            .Identifier(_) then { i += 1 },
-                            _ then {},
-                        }
-                    }
-                    if i < self.tokens.count() then {
-                        when self.tokens[i].kind in {
-                            .Arrow() then { return true },
-                            _ then {},
-                        }
-                    }
-                },
-                _ then {},
-            }
-        }
-        return false
+        if i >= self.tokens.count() then { return false }
+        if self.tokens[i].kind is .Arrow() then { return true }
+        return self.lookahead_lambda_return_clause(i)
     }
 
     // Parse a lambda expression: (params) [ReturnType] -> body
@@ -349,7 +262,7 @@ given Parser {
             // Prefix/full range expressions used as standalone values (e.g. as arguments)
             .Range() then {
                 self.advance()
-                if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
+                if self.can_start_range_bound(self.current().kind) and self.can_continue_range_bound_after_newline() then {
                     let rhs = self.parse_unary() or return
                     return .Ok(box(Expr.RangeExpr(RangeOperator.To(), Option[* Expr].None(), Option[* Expr].Some(rhs), self.span_from_start(t))))
                 }
@@ -516,20 +429,17 @@ given Parser {
             return .Ok(box(Expr.NamedArgument("...", box(Expr.Identifier("<default-fill>", self.span_from_start(start))), self.span_from_start(start))))
         }
 
-        when self.current().kind in {
-            .Identifier(label) then {
-                let next_is_colon = self.next_is_colon()
-                if not self.is_upper_first(label) and next_is_colon then {
-                    self.advance()
-                    self.advance()
-                    let expr = self.parse_expression_checked("named \(context) argument") or else {
-                        self.restore_state(saved)
-                        return .Error(self.parser_error("parse named argument error"))
-                    }
-                    return .Ok(box(Expr.NamedArgument(label, expr, self.span_from_start(start))))
+        when self.current_labeled_argument_name(true) in {
+            .Some(label) then {
+                self.advance()
+                self.advance()
+                let expr = self.parse_expression_checked("named \(context) argument") or else {
+                    self.restore_state(saved)
+                    return .Error(self.parser_error("parse named argument error"))
                 }
+                return .Ok(box(Expr.NamedArgument(label, expr, self.span_from_start(start))))
             },
-            _ then {},
+            .None() then {},
         }
 
         self.restore_state(saved)
@@ -539,20 +449,17 @@ given Parser {
     protected parse_pattern_argument(*mutable self, stop_on_in Bool) Result[PatternElement] = {
         let saved = self.save_state()
 
-        when self.current().kind in {
-            .Identifier(label) then {
-                let next_is_colon = self.next_is_colon()
-                if label <> "_" and not self.is_upper_first(label) and next_is_colon then {
-                    self.advance()
-                    self.advance()
-                    let pattern = self.parse_pattern_or(stop_on_in) or else {
-                        self.restore_state(saved)
-                        return .Error(self.parser_error("parse named pattern argument error"))
-                    }
-                    return .Ok(PatternElement(Option[String].Some(label), box(pattern)))
+        when self.current_labeled_argument_name(false) in {
+            .Some(label) then {
+                self.advance()
+                self.advance()
+                let pattern = self.parse_pattern_or(stop_on_in) or else {
+                    self.restore_state(saved)
+                    return .Error(self.parser_error("parse named pattern argument error"))
                 }
+                return .Ok(PatternElement(Option[String].Some(label), box(pattern)))
             },
-            _ then {},
+            .None() then {},
         }
 
         self.restore_state(saved)
@@ -1282,6 +1189,20 @@ given Parser {
         return Option[List[* TypeNode]].None()
     }
 
+    protected has_bare_method_type_args(*mutable self) Bool = {
+        if self.current().kind is not .LBracket() then {
+            return false
+        }
+
+        let saved = self.save_state()
+        let has_missing_call = when self.parse_type_arg_list() in {
+            .Ok(_) then self.current().kind is not .LParen(),
+            .Error(_) then false,
+        }
+        self.restore_state(saved)
+        return has_missing_call
+    }
+
     protected parse_call_suffix(*mutable self, base * Expr) Result[* Expr] = {
         self.advance()
         let args = self.parse_argument_list_until_rparen("call") or return
@@ -1423,6 +1344,7 @@ given Parser {
 
         let member = self.expect_identifier("member access") or return
         self.parse_debug("dot suffix member=\(member)")
+        let bare_method_type_args = self.has_bare_method_type_args()
         let method_type_args = when self.try_parse_method_type_args() in {
             .Some(type_args) then type_args,
             .None() then List[* TypeNode].new(),
@@ -1490,6 +1412,10 @@ given Parser {
         }
 
         if not method_type_args.is_empty() then {
+            return .Error(self.parser_error("Expected '(' after generic method name"))
+        }
+
+        if bare_method_type_args then {
             return .Error(self.parser_error("Expected '(' after generic method name"))
         }
 

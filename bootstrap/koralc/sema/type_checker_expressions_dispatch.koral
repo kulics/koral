@@ -1440,17 +1440,13 @@ given TypeChecker {
                     return make_typed_expr(TypedExprKind.GenericInstantiation(base_type, resolved_args), generic_type)
                 }
 
-                let fn_lookup = when self.lookup_current_file_symbol(base) in {
-                    .Some(sym) then Option[Symbol].Some(sym),
-                    .None() then self.storage.global_scope.lookup(base),
+                if self.lookup_current_file_symbol(base) is .Some(_) or self.storage.global_scope.lookup(base) is .Some(_) then {
+                    self.push_expr_diagnostic(expr, "Invalid operation use type as value between types \(base) and ")
+                    yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, List[* Type].new()), resolved_args), Type.Unknown())
                 }
-                yield when fn_lookup in {
-                    .Some(sym) then make_typed_expr(TypedExprKind.Variable(box(sym)), sym.symbol_type),
-                    .None() then {
-                        self.push_expr_diagnostic(expr, "Undefined type: \(base)")
-                        yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, List[* Type].new()), resolved_args), Type.Unknown())
-                    },
-                }
+
+                self.push_expr_diagnostic(expr, "Undefined type: \(base)")
+                yield make_typed_expr(TypedExprKind.GenericInstantiation(Type.GenericStruct(base, List[* Type].new()), resolved_args), Type.Unknown())
             },
             .StaticMethodCall(type_name, type_args, method_name, args, _) then
                 self.check_static_method_call_ref(type_name, type_args, method_name, args, expected, scope),

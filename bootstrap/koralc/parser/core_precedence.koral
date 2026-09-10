@@ -141,7 +141,7 @@ given Parser {
             when self.current().kind in {
                 .Range() then {
                     self.advance()
-                    if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
+                    if self.can_start_range_bound(self.current().kind) and self.can_continue_range_bound_after_newline() then {
                         let rhs = self.parse_comparison() or return
                         expr = box(Expr.RangeExpr(RangeOperator.Closed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
@@ -156,7 +156,7 @@ given Parser {
                 },
                 .LessRange() then {
                     self.advance()
-                    if self.is_expr_start_token(self.current().kind) and self.can_continue_range_bound_after_newline() then {
+                    if self.can_start_range_bound(self.current().kind) and self.can_continue_range_bound_after_newline() then {
                         let rhs = self.parse_comparison() or return
                         expr = box(Expr.RangeExpr(RangeOperator.OpenClosed(), .Some(box(*expr)), .Some(box(*rhs)), self.span_from_expr_start(expr)))
                     } else {
@@ -868,6 +868,10 @@ given Parser {
         when flags.invalid_access_message in {
             .Some(message) then { return .Error(self.parser_error_without_span(message)) },
             .None() then {},
+        }
+
+        if flags.is_foreign and flags.is_intrinsic then {
+            return .Error(self.parser_error_without_span("foreign and intrinsic cannot be used together"))
         }
 
         when self.current().kind in {

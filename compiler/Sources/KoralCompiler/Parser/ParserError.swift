@@ -69,6 +69,7 @@ public enum ParserError: Error {
   case invalidReceiverParameterSyntax(span: SourceSpan)
   // Foreign declaration errors
   case foreignAndIntrinsicConflict(span: SourceSpan)
+  case duplicateDeclarationModifier(span: SourceSpan, modifier: String)
   case foreignFunctionNoBody(span: SourceSpan)
   case foreignTypeNoBody(span: SourceSpan)
   case foreignFunctionNoGenerics(span: SourceSpan)
@@ -97,6 +98,7 @@ public enum ParserError: Error {
     case .expectedArrow(let span): return span
     case .invalidReceiverParameterSyntax(let span): return span
     case .foreignAndIntrinsicConflict(let span): return span
+    case .duplicateDeclarationModifier(let span, _): return span
     case .foreignFunctionNoBody(let span): return span
     case .foreignTypeNoBody(let span): return span
     case .foreignFunctionNoGenerics(let span): return span
@@ -156,6 +158,8 @@ public enum ParserError: Error {
       return "Invalid receiver parameter syntax: use 'self', '*self', or '*mutable self'"
     case .foreignAndIntrinsicConflict:
       return "foreign and intrinsic cannot be used together"
+    case .duplicateDeclarationModifier(_, let modifier):
+      return "Duplicate declaration modifier: \(modifier)"
     case .foreignFunctionNoBody:
       return "foreign function cannot have a body"
     case .foreignTypeNoBody:

@@ -39,6 +39,7 @@ type MIRFunctionBuilder(
     mutable pattern_comparison_local Option[MIRLocalID],
     mutable temporary_value_source_locations Dict[UInt, MIRTemporaryValueSourceLocation],
     mutable ambiguous_temporary_value_source_locals Set[UInt],
+    mutable diagnostics DiagnosticCollector,
 )
 
 given MIRFunctionBuilder {
@@ -81,7 +82,16 @@ given MIRFunctionBuilder {
             Option[MIRLocalID].None(),
             Dict[UInt, MIRTemporaryValueSourceLocation].new(),
             Set[UInt].new(),
+            DiagnosticCollector.new(),
         )
+    }
+
+    public emitted_diagnostics(self) DiagnosticCollector = self.diagnostics
+
+    private report_lowering_error(*mutable self, message String) Void = {
+        let file_path = self.context.get_source_file(self.identifier.def_id) or else ""
+        let span = self.context.get_span(self.identifier.def_id) or else unknown_span()
+        self.diagnostics.push(make_diagnostic_at(DiagnosticStage.Other(), file_path, message, span))
     }
 
     public lower(*mutable self) * MIRFunction = {
@@ -3296,7 +3306,8 @@ given MIRFunctionBuilder {
             },
             .None() then {
                 if self.context.contains_generic_parameter(inner.expr_type) then {
-                    panic("Unsupported generic reference expression reached MIR lowering")
+                    self.report_lowering_error("Unsupported generic reference expression reached MIR lowering")
+                    yield Option[MIRExprResult].None()
                 }
                 let source_local = self.make_temporary(inner.expr_type, "ref_source")
                 self.append_statement(MIRStatement.Declare(source_local.id))

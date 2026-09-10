@@ -4,6 +4,13 @@
 /// Extension containing all declaration parsing methods
 extension Parser {
 
+  private struct TopLevelDeclFlags {
+    let access: AccessModifier
+    let explicitAccess: AccessModifier?
+    let isIntrinsic: Bool
+    let isForeign: Bool
+  }
+
   private func parseSelfReceiverType() throws -> TypeNode {
     if currentToken === .multiply {
       try match(.multiply)
@@ -40,23 +47,11 @@ extension Parser {
   /// Parse global declaration
   func parseGlobalDeclaration() throws -> GlobalNode {
     let startSpan = currentSpan
-    let explicitAccess = try parseExplicitAccessModifier()
-    let access = explicitAccess ?? .protected
-
-    var isIntrinsic = false
-    var isForeign = false
-    if currentToken === .intrinsicKeyword {
-      try match(.intrinsicKeyword)
-      isIntrinsic = true
-    }
-
-    if currentToken === .foreignKeyword {
-      try match(.foreignKeyword)
-      if isIntrinsic {
-        throw ParserError.foreignAndIntrinsicConflict(span: currentSpan)
-      }
-      isForeign = true
-    }
+    let flags = try parseTopLevelDeclFlags()
+    let explicitAccess = flags.explicitAccess
+    let access = flags.access
+    let isIntrinsic = flags.isIntrinsic
+    let isForeign = flags.isForeign
 
     if currentToken === .letKeyword {
       try match(.letKeyword)
@@ -509,6 +504,59 @@ extension Parser {
   
   func parseAccessModifier(default defaultAccess: AccessModifier) throws -> AccessModifier {
     return try parseExplicitAccessModifier() ?? defaultAccess
+  }
+
+  private func isCurrentAccessModifierToken() -> Bool {
+    currentToken === .publicKeyword || currentToken === .protectedKeyword || currentToken === .privateKeyword
+  }
+
+  private func parseTopLevelDeclFlags() throws -> TopLevelDeclFlags {
+    var explicitAccess: AccessModifier? = nil
+    var access: AccessModifier = .protected
+
+    var isIntrinsic = false
+    var isForeign = false
+
+    while true {
+      if isCurrentAccessModifierToken() {
+        if let existingAccess = explicitAccess {
+          throw ParserError.invalidAccessModifierOrder(
+            span: currentSpan,
+            message: "Invalid access modifier order: '\(existingAccess.description) \(currentToken.description)'. Use 'protected public' only in that exact order"
+          )
+        }
+        explicitAccess = try parseExplicitAccessModifier()
+        access = explicitAccess ?? .protected
+        continue
+      }
+
+      if currentToken === .intrinsicKeyword {
+        if isIntrinsic {
+          throw ParserError.duplicateDeclarationModifier(span: currentSpan, modifier: "intrinsic")
+        }
+        try match(.intrinsicKeyword)
+        isIntrinsic = true
+      } else if currentToken === .foreignKeyword {
+        if isForeign {
+          throw ParserError.duplicateDeclarationModifier(span: currentSpan, modifier: "foreign")
+        }
+        try match(.foreignKeyword)
+        isForeign = true
+      } else {
+        break
+      }
+
+      if isIntrinsic && isForeign {
+        throw ParserError.foreignAndIntrinsicConflict(span: currentSpan)
+      }
+    }
+
+    return TopLevelDeclFlags(
+      access: access,
+      explicitAccess: explicitAccess,
+      isIntrinsic: isIntrinsic,
+      isForeign: isForeign
+    )
   }
 
   private func ensureNoTrailingAccessModifier(after accessText: String) throws {

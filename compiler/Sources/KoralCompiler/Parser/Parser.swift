@@ -86,6 +86,20 @@ public class Parser {
     return false
   }
 
+  func canOmitControlStatementValue() -> Bool {
+    shouldTerminateStatement()
+  }
+
+  func requireStatementTerminator(after keyword: String) throws {
+    guard shouldTerminateStatement() else {
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "statement terminator after '\(keyword)'"
+      )
+    }
+  }
+
   
   /// Consume optional semicolon if present
   func consumeOptionalSemicolon() throws {
@@ -130,27 +144,22 @@ public class Parser {
       return try variableDeclaration()
     case .returnKeyword:
       try match(.returnKeyword)
-      if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
+      if canOmitControlStatementValue() {
         return .return(value: nil, span: startSpan)
       }
       let value = try expression()
       return .return(value: value, span: startSpan)
     case .breakKeyword:
       try match(.breakKeyword)
-      if currentToken === .semicolon || currentToken === .rightBrace || shouldTerminateStatement() {
-        return .break(span: startSpan)
-      }
-      throw ParserError.unexpectedToken(
-        span: currentSpan,
-        got: currentToken.description,
-        expected: "statement terminator after 'break'"
-      )
+      try requireStatementTerminator(after: "break")
+      return .break(span: startSpan)
     case .yieldKeyword:
       try match(.yieldKeyword)
       let value = try expression()
       return .yield(value: value, span: startSpan)
     case .continueKeyword:
       try match(.continueKeyword)
+      try requireStatementTerminator(after: "continue")
       return .continue(span: startSpan)
     case .deferKeyword:
       try match(.deferKeyword)
@@ -406,6 +415,30 @@ public class Parser {
     default:
       return false
     }
+  }
+
+  func canStartRangeBound() -> Bool {
+    switch currentToken {
+    case .ifKeyword, .whileKeyword, .whenKeyword, .forKeyword:
+      return true
+    case .minus, .tilde, .ampersand, .multiply:
+      return true
+    case .identifier(_), .selfKeyword, .integer(_), .durationLiteral(_, _), .float(_), .string(_), .rune(_), .interpolatedString(_), .bool(_), .itKeyword:
+      return true
+    case .leftBrace, .leftParen, .leftBracket, .dot:
+      return true
+    default:
+      return false
+    }
+  }
+
+  func currentLabeledArgumentName(allowUnderscore: Bool) -> String? {
+    guard case .identifier(let name) = currentToken else { return nil }
+    guard isValidVariableName(name) else { return nil }
+    if !allowUnderscore && name == "_" {
+      return nil
+    }
+    return lexer.peekNextToken() === .colon ? name : nil
   }
 
   func isValidVariableName(_ name: String) -> Bool {

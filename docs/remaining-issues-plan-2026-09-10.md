@@ -12,39 +12,12 @@ This document renumbers only the issues that are still not fully resolved after 
 - Old `#11`: bootstrap frontend diagnostics moved to structured, file-aware diagnostics.
 - Old `#12` large parts: bootstrap sema panic paths were converted to diagnostics; several user-facing mono/driver crash paths were also downgraded to diagnostics.
 
+## Closed Since This Renumbered List
+
+- `R1`: parser acceptance logic is now consolidated enough to close for the current backlog. The latest work pulled named-argument lookahead, range-bound starts, generic function/method instantiation diagnostics, control-statement terminator checks, and top-level declaration flag classification into shared parser helper layers on both compilers. The current shared suite is green end-to-end on both compilers, including the newly added parser regressions.
+- `R4`: MIR-lowering invariant panic chain is resolved in the current local code state. Bootstrap parser/sema/mono/driver crash paths now route through diagnostics instead of unrecovered panics.
+
 ## Remaining Issues (Renumbered)
-
-### R1. Parser Acceptance Logic Is Still Distributed
-
-Maps from old issue: `#3`
-
-Current state:
-
-- Parser diagnostics and several acceptance edge cases were cleaned up.
-- The actual acceptance logic is still spread across:
-  - `bootstrap/koralc/parser/core.koral`
-  - `bootstrap/koralc/parser/core_expressions.koral`
-  - `bootstrap/koralc/parser/core_precedence.koral`
-
-Why this is still open:
-
-- Expression-vs-type-vs-declaration admission is still controlled by multiple local predicates such as `is_type_start`, `should_continue_postfix_after_expression`, `is_expr_start_token`, and many ad hoc token checks.
-- The current design still makes newline/ASI behavior, postfix continuation, generic application, and named-argument acceptance drift-prone.
-
-Exit criteria:
-
-- A single shared acceptance layer decides:
-  - expression starts
-  - type starts
-  - postfix continuation eligibility
-  - declaration-start classification
-- Parser files stop duplicating local token-shape decisions.
-- Existing parser regression buckets remain green.
-
-Suggested implementation direction:
-
-- Introduce a small shared parser classification module or a consolidated helper region in `core.koral`.
-- Route `core_expressions` and `core_precedence` through that shared decision layer rather than re-checking token families independently.
 
 ### R2. Interpolation Is Not Yet A True Lexer-Level Sublanguage
 
@@ -97,26 +70,6 @@ Exit criteria:
 - Ownership / escape decisions are computed from explicit CFG dataflow.
 - Closure capture, branch merge, alias container store, and borrowed/managed transitions share one analysis model instead of several local heuristics.
 
-### R4. One MIR-Lowering Invariant Panic Still Remains
-
-Maps from old issue tail: `#12`
-
-Current state:
-
-- Remaining bootstrap pipeline panic is:
-  - `bootstrap/koralc/mir/mir_function_builder.koral`
-  - `panic("Unsupported generic reference expression reached MIR lowering")`
-
-Why this is still open:
-
-- This guard currently protects against a state the compiler still treats as impossible.
-- A naive downgrade risks producing invalid MIR rather than a clean user-facing failure.
-
-Exit criteria:
-
-- Either upstream guarantees prove the state impossible and the invariant is removed by construction,
-  or MIR lowering gains a conservative, diagnostic-producing fallback that does not generate invalid MIR.
-
 ### R5. Type-Equivalence / Canonicalization Still Needs A Full Audit
 
 Maps from old issue tail: `#9`
@@ -148,15 +101,20 @@ Exit criteria:
 
 ## Recommended Execution Order
 
-1. `R4` — smallest remaining hard crash surface; contained and safety-critical.
-2. `R1` — reduces parser drift and simplifies later parser/interpolation work.
-3. `R2` — easier once parser acceptance is centralized.
-4. `R5` — broad audit after current hotspot fixes are stable.
-5. `R3` — largest architectural item; likely requires a dedicated design pass.
+1. `R2` — now the next parser/frontend architecture item after `R1` closure.
+2. `R5` — broad audit after the parser acceptance work has been stabilized.
+3. `R3` — largest architectural item; likely requires a dedicated design pass.
 
 ## Current Validation Anchors
 
-- Bootstrap full suite clean anchor:
+- Final local `R1` closure full-suite anchors:
+  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-r1-final.report.log` (`575/575`)
+  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-10-r1-final.report.log` (`575/575`)
+- Earlier clean parser-work anchors during the `R1` batch:
+  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-r1-postfix-current-rerun.report.log`
+  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-10-r1-postfix-current.report.log`
+- Earlier clean bootstrap anchors:
+  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-current-21.report.log`
   - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-current-25.report.log`
-- Swift full suite clean anchor for the last Swift-touching change set:
+- Earlier clean Swift anchor before this `R1` parser batch:
   - `tests/compiler-cases_output/_reports/swift-validation-2026-09-09-current-7.report.log`

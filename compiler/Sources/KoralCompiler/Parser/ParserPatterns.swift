@@ -20,24 +20,14 @@ extension Parser {
 
   /// Parse a single pattern argument, which may be a named pattern (label: pattern) or positional (pattern).
   private func parsePatternArgument() throws -> PatternArg {
-    // Try to parse as named pattern: identifier followed by colon
-    if case .identifier(let name) = currentToken,
-       isValidVariableName(name),
-       name != "_"
-    {
+    if let name = currentLabeledArgumentName(allowUnderscore: false) {
       let savedState = lexer.saveState()
       let savedToken = currentToken
       do {
         try match(.identifier(name))
-        if currentToken === .colon {
-          try match(.colon)
-          let pattern = try parsePattern()
-          return PatternArg(label: name, pattern: pattern)
-        } else {
-          // Not a named pattern, restore
-          lexer.restoreState(savedState)
-          currentToken = savedToken
-        }
+        try match(.colon)
+        let pattern = try parsePattern()
+        return PatternArg(label: name, pattern: pattern)
       } catch {
         lexer.restoreState(savedState)
         currentToken = savedToken

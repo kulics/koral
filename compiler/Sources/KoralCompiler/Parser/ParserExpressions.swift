@@ -96,6 +96,24 @@ extension Parser {
     }
   }
 
+  private func hasBareMethodTypeArguments() -> Bool {
+    guard currentToken === .leftBracket else { return false }
+
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+
+    do {
+      _ = try parseBracketedTypeArguments()
+      return currentToken !== .leftParen
+    } catch {
+      return false
+    }
+  }
+
   private func tryParsePostfixCastSuffix(base: ExpressionNode) throws -> ExpressionNode? {
     guard currentToken === .leftParen else { return nil }
 
@@ -405,21 +423,6 @@ extension Parser {
     }
   }
 
-  private func canStartRangeBound() -> Bool {
-    switch currentToken {
-    case .ifKeyword, .whileKeyword, .whenKeyword, .forKeyword:
-      return true
-    case .minus, .tilde:
-      return true
-    case .identifier(_), .selfKeyword, .integer(_), .durationLiteral(_, _), .float(_), .string(_), .rune(_), .interpolatedString(_), .bool(_), .itKeyword:
-      return true
-    case .leftBrace, .leftParen, .leftBracket, .dot:
-      return true
-    default:
-      return false
-    }
-  }
-
   
   // MARK: - Comparison Expressions
 
@@ -667,6 +670,7 @@ extension Parser {
         }
         try match(.identifier(member))
 
+        let bareMethodTypeArgs = hasBareMethodTypeArguments()
         let methodTypeArgs = try tryParseMethodTypeArguments() ?? []
 
         if case .traitQualificationExpression(let qualifiedBase, let traitType) = expr {
@@ -760,6 +764,14 @@ extension Parser {
               continue
           }
         }
+
+        if bareMethodTypeArgs {
+          throw ParserError.unexpectedToken(
+            span: currentSpan,
+            got: currentToken.description,
+            expected: "'(' after generic method name"
+          )
+        }
         
         // Regular member path
         if case .memberPath(let base, let path) = expr {
@@ -812,24 +824,14 @@ extension Parser {
       return CallArg(defaultFill: ())
     }
 
-    // Try to parse as named argument: identifier followed by colon
-    if case .identifier(let name) = currentToken,
-       isValidVariableName(name),
-       name != "_"
-    {
+    if let name = currentLabeledArgumentName(allowUnderscore: false) {
       let savedState = lexer.saveState()
       let savedToken = currentToken
       do {
         try match(.identifier(name))
-        if currentToken === .colon {
-          try match(.colon)
-          let expr = try expression()
-          return CallArg(label: name, expression: expr)
-        } else {
-          // Not a named argument, restore
-          lexer.restoreState(savedState)
-          currentToken = savedToken
-        }
+        try match(.colon)
+        let expr = try expression()
+        return CallArg(label: name, expression: expr)
       } catch {
         lexer.restoreState(savedState)
         currentToken = savedToken
@@ -1136,10 +1138,7 @@ extension Parser {
       // Check for optional return type before arrow
       var returnType: TypeNode? = nil
       if currentToken !== .arrow {
-        // Could be a return type
-        if case .identifier(_) = currentToken {
-          returnType = try parseType()
-        } else if currentToken === .leftBracket {
+        if canStartTypeSyntax() {
           returnType = try parseType()
         }
       }
@@ -1148,6 +1147,9 @@ extension Parser {
         let body = try expression()
         return .lambdaExpression(parameters: [], returnType: returnType, body: body, span: startSpan)
       } else {
+        if returnType != nil {
+          throw ParserError.expectedArrow(span: currentSpan)
+        }
         // Not a lambda, but () is not a valid expression by itself
         throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "'->'")
       }
@@ -1160,6 +1162,7 @@ extension Parser {
     // Try to parse as lambda parameters
     var parameters: [(name: String, type: TypeNode?)] = []
     var isLambda = false
+    var sawExplicitReturnType = false
     
     do {
       while currentToken !== .rightParen {
@@ -1204,6 +1207,7 @@ extension Parser {
         // Could be a return type
         if canStartTypeSyntax() {
           returnType = try parseType()
+          sawExplicitReturnType = true
         }
       }
       
@@ -1225,6 +1229,9 @@ extension Parser {
     } catch let error as ParserError {
       if case .unexpectedToken(_, let got, _) = error,
          got == "Lambda parameters use 'name Type', not 'name: Type'" {
+        throw error
+      }
+      if parameters.count > 1 || parameters.contains(where: { $0.type != nil }) || sawExplicitReturnType {
         throw error
       }
       // Parsing as lambda failed, restore state
