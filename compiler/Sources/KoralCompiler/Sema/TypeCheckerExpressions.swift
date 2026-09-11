@@ -267,6 +267,90 @@ extension TypeChecker {
     }
   }
 
+  func canonicalizedTypeForStaticMemberLookup(_ type: Type) -> Type {
+    switch type {
+    case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+      if let mapped = context.defIdMap.lookupType(defId: defId), mapped != type {
+        return canonicalizedTypeForStaticMemberLookup(mapped)
+      }
+      return type
+    default:
+      return type
+    }
+  }
+
+  func canonicalizedTypeForComparison(_ type: Type) -> Type {
+    switch type {
+    case .structure, .`enum`, .opaque:
+      return canonicalizedTypeForStaticMemberLookup(type)
+    case .reference(let inner):
+      return .reference(inner: canonicalizedTypeForComparison(inner))
+    case .mutableReference(let inner):
+      return .mutableReference(inner: canonicalizedTypeForComparison(inner))
+    case .borrowedReference(let inner):
+      return .borrowedReference(inner: canonicalizedTypeForComparison(inner))
+    case .mutableBorrowedReference(let inner):
+      return .mutableBorrowedReference(inner: canonicalizedTypeForComparison(inner))
+    case .pointer(let element):
+      return .pointer(element: canonicalizedTypeForComparison(element))
+    case .mutablePointer(let element):
+      return .mutablePointer(element: canonicalizedTypeForComparison(element))
+    case .weakReference(let inner):
+      return .weakReference(inner: canonicalizedTypeForComparison(inner))
+    case .mutableWeakReference(let inner):
+      return .mutableWeakReference(inner: canonicalizedTypeForComparison(inner))
+    case .function(let parameters, let returns):
+      return .function(
+        parameters: parameters.map { Parameter(type: canonicalizedTypeForComparison($0.type), kind: $0.kind) },
+        returns: canonicalizedTypeForComparison(returns)
+      )
+    case .genericStruct(let template, let args):
+      return .genericStruct(template: template, args: args.map { canonicalizedTypeForComparison($0) })
+    case .genericEnum(let template, let args):
+      return .genericEnum(template: template, args: args.map { canonicalizedTypeForComparison($0) })
+    case .traitObject(let traitName, let typeArgs):
+      return .traitObject(traitName: traitName, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) })
+    default:
+      return type
+    }
+  }
+
+  func nominalInstantiationMatchesGeneric(_ nominal: Type, genericCandidate: Type) -> Bool {
+    switch (canonicalizedTypeForComparison(nominal), canonicalizedTypeForComparison(genericCandidate)) {
+    case (.structure(let defId), .genericStruct(let templateName, let typeArgs)):
+      guard context.getTemplateName(defId) == templateName,
+            let actualArgs = context.getTypeArguments(defId),
+            actualArgs.count == typeArgs.count else {
+        return false
+      }
+      return zip(actualArgs, typeArgs).allSatisfy { typesEquivalentForComparison($0, $1) }
+    case (.`enum`(let defId), .genericEnum(let templateName, let typeArgs)):
+      guard context.getTemplateName(defId) == templateName,
+            let actualArgs = context.getTypeArguments(defId),
+            actualArgs.count == typeArgs.count else {
+        return false
+      }
+      return zip(actualArgs, typeArgs).allSatisfy { typesEquivalentForComparison($0, $1) }
+    default:
+      return false
+    }
+  }
+
+  func typesEquivalentForComparison(_ lhs: Type, _ rhs: Type) -> Bool {
+    let left = canonicalizedTypeForComparison(lhs)
+    let right = canonicalizedTypeForComparison(rhs)
+    if left == right {
+      return true
+    }
+
+    if let (expectedInner, actualInner) = left.compatibleIndirectionInners(with: right) {
+      return typesEquivalentForComparison(expectedInner, actualInner)
+    }
+
+    return nominalInstantiationMatchesGeneric(left, genericCandidate: right)
+      || nominalInstantiationMatchesGeneric(right, genericCandidate: left)
+  }
+
   func checkNotDerefConstraint(for innerType: Type) throws {
     guard let defId = nominalDefId(for: innerType), context.isNotDeref(defId) else {
       return
@@ -428,26 +512,7 @@ extension TypeChecker {
   }
 
   func implicitReferenceInnerMatches(_ expectedInner: Type, actualType: Type) -> Bool {
-    if expectedInner == actualType {
-      return true
-    }
-
-    if let (expectedNested, actualNested) = expectedInner.compatibleIndirectionInners(with: actualType) {
-      return implicitReferenceInnerMatches(expectedNested, actualType: actualNested)
-    }
-
-    switch (expectedInner, actualType) {
-    case (.genericStruct(let templateName, let typeArgs), .structure(let defId)),
-         (.structure(let defId), .genericStruct(let templateName, let typeArgs)):
-      return context.getTemplateName(defId) == templateName
-        && context.getTypeArguments(defId) == typeArgs
-    case (.genericEnum(let templateName, let typeArgs), .`enum`(let defId)),
-         (.`enum`(let defId), .genericEnum(let templateName, let typeArgs)):
-      return context.getTemplateName(defId) == templateName
-        && context.getTypeArguments(defId) == typeArgs
-    default:
-      return false
-    }
+    typesEquivalentForComparison(expectedInner, actualType)
   }
 
   func makeImplicitReference(_ expr: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode? {
@@ -867,17 +932,17 @@ extension TypeChecker {
 
   // Pick a read-only common supertype when branches differ only by mutability.
   private func commonBranchSupertype(_ lhs: Type, _ rhs: Type) -> Type? {
-    if lhs == rhs { return lhs }
+    if typesEquivalentForComparison(lhs, rhs) { return lhs }
     switch (lhs, rhs) {
     case (.reference(let leftInner), .mutableReference(let rightInner)),
          (.mutableReference(let leftInner), .reference(let rightInner)):
-      return leftInner == rightInner ? .reference(inner: leftInner) : nil
+      return typesEquivalentForComparison(leftInner, rightInner) ? .reference(inner: leftInner) : nil
     case (.pointer(let leftElem), .mutablePointer(let rightElem)),
          (.mutablePointer(let leftElem), .pointer(let rightElem)):
-      return leftElem == rightElem ? .pointer(element: leftElem) : nil
+      return typesEquivalentForComparison(leftElem, rightElem) ? .pointer(element: leftElem) : nil
     case (.weakReference(let leftInner), .mutableWeakReference(let rightInner)),
          (.mutableWeakReference(let leftInner), .weakReference(let rightInner)):
-      return leftInner == rightInner ? .weakReference(inner: leftInner) : nil
+      return typesEquivalentForComparison(leftInner, rightInner) ? .weakReference(inner: leftInner) : nil
     default:
       return nil
     }
@@ -909,7 +974,7 @@ extension TypeChecker {
     if let implicitDeref = makeImplicitDereference(typedElse, expectedType: typedThen.type) {
       typedElse = implicitDeref
     }
-    if typedThen.type == typedElse.type {
+    if typesEquivalentForComparison(typedThen.type, typedElse.type) {
       resultType = typedThen.type
     } else if typedThen.type == .never {
       resultType = typedElse.type
@@ -2877,7 +2942,7 @@ extension TypeChecker {
       guard isStatic else { return nil }
       
       // Check if return type matches expected type
-      guard returnType == expectedType else {
+      guard typesEquivalentForComparison(returnType, expectedType) else {
         return nil
       }
       
@@ -2925,7 +2990,7 @@ extension TypeChecker {
       guard isStatic else { return nil }
       
       // Check if return type matches expected type
-      guard returnType == expectedType else {
+      guard typesEquivalentForComparison(returnType, expectedType) else {
         return nil
       }
       
@@ -2981,7 +3046,7 @@ extension TypeChecker {
       }
       
       // Check if return type matches expected type (allowing Self substitution)
-      guard returnType == expectedType else {
+      guard typesEquivalentForComparison(returnType, expectedType) else {
         return nil
       }
       
@@ -3037,7 +3102,7 @@ extension TypeChecker {
       }
       
       // Check if return type matches expected type (allowing Self substitution)
-      guard returnType == expectedType else {
+      guard typesEquivalentForComparison(returnType, expectedType) else {
         return nil
       }
       
@@ -3580,6 +3645,68 @@ extension TypeChecker {
     // Check if callee is a generic instantiation (Constructor call or Function call)
     if case .genericInstantiation(let base, let args) = callee {
       return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs)
+    }
+
+    if case .memberPath(let baseExpr, let path) = callee,
+       case .identifier(let baseName) = baseExpr,
+       path.count == 1,
+       let rawBaseType = currentScope.lookupType(baseName, sourceFile: currentSourceFile) {
+      let memberName = path[0]
+      let baseType = canonicalizedTypeForStaticMemberLookup(rawBaseType)
+
+      switch baseType {
+      case .`enum`(let defId):
+        if let c = context.getEnumCases(defId)?.first(where: { $0.name == memberName }) {
+          let resolvedParams = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
+          let plan = try planConstructorArguments(
+            callArgs,
+            fieldNames: c.parameters.map { $0.name },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
+          let typedArgs = try typeCheckConstructorArguments(
+            plan: plan,
+            members: zip(c.parameters, resolvedParams).map { source, resolved in
+              (name: source.name, type: resolved.type)
+            },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
+          return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
+        }
+      case .genericEnum(let templateName, let typeArgs):
+        if let template = currentScope.lookupGenericEnumTemplate(templateName),
+           let c = template.cases.first(where: { $0.name == memberName }) {
+          var substitution: [String: Type] = [:]
+          for (index, param) in template.typeParameters.enumerated() {
+            substitution[param.name] = typeArgs[index]
+          }
+
+          let resolvedParams = try withNewScope {
+            for (paramName, paramType) in substitution {
+              try currentScope.defineType(paramName, type: paramType)
+            }
+            return try c.parameters.map { param -> Parameter in
+              let paramType = try resolveTypeNode(param.type)
+              return Parameter(type: paramType, kind: .byVal)
+            }
+          }
+
+          let plan = try planConstructorArguments(
+            callArgs,
+            fieldNames: c.parameters.map { $0.name },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
+          let typedArgs = try typeCheckConstructorArguments(
+            plan: plan,
+            members: zip(c.parameters, resolvedParams).map { source, resolved in
+              (name: source.name, type: resolved.type)
+            },
+            constructorDescription: "\(baseName).\(memberName)"
+          )
+          return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
+        }
+      default:
+        break
+      }
     }
 
     // Resolve Callee (Check Enum Constructor)
@@ -4960,22 +5087,37 @@ extension TypeChecker {
     }
 
     // 2. Check if baseExpr is a Type (Identifier) for static method access
-    if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+    if case .identifier(let name) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+      let type = canonicalizedTypeForStaticMemberLookup(rawType)
+      switch type {
+      case .genericStruct(let templateName, let typeArgs):
+        let argNodes = try typeArgs.map { try toTypeNode($0) }
+        if let result = try inferGenericInstantiationMemberPath(baseName: templateName, args: argNodes, path: path) {
+          return result
+        }
+      case .genericEnum(let templateName, let typeArgs):
+        let argNodes = try typeArgs.map { try toTypeNode($0) }
+        if let result = try inferGenericInstantiationMemberPath(baseName: templateName, args: argNodes, path: path) {
+          return result
+        }
+      default:
+        break
+      }
+
       if let result = try inferTypeMemberPath(type: type, typeName: name, path: path) {
         return result
       }
     }
 
     // 3. Enum Constructor Access via member path (e.g., EnumType.CaseName)
-    if case .identifier(let name) = baseExpr, let type = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+    if case .identifier(let name) = baseExpr, let rawType = currentScope.lookupType(name, sourceFile: currentSourceFile) {
+      let type = canonicalizedTypeForStaticMemberLookup(rawType)
       if path.count == 1 {
         let memberName = path[0]
         if case .`enum`(let defId) = type {
           if let c = context.getEnumCases(defId)?.first(where: { $0.name == memberName }) {
             let paramTypes = c.parameters.map { Parameter(type: $0.type, kind: .byVal) }
-            let funcType = Type.function(parameters: paramTypes, returns: type)
-            let symbol = makeLocalSymbol(name: "\(name).\(memberName)", type: funcType, kind: .function)
-            return .variable(identifier: symbol)
+            return makeEnumConstructorValueLambda(enumType: type, caseName: memberName, parameters: paramTypes)
           }
         }
       }
@@ -5025,11 +5167,8 @@ extension TypeChecker {
               return Parameter(type: paramType, kind: .byVal)
             }
           }
-          
-          let symbolName = "\(name).\(memberName)"
-          let constructorType = Type.function(parameters: resolvedParams, returns: type)
-          let symbol = makeLocalSymbol(name: symbolName, type: constructorType, kind: .variable(.Value))
-          return .variable(identifier: symbol)
+
+          return makeEnumConstructorValueLambda(enumType: type, caseName: memberName, parameters: resolvedParams)
         }
       }
     }
@@ -5250,6 +5389,53 @@ extension TypeChecker {
     throw SemanticError(.generic("Cannot access private method '\(memberName)'"), span: currentSpan)
   }
 
+  private func makeCallableValueLambda(
+    parameters: [Parameter],
+    returnType: Type,
+    body: ([TypedExpressionNode]) -> TypedExpressionNode
+  ) -> TypedExpressionNode {
+    let parameterSymbols = parameters.enumerated().map { index, parameter in
+      nextSynthSymbol(prefix: "callable_arg_\(index)", type: parameter.type)
+    }
+    let arguments = parameterSymbols.map { TypedExpressionNode.variable(identifier: $0) }
+    return .lambdaExpression(
+      parameters: parameterSymbols,
+      captures: [],
+      body: body(arguments),
+      type: .function(parameters: parameters, returns: returnType)
+    )
+  }
+
+  private func makeEnumConstructorValueLambda(
+    enumType: Type,
+    caseName: String,
+    parameters: [Parameter]
+  ) -> TypedExpressionNode {
+    makeCallableValueLambda(parameters: parameters, returnType: enumType) { arguments in
+      .enumConstruction(type: enumType, caseName: caseName, arguments: arguments)
+    }
+  }
+
+  private func makeStaticMethodValueLambda(
+    baseType: Type,
+    methodName: String,
+    typeArgs: [Type],
+    methodTypeArgs: [Type],
+    parameters: [Parameter],
+    returnType: Type
+  ) -> TypedExpressionNode {
+    makeCallableValueLambda(parameters: parameters, returnType: returnType) { arguments in
+      .staticMethodCall(
+        baseType: baseType,
+        methodName: methodName,
+        typeArgs: typeArgs,
+        methodTypeArgs: methodTypeArgs,
+        arguments: arguments,
+        type: returnType
+      )
+    }
+  }
+
   /// Helper to infer generic instantiation member path
   private func inferGenericInstantiationMemberPath(baseName: String, args: [TypeNode], path: [String]) throws -> TypedExpressionNode? {
     if let template = currentScope.lookupGenericStructTemplate(baseName) {
@@ -5283,7 +5469,17 @@ extension TypeChecker {
               let methodSym = try resolveGenericExtensionMethod(
                 baseType: type, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
-              return .variable(identifier: methodSym)
+              guard case .function(let parameters, let returnType) = methodSym.type else {
+                throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
+              }
+              return makeStaticMethodValueLambda(
+                baseType: type,
+                methodName: memberName,
+                typeArgs: resolvedArgs,
+                methodTypeArgs: [],
+                parameters: parameters,
+                returnType: returnType
+              )
             }
           }
         }
@@ -5327,11 +5523,8 @@ extension TypeChecker {
               return Parameter(type: paramType, kind: .byVal)
             }
           }
-          
-          let symbolName = "\(baseName).\(memberName)"
-          let constructorType = Type.function(parameters: resolvedParams, returns: type)
-          let symbol = makeLocalSymbol(name: symbolName, type: constructorType, kind: .variable(.Value))
-          return .variable(identifier: symbol)
+
+          return makeEnumConstructorValueLambda(enumType: type, caseName: memberName, parameters: resolvedParams)
         }
       }
     }
@@ -5611,6 +5804,42 @@ extension TypeChecker {
     }
 
     let resolvedTypeArgs = try typeArgs.map { try resolveTypeNode($0) }
+
+    if let rawType = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
+      let canonicalType = canonicalizedTypeForStaticMemberLookup(rawType)
+      switch canonicalType {
+      case .genericStruct(let templateName, let aliasArgs):
+        if !resolvedTypeArgs.isEmpty {
+          throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
+        }
+        guard let template = currentScope.lookupGenericStructTemplate(templateName) else {
+          throw SemanticError.undefinedType(templateName)
+        }
+        return try inferGenericStructStaticMethodCall(
+          template: template,
+          typeName: templateName,
+          resolvedTypeArgs: aliasArgs,
+          methodName: methodName,
+          arguments: arguments
+        )
+      case .genericEnum(let templateName, let aliasArgs):
+        if !resolvedTypeArgs.isEmpty {
+          throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
+        }
+        guard let template = currentScope.lookupGenericEnumTemplate(templateName) else {
+          throw SemanticError.undefinedType(templateName)
+        }
+        return try inferGenericEnumStaticMethodCall(
+          template: template,
+          typeName: templateName,
+          resolvedTypeArgs: aliasArgs,
+          methodName: methodName,
+          arguments: arguments
+        )
+      default:
+        break
+      }
+    }
     
     // Check if it's a generic struct
     if let template = currentScope.lookupGenericStructTemplate(typeName) {

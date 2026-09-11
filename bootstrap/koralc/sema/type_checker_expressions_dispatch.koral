@@ -1026,6 +1026,104 @@ given TypeChecker {
         }
     }
 
+    protected typed_params_for_callable_value(self, param_types List[Type], param_specs List[FunctionParamSpec]) List[TypedParam] = {
+        let mutable typed_params = List[TypedParam].new()
+        let mutable index UInt = 0
+        while index < param_types.count() then {
+            let spec = if index < param_specs.count() then param_specs[index] else FunctionParamSpec("", false, false)
+            let param_name = if spec.name.is_empty() then {
+                let mutable generated = "__member_arg_"
+                generated.push_string(index.to_string())
+                yield generated
+            } else spec.name
+            typed_params.push(TypedParam(param_name, spec.is_mutable, param_types[index], spec.named))
+            index += 1
+        }
+        return typed_params
+    }
+
+    protected callable_value_arg_exprs(self, params List[TypedParam]) List[* TypedExpr] = {
+        let mutable args = List[* TypedExpr].new()
+        for param in params then {
+            let kind = if param.is_mutable then VariableKind.MutableValue() else VariableKind.Value()
+            let symbol = Symbol(
+                self.allocate_unindexed_def_id(param.name, DefKind.Variable()),
+                param.param_type,
+                SymbolKind.Variable(kind)
+            )
+            args.push(box(make_typed_expr(TypedExprKind.Variable(box(symbol)), param.param_type)))
+        }
+        return args
+    }
+
+    protected make_callable_value_lambda(self, params List[TypedParam], body TypedExpr) TypedExpr = {
+        let lambda_type = self.build_function_type_from_params(params, body.expr_type)
+        return make_typed_expr(TypedExprKind.LambdaExpr(params, body.expr_type, box(body)), lambda_type)
+    }
+
+    protected static_receiver_info_for_type(self, receiver_type Type) Option[Pair[String, List[Type]]] = {
+        let canonical = self.canonicalize_alias_type(receiver_type)
+        return when canonical in {
+            .StructureType(def_id) then Option[Pair[String, List[Type]]].Some(self.implicit_static_receiver_info_for_def_id(def_id)),
+            .EnumType(def_id) then Option[Pair[String, List[Type]]].Some(self.implicit_static_receiver_info_for_def_id(def_id)),
+            .GenericStruct(template_name, type_args) then {
+                yield Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args)))
+            },
+            .GenericEnum(template_name, type_args) then {
+                yield Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](template_name, self.type_ref_list_to_value_list(type_args)))
+            },
+            .IntType() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int", List[Type].new())),
+            .Int8Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int8", List[Type].new())),
+            .Int16Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int16", List[Type].new())),
+            .Int32Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int32", List[Type].new())),
+            .Int64Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Int64", List[Type].new())),
+            .UIntType() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("UInt", List[Type].new())),
+            .UInt8Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("UInt8", List[Type].new())),
+            .UInt16Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("UInt16", List[Type].new())),
+            .UInt32Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("UInt32", List[Type].new())),
+            .UInt64Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("UInt64", List[Type].new())),
+            .Float32Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Float32", List[Type].new())),
+            .Float64Type() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Float64", List[Type].new())),
+            .BoolType() then Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]]("Bool", List[Type].new())),
+            _ then {
+                let implicit_name = if self.is_string_type(canonical) then "String" else if self.is_rune_type(canonical) then "Rune" else ""
+                yield if implicit_name.is_empty()
+                    then Option[Pair[String, List[Type]]].None()
+                    else Option[Pair[String, List[Type]]].Some(Pair[String, List[Type]](implicit_name, List[Type].new()))
+            },
+        }
+    }
+
+    protected try_make_type_member_value_lambda(self, receiver_type Type, member_name String) Option[TypedExpr] = {
+        let canonical = self.canonicalize_alias_type(receiver_type)
+        if self.static_member_is_enum_case(canonical, member_name) then {
+            let field_types = self.get_enum_case_field_types(canonical, member_name)
+            let param_specs = self.get_enum_case_param_specs(canonical, member_name)
+            let typed_params = self.typed_params_for_callable_value(field_types, param_specs)
+            let typed_args = self.callable_value_arg_exprs(typed_params)
+            let body = self.lower_enum_constructor_expr(canonical, member_name, typed_args)
+            return Option[TypedExpr].Some(self.make_callable_value_lambda(typed_params, body))
+        }
+        return when self.static_receiver_info_for_type(canonical) in {
+            .Some(receiver_info) then {
+                let type_name = receiver_info.first
+                let receiver_type_args = receiver_info.second
+                let raw_declared_receiver_type = self.resolve_static_declared_receiver_type(type_name, receiver_type_args)
+                let declared_receiver_type = if raw_declared_receiver_type is .Unknown() then canonical else raw_declared_receiver_type
+                if self.resolve_static_method_signature_for_receiver(type_name, declared_receiver_type, member_name) is .None() then {
+                    return Option[TypedExpr].None()
+                }
+                let param_types = self.resolve_static_method_param_types_for_receiver(type_name, canonical, member_name)
+                let param_specs = self.resolve_static_call_param_specs(type_name, member_name)
+                let typed_params = self.typed_params_for_callable_value(param_types, param_specs)
+                let typed_args = self.callable_value_arg_exprs(typed_params)
+                let body = self.lower_static_method_call_expr(canonical, member_name, typed_args, canonical)
+                yield Option[TypedExpr].Some(self.make_callable_value_lambda(typed_params, body))
+            },
+            .None() then Option[TypedExpr].None(),
+        }
+    }
+
     protected check_member_dispatch_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .MemberPath(base, path, _) then {
@@ -1035,6 +1133,34 @@ given TypeChecker {
                 let mutable copied_path = List[String].new()
                 for seg in path then {
                     copied_path.push(seg)
+                }
+                if copied_path.count() == 1(UInt) then {
+                    when typed_base.expr_kind in {
+                        .Variable(sym) then when sym.kind in {
+                            .TypeSymbol() then when self.try_make_type_member_value_lambda(typed_base.expr_type, copied_path[0(UInt)]) in {
+                                .Some(lambda_value) then {
+                                    return self.adapt_expr_to_expected_type_at(
+                                        lambda_value,
+                                        expected,
+                                        Option[SourceSpan].Some(expr_span(expr))
+                                    )
+                                },
+                                .None() then {},
+                            },
+                            _ then {},
+                        },
+                        .GenericInstantiation(_, _) then when self.try_make_type_member_value_lambda(typed_base.expr_type, copied_path[0(UInt)]) in {
+                            .Some(lambda_value) then {
+                                return self.adapt_expr_to_expected_type_at(
+                                    lambda_value,
+                                    expected,
+                                    Option[SourceSpan].Some(expr_span(expr))
+                                )
+                            },
+                            .None() then {},
+                        },
+                        _ then {},
+                    }
                 }
                 for seg in copied_path then {
                     current_type = when current_type in {

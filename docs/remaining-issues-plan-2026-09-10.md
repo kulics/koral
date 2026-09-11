@@ -17,6 +17,7 @@ This document renumbers only the issues that are still not fully resolved after 
 - `R1`: parser acceptance logic is now consolidated enough to close for the current backlog. The latest work pulled named-argument lookahead, range-bound starts, generic function/method instantiation diagnostics, control-statement terminator checks, and top-level declaration flag classification into shared parser helper layers on both compilers. The current shared suite is green end-to-end on both compilers, including the newly added parser regressions.
 - `R2`: interpolation now crosses the lexer/parser boundary as a structured lexer-level token stream in bootstrap rather than as a plain string re-scanned by parser helpers. Single-line and multiline interpolation parts preserve embedded-expression start locations well enough for file-relative diagnostics, and the current full shared suite is clean on both compilers.
 - `R4`: MIR-lowering invariant panic chain is resolved in the current local code state. Bootstrap parser/sema/mono/driver crash paths now route through diagnostics instead of unrecovered panics.
+- `R5`: type-equivalence and alias canonicalization are now closed for the current backlog. The alias-aware comparison/canonicalization work was consolidated across sema (`same_expr_type` now canonicalizes both sides), method lookup (`normalize_method_receiver_type` applies alias canonicalization to all reference/pointer wrappers), mono receiver matching (`resolve_alias_receiver_match_type` + `receiver_match_keys_equal` replace all ad hoc `layout_key` comparisons), and static member dispatch (Swift `canonicalizedTypeForComparison` / `typesEquivalentForComparison` / `nominalInstantiationMatchesGeneric` provide a unified equivalence model). New regression tests cover deep alias canonicalization, generic static receivers through aliases, generic enum static receivers, trait dispatch through aliases, and static member value references. The latest bootstrap full-suite validation is green at `580/580` and Swift is green at `580/580`. The remaining work is now the deeper architectural pass under `R3`, not another open `R5` regression chain.
 
 ## Remaining Issues (Renumbered)
 
@@ -45,53 +46,6 @@ Exit criteria:
 - Ownership / escape decisions are computed from explicit CFG dataflow.
 - Closure capture, branch merge, alias container store, and borrowed/managed transitions share one analysis model instead of several local heuristics.
 
-### R5. Type-Equivalence / Canonicalization Still Needs A Full Audit
-
-Maps from old issue tail: `#9`
-
-Current state:
-
-- Hot paths now treat concrete instantiated nominal types as equivalent to matching generic nominal forms where needed.
-- Several active alias/canonicalization regressions were fixed.
-
-Why this is still open:
-
-- Equality and compatibility logic is still distributed across `same_expr_type`, call adaptation, method lookup, and mono/type-resolution fallback paths.
-- The current fixes are sufficient for covered regressions, but not yet a proof that all nominal/generic/alias equality paths are unified.
-
-Primary areas:
-
-- `bootstrap/koralc/sema/type_checker.koral`
-- `bootstrap/koralc/sema/type_checker_methods.koral`
-- `bootstrap/koralc/sema/type_checker_expressions_static_calls.koral`
-- `bootstrap/koralc/mono/mono_type_resolution.koral`
-
-Exit criteria:
-
-- One shared equivalence model covers:
-  - concrete instantiated nominal vs generic nominal
-  - alias-expanded vs direct nominal
-  - wrapper/reference family compatibility where intended
-- Existing compatibility checks stop relying on path-specific ad hoc comparisons.
-
 ## Recommended Execution Order
 
-1. `R5` — broad audit after the parser/interpolation frontend work has been stabilized.
-2. `R3` — largest architectural item; likely requires a dedicated design pass.
-
-## Current Validation Anchors
-
-- Final local `R2` closure full-suite anchors:
-  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-11-r2-final.report.log` (`575/575`)
-  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-11-r2-final.report.log` (`575/575`)
-- Final local `R1` closure full-suite anchors:
-  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-r1-final.report.log` (`575/575`)
-  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-10-r1-final.report.log` (`575/575`)
-- Earlier clean parser-work anchors during the `R1` batch:
-  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-r1-postfix-current-rerun.report.log`
-  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-10-r1-postfix-current.report.log`
-- Earlier clean bootstrap anchors:
-  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-current-21.report.log`
-  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-current-25.report.log`
-- Earlier clean Swift anchor before this `R1` parser batch:
-  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-09-current-7.report.log`
+1. `R3` — largest architectural item; likely requires a dedicated design pass.

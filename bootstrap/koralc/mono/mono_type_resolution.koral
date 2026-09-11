@@ -1882,47 +1882,129 @@ private let adapt_call_args_for_method(
     return adapted_args
 }
 
+private let resolve_alias_receiver_match_type(
+    mono * Monomorphizer,
+    t Type,
+) Type = {
+    let resolved = resolve_parameterized_type(mono, t)
+    return when resolved in {
+        .StructureType(def_id) then when mono.storage.context.lookup_type(def_id) in {
+            .Some(mapped) then {
+                let resolved_mapped = resolve_parameterized_type(mono, mapped)
+                yield if layout_key(resolved_mapped) == layout_key(resolved)
+                    then resolved
+                    else resolve_alias_receiver_match_type(mono, resolved_mapped)
+            },
+            .None() then resolved,
+        },
+        .EnumType(def_id) then when mono.storage.context.lookup_type(def_id) in {
+            .Some(mapped) then {
+                let resolved_mapped = resolve_parameterized_type(mono, mapped)
+                yield if layout_key(resolved_mapped) == layout_key(resolved)
+                    then resolved
+                    else resolve_alias_receiver_match_type(mono, resolved_mapped)
+            },
+            .None() then resolved,
+        },
+        .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
+            .Some(mapped) then {
+                let resolved_mapped = resolve_parameterized_type(mono, mapped)
+                yield if layout_key(resolved_mapped) == layout_key(resolved)
+                    then resolved
+                    else resolve_alias_receiver_match_type(mono, resolved_mapped)
+            },
+            .None() then resolved,
+        },
+        .ReferenceType(inner) then Type.ReferenceType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .MutableReferenceType(inner) then Type.MutableReferenceType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .BorrowedReferenceType(inner) then Type.BorrowedReferenceType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .WeakReferenceType(inner) then Type.WeakReferenceType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .PointerType(inner) then Type.PointerType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .MutablePointerType(inner) then Type.MutablePointerType(box(resolve_alias_receiver_match_type(mono, *inner))),
+        .FunctionType(fn_params, return_type) then {
+            let mutable param_types = List[* Type].new()
+            for entry in fn_params then {
+                param_types.push(box(resolve_alias_receiver_match_type(mono, entry.param_type)))
+            }
+            yield make_function_type(param_types, resolve_alias_receiver_match_type(mono, *return_type))
+        },
+        .GenericStruct(template, args) then {
+            let mutable resolved_args = List[* Type].new()
+            for arg in args then {
+                resolved_args.push(box(resolve_alias_receiver_match_type(mono, *arg)))
+            }
+            yield Type.GenericStruct(template, resolved_args)
+        },
+        .GenericEnum(template, args) then {
+            let mutable resolved_args = List[* Type].new()
+            for arg in args then {
+                resolved_args.push(box(resolve_alias_receiver_match_type(mono, *arg)))
+            }
+            yield Type.GenericEnum(template, resolved_args)
+        },
+        _ then resolved,
+    }
+}
+
+private let receiver_match_layout_key(
+    mono * Monomorphizer,
+    t Type,
+) String = {
+    return layout_key(resolve_alias_receiver_match_type(mono, t))
+}
+
+private let receiver_match_keys_equal(
+    mono * Monomorphizer,
+    left Type,
+    right Type,
+) Bool = {
+    return receiver_match_layout_key(mono, left) == receiver_match_layout_key(mono, right)
+}
+
 private let receiver_param_matches_actual_receiver(
     mono * Monomorphizer,
     receiver_param_type Type,
     actual_receiver_type Type,
 ) Bool = {
-    let resolved_actual = resolve_parameterized_type(mono, actual_receiver_type)
-    return when receiver_param_type in {
+    let resolved_expected = resolve_alias_receiver_match_type(mono, receiver_param_type)
+    let resolved_actual = resolve_alias_receiver_match_type(mono, actual_receiver_type)
+    return when resolved_expected in {
         .ReferenceType(inner_ref) then when resolved_actual in {
-            .ReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .BorrowedReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableBorrowedReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            _ then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolved_actual),
+            .ReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .BorrowedReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            _ then receiver_match_keys_equal(mono, *inner_ref, resolved_actual),
         },
         .MutableReferenceType(inner_ref) then when resolved_actual in {
-            .MutableReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableBorrowedReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            _ then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolved_actual),
+            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            _ then receiver_match_keys_equal(mono, *inner_ref, resolved_actual),
         },
         .BorrowedReferenceType(inner_ref) then when resolved_actual in {
-            .BorrowedReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .ReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableBorrowedReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            _ then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolved_actual),
+            .BorrowedReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .ReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            _ then receiver_match_keys_equal(mono, *inner_ref, resolved_actual),
         },
         .MutableBorrowedReferenceType(inner_ref) then when resolved_actual in {
-            .MutableBorrowedReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            _ then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolved_actual),
+            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            _ then receiver_match_keys_equal(mono, *inner_ref, resolved_actual),
         },
         .WeakReferenceType(inner_ref) then when resolved_actual in {
-            .WeakReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            .MutableWeakReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
+            .WeakReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            .MutableWeakReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
             _ then false,
         },
         .MutableWeakReferenceType(inner_ref) then when resolved_actual in {
-            .MutableWeakReferenceType(actual_inner) then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolve_parameterized_type(mono, *actual_inner)),
-            _ then layout_key(resolve_parameterized_type(mono, *inner_ref)) == layout_key(resolved_actual),
+            .MutableWeakReferenceType(actual_inner) then receiver_match_keys_equal(mono, *inner_ref, *actual_inner),
+            _ then receiver_match_keys_equal(mono, *inner_ref, resolved_actual),
         },
-        _ then layout_key(resolve_parameterized_type(mono, receiver_param_type)) == layout_key(resolved_actual),
+        _ then receiver_match_keys_equal(mono, resolved_expected, resolved_actual),
     }
 }
 
@@ -1940,7 +2022,7 @@ private let method_def_id_matches_receiver_exactly(
             .FunctionType(fn_params, _) then {
                 let param_types = param_entry_types(fn_params)
                 if param_types.count() == 0 then { return false }
-                yield layout_key(resolve_parameterized_type(mono, (*param_types[0(UInt)]))) == layout_key(concrete_receiver_type)
+                yield receiver_match_keys_equal(mono, (*param_types[0(UInt)]), concrete_receiver_type)
             },
             _ then false,
         },
@@ -2139,7 +2221,7 @@ private let method_signature_matches_receiver_type(
                     yield false
                 } else {
                     let declared_receiver_type = resolve_parameterized_type(mono, (*param_types[0(UInt)]))
-                    yield layout_key(declared_receiver_type) == layout_key(concrete_receiver_type)
+                    yield receiver_match_keys_equal(mono, declared_receiver_type, concrete_receiver_type)
                 }
             },
             _ then false,
@@ -2151,7 +2233,7 @@ private let method_signature_matches_receiver_type(
                     yield false
                 } else {
                     let declared_receiver_type = resolve_parameterized_type(mono, (*param_types[0(UInt)]))
-                    yield layout_key(declared_receiver_type) == layout_key(concrete_receiver_type)
+                    yield receiver_match_keys_equal(mono, declared_receiver_type, concrete_receiver_type)
                 }
             },
             _ then false,
