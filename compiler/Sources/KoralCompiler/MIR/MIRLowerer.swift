@@ -408,7 +408,7 @@ final class MIRLowerer {
       sourceFile: context.getSourceFile(identifier.defId) ?? "<mir_global_init>",
       type: functionType,
       kind: .function,
-      access: .private
+      access: .file_private
     )
     return lowerFunction(identifier: initializer, parameters: [], body: value, kind: .global)
   }
@@ -2471,7 +2471,7 @@ private final class MIRFunctionBuilder {
       sourceFile: "<mir_pattern_field>",
       type: type,
       kind: .variable(.Value),
-      access: .private
+      access: .file_private
     )
   }
 

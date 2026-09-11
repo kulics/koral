@@ -327,7 +327,7 @@ given DefIdMap {
         let key_with_file = self.make_key(module_path, name, Option[String].Some(source_file))
         self.name_to_def_id.insert(key_with_file, def_id)
         when access in {
-            .Private() then {},
+            .FilePrivate() then {},
             _ then {
                 let key_without_file = self.make_key(module_path, name, Option[String].None())
                 self.name_to_def_id.insert(key_without_file, def_id)
@@ -440,7 +440,7 @@ given DefIdMap {
     }
 
     /// 生成查找键
-    private make_key(*self, module_path List[String], name String, source_file Option[String]) String = {
+    file_private make_key(*self, module_path List[String], name String, source_file Option[String]) String = {
         let mutable result = if module_path.is_empty() then String.new() else module_path.join_to_string(".")
         if not module_path.is_empty() then {
             result.push_byte('.')
@@ -476,7 +476,7 @@ given DefIdMap {
     /// 获取 C 标识符
     public get_c_identifier(*self, id DefId) Option[String] = {
         if self.names.get(id.id) is .Some(name) then {
-            let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .Private() else false
+            let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .FilePrivate() else false
             let source_file = when self.source_files.get(id.id) in {
                 .Some(sf) then sf,
                 .None() then "",
@@ -722,7 +722,7 @@ public type Type {
     Unknown(),
 }
 
-private type TypeStringWrapperKind {
+file_private type TypeStringWrapperKind {
     Reference(),
     MutableReference(),
     BorrowedReference(),
@@ -733,12 +733,12 @@ private type TypeStringWrapperKind {
     MutableWeakReference(),
 }
 
-private type TypeStringWrapperChain(
+file_private type TypeStringWrapperChain(
     wrappers List[TypeStringWrapperKind],
     inner Type,
 )
 
-private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
+file_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
     let mutable wrappers = List[TypeStringWrapperKind].new()
     let mutable current = t
     while true then {
@@ -781,7 +781,7 @@ private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
     return TypeStringWrapperChain(wrappers, current)
 }
 
-private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
+file_private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
     return when kind in {
         .Reference() then "* ",
         .MutableReference() then "*mutable ",
@@ -794,7 +794,7 @@ private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
     }
 }
 
-private let join_type_ref_list(types List[* Type]) String = {
+file_private let join_type_ref_list(types List[* Type]) String = {
     let mutable out = String.new()
     let mutable first = true
     for item in types then {
@@ -805,7 +805,7 @@ private let join_type_ref_list(types List[* Type]) String = {
     return out
 }
 
-private let join_param_entry_list(entries List[* FunctionParamEntry]) String = {
+file_private let join_param_entry_list(entries List[* FunctionParamEntry]) String = {
     let mutable out = String.new()
     let mutable first = true
     for entry in entries then {
@@ -816,7 +816,7 @@ private let join_param_entry_list(entries List[* FunctionParamEntry]) String = {
     return out
 }
 
-private let join_type_ref_key_list(types List[* Type]) String = {
+file_private let join_type_ref_key_list(types List[* Type]) String = {
     let mutable out = String.new()
     let mutable first = true
     for item in types then {
@@ -827,7 +827,7 @@ private let join_type_ref_key_list(types List[* Type]) String = {
     return out
 }
 
-private let join_param_entry_key_list(entries List[* FunctionParamEntry]) String = {
+file_private let join_param_entry_key_list(entries List[* FunctionParamEntry]) String = {
     let mutable out = String.new()
     let mutable first = true
     for entry in entries then {
@@ -904,7 +904,7 @@ public let type_to_string(t Type) String = {
 
 // Iterative-safe type_to_string with depth limit to prevent stack overflow
 // on deeply nested generic types in the bootstrap binary.
-private let type_to_string_impl(t Type, depth UInt) String = {
+file_private let type_to_string_impl(t Type, depth UInt) String = {
     let chain = split_type_string_wrappers(t)
     let inner = chain.inner
     let inner_string = when inner in {
@@ -1072,7 +1072,7 @@ private let type_to_string_impl(t Type, depth UInt) String = {
     return out
 }
 
-private let stable_hash_combine_string(seed UInt, text String) UInt = {
+file_private let stable_hash_combine_string(seed UInt, text String) UInt = {
     let mutable hash = seed.combine_hash(text.count())
     for byte in text.bytes() then {
         hash = hash.combine_hash(byte(UInt))
@@ -1080,7 +1080,7 @@ private let stable_hash_combine_string(seed UInt, text String) UInt = {
     return hash.combine_hash(255)
 }
 
-private let stable_hash_combine_string_list(seed UInt, values List[String]) UInt = {
+file_private let stable_hash_combine_string_list(seed UInt, values List[String]) UInt = {
     let mutable hash = seed.combine_hash(values.count())
     for value in values then {
         hash = stable_hash_combine_string(hash, value)

@@ -11,7 +11,7 @@ public type ExhaustivenessChecker(
     span SourceSpan,
 )
 
-private type PatternSpace {
+file_private type PatternSpace {
     Full(type_value Type),
     Empty(),
     EnumCases(type_name String, cases Dict[String, List[* PatternSpace]]),
@@ -173,7 +173,7 @@ given ExhaustivenessChecker {
 
 
     // 检查不可达模式（已被前面模式完全覆盖的分支）
-    private check_unreachable_patterns(self) Result[Void] = {
+    file_private check_unreachable_patterns(self) Result[Void] = {
         let mutable covered_trait_object_types = Set[String].new()
         let mutable has_catchall = false
         let mutable catchall_is_struct = false
@@ -240,7 +240,7 @@ given ExhaustivenessChecker {
         return Result[Void].Ok({})
     }
 
-    private initial_finite_pattern_space(self) Option[PatternSpace] = {
+    file_private initial_finite_pattern_space(self) Option[PatternSpace] = {
         return when self.subject_type in {
             .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
                 .Some(cases) then Option[PatternSpace].Some(self.enum_pattern_space(self.context.type_display_name(self.subject_type), Option[List[EnumCaseInfo]].Some(cases))),
@@ -261,7 +261,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private enum_pattern_space(self, type_name String, maybe_cases Option[List[EnumCaseInfo]]) PatternSpace = {
+    file_private enum_pattern_space(self, type_name String, maybe_cases Option[List[EnumCaseInfo]]) PatternSpace = {
         let _ = self
         let mutable cases = Dict[String, List[* PatternSpace]].new()
         when maybe_cases in {
@@ -279,7 +279,7 @@ given ExhaustivenessChecker {
         return PatternSpace.EnumCases(type_name, cases)
     }
 
-    private full_space_for_type(self, t Type) PatternSpace = {
+    file_private full_space_for_type(self, t Type) PatternSpace = {
         return when t in {
             .BoolType() then PatternSpace.BoolValues(true, true),
             .EnumType(def_id) then self.enum_pattern_space(self.context.type_display_name(t), self.context.get_enum_cases(def_id)),
@@ -294,7 +294,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private pattern_space_is_empty(self, space PatternSpace) Bool = {
+    file_private pattern_space_is_empty(self, space PatternSpace) Bool = {
         let _ = self
         return when space in {
             .Empty() then true,
@@ -304,7 +304,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private pattern_space_equals(self, lhs PatternSpace, rhs PatternSpace) Bool = {
+    file_private pattern_space_equals(self, lhs PatternSpace, rhs PatternSpace) Bool = {
         let _ = self
         return when lhs in {
             .Empty() then rhs is .Empty(),
@@ -343,7 +343,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) PatternSpace = {
+    file_private subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) PatternSpace = {
         return when pattern in {
             .Wildcard() then PatternSpace.Empty(),
             .Variable(_) then PatternSpace.Empty(),
@@ -361,7 +361,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private can_precisely_subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) Bool = {
+    file_private can_precisely_subtract_pattern(self, space PatternSpace, pattern * TypedPattern, subject_type Type) Bool = {
         return when pattern in {
             .Wildcard() then true,
             .Variable(_) then true,
@@ -397,7 +397,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
+    file_private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
         let _ = self
         return when space in {
             .BoolValues(has_true, has_false) then {
@@ -409,7 +409,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private subtract_enum_case(self, space PatternSpace, case_name String, elements List[* TypedPatternElement], subject_type Type) PatternSpace = {
+    file_private subtract_enum_case(self, space PatternSpace, case_name String, elements List[* TypedPatternElement], subject_type Type) PatternSpace = {
         let mutable cases = when space in {
             .Full(_) then self.enum_case_map_for_type(subject_type),
             .EnumCases(_, existing) then existing,
@@ -437,7 +437,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private enum_case_map_for_type(self, t Type) Dict[String, List[* PatternSpace]] = {
+    file_private enum_case_map_for_type(self, t Type) Dict[String, List[* PatternSpace]] = {
         let mutable cases = Dict[String, List[* PatternSpace]].new()
         let maybe_cases = when t in {
             .EnumType(def_id) then self.context.get_enum_cases(def_id),
@@ -462,7 +462,7 @@ given ExhaustivenessChecker {
         return cases
     }
 
-    private subtract_pattern_fields(self, fields List[* PatternSpace], elements List[* TypedPatternElement]) List[* PatternSpace] = {
+    file_private subtract_pattern_fields(self, fields List[* PatternSpace], elements List[* TypedPatternElement]) List[* PatternSpace] = {
         if fields.count() <> elements.count() then {
             return fields
         }
@@ -478,7 +478,7 @@ given ExhaustivenessChecker {
         return result
     }
 
-    private pattern_space_type(self, space PatternSpace) Type = {
+    file_private pattern_space_type(self, space PatternSpace) Type = {
         let _ = self
         return when space in {
             .Full(t) then t,
@@ -488,7 +488,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private pattern_elements_all_catchall(self, elements List[* TypedPatternElement]) Bool = {
+    file_private pattern_elements_all_catchall(self, elements List[* TypedPatternElement]) Bool = {
         let _ = self
         for element in elements then {
             if not is_catchall(element.pattern) then {
@@ -498,7 +498,7 @@ given ExhaustivenessChecker {
         return true
     }
 
-    private pattern_space_list_all_empty(self, spaces List[* PatternSpace]) Bool = {
+    file_private pattern_space_list_all_empty(self, spaces List[* PatternSpace]) Bool = {
         for space in spaces then {
             if not self.pattern_space_is_empty(*space) then {
                 return false
@@ -507,7 +507,7 @@ given ExhaustivenessChecker {
         return true
     }
 
-    private pattern_space_missing_cases(self, space PatternSpace) List[String] = {
+    file_private pattern_space_missing_cases(self, space PatternSpace) List[String] = {
         return when space in {
             .Empty() then List[String].new(),
             .Full(t) then {
@@ -536,7 +536,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private render_missing_constructor(self, case_name String, fields List[* PatternSpace]) List[String] = {
+    file_private render_missing_constructor(self, case_name String, fields List[* PatternSpace]) List[String] = {
         let _ = self
         if fields.is_empty() then {
             let mutable out = List[String].new()
@@ -566,7 +566,7 @@ given ExhaustivenessChecker {
         return out
     }
 
-    private pattern_space_missing_fragments(self, space PatternSpace) List[String] = {
+    file_private pattern_space_missing_fragments(self, space PatternSpace) List[String] = {
         return when space in {
             .Empty() then List[String].new(),
             .Full(_) then {
@@ -599,7 +599,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private combine_missing_field_options(self, options List[List[String]]) List[List[String]] = {
+    file_private combine_missing_field_options(self, options List[List[String]]) List[List[String]] = {
         if options.is_empty() then {
             return List[List[String]].new()
         }
@@ -623,7 +623,7 @@ given ExhaustivenessChecker {
         return result
     }
 
-    private exhaustiveness_type_name(self) String = {
+    file_private exhaustiveness_type_name(self) String = {
         return when self.subject_type in {
             .EnumType(_) then self.context.type_display_name(self.subject_type),
             .GenericEnum(template_name, _) then template_name,
@@ -632,7 +632,7 @@ given ExhaustivenessChecker {
         }
     }
 
-    private non_exhaustive_match_message_from_patterns(self, type_name String, missing List[String]) String = {
+    file_private non_exhaustive_match_message_from_patterns(self, type_name String, missing List[String]) String = {
         let _ = self
         let mutable msg = "Non-exhaustive match on type '"
         msg.push_string(type_name)
@@ -646,7 +646,7 @@ given ExhaustivenessChecker {
         return msg
     }
 
-    private is_synthetic_trailing_wildcard(self, pattern * TypedPattern, pattern_index UInt, pattern_count UInt) Bool = {
+    file_private is_synthetic_trailing_wildcard(self, pattern * TypedPattern, pattern_index UInt, pattern_count UInt) Bool = {
         if pattern_count <> 2(UInt) then {
             return false
         }
@@ -665,7 +665,7 @@ given ExhaustivenessChecker {
     }
 
     // 检查 enum 是否已被完全覆盖
-    private is_enum_fully_covered(self, covered_cases Set[String]) Bool = {
+    file_private is_enum_fully_covered(self, covered_cases Set[String]) Bool = {
         let all_cases = self.get_all_enum_case_names()
         if all_cases.is_empty() then { return false }
         for case_name in all_cases.iterator() then {
@@ -677,7 +677,7 @@ given ExhaustivenessChecker {
     }
 
     // 获取所有 enum case 名称
-    private get_all_enum_case_names(self) Set[String] = {
+    file_private get_all_enum_case_names(self) Set[String] = {
         let mutable names = Set[String].new()
         when self.subject_type in {
             .EnumType(def_id) then {
@@ -711,7 +711,7 @@ given ExhaustivenessChecker {
     }
 
     // 检查 Bool 类型的穷举性
-    private check_bool_exhaustiveness(self, has_catchall Bool) Result[Void] = {
+    file_private check_bool_exhaustiveness(self, has_catchall Bool) Result[Void] = {
         if has_catchall then {
             return Result[Void].Ok({})
         }
@@ -740,7 +740,7 @@ given ExhaustivenessChecker {
         return Result[Void].Ok({})
     }
 
-    private missing_catchall_message(self, type_name String) String = {
+    file_private missing_catchall_message(self, type_name String) String = {
         let _ = self
         let mutable msg = "Match on type '"
         msg.push_string(type_name)
@@ -748,7 +748,7 @@ given ExhaustivenessChecker {
         return msg
     }
 
-    private non_exhaustive_match_message(self, type_name String, missing List[String], add_case_dot Bool) String = {
+    file_private non_exhaustive_match_message(self, type_name String, missing List[String], add_case_dot Bool) String = {
         let mutable msg = "Non-exhaustive match on type '"
         msg.push_string(type_name)
         msg.push_string("': missing cases ")
@@ -834,7 +834,7 @@ public let pattern_description(pattern * TypedPattern) String = {
     }
 }
 
-private let unreachable_after_pattern_message(pattern_desc String) String = {
+file_private let unreachable_after_pattern_message(pattern_desc String) String = {
     let mutable msg = "Unreachable pattern: pattern after '"
     msg.push_string(pattern_desc)
     msg.push_string("' is unreachable")

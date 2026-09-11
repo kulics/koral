@@ -1,6 +1,6 @@
 using std::time { .. }
 
-private type ReusedGivenMemberSignature(
+file_private type ReusedGivenMemberSignature(
     method_def_id DefId,
     params List[TypedParam],
     return_type Type,
@@ -8,7 +8,7 @@ private type ReusedGivenMemberSignature(
 
 given TypeChecker {
 
-    protected report_concrete_body_recheck_failure(self, source ConcreteExprSource, context String, error * Error) Void = {
+    module_private report_concrete_body_recheck_failure(self, source ConcreteExprSource, context String, error * Error) Void = {
         let mutable message = "failed to recheck "
         message.push_string(context)
         message.push_string(": ")
@@ -16,7 +16,7 @@ given TypeChecker {
         self.push_expr_diagnostic(source.body, message)
     }
 
-    protected function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
+    module_private function_param_specs_from_typed_params(self, params List[TypedParam]) List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new()
         for param in params then {
             specs.push(FunctionParamSpec(param.name, param.is_mutable, param.named))
@@ -24,7 +24,7 @@ given TypeChecker {
         return specs
     }
 
-    protected function_param_specs_from_params(self, params List[Param]) List[FunctionParamSpec] = {
+    module_private function_param_specs_from_params(self, params List[Param]) List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new()
         for param in params then {
             specs.push(FunctionParamSpec(param.name, param.is_mutable, param.named))
@@ -32,13 +32,13 @@ given TypeChecker {
         return specs
     }
 
-    protected register_function_symbol_metadata(self, symbol Symbol, param_specs List[FunctionParamSpec]) Void = {
+    module_private register_function_symbol_metadata(self, symbol Symbol, param_specs List[FunctionParamSpec]) Void = {
         let mutable context = self.context()
         context.set_symbol_info(symbol.def_id, SymbolInfo(symbol.symbol_type, symbol.kind, MethodKind.Normal(), false))
         context.set_param_specs(symbol.def_id, param_specs)
     }
 
-    protected make_method_callable_symbol(self, method_name String, params List[TypedParam], return_type Type) Symbol = {
+    module_private make_method_callable_symbol(self, method_name String, params List[TypedParam], return_type Type) Symbol = {
         let mutable param_types = List[* Type].new()
         for param in params then {
             param_types.push(box(param.param_type))
@@ -52,7 +52,7 @@ given TypeChecker {
         return method_symbol
     }
 
-    protected make_method_callable_symbol_with_visibility(
+    module_private make_method_callable_symbol_with_visibility(
         self,
         method_name String,
         params List[TypedParam],
@@ -62,7 +62,7 @@ given TypeChecker {
         source_file String,
         package_id String,
     ) Symbol = {
-        if not (access is .Private()) then {
+        if not (access is .FilePrivate()) then {
             return self.make_method_callable_symbol(method_name, params, return_type)
         }
         let mutable param_types = List[* Type].new()
@@ -86,7 +86,7 @@ given TypeChecker {
         return method_symbol
     }
 
-    protected make_method_callable_symbol_with_param_types(
+    module_private make_method_callable_symbol_with_param_types(
         self,
         method_name String,
         param_types List[Type],
@@ -97,7 +97,7 @@ given TypeChecker {
         source_file String,
         package_id String,
     ) Symbol = {
-        if access is .Private() then {
+        if access is .FilePrivate() then {
             let mutable context = self.context()
             let method_symbol = context.create_symbol_with_package(
                 method_name,
@@ -123,7 +123,7 @@ given TypeChecker {
         return method_symbol
     }
 
-    protected given_member_phase_label(self, prefix String, target_type Type, member_name String) String = {
+    module_private given_member_phase_label(self, prefix String, target_type Type, member_name String) String = {
         let mutable message = prefix
         message.push_string(" ")
         message.push_string(member_name)
@@ -132,12 +132,12 @@ given TypeChecker {
         return message
     }
 
-    protected make_method_symbol(self, method_name String, return_type Type) Symbol = {
+    module_private make_method_symbol(self, method_name String, return_type Type) Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
         return Symbol(def_id, Type.FunctionType(List[* FunctionParamEntry].new(), box(return_type)), SymbolKind.Function())
     }
 
-    protected reused_given_member_signature(self, method_symbol Symbol) Option[ReusedGivenMemberSignature] = {
+    module_private reused_given_member_signature(self, method_symbol Symbol) Option[ReusedGivenMemberSignature] = {
         let param_specs = self.context().get_param_specs(method_symbol.def_id) or else List[FunctionParamSpec].new()
         return when self.context().get_function_type(method_symbol.def_id) in {
             .Some(function_type) then when function_type in {
@@ -161,7 +161,7 @@ given TypeChecker {
     }
 
     // Recover static receiver types from member chains like Time.DateTime.
-    protected resolve_static_receiver_type(self, expr * TypedExpr) Option[Type] = {
+    module_private resolve_static_receiver_type(self, expr * TypedExpr) Option[Type] = {
         return when expr.expr_kind in {
             .MemberPath(_, path) then if not path.is_empty() then {
                 let member_name = path[path.count() - 1]
@@ -184,14 +184,14 @@ given TypeChecker {
         }
     }
 
-    protected trait_name_from_type(self, trait_type Type) String = {
+    module_private trait_name_from_type(self, trait_type Type) String = {
         return when trait_type in {
             .TraitObject(name, _) then name,
             _ then self.context().type_display_name(trait_type),
         }
     }
 
-    protected check_params(self, params List[Param]) List[TypedParam] = {
+    module_private check_params(self, params List[Param]) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
             out.push(TypedParam(p.name, p.is_mutable, self.resolve_type(p.type_name), p.named))
@@ -201,7 +201,7 @@ given TypeChecker {
 
     /// Build TypedParam list from already-resolved types, avoiding re-resolution.
     /// Used in pass 2 for generic functions where resolve_type would fail on type params.
-    protected build_typed_params_from_resolved(self, params List[Param], resolved_types List[Type]) List[TypedParam] = {
+    module_private build_typed_params_from_resolved(self, params List[Param], resolved_types List[Type]) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         let mutable idx UInt = 0
         while idx < params.count() and idx < resolved_types.count() then {
@@ -212,7 +212,7 @@ given TypeChecker {
         return out
     }
 
-    protected check_params_in_scope(self, params List[Param], scope Scope) List[TypedParam] = {
+    module_private check_params_in_scope(self, params List[Param], scope Scope) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
             out.push(TypedParam(p.name, p.is_mutable, self.resolve_type_in_scope(p.type_name, scope), p.named))
@@ -220,19 +220,19 @@ given TypeChecker {
         return out
     }
 
-    protected resolve_given_member_type(self, node TypeNode, self_type Type) Type = {
+    module_private resolve_given_member_type(self, node TypeNode, self_type Type) Type = {
         return self.resolve_given_member_type_with_bindings(node, self_type, Dict[String, Type].new())
     }
 
-    protected resolve_given_member_type_with_bindings(self, node TypeNode, self_type Type, bindings Dict[String, Type]) Type = {
+    module_private resolve_given_member_type_with_bindings(self, node TypeNode, self_type Type, bindings Dict[String, Type]) Type = {
         return self.resolve_type_with_self_and_bindings(node, self_type, bindings)
     }
 
-    protected check_given_member_params(self, params List[Param], self_type Type) List[TypedParam] = {
+    module_private check_given_member_params(self, params List[Param], self_type Type) List[TypedParam] = {
         return self.check_given_member_params_with_bindings(params, self_type, Dict[String, Type].new())
     }
 
-    protected check_given_member_params_with_bindings(self, params List[Param], self_type Type, bindings Dict[String, Type]) List[TypedParam] = {
+    module_private check_given_member_params_with_bindings(self, params List[Param], self_type Type, bindings Dict[String, Type]) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
             out.push(TypedParam(p.name, p.is_mutable, self.resolve_type_with_self_and_bindings(p.type_name, self_type, bindings), p.named))
@@ -240,7 +240,7 @@ given TypeChecker {
         return out
     }
 
-    protected make_given_member_type_scope(self, self_type Type, owner_type_params List[TypeParameter], method_type_params List[TypeParameter]) Scope = {
+    module_private make_given_member_type_scope(self, self_type Type, owner_type_params List[TypeParameter], method_type_params List[TypeParameter]) Scope = {
         let mutable scope = Scope.new_child(self.storage.current_scope)
         for tp in owner_type_params then {
             scope.define_generic_param(tp.name)
@@ -258,7 +258,7 @@ given TypeChecker {
         return scope
     }
 
-    protected check_method_params(self, params List[Param], self_type Type) List[TypedParam] = {
+    module_private check_method_params(self, params List[Param], self_type Type) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         let mutable first = true
         for p in params then {
@@ -272,11 +272,11 @@ given TypeChecker {
         return out
     }
 
-    protected resolve_type_with_self(self, node TypeNode, self_type Type) Type = {
+    module_private resolve_type_with_self(self, node TypeNode, self_type Type) Type = {
         return self.resolve_type_with_self_and_bindings(node, self_type, Dict[String, Type].new())
     }
 
-    protected resolve_type_with_self_and_bindings(self, node TypeNode, self_type Type, bindings Dict[String, Type]) Type = {
+    module_private resolve_type_with_self_and_bindings(self, node TypeNode, self_type Type, bindings Dict[String, Type]) Type = {
         return when node in {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -381,7 +381,7 @@ given TypeChecker {
         }
     }
 
-    protected check_fields(self, fields List[Field]) List[TypedField] = {
+    module_private check_fields(self, fields List[Field]) List[TypedField] = {
         let mutable out = List[TypedField].new()
         for f in fields then {
             out.push(TypedField(f.access, f.name, f.is_mutable, self.resolve_type(f.type_name), f.named))
@@ -389,7 +389,7 @@ given TypeChecker {
         return out
     }
 
-    protected check_fields_in_scope(self, fields List[Field], scope Scope) List[TypedField] = {
+    module_private check_fields_in_scope(self, fields List[Field], scope Scope) List[TypedField] = {
         let mutable out = List[TypedField].new()
         for f in fields then {
             out.push(TypedField(f.access, f.name, f.is_mutable, self.resolve_type_in_scope(f.type_name, scope), f.named))
@@ -397,7 +397,7 @@ given TypeChecker {
         return out
     }
 
-    protected resolve_reference_type(self, inner_type Type) Type = {
+    module_private resolve_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
@@ -421,7 +421,7 @@ given TypeChecker {
         return Type.ReferenceType(box(inner_type))
     }
 
-    protected resolve_mutable_reference_type(self, inner_type Type) Type = {
+    module_private resolve_mutable_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
@@ -445,7 +445,7 @@ given TypeChecker {
         return Type.MutableReferenceType(box(inner_type))
     }
 
-    protected resolve_weak_reference_type(self, inner_type Type) Type = {
+    module_private resolve_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
@@ -469,7 +469,7 @@ given TypeChecker {
         return Type.WeakReferenceType(box(inner_type))
     }
 
-    protected resolve_mutable_weak_reference_type(self, inner_type Type) Type = {
+    module_private resolve_mutable_weak_reference_type(self, inner_type Type) Type = {
         when inner_type in {
             .TraitObject(trait_name, _) then {
                 when self.storage.trait_registry.check_object_safety_in_module(trait_name, self.storage.module_path) in {
@@ -493,7 +493,7 @@ given TypeChecker {
         return Type.MutableWeakReferenceType(box(inner_type))
     }
 
-    protected check_enum_cases(self, cases List[EnumCase]) List[TypedEnumCase] = {
+    module_private check_enum_cases(self, cases List[EnumCase]) List[TypedEnumCase] = {
         let mutable out = List[TypedEnumCase].new()
         for c in cases then {
             let mutable typed_fields = List[TypedEnumCaseField].new()
@@ -505,7 +505,7 @@ given TypeChecker {
         return out
     }
 
-    protected check_enum_cases_in_scope(self, cases List[EnumCase], scope Scope) List[TypedEnumCase] = {
+    module_private check_enum_cases_in_scope(self, cases List[EnumCase], scope Scope) List[TypedEnumCase] = {
         let mutable out = List[TypedEnumCase].new()
         for c in cases then {
             let mutable typed_fields = List[TypedEnumCaseField].new()
@@ -517,7 +517,7 @@ given TypeChecker {
         return out
     }
 
-    protected check_trait_members(self, members List[TraitMember], type_params List[TypeParameter]) List[TypedTraitMember] = {
+    module_private check_trait_members(self, members List[TraitMember], type_params List[TypeParameter]) List[TypedTraitMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params)
         self.register_generic_constraints(type_params)
         defer { self.restore_generic_constraints(owner_constraint_snapshot) }
@@ -551,7 +551,7 @@ given TypeChecker {
         return out
     }
 
-    protected check_given_members(self, members List[GivenMember]) List[* TypedGivenMember] = {
+    module_private check_given_members(self, members List[GivenMember]) List[* TypedGivenMember] = {
         let mutable out = List[* TypedGivenMember].with_capacity(members.count())
         for m in members then {
             let typed_params = self.check_params(m.params)
@@ -582,7 +582,7 @@ given TypeChecker {
         return out
     }
 
-    protected check_given_members_for_type(
+    module_private check_given_members_for_type(
         *mutable self,
         members List[GivenMember],
         target_type Type,
@@ -825,7 +825,7 @@ given TypeChecker {
         return out
     }
 
-    protected resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {
+    module_private resolve_given_return_type(self, return_type TypeNode, target_type Type) Type = {
         when return_type in {
             .InferredSelf() then { return target_type },
             _ then {},
@@ -953,7 +953,7 @@ given TypeChecker {
         return finalized
     }
 
-    protected make_method_scope(self, params List[TypedParam], self_type Type, type_params List[TypeParameter]) Scope = {
+    module_private make_method_scope(self, params List[TypedParam], self_type Type, type_params List[TypeParameter]) Scope = {
         let mutable scope = Scope.new_child(self.storage.current_scope)
         // 注入泛型类型参数
         for tp in type_params then {
@@ -983,7 +983,7 @@ given TypeChecker {
         return scope
     }
 
-    protected make_fn_scope(self, params List[TypedParam]) Scope = {
+    module_private make_fn_scope(self, params List[TypedParam]) Scope = {
         let mutable scope = Scope.new_child(self.storage.global_scope)
         for p in params then {
             let kind = SymbolKind.Variable(self.variable_kind_for_param_type(p.param_type, p.is_mutable))
@@ -993,7 +993,7 @@ given TypeChecker {
         return scope
     }
 
-    protected make_generic_fn_scope(self, params List[TypedParam], type_params List[TypeParameter]) Scope = {
+    module_private make_generic_fn_scope(self, params List[TypedParam], type_params List[TypeParameter]) Scope = {
         let mutable scope = Scope.new_child(self.storage.global_scope)
         for tp in type_params then {
             scope.define_generic_param(tp.name)

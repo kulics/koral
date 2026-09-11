@@ -65,19 +65,19 @@ given CodeGen {
         return self.concrete_type_c_name_fallback(t)
     }
 
-    protected vtable_method_return_type(self, member MIRTraitVTableMethod) Type = {
+    module_private vtable_method_return_type(self, member MIRTraitVTableMethod) Type = {
         let _ = self
         return member.return_type or else Type.VoidType()
     }
 
-    protected vtable_method_param_type(self, member MIRTraitVTableMethod, index UInt) Type = {
+    module_private vtable_method_param_type(self, member MIRTraitVTableMethod, index UInt) Type = {
         let _ = self
         return if index < member.parameters.count()
             then member.parameters[index].param_type or else Type.Unknown()
             else Type.Unknown()
     }
 
-    protected trait_member_has_receiver(self, member MIRTraitVTableMethod) Bool = {
+    module_private trait_member_has_receiver(self, member MIRTraitVTableMethod) Bool = {
         let _ = self
         if member.parameters.is_empty() then { return false }
         let first_param = member.parameters[0]
@@ -89,7 +89,7 @@ given CodeGen {
         return member.self_by_value
     }
 
-    protected vtable_method_needs_wrapper(self, concrete_type Type, member MIRTraitVTableMethod, actual_method_def_id DefId) Bool = {
+    module_private vtable_method_needs_wrapper(self, concrete_type Type, member MIRTraitVTableMethod, actual_method_def_id DefId) Bool = {
         if self.actual_method_needs_wrapper(member) then {
             return true
         }
@@ -98,7 +98,7 @@ given CodeGen {
         return layout_key(self.unwrap_vtable_receiver_value_type(concrete_type)) <> layout_key(self.unwrap_vtable_receiver_value_type(actual_self_type))
     }
 
-    protected trait_member_type_bindings(self, trait_name String, concrete_type Type, trait_type_args List[* Type]) Dict[String, Type] = {
+    module_private trait_member_type_bindings(self, trait_name String, concrete_type Type, trait_type_args List[* Type]) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new()
         bindings.insert("Self", concrete_type)
 
@@ -115,7 +115,7 @@ given CodeGen {
         return bindings
     }
 
-    protected resolve_vtable_named_type(self, name String, bindings Dict[String, Type]) Type = {
+    module_private resolve_vtable_named_type(self, name String, bindings Dict[String, Type]) Type = {
         when bindings.get(name) in {
             .Some(bound) then { return bound },
             .None() then {},
@@ -166,7 +166,7 @@ given CodeGen {
         }
     }
 
-    protected resolve_type_node_for_vtable(self, node TypeNode, bindings Dict[String, Type]) Type = {
+    module_private resolve_type_node_for_vtable(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
             .Identifier(name) then self.resolve_vtable_named_type(name, bindings),
             .Reference(inner, is_mutable) then {
@@ -224,7 +224,7 @@ given CodeGen {
         }
     }
 
-    protected resolve_trait_member_for_vtable(self, member TraitMember, trait_name String, concrete_type Type, trait_type_args List[* Type]) MIRTraitVTableMethod = {
+    module_private resolve_trait_member_for_vtable(self, member TraitMember, trait_name String, concrete_type Type, trait_type_args List[* Type]) MIRTraitVTableMethod = {
         let bindings = self.trait_member_type_bindings(trait_name, concrete_type, trait_type_args)
         let mutable bound_params = List[MIRTraitVTableParameter].new()
         let mutable self_by_value = false
@@ -252,7 +252,7 @@ given CodeGen {
         return MIRTraitVTableMethod(member.name, Option[Type].Some(bound_return_type), bound_params, self_by_value)
     }
 
-    protected resolve_trait_members_for_vtable(self, members List[TraitMember], trait_name String, concrete_type Type, trait_type_args List[* Type]) List[MIRTraitVTableMethod] = {
+    module_private resolve_trait_members_for_vtable(self, members List[TraitMember], trait_name String, concrete_type Type, trait_type_args List[* Type]) List[MIRTraitVTableMethod] = {
         let mutable bound_members = List[MIRTraitVTableMethod].new()
         for member in members then {
             bound_members.push(self.resolve_trait_member_for_vtable(member, trait_name, concrete_type, trait_type_args))
@@ -280,7 +280,7 @@ given CodeGen {
         }
     }
 
-    protected unwrap_vtable_receiver_value_type(self, t Type) Type = {
+    module_private unwrap_vtable_receiver_value_type(self, t Type) Type = {
         let resolved = self.normalize_vtable_receiver_type(self.concretize_codegen_type(t))
         return when resolved in {
             .ReferenceType(inner) then self.normalize_vtable_receiver_type(self.concretize_codegen_type(*inner)),
@@ -295,7 +295,7 @@ given CodeGen {
         }
     }
 
-    protected is_ref_like_codegen_type(self, t Type) Bool = {
+    module_private is_ref_like_codegen_type(self, t Type) Bool = {
         return when t in {
             .ReferenceType(_) then true,
             .MutableReferenceType(_) then true,
@@ -315,7 +315,7 @@ given CodeGen {
         return layout_key(normalized_requested) == layout_key(normalized_candidate)
     }
 
-    protected trait_vtable_receiver_has_full_impl(self, trait_name String, concrete_type Type) Bool = {
+    module_private trait_vtable_receiver_has_full_impl(self, trait_name String, concrete_type Type) Bool = {
         let normalized_concrete_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type))
         let members = self.get_ordered_trait_members_for_vtable(trait_name, normalized_concrete_type, List[* Type].new())
         if members.is_empty() then {
@@ -329,7 +329,7 @@ given CodeGen {
         return true
     }
 
-    protected trait_vtable_receiver_type(self, trait_name String, concrete_type Type) Type = {
+    module_private trait_vtable_receiver_type(self, trait_name String, concrete_type Type) Type = {
         let direct_type = self.normalize_vtable_receiver_type(self.concretize_codegen_type(concrete_type))
         if self.trait_vtable_receiver_has_full_impl(trait_name, direct_type) then {
             return direct_type
@@ -344,7 +344,7 @@ given CodeGen {
     // ── 方法名解析 ────────────────────────────────────────────────────────────
 
     /// Convert List[* Type] to List[Type] for function calls
-    protected deref_type_list(self, types List[* Type]) List[Type] = {
+    module_private deref_type_list(self, types List[* Type]) List[Type] = {
         let mutable result = List[Type].new()
         for t in types then {
             result.push(*t)
@@ -388,7 +388,7 @@ given CodeGen {
         return Option[DefId].None()
     }
 
-    protected type_module_path(self, t Type) List[String] = {
+    module_private type_module_path(self, t Type) List[String] = {
         return when t in {
             .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
             .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
@@ -401,14 +401,14 @@ given CodeGen {
         }
     }
 
-    protected trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
+    module_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
         return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
         }
     }
 
-    protected require_bound_method_symbol(
+    module_private require_bound_method_symbol(
         self,
         def_id DefId,
         receiver_type Type,
@@ -419,7 +419,7 @@ given CodeGen {
             or else panic("CodeGen vtable error: unresolved concrete method symbol for \(error_context) (def #\(def_id.id))")
     }
 
-    protected vtable_member_signature_matches(self, def_id DefId, receiver_type Type, member MIRTraitVTableMethod) Bool = {
+    module_private vtable_member_signature_matches(self, def_id DefId, receiver_type Type, member MIRTraitVTableMethod) Bool = {
         return when self.context.get_function_type(def_id) in {
             .Some(raw_function_type) then {
                 let bound_function_type = self.bind_method_function_type(def_id, receiver_type, raw_function_type)
@@ -451,7 +451,7 @@ given CodeGen {
         }
     }
 
-    protected lookup_exact_concrete_vtable_method_symbol(
+    module_private lookup_exact_concrete_vtable_method_symbol(
         self,
         concrete_type Type,
         trait_name String,
@@ -484,7 +484,7 @@ given CodeGen {
         return Option[Symbol].None()
     }
 
-    protected resolve_vtable_method_symbol(
+    module_private resolve_vtable_method_symbol(
         self,
         concrete_type Type,
         trait_name String,
@@ -745,14 +745,14 @@ given CodeGen {
         return result
     }
 
-    protected trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) List[* Type] = {
+    module_private trait_args_for_concrete_vtable(self, trait_name String, concrete_type Type) List[* Type] = {
         let _ = self
         let _ = trait_name
         let _ = concrete_type
         return List[* Type].new()
     }
 
-    protected overlay_concrete_trait_member_signatures(
+    module_private overlay_concrete_trait_member_signatures(
         self,
         members List[MIRTraitVTableMethod],
         trait_name String,
@@ -822,7 +822,7 @@ given CodeGen {
         return resolved_members
     }
 
-    protected collect_instantiated_trait_members_for_vtable(
+    module_private collect_instantiated_trait_members_for_vtable(
         self,
         trait_name String,
         concrete_type Type,
@@ -852,7 +852,7 @@ given CodeGen {
         }
     }
 
-    protected trait_vtable_binding_visit_key(self, trait_name String, bindings Dict[String, Type]) String = {
+    module_private trait_vtable_binding_visit_key(self, trait_name String, bindings Dict[String, Type]) String = {
         let mutable key = trait_name
         when self.program.traits.get(trait_name) in {
             .Some(trait_info) then {
@@ -870,7 +870,7 @@ given CodeGen {
         return key
     }
 
-    protected parent_trait_bindings_for_vtable(self, parent ParentTraitConstraint, concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
+    module_private parent_trait_bindings_for_vtable(self, parent ParentTraitConstraint, concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
         let mutable result = Dict[String, Type].new()
         for entry in bindings then {
             result.insert(entry.first, entry.second)
@@ -890,7 +890,7 @@ given CodeGen {
         return result
     }
 
-    protected resolve_trait_member_for_vtable_with_bindings(self, member TraitMember, bindings Dict[String, Type]) MIRTraitVTableMethod = {
+    module_private resolve_trait_member_for_vtable_with_bindings(self, member TraitMember, bindings Dict[String, Type]) MIRTraitVTableMethod = {
         let mutable bound_params = List[MIRTraitVTableParameter].new()
         let mutable self_by_value = false
         let mutable param_index UInt = 0
@@ -921,14 +921,14 @@ given CodeGen {
         return self.get_ordered_trait_members_for_vtable(trait_name, self.trait_object_type_from_name(trait_name), List[* Type].new())
     }
 
-    protected mir_type_args_to_ref_list(self, args List[Type]) List[* Type] = {
+    module_private mir_type_args_to_ref_list(self, args List[Type]) List[* Type] = {
         let _ = self
         let mutable out = List[* Type].new()
         for arg in args then { out.push(box(arg)) }
         return out
     }
 
-    protected trait_target_type_name(self, t Type) Option[String] = {
+    module_private trait_target_type_name(self, t Type) Option[String] = {
         return when t in {
             .TraitObject(trait_name, _) then Option[String].Some(trait_name),
             .ReferenceType(inner) then self.trait_target_type_name(*inner),
@@ -939,7 +939,7 @@ given CodeGen {
         }
     }
 
-    protected trait_target_type_args(self, t Type) List[* Type] = {
+    module_private trait_target_type_args(self, t Type) List[* Type] = {
         return when t in {
             .TraitObject(_, args) then args,
             .ReferenceType(inner) then self.trait_target_type_args(*inner),
@@ -950,7 +950,7 @@ given CodeGen {
         }
     }
 
-    protected trait_conversion_source_concrete_type(self, t Type) Option[Type] = {
+    module_private trait_conversion_source_concrete_type(self, t Type) Option[Type] = {
         let _ = self
         return when t in {
             .ReferenceType(inner) then if *inner is .TraitObject(_, _)
@@ -969,7 +969,7 @@ given CodeGen {
         }
     }
 
-    protected mir_local_type_map(self, function MIRFunction) Dict[UInt, Type] = {
+    module_private mir_local_type_map(self, function MIRFunction) Dict[UInt, Type] = {
         let _ = self
         let mutable local_types = Dict[UInt, Type].new()
         for local in function.locals then {
@@ -978,7 +978,7 @@ given CodeGen {
         return local_types
     }
 
-    protected mir_type_of_operand(self, operand MIROperand, local_types Dict[UInt, Type]) Type = {
+    module_private mir_type_of_operand(self, operand MIROperand, local_types Dict[UInt, Type]) Type = {
         let _ = self
         return when operand in {
             .Local(local) then local_types.get(local.raw_value) or else Type.Unknown(),
@@ -993,7 +993,7 @@ given CodeGen {
         }
     }
 
-    protected mir_type_of_place(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
+    module_private mir_type_of_place(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
         return when place in {
             .Local(local) then local_types.get(local.raw_value) or else Type.Unknown(),
             .Field(_, field) then field.symbol_type,
@@ -1004,7 +1004,7 @@ given CodeGen {
         }
     }
 
-    protected mir_type_of_value(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
+    module_private mir_type_of_value(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
         return when value in {
             .Operand(operand) then self.mir_type_of_operand(operand, local_types),
             .PlaceRead(place, _) then self.mir_type_of_place(place, local_types),
@@ -1041,7 +1041,7 @@ given CodeGen {
         }
     }
 
-    protected collect_implicit_trait_object_vtable_request(
+    module_private collect_implicit_trait_object_vtable_request(
         self,
         source_type Type,
         target_type Type,
@@ -1065,7 +1065,7 @@ given CodeGen {
         }
     }
 
-    protected collect_implicit_trait_object_vtable_requests_in_statement(
+    module_private collect_implicit_trait_object_vtable_requests_in_statement(
         self,
         statement MIRStatement,
         local_types Dict[UInt, Type],
@@ -1081,7 +1081,7 @@ given CodeGen {
         }
     }
 
-    protected collect_trait_object_conversions_in_intrinsic(*self, node MIRIntrinsic, out *mutable List[MIRTraitObjectConversion]) Void = {
+    module_private collect_trait_object_conversions_in_intrinsic(*self, node MIRIntrinsic, out *mutable List[MIRTraitObjectConversion]) Void = {
         when node in {
             .AllocMemory(count, _) then self.collect_trait_object_conversions_in_value(*count, out),
             .DeallocMemory(pointer) then self.collect_trait_object_conversions_in_value(*pointer, out),
@@ -1127,7 +1127,7 @@ given CodeGen {
         }
     }
 
-    protected collect_trait_object_conversions_in_value(*self, value MIRValue, out *mutable List[MIRTraitObjectConversion]) Void = {
+    module_private collect_trait_object_conversions_in_value(*self, value MIRValue, out *mutable List[MIRTraitObjectConversion]) Void = {
         when value in {
             .Call(call) then {
                 for argument in call.arguments then {
@@ -1160,7 +1160,7 @@ given CodeGen {
         }
     }
 
-    protected collect_trait_object_conversions_in_statement(*self, statement MIRStatement, out *mutable List[MIRTraitObjectConversion]) Void = {
+    module_private collect_trait_object_conversions_in_statement(*self, statement MIRStatement, out *mutable List[MIRTraitObjectConversion]) Void = {
         when statement in {
             .Assign(_, value) then self.collect_trait_object_conversions_in_value(value, out),
             .CompoundAssign(assignment) then self.collect_trait_object_conversions_in_value(assignment.value, out),
@@ -1171,7 +1171,7 @@ given CodeGen {
         }
     }
 
-    protected collect_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
+    module_private collect_mir_vtable_codegen_requests(self) List[VtableCodegenRequest] = {
         let mutable requests = List[VtableCodegenRequest].new()
         for global in self.program.globals then {
             when global in {

@@ -89,8 +89,8 @@ extension TypeChecker {
       )
     }
 
-    let access = defIdMap.getAccess(templateDefId) ?? .protected
-    if access == .private {
+    let access = defIdMap.getAccess(templateDefId) ?? .module_private
+    if access == .file_private {
       throw SemanticError(
         .generic("Type '\(templateName)' is not a public type of module '\(moduleName)'"),
         span: currentSpan
@@ -103,19 +103,19 @@ extension TypeChecker {
     templateDefId: DefId
   ) throws {
     let modulePath = context.getModulePath(templateDefId) ?? []
-    let access = context.getAccess(templateDefId) ?? .protected
+    let access = context.getAccess(templateDefId) ?? .module_private
 
     switch access {
-    case .private:
+    case .file_private:
       let defSourceFile = context.getSourceFile(templateDefId) ?? ""
       guard isSameSourceFile(defSourceFile, currentSourceFile) else {
         throw SemanticError.undefinedType(templateName)
       }
-    case .protected:
+    case .module_private:
       guard modulePath == currentModulePath else {
         throw SemanticError.undefinedType(templateName)
       }
-    case .protectedPublic:
+    case .package_private:
       guard !currentPackageID.isEmpty,
             context.getPackageID(templateDefId) == currentPackageID else {
         throw SemanticError.undefinedType(templateName)

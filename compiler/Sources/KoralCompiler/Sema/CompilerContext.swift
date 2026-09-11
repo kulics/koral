@@ -82,7 +82,7 @@ public final class CompilerContext: @unchecked Sendable {
         name: String,
         kind: DefKind,
         sourceFile: String,
-        access: AccessModifier = .protected,
+        access: AccessModifier = .module_private,
         packageID: String = "",
         span: SourceSpan = .unknown
     ) -> DefId {
@@ -103,7 +103,7 @@ public final class CompilerContext: @unchecked Sendable {
         sourceFile: String,
         type: Type,
         kind: SymbolKind,
-        access: AccessModifier = .protected,
+        access: AccessModifier = .module_private,
         span: SourceSpan = .unknown,
         packageID: String = "",
         isMutable: Bool = false
@@ -125,7 +125,7 @@ public final class CompilerContext: @unchecked Sendable {
         }
 
         let defId: DefId
-        if access == .private {
+        if access == .file_private {
             defId = defIdMap.lookupExact(
                 modulePath: modulePath,
                 name: name,
@@ -458,7 +458,7 @@ public final class CompilerContext: @unchecked Sendable {
         if !metadata.modulePath.isEmpty {
             parts.append(metadata.modulePath.joined(separator: "_"))
         }
-        if metadata.access == .private {
+        if metadata.access == .file_private {
             var hash: UInt32 = 0
             for char in metadata.sourceFile.utf8 {
                 hash = hash &* 31 &+ UInt32(char)

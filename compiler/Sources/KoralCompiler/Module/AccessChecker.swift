@@ -4,8 +4,8 @@ import Foundation
 
 /// 访问控制错误类型
 public enum AccessError: Error, CustomStringConvertible {
-    case privateAccess(symbol: String, span: SourceSpan)
-    case protectedAccess(symbol: String, definedIn: [String], accessedFrom: [String], span: SourceSpan)
+    case filePrivateAccess(symbol: String, span: SourceSpan)
+    case modulePrivateAccess(symbol: String, definedIn: [String], accessedFrom: [String], span: SourceSpan)
     case cannotReexportExternal(path: [String], span: SourceSpan)
     case insufficientTypeVisibility(
         symbol: String,
@@ -18,13 +18,13 @@ public enum AccessError: Error, CustomStringConvertible {
     
     public var description: String {
         switch self {
-        case .privateAccess(let symbol, let span):
-            return "\(span): Cannot access private symbol '\(symbol)'"
+        case .filePrivateAccess(let symbol, let span):
+            return "\(span): Cannot access file_private symbol '\(symbol)'"
             
-        case .protectedAccess(let symbol, let definedIn, let accessedFrom, let span):
+        case .modulePrivateAccess(let symbol, let definedIn, let accessedFrom, let span):
             let definedPath = definedIn.isEmpty ? "<root>" : definedIn.joined(separator: ".")
             let accessPath = accessedFrom.isEmpty ? "<root>" : accessedFrom.joined(separator: ".")
-            return "\(span): Cannot access protected symbol '\(symbol)' defined in '\(definedPath)' from '\(accessPath)'"
+            return "\(span): Cannot access module_private symbol '\(symbol)' defined in '\(definedPath)' from '\(accessPath)'"
             
         case .cannotReexportExternal(let path, let span):
             return "\(span): Cannot re-export external module symbol '\(path.joined(separator: "."))'"
@@ -71,10 +71,10 @@ public class AccessChecker {
             // public 符号总是可访问
             return
             
-        case .protected:
-            // protected 符号只能从定义模块内部访问
+        case .module_private:
+            // module_private 符号只能从定义模块内部访问
             if from.path != definedIn.path {
-                throw AccessError.protectedAccess(
+                throw AccessError.modulePrivateAccess(
                     symbol: symbolName,
                     definedIn: definedIn.path,
                     accessedFrom: from.path,
@@ -82,11 +82,11 @@ public class AccessChecker {
                 )
             }
 
-        case .protectedPublic:
-            // The standalone AccessChecker does not carry package identity.
-            // Callers that need package-scoped checks should use DefId metadata.
+        case .package_private:
+            // package_private 默认仍受模块边界约束。
+            // 后续如果需要跨包边界细化，再扩展 package 元数据。
             if from.path != definedIn.path {
-                throw AccessError.protectedAccess(
+                throw AccessError.modulePrivateAccess(
                     symbol: symbolName,
                     definedIn: definedIn.path,
                     accessedFrom: from.path,
@@ -94,10 +94,10 @@ public class AccessChecker {
                 )
             }
             
-        case .private:
-            // private 符号只能从同一文件访问
+        case .file_private:
+            // file_private 符号只能从同一文件访问
             if definedInFile != fromFile {
-                throw AccessError.privateAccess(
+                throw AccessError.filePrivateAccess(
                     symbol: symbolName,
                     span: span
                 )
@@ -140,9 +140,9 @@ public class AccessChecker {
     /// - Returns: 是否满足要求
     private func isAtLeast(_ actual: AccessModifier, _ required: AccessModifier) -> Bool {
         let order: [AccessModifier: Int] = [
-            .private: 0,
-            .protected: 1,
-            .protectedPublic: 2,
+            .file_private: 0,
+            .module_private: 1,
+            .package_private: 2,
             .public: 3
         ]
         
@@ -194,22 +194,22 @@ public class AccessChecker {
     public static func defaultAccess(for node: GlobalNode) -> AccessModifier {
         switch node {
         case .usingDeclaration:
-            return .private
+            return .file_private
             
-           case .globalFunctionDeclaration, .globalVariableDeclaration,
+        case .globalFunctionDeclaration, .globalVariableDeclaration,
                .globalStructDeclaration, .globalEnumDeclaration,
                .intrinsicFunctionDeclaration, .intrinsicTypeDeclaration,
                .foreignFunctionDeclaration, .foreignTypeDeclaration,
                .foreignLetDeclaration,
                .typeAliasDeclaration:
-            return .protected
+            return .module_private
             
         case .traitDeclaration:
-            return .protected
+            return .module_private
             
         case .givenDeclaration, .givenTraitDeclaration, .givenNotTraitDeclaration, .intrinsicGivenDeclaration:
             // given 声明本身没有访问修饰符，其方法有各自的访问修饰符
-            return .private
+            return .file_private
         }
     }
     
@@ -225,7 +225,7 @@ public class AccessChecker {
     
     /// 获取成员函数的默认访问修饰符
     public static func defaultAccessForMethod() -> AccessModifier {
-        return .protected
+        return .module_private
     }
     
     /// 获取 trait 方法的默认访问修饰符
@@ -235,6 +235,6 @@ public class AccessChecker {
     
     /// 获取 using 声明的默认访问修饰符
     public static func defaultAccessForUsing() -> AccessModifier {
-        return .private
+        return .file_private
     }
 }

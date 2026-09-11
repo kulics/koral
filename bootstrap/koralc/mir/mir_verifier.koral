@@ -20,7 +20,7 @@ given MIRVerifier {
         return Result[Void].Ok({})
     }
 
-    private verify_trait_vtable_inventory(self) Result[Void] = {
+    file_private verify_trait_vtable_inventory(self) Result[Void] = {
         let mutable seen = Set[String].new()
         for global in self.program.globals then {
             when global in {
@@ -37,14 +37,14 @@ given MIRVerifier {
         return Result[Void].Ok({})
     }
 
-    private verify_global(self, global MIRGlobal) Result[Void] = {
+    file_private verify_global(self, global MIRGlobal) Result[Void] = {
         return when global in {
             .TraitVTable(vtable) then self.verify_trait_vtable(vtable),
             _ then Result[Void].Ok({}),
         }
     }
 
-    private verify_trait_vtable(self, vtable MIRTraitVTable) Result[Void] = {
+    file_private verify_trait_vtable(self, vtable MIRTraitVTable) Result[Void] = {
         if vtable.trait_name.is_empty() then {
             return Result[Void].Error(box("MIR verification failed in trait vtable: empty trait name"))
         }
@@ -94,7 +94,7 @@ given MIRVerifier {
         return Result[Void].Ok({})
     }
 
-    private verify_function(self, function * MIRFunction) Result[Void] = {
+    file_private verify_function(self, function * MIRFunction) Result[Void] = {
         if function.blocks.is_empty() then {
             return self.fail(function, "function has no basic blocks")
         }
@@ -130,7 +130,7 @@ given MIRVerifier {
         return Result[Void].Ok({})
     }
 
-    private verify_statement(self, function * MIRFunction, statement * MIRStatement, block_ids Set[UInt], local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_statement(self, function * MIRFunction, statement * MIRStatement, block_ids Set[UInt], local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         let _ = block_ids
         return when statement in {
             .Declare(local_id) then self.verify_local_id(function, local_id, local_ids),
@@ -154,7 +154,7 @@ given MIRVerifier {
         }
     }
 
-    private verify_terminator(self, function * MIRFunction, terminator MIRTerminator, block_ids Set[UInt], local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_terminator(self, function * MIRFunction, terminator MIRTerminator, block_ids Set[UInt], local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when terminator in {
             .Goto(target) then self.verify_target(function, target, block_ids),
             .Branch(condition, then_block, else_block) then {
@@ -189,7 +189,7 @@ given MIRVerifier {
         }
     }
 
-    private verify_place(self, function * MIRFunction, place MIRPlace, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_place(self, function * MIRFunction, place MIRPlace, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when place in {
             .Local(local_id) then self.verify_local_id(function, local_id, local_ids),
             .Global(_) then Result[Void].Ok({}),
@@ -224,7 +224,7 @@ given MIRVerifier {
         }
     }
 
-    private verify_value(self, function * MIRFunction, value MIRValue, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_value(self, function * MIRFunction, value MIRValue, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when value in {
             .Operand(operand) then self.verify_operand(function, operand, local_ids, local_types),
             .PlaceRead(place, _) then self.verify_place(function, place, local_ids, local_types),
@@ -297,7 +297,7 @@ given MIRVerifier {
         }
     }
 
-    private verify_operand(self, function * MIRFunction, operand MIROperand, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_operand(self, function * MIRFunction, operand MIROperand, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         let _ = local_types
         return when operand in {
             .Local(local_id) then self.verify_local_id(function, local_id, local_ids),
@@ -308,7 +308,7 @@ given MIRVerifier {
         }
     }
 
-    private verify_intrinsic(self, function * MIRFunction, node MIRIntrinsic, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_intrinsic(self, function * MIRFunction, node MIRIntrinsic, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         return when node in {
             .TraitObjectMatches(value, trait_name, trait_type_args, concrete_type) then {
                 let _ = self.verify_value(function, *value, local_ids, local_types) or return
@@ -411,7 +411,7 @@ given MIRVerifier {
         }
     }
 
-    private verify_lambda(self, function * MIRFunction, lambda MIRLambda, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_lambda(self, function * MIRFunction, lambda MIRLambda, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         if self.program.context.contains_generic_parameter(lambda.lambda_type) then {
             return self.fail(function, "lambda has unresolved generic type")
         }
@@ -424,7 +424,7 @@ given MIRVerifier {
         return self.verify_function(lambda.function)
     }
 
-    private verify_trait_object_conversion(self, function * MIRFunction, conversion MIRTraitObjectConversion, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_trait_object_conversion(self, function * MIRFunction, conversion MIRTraitObjectConversion, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         if conversion.trait_name.is_empty() then {
             return self.fail(function, "trait object conversion has empty trait name")
         }
@@ -458,7 +458,7 @@ given MIRVerifier {
         return self.verify_value(function, *conversion.inner, local_ids, local_types)
     }
 
-    private verify_trait_method_call(self, function * MIRFunction, call MIRTraitMethodCall, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
+    file_private verify_trait_method_call(self, function * MIRFunction, call MIRTraitMethodCall, local_ids Set[UInt], local_types Dict[UInt, Type]) Result[Void] = {
         if call.trait_name.is_empty() then {
             return self.fail(function, "trait method call has empty trait name")
         }
@@ -504,21 +504,21 @@ given MIRVerifier {
         return Result[Void].Ok({})
     }
 
-    private verify_local_id(self, function * MIRFunction, local_id MIRLocalID, local_ids Set[UInt]) Result[Void] = {
+    file_private verify_local_id(self, function * MIRFunction, local_id MIRLocalID, local_ids Set[UInt]) Result[Void] = {
         if local_ids.contains(local_id.raw_value) then {
             return Result[Void].Ok({})
         }
         return self.fail(function, "use of unknown local \(local_id.raw_value.to_string())")
     }
 
-    private verify_target(self, function * MIRFunction, target MIRBlockID, block_ids Set[UInt]) Result[Void] = {
+    file_private verify_target(self, function * MIRFunction, target MIRBlockID, block_ids Set[UInt]) Result[Void] = {
         if block_ids.contains(target.raw_value) then {
             return Result[Void].Ok({})
         }
         return self.fail(function, "terminator targets missing block \(target.raw_value.to_string())")
     }
 
-    private lookup_vtable(self, concrete_type Type, trait_name String, trait_type_args List[Type]) Option[MIRTraitVTable] = {
+    file_private lookup_vtable(self, concrete_type Type, trait_name String, trait_type_args List[Type]) Option[MIRTraitVTable] = {
         for global in self.program.globals then {
             when global in {
                 .TraitVTable(vtable) then {
@@ -535,11 +535,11 @@ given MIRVerifier {
         return Option[MIRTraitVTable].None()
     }
 
-    private ordered_trait_method_names(self, trait_name String) List[String] = {
+    file_private ordered_trait_method_names(self, trait_name String) List[String] = {
         return self.ordered_trait_method_names_in_module(trait_name, List[String].new())
     }
 
-    private ordered_trait_method_names_in_module(self, trait_name String, preferred_module_path List[String]) List[String] = {
+    file_private ordered_trait_method_names_in_module(self, trait_name String, preferred_module_path List[String]) List[String] = {
         let mutable ordered = List[String].new()
         let mutable seen = Set[String].new()
         let mutable visited = Set[String].new()
@@ -547,18 +547,18 @@ given MIRVerifier {
         return ordered
     }
 
-    private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
+    file_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
         return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
         }
     }
 
-    private function_module_path(self, function * MIRFunction) List[String] = {
+    file_private function_module_path(self, function * MIRFunction) List[String] = {
         return self.program.context.get_module_path(function.identifier.def_id) or else List[String].new()
     }
 
-    private collect_ordered_trait_method_names(self, trait_name String, preferred_module_path List[String], ordered *mutable List[String], seen *mutable Set[String], visited *mutable Set[String]) Void = {
+    file_private collect_ordered_trait_method_names(self, trait_name String, preferred_module_path List[String], ordered *mutable List[String], seen *mutable Set[String], visited *mutable Set[String]) Void = {
         let _ = self
         let visit_key = qualified_trait_key(preferred_module_path, trait_name)
         if visited.contains(visit_key) then {
@@ -581,7 +581,7 @@ given MIRVerifier {
         }
     }
 
-    private trait_object_reference_info(self, t Type) Option[Pair[String, List[Type]]] = {
+    file_private trait_object_reference_info(self, t Type) Option[Pair[String, List[Type]]] = {
         return when t in {
             .TraitObject(trait_name, trait_args) then {
                 let mutable copied = List[Type].new()
@@ -596,7 +596,7 @@ given MIRVerifier {
         }
     }
 
-    private referenced_type(self, t Type) Option[Type] = {
+    file_private referenced_type(self, t Type) Option[Type] = {
         return when t in {
             .ReferenceType(inner) then Option[Type].Some(*inner),
             .MutableReferenceType(inner) then Option[Type].Some(*inner),
@@ -606,12 +606,12 @@ given MIRVerifier {
         }
     }
 
-    private same_type(self, left Type, right Type) Bool = {
+    file_private same_type(self, left Type, right Type) Bool = {
         let _ = self
         return left == right
     }
 
-    private type_list_equals(self, left List[Type], right List[Type]) Bool = {
+    file_private type_list_equals(self, left List[Type], right List[Type]) Bool = {
         let _ = self
         if left.count() <> right.count() then { return false }
         let mutable index UInt = 0
@@ -624,7 +624,7 @@ given MIRVerifier {
         return true
     }
 
-    private render_vtable_key(self, concrete_type Type, trait_name String, trait_type_args List[Type]) String = {
+    file_private render_vtable_key(self, concrete_type Type, trait_name String, trait_type_args List[Type]) String = {
         let mutable rendered = trait_name
         if not trait_type_args.is_empty() then {
             rendered.push_byte('<')
@@ -641,7 +641,7 @@ given MIRVerifier {
         return rendered
     }
 
-    private fail(self, function * MIRFunction, message String) Result[Void] = {
+    file_private fail(self, function * MIRFunction, message String) Result[Void] = {
         let name = self.program.context.symbol_name(*(function.identifier))
         let mutable full = "MIR verification failed in "
         full.push_string(name)
@@ -650,7 +650,7 @@ given MIRVerifier {
         return Result[Void].Error(box(full))
     }
 
-    private mir_local_type_map(self, function MIRFunction) Dict[UInt, Type] = {
+    file_private mir_local_type_map(self, function MIRFunction) Dict[UInt, Type] = {
         let mutable local_types = Dict[UInt, Type].new()
         for local in function.locals then {
             local_types.insert(local.id.raw_value, local.local_type)
@@ -658,7 +658,7 @@ given MIRVerifier {
         return local_types
     }
 
-    private mir_type_of_operand(self, operand MIROperand, local_types Dict[UInt, Type]) Type = {
+    file_private mir_type_of_operand(self, operand MIROperand, local_types Dict[UInt, Type]) Type = {
         let _ = self
         return when operand in {
             .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
@@ -673,7 +673,7 @@ given MIRVerifier {
         }
     }
 
-    private mir_type_of_place(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
+    file_private mir_type_of_place(self, place MIRPlace, local_types Dict[UInt, Type]) Type = {
         let _ = self
         return when place in {
             .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(),
@@ -685,7 +685,7 @@ given MIRVerifier {
         }
     }
 
-    private mir_type_of_value(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
+    file_private mir_type_of_value(self, value MIRValue, local_types Dict[UInt, Type]) Type = {
         return when value in {
             .Operand(operand) then self.mir_type_of_operand(operand, local_types),
             .PlaceRead(place, _) then self.mir_type_of_place(place, local_types),

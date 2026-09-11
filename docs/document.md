@@ -2050,11 +2050,9 @@ Koral provides four access levels to control symbol visibility:
 | Modifier | Visibility |
 |----------|------------|
 | `public` | Accessible from anywhere |
-| `protected public` | Accessible from any module in the same package |
-| `protected` | Accessible within the current logical module |
-| `private` | Accessible only within the same file |
-
-`protected public` is a single composite access modifier. Only the exact order `protected public` is valid; `public protected` is invalid.
+| `package_private` | Accessible from any module in the same package |
+| `module_private` | Accessible within the current logical module |
+| `file_private` | Accessible only within the same file |
 
 Package scope follows the manifest graph: the root package, `std`, and each dependency package are separate package boundaries.
 
@@ -2062,14 +2060,14 @@ Package scope follows the manifest graph: the root package, `std`, and each depe
 
 | Declaration | Default |
 |-------------|---------|
-| Global functions, variables, types | `protected` |
+| Global functions, variables, types | `module_private` |
 | Struct fields | `public` |
 | Enum constructor fields | `public` |
-| Member functions (in `given` blocks) | `protected` |
+| Member functions (in `given` blocks) | `module_private` |
 | Trait methods | `public` |
 
 Direct struct construction `Type(...)` is only allowed when all referenced fields are visible at the call site.
-If a type has inaccessible `private`/`protected`/`protected public` fields, use an exposed public factory method.
+If a type has inaccessible `file_private`/`module_private`/`package_private` fields, use an exposed public factory method.
 
 ### Project Structure Example
 

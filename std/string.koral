@@ -9,7 +9,7 @@
 // ============================================================================
 
 // Internal storage for String (COW semantics)
-protected public type StringStorage(mutable data *unsafe mutable UInt8, mutable len UInt, mutable cap UInt)
+package_private type StringStorage(mutable data *unsafe mutable UInt8, mutable len UInt, mutable cap UInt)
 
 given StringStorage as Drop {
 
@@ -19,16 +19,16 @@ given StringStorage as Drop {
 }
 
 // String type with COW semantics
-public type String(protected public mutable storage *mutable StringStorage)
+public type String(package_private mutable storage *mutable StringStorage)
 
 // String iterator types
-public type StringSplitAsciiWhitespaceIterator(protected source String, protected mutable index UInt)
+public type StringSplitAsciiWhitespaceIterator(module_private source String, module_private mutable index UInt)
 
-public type StringSplitIterator(protected source String, protected sep String, protected mutable index UInt)
+public type StringSplitIterator(module_private source String, module_private sep String, module_private mutable index UInt)
 
-public type StringLinesIterator(protected source String, protected mutable index UInt)
+public type StringLinesIterator(module_private source String, module_private mutable index UInt)
 
-public type StringBytesIterator(protected source String, protected mutable index UInt)
+public type StringBytesIterator(module_private source String, module_private mutable index UInt)
 
 // ============================================================================
 // String Methods
@@ -46,13 +46,13 @@ given String {
     }
 
     // Unsafe constructor for compiler lowering: takes ownership of an allocated UTF-8 buffer.
-    protected public from_owned_utf8_ptr_unchecked(bytes *unsafe mutable UInt8, len UInt, cap UInt) String = {
+    package_private from_owned_utf8_ptr_unchecked(bytes *unsafe mutable UInt8, len UInt, cap UInt) String = {
         let storage = box(StringStorage(bytes, len, cap))
         return String(storage)
     }
 
     // Validate UTF-8 byte sequence (strict)
-    private validate_utf8(bytes *unsafe UInt8, len UInt) Bool = {
+    file_private validate_utf8(bytes *unsafe UInt8, len UInt) Bool = {
         let mutable i UInt = 0
         while i < len then {
             let b0 = bytes[i]
@@ -173,7 +173,7 @@ given String {
     }
 
     // Using comparison patterns for ASCII space check
-    private is_ascii_space(b UInt8) Bool = {
+    file_private is_ascii_space(b UInt8) Bool = {
         if b == ' ' then { return true }
         if b == '\t' then { return true }
         if b == '\n' then { return true }
@@ -183,19 +183,19 @@ given String {
         return false
     }
 
-    private bounds_check_read(*self, index UInt) Void = {
+    file_private bounds_check_read(*self, index UInt) Void = {
         if index > self.storage.len then {
             panic("String index out of bounds")
         }
     }
 
-    private bounds_check_write(*self, index UInt) Void = {
+    file_private bounds_check_write(*self, index UInt) Void = {
         if index >= self.storage.len then {
             panic("String index out of bounds")
         }
     }
 
-    private ensure_unique(*mutable self) Void = {
+    file_private ensure_unique(*mutable self) Void = {
         if not is_unique_mutable(&unsafe self.storage) then {
             let old = self.storage
             let new_data = alloc_memory[UInt8](old.cap)
@@ -205,7 +205,7 @@ given String {
         }
     }
 
-    private ensure_capacity(*mutable self, min_cap UInt) Void = {
+    file_private ensure_capacity(*mutable self, min_cap UInt) Void = {
         if self.storage.cap >= min_cap then {
             return
         }
@@ -241,7 +241,7 @@ given String {
         return Option[UInt8].Some(self.storage.data[index])
     }
 
-    private __index_get(*self, key UInt) UInt8 = {
+    file_private __index_get(*self, key UInt) UInt8 = {
         if key >= self.storage.len then {
             panic("String index out of bounds")
         }
@@ -329,7 +329,7 @@ given String {
         return result
     }
 
-    private make_substring(*self, start UInt, len UInt) String = {
+    file_private make_substring(*self, start UInt, len UInt) String = {
         if start + len > self.storage.len then {
             panic("substring out of bounds")
         }
@@ -341,7 +341,7 @@ given String {
         return String(storage)
     }
 
-    private is_utf8_continuation_byte(b UInt8) Bool = (b & 192) == 128
+    file_private is_utf8_continuation_byte(b UInt8) Bool = (b & 192) == 128
 
     public is_rune_boundary(*self, byte_index UInt) Bool = {
         if byte_index > self.storage.len then {
@@ -353,7 +353,7 @@ given String {
         return not String.is_utf8_continuation_byte(self.storage.data[byte_index])
     }
 
-    private validate_substring_bounds(*self, start UInt, end UInt) Void = {
+    file_private validate_substring_bounds(*self, start UInt, end UInt) Void = {
         if start > end then {
             panic("substring invalid range")
         }
@@ -494,8 +494,8 @@ given String {
     }
 
     // Using comparison patterns for case conversion
-    private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and b is <= 90 then b + 32 else b
-    private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and b is <= 122 then b - 32 else b
+    file_private to_lower_byte(b UInt8) UInt8 = if b is >= 65 and b is <= 90 then b + 32 else b
+    file_private to_upper_byte(b UInt8) UInt8 = if b is >= 97 and b is <= 122 then b - 32 else b
 
     public to_ascii_lowercase(*self) String = {
         let cap = self.storage.len + 1
@@ -914,7 +914,7 @@ given StringLinesIterator as Iterator[String] {
 // ============================================================================
 
 // Iterator type for rune iteration (provides next() method)
-public type StringRunesIterator(protected source String, protected mutable byte_index UInt)
+public type StringRunesIterator(module_private source String, module_private mutable byte_index UInt)
 
 given StringRunesIterator as Iterator[Rune] {
 

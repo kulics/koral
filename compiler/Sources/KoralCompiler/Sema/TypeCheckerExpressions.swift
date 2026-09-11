@@ -1753,7 +1753,7 @@ extension TypeChecker {
         name: name,
         kind: fallbackDefKind,
         sourceFile: symbolSourceFile,
-        access: info.isPrivate ? .private : .protected,
+        access: info.isPrivate ? .file_private : .module_private,
         packageID: currentPackageID,
         span: currentSpan
       )
@@ -5208,7 +5208,7 @@ extension TypeChecker {
           // Check field visibility
           if !isFieldAccessibleForMemberAccess(fieldAccess: mem.access, defId: defId) {
             let structName = context.getName(defId) ?? typeToLookup.description
-            let accessLabel = mem.access == .private ? "private" : "protected"
+            let accessLabel = mem.access.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(memberName)' of type '\(structName)'"
             ), span: currentSpan)
@@ -5237,7 +5237,7 @@ extension TypeChecker {
             // Check field visibility
             if !isFieldAccessibleForMemberAccess(fieldAccess: param.access, defId: template.defId) {
               let fieldAccess = param.access
-              let accessLabel = fieldAccess == .private ? "private" : "protected"
+              let accessLabel = fieldAccess.description
               throw SemanticError(.generic(
                 "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
               ), span: currentSpan)
@@ -5355,15 +5355,15 @@ extension TypeChecker {
     switch fieldAccess {
     case .public:
       return true
-    case .private:
-      // Private: only accessible from the same file
+    case .file_private:
+      // file_private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return defSourceFile == currentSourceFile
-    case .protected:
+    case .module_private:
       // Protected: accessible from the same logical module only.
       let defModulePath = context.getModulePath(defId) ?? []
       return defModulePath == currentModulePath
-    case .protectedPublic:
+    case .package_private:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(defId) == currentPackageID
     }
@@ -5373,7 +5373,7 @@ extension TypeChecker {
     guard let methodAccess = context.getAccess(method.defId) else {
       return true
     }
-    guard methodAccess == .private else {
+    guard methodAccess == .file_private else {
       return true
     }
     let defSourceFile = context.getSourceFile(method.defId) ?? ""
@@ -5381,12 +5381,12 @@ extension TypeChecker {
   }
 
   private func ensureMethodAccessibleForMemberAccess(_ method: Symbol, memberName: String) throws {
-    guard context.getAccess(method.defId) == .private,
+    guard context.getAccess(method.defId) == .file_private,
           !isMethodAccessibleForMemberAccess(method) else {
       return
     }
 
-    throw SemanticError(.generic("Cannot access private method '\(memberName)'"), span: currentSpan)
+    throw SemanticError(.generic("Cannot access file_private method '\(memberName)'"), span: currentSpan)
   }
 
   private func makeCallableValueLambda(
@@ -5763,7 +5763,7 @@ extension TypeChecker {
           name: memberName,
           type: expectedType,
           kind: .function,
-          access: .protected
+          access: .module_private
         )
 
         // Register named parameter info from the trait method signature
@@ -7209,7 +7209,7 @@ extension TypeChecker {
           // Check field visibility
           if !isFieldAccessibleForMemberAccess(fieldAccess: member.access, defId: defId) {
             let structName = context.getName(defId) ?? typeToLookup.description
-            let accessLabel = member.access == .private ? "private" : "protected"
+            let accessLabel = member.access.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(memberName)' of type '\(structName)'"
             ), span: currentSpan)
@@ -7260,7 +7260,7 @@ extension TypeChecker {
           // Check field visibility
           let fieldAccess = param.access
           if !isFieldAccessibleForMemberAccess(fieldAccess: fieldAccess, defId: template.defId) {
-            let accessLabel = fieldAccess == .private ? "private" : "protected"
+            let accessLabel = fieldAccess.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(memberName)' of type '\(templateName)'"
             ), span: currentSpan)

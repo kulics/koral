@@ -1,5 +1,5 @@
 given TypeChecker {
-    protected should_defer_explicit_trait_check(self, t Type) Bool = {
+    module_private should_defer_explicit_trait_check(self, t Type) Bool = {
         return when t in {
             .Unknown() then true,
             .TypeVar(_) then true,
@@ -8,7 +8,7 @@ given TypeChecker {
         }
     }
 
-    protected check_expr_scoped_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_expr_scoped_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         let skip_call_family_expr = if self.skip_call_family_debug_enabled() then when expr in {
             .Call(_, _, _) then true,
             .GenericMethodCall(_, _, _, _, _) then true,
@@ -81,7 +81,7 @@ given TypeChecker {
         return self.check_expr_core_ref(expr, expected, scope)
     }
 
-    protected flatten_left_assoc_and_operands(self, expr * Expr) List[* Expr] = {
+    module_private flatten_left_assoc_and_operands(self, expr * Expr) List[* Expr] = {
         let mutable reversed_tail = List[* Expr].new()
         let mutable current = expr
         while true then {
@@ -104,7 +104,7 @@ given TypeChecker {
         return operands
     }
 
-    protected flatten_left_assoc_or_operands(self, expr * Expr) List[* Expr] = {
+    module_private flatten_left_assoc_or_operands(self, expr * Expr) List[* Expr] = {
         let mutable reversed_tail = List[* Expr].new()
         let mutable current = expr
         while true then {
@@ -127,7 +127,7 @@ given TypeChecker {
         return operands
     }
 
-    protected check_and_expr_iterative(self, expr * Expr, scope Scope) TypedExpr = {
+    module_private check_and_expr_iterative(self, expr * Expr, scope Scope) TypedExpr = {
         let operands = self.flatten_left_assoc_and_operands(expr)
         let mutable typed_operands = List[* TypedExpr].new()
         for operand in operands then {
@@ -146,7 +146,7 @@ given TypeChecker {
         return current
     }
 
-    protected check_or_expr_iterative(self, expr * Expr, scope Scope) TypedExpr = {
+    module_private check_or_expr_iterative(self, expr * Expr, scope Scope) TypedExpr = {
         let operands = self.flatten_left_assoc_or_operands(expr)
         let mutable typed_operands = List[* TypedExpr].new()
         for operand in operands then {
@@ -165,7 +165,7 @@ given TypeChecker {
         return current
     }
 
-    protected collect_bitwise_chain(self, left * Expr, op BitwiseOperator, right * Expr) Pair[List[* Expr], List[BitwiseOperator]] = {
+    module_private collect_bitwise_chain(self, left * Expr, op BitwiseOperator, right * Expr) Pair[List[* Expr], List[BitwiseOperator]] = {
         let mutable ops_rev = List[BitwiseOperator].new()
         let mutable rhs_rev = List[* Expr].new()
         let mutable current_left = left
@@ -203,7 +203,7 @@ given TypeChecker {
         return Pair[List[* Expr], List[BitwiseOperator]](operands, ops)
     }
 
-    protected collect_if_chain(self, condition * Expr, then_branch * Expr, else_branch Option[* Expr]) IfChain = {
+    module_private collect_if_chain(self, condition * Expr, then_branch * Expr, else_branch Option[* Expr]) IfChain = {
         let mutable arms = List[Pair[* Expr, * Expr]].new()
         arms.push(Pair[* Expr, * Expr](condition, then_branch))
         let mutable current_else = else_branch
@@ -228,7 +228,7 @@ given TypeChecker {
         return IfChain(arms, Option[* Expr].None())
     }
 
-    protected pattern_contains_bindings(self, pattern * PatternNode) Bool = {
+    module_private pattern_contains_bindings(self, pattern * PatternNode) Bool = {
         let mutable names = Set[String].new()
         let mutable stack = List[* PatternNode].new()
         stack.push(pattern)
@@ -269,7 +269,7 @@ given TypeChecker {
         return not names.is_empty()
     }
 
-    protected check_for_loop_pattern_exhaustiveness(self, pattern * PatternNode, element_type Type) Void = {
+    module_private check_for_loop_pattern_exhaustiveness(self, pattern * PatternNode, element_type Type) Void = {
         when pattern in {
             .Variable(_, _, _) then { return },
             .Wildcard(_) then { return },
@@ -315,7 +315,7 @@ given TypeChecker {
         }
     }
 
-    protected condition_contains_is_with_bindings(self, expr * Expr) Bool = {
+    module_private condition_contains_is_with_bindings(self, expr * Expr) Bool = {
         return when expr in {
             .IsExpr(_, pattern, _) then self.pattern_contains_bindings(box(pattern)),
             .AndExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right),
@@ -328,7 +328,7 @@ given TypeChecker {
         }
     }
 
-    protected condition_contains_is_expression(self, expr * Expr) Bool = {
+    module_private condition_contains_is_expression(self, expr * Expr) Bool = {
         return when expr in {
             .IsExpr(_, _, _) then true,
             .AndExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(right),
@@ -341,7 +341,7 @@ given TypeChecker {
         }
     }
 
-    protected condition_requires_pattern_lowering(self, expr * Expr) Bool = {
+    module_private condition_requires_pattern_lowering(self, expr * Expr) Bool = {
         return when expr in {
             .IsExpr(_, _, _) then true,
             .AndExpr(left, right, _) then self.condition_requires_pattern_lowering(left) or self.condition_requires_pattern_lowering(right),
@@ -352,7 +352,7 @@ given TypeChecker {
         }
     }
 
-    protected check_or_branches_for_bindings(self, expr * Expr) Bool = {
+    module_private check_or_branches_for_bindings(self, expr * Expr) Bool = {
         return when expr in {
             .OrExpr(left, right, _) then {
                 let has_invalid_bindings = self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(right)
@@ -388,7 +388,7 @@ given TypeChecker {
         }
     }
 
-    protected flatten_and_chain_into(self, expr * Expr, out *mutable List[* Expr]) Void = {
+    module_private flatten_and_chain_into(self, expr * Expr, out *mutable List[* Expr]) Void = {
         when expr in {
             .AndExpr(left, right, _) then {
                 self.flatten_and_chain_into(left, out)
@@ -398,7 +398,7 @@ given TypeChecker {
         }
     }
 
-    protected expr_condition_span(self, expr * Expr) SourceSpan = {
+    module_private expr_condition_span(self, expr * Expr) SourceSpan = {
         return when expr in {
             .IsExpr(_, _, span) then span,
             .IsNotExpr(_, _, span) then span,
@@ -406,7 +406,7 @@ given TypeChecker {
         }
     }
 
-    protected make_if_expr_from_condition(self, condition * Expr, then_expr * Expr, else_expr Option[* Expr], fallback_span SourceSpan) * Expr = {
+    module_private make_if_expr_from_condition(self, condition * Expr, then_expr * Expr, else_expr Option[* Expr], fallback_span SourceSpan) * Expr = {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
@@ -423,7 +423,7 @@ given TypeChecker {
         }
     }
 
-    protected make_while_expr_from_condition(self, condition * Expr, body * Expr, fallback_span SourceSpan) * Expr = {
+    module_private make_while_expr_from_condition(self, condition * Expr, body * Expr, fallback_span SourceSpan) * Expr = {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span
@@ -437,7 +437,7 @@ given TypeChecker {
         }
     }
 
-    protected lower_if_condition_with_bindings(self, condition * Expr, then_expr * Expr, else_expr Option[* Expr], outer_span SourceSpan) Option[* Expr] = {
+    module_private lower_if_condition_with_bindings(self, condition * Expr, then_expr * Expr, else_expr Option[* Expr], outer_span SourceSpan) Option[* Expr] = {
         if self.check_or_branches_for_bindings(condition) then {
             return Option[* Expr].Some(box(Expr.IfExpr(box(Expr.BoolLiteral(false, outer_span)), then_expr, else_expr, outer_span)))
         }
@@ -480,7 +480,7 @@ given TypeChecker {
         return Option[* Expr].Some(lowered)
     }
 
-    protected lower_while_condition_with_bindings(self, condition * Expr, body * Expr, outer_span SourceSpan) Option[* Expr] = {
+    module_private lower_while_condition_with_bindings(self, condition * Expr, body * Expr, outer_span SourceSpan) Option[* Expr] = {
         if not self.condition_contains_is_expression(condition) then {
             return Option[* Expr].None()
         }
@@ -498,13 +498,13 @@ given TypeChecker {
         }
     }
 
-    protected make_break_block_expr(self, span SourceSpan) * Expr = {
+    module_private make_break_block_expr(self, span SourceSpan) * Expr = {
         let mutable statements = List[Statement].new()
         statements.push(Statement.BreakStmt(span))
         return box(Expr.Block(statements, span))
     }
 
-    protected lower_range_expr_from_typed(self, op RangeOperator, typed_left Option[* TypedExpr], typed_right Option[* TypedExpr], range_type Type) TypedExpr = {
+    module_private lower_range_expr_from_typed(self, op RangeOperator, typed_left Option[* TypedExpr], typed_right Option[* TypedExpr], range_type Type) TypedExpr = {
         let mutable args = List[* TypedExpr].new()
         let case_name = when op in {
             .Closed() then {
@@ -548,7 +548,7 @@ given TypeChecker {
         return self.lower_enum_constructor_expr(range_type, case_name, args)
     }
 
-    protected check_range_expr_ref(self, op RangeOperator, left Option[* Expr], right Option[* Expr], expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_range_expr_ref(self, op RangeOperator, left Option[* Expr], right Option[* Expr], expected Option[Type], scope Scope) TypedExpr = {
         let expected_element_type = when expected in {
             .Some(et) then when et in {
                 .GenericEnum(template, args) then {

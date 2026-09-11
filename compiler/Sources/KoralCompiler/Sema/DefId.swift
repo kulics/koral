@@ -445,14 +445,14 @@ public class DefIdMap {
         name: String,
         kind: DefKind,
         sourceFile: String,
-        access: AccessModifier = .protected,
+        access: AccessModifier = .module_private,
         packageID: String = "",
         span: SourceSpan = .unknown
     ) -> DefId {
         let isLocalSymbol = modulePath.isEmpty && sourceFile.isEmpty && kind == .variable
 
         // Reuse existing DefId for non-local symbols when possible
-        if access == .private {
+        if access == .file_private {
             let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
             if let existing = nameToDefId[keyWithFile],
                let metadata = idToMetadata[existing.id],
@@ -480,7 +480,7 @@ public class DefIdMap {
             let keyWithFile = makeKey(modulePath: modulePath, name: name, sourceFile: sourceFile)
             nameToDefId[keyWithFile] = defId
 
-            if access != .private {
+            if access != .file_private {
                 let keyWithoutFile = makeKey(modulePath: modulePath, name: name, sourceFile: nil)
                 nameToDefId[keyWithoutFile] = defId
             }
@@ -500,7 +500,7 @@ public class DefIdMap {
         let keyWithFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: metadata.sourceFile)
         nameToDefId[keyWithFile] = defId
 
-        if metadata.access != .private {
+        if metadata.access != .file_private {
             let keyWithoutFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: nil)
             nameToDefId[keyWithoutFile] = defId
         }
@@ -728,7 +728,7 @@ public class DefIdMap {
         guard let metadata = idToMetadata[defId.id] else {
             return nil
         }
-        let isPrivate = metadata.access == .private
+        let isPrivate = metadata.access == .file_private
         return generateCIdentifier(
             modulePath: metadata.modulePath,
             name: metadata.name,

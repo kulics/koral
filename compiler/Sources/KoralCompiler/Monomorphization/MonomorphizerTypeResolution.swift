@@ -517,7 +517,7 @@ extension Monomorphizer {
                     kind: method.identifier.kind,
                     modulePath: semanticMethodModulePath(ownerType: resolvedType, trait: resolvedTrait, methodTypeArgs: []),
                     sourceFile: context.getSourceFile(method.identifier.defId) ?? "",
-                    access: context.getAccess(method.identifier.defId) ?? .protected
+                    access: context.getAccess(method.identifier.defId) ?? .module_private
                 )
 
                 let entry = ConcreteMethodEntry(symbol: remappedIdentifier, trait: resolvedTrait)

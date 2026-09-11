@@ -19,7 +19,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 - 基于 Trait 的多态，支持 Trait 对象实现运行时分发。
 - 一等函数、Lambda 表达式和闭包。
 - 多范式编程（函数式与命令式结合）。
-- 模块系统，支持访问控制（`public` / `protected public` / `protected` / `private`）。
+- 模块系统，支持访问控制（`public` / `package_private` / `module_private` / `file_private`）。当前仍兼容旧写法 `protected` / `private`，推荐使用新关键字。
 - 外部函数接口（FFI），与 C 语言无缝互操作。
 - C 后端，广泛的平台兼容性。
 
@@ -2074,7 +2074,7 @@ using std::io { .. }
 
 说明：
 
-1. `using module { symbol-list }` 只导入对当前文件可见的符号：任意 package 的 `public`，以及同一 package 内的 `protected public`。
+1. `using module { symbol-list }` 只导入对当前文件可见的符号：任意 package 的 `public`，以及同一 package 内的 `package_private`。
 2. `as` 作用于单个导入符号，而不是整个模块。
 3. `using module { .. }` 导入该模块对当前文件全部可见的符号，且 `..` 必须单独出现。
 4. 导入名只在当前文件内可见，不会自动再导出。
@@ -2089,11 +2089,9 @@ Koral 提供四种访问级别来控制符号可见性：
 | 修饰符 | 可见性 |
 |--------|--------|
 | `public` | 任何地方都可访问 |
-| `protected public` | 同一 package 内任意 module 可访问 |
-| `protected` | 当前逻辑 module 内可访问 |
-| `private` | 仅在同一文件内可访问 |
-
-`protected public` 是一个复合访问修饰符，只接受精确顺序 `protected public`，`public protected` 非法。
+| `package_private` | 同一 package 内任意 module 可访问 |
+| `module_private` | 当前逻辑 module 内可访问 |
+| `file_private` | 仅在同一文件内可访问 |
 
 package 边界按 manifest 图划分：根 package、`std`、以及每个 dependency package 各自独立。
 
@@ -2101,14 +2099,14 @@ package 边界按 manifest 图划分：根 package、`std`、以及每个 depend
 
 | 声明类型 | 默认值 |
 |----------|--------|
-| 全局函数、变量、类型 | `protected` |
+| 全局函数、变量、类型 | `module_private` |
 | 结构体字段 | `public` |
 | 枚举类型构造器字段 | `public` |
-| 成员函数（`given` 块内） | `protected` |
+| 成员函数（`given` 块内） | `module_private` |
 | Trait 方法 | `public` |
 
 直接结构体构造 `Type(...)` 仅在调用点对相关字段都可见时才允许。
-若类型包含当前不可见的 `private` / `protected` / `protected public` 字段，请使用公开的工厂方法进行构造。
+若类型包含当前不可见的 `file_private` / `module_private` / `package_private` 字段，请使用公开的工厂方法进行构造。
 
 ### 项目结构示例
 

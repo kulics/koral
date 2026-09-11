@@ -5,7 +5,7 @@ using std::time { .. }
 using std::async { .. }
 using std::sync { .. }
 
-private let failure_result(
+file_private let failure_result(
     info CaseInfo,
     status String,
     failure_type String,
@@ -24,7 +24,7 @@ private let failure_result(
     )
 }
 
-private let pass_result(
+file_private let pass_result(
     info CaseInfo,
     duration_ms Int64,
     exit_code Int,
@@ -40,7 +40,7 @@ private let pass_result(
     )
 }
 
-private let infer_exit_code(status ExitStatus) Int = {
+file_private let infer_exit_code(status ExitStatus) Int = {
     return when status.code() in {
         .Some(c) then c,
         .None then when status.signal() in {
@@ -50,10 +50,10 @@ private let infer_exit_code(status ExitStatus) Int = {
     }
 }
 
-private let is_windows_host() Bool =
+file_private let is_windows_host() Bool =
     if env("OS") is .Some(os) then os.contains("Windows") else false
 
-private type CommandExecution {
+file_private type CommandExecution {
     Finished(output CommandOutput),
     TimedOut(exit_code Int),
     Aborted(exit_code Int),
@@ -61,7 +61,7 @@ private type CommandExecution {
     InfrastructureError(message String),
 }
 
-private let timeout_case_result(config RunnerConfig, info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
+file_private let timeout_case_result(config RunnerConfig, info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
     let duration_ms = start.elapsed().as_milliseconds()
     return failure_result(
         info,
@@ -73,11 +73,11 @@ private let timeout_case_result(config RunnerConfig, info CaseInfo, start MonoTi
     )
 }
 
-private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
+file_private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
     return "case exceeded memory limit (peak \(peak_bytes / 1024(UInt) / 1024(UInt)) MB, limit \(config.memory_limit_mb) MB)"
 }
 
-private let memory_exceeded_case_result(
+file_private let memory_exceeded_case_result(
     config RunnerConfig,
     info CaseInfo,
     start MonoTime,
@@ -95,7 +95,7 @@ private let memory_exceeded_case_result(
     )
 }
 
-private let aborted_case_result(info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
+file_private let aborted_case_result(info CaseInfo, start MonoTime, exit_code Int) CaseResult = {
     let duration_ms = start.elapsed().as_milliseconds()
     return failure_result(
         info,
@@ -107,7 +107,7 @@ private let aborted_case_result(info CaseInfo, start MonoTime, exit_code Int) Ca
     )
 }
 
-private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
+file_private let build_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
     let mutable args = ["build"]
     when find_case_manifest(config, info) in {
         .Some(manifest_path) then {
@@ -130,7 +130,7 @@ private let build_command_args_for_case(config RunnerConfig, info CaseInfo, outp
     return Result[List[String]].Ok(args)
 }
 
-private let check_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
+file_private let check_command_args_for_case(config RunnerConfig, info CaseInfo, output_dir Path) Result[List[String]] = {
     let mutable args = ["check"]
     when find_case_manifest(config, info) in {
         .Some(manifest_path) then {
@@ -152,7 +152,7 @@ private let check_command_args_for_case(config RunnerConfig, info CaseInfo, outp
     return Result[List[String]].Ok(args)
 }
 
-private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
+file_private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
     let base = info.absolute_path.base_name()
     let ext = info.absolute_path.ext_name()
     let stem = if ext.is_empty() then base else base.substring(.Until(base.count() - ext.count()))
@@ -160,7 +160,7 @@ private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
     return output_dir.join(exe_name)
 }
 
-private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
+file_private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
     let cases_root = config.cases_root.normalize()
     let mutable current = info.absolute_path.dir_name().normalize()
     while true then {
@@ -180,7 +180,7 @@ private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] 
     return Option[Path].None()
 }
 
-private let find_case_requires_root(manifest_path Path) Option[Path] = {
+file_private let find_case_requires_root(manifest_path Path) Option[Path] = {
     let requires_root = manifest_path.dir_name().join("requires").normalize()
     if path_exist(requires_root) then {
         return Option[Path].Some(requires_root)
@@ -188,7 +188,7 @@ private let find_case_requires_root(manifest_path Path) Option[Path] = {
     return Option[Path].None()
 }
 
-private let find_built_executable(output_dir Path) Result[Path] = {
+file_private let find_built_executable(output_dir Path) Result[Path] = {
     let is_windows = is_windows_host()
     let mutable iter = read_dir(output_dir) or else {
         return Result[Path].Error(it)
@@ -221,7 +221,7 @@ private let find_built_executable(output_dir Path) Result[Path] = {
     return Result[Path].Error(box("multiple executable candidates produced"))
 }
 
-private let prepared_run_executable_path(info CaseInfo, output_dir Path, launch_attempt UInt) Result[Path] = {
+file_private let prepared_run_executable_path(info CaseInfo, output_dir Path, launch_attempt UInt) Result[Path] = {
     let exe_path = when path_exist(executable_path_for_case(info, output_dir)) in {
         true then executable_path_for_case(info, output_dir),
         false then find_built_executable(output_dir) or return,
@@ -260,16 +260,16 @@ private let prepared_run_executable_path(info CaseInfo, output_dir Path, launch_
     return Result[Path].Error(box("failed to create launch executable copy"))
 }
 
-private let run_command_args_for_case() List[String] = List[String].new()
+file_private let run_command_args_for_case() List[String] = List[String].new()
 
-private let read_text_file_or_empty(path Path) String = {
+file_private let read_text_file_or_empty(path Path) String = {
     return when read_text_file(path) in {
         .Ok(content) then content,
         .Error(_) then String.new(),
     }
 }
 
-private let has_runtime_expect_error(expect_error List[String]) Bool = {
+file_private let has_runtime_expect_error(expect_error List[String]) Bool = {
     for line in expect_error then {
         if line.trim_ascii().starts_with("Panic:") then {
             return true
@@ -278,7 +278,7 @@ private let has_runtime_expect_error(expect_error List[String]) Bool = {
     return false
 }
 
-private let non_empty_lines(lines List[String]) List[String] = {
+file_private let non_empty_lines(lines List[String]) List[String] = {
     let mutable out = List[String].new()
     for line in lines then {
         if not line.is_empty() then {
@@ -288,7 +288,7 @@ private let non_empty_lines(lines List[String]) List[String] = {
     return out
 }
 
-private let match_exact_lines(actual List[String], expected List[String]) Pair[Bool, String] = {
+file_private let match_exact_lines(actual List[String], expected List[String]) Pair[Bool, String] = {
     if actual.count() <> expected.count() then {
         return Pair[Bool, String](false, "line count mismatch: expected " + expected.count().to_string() + ", got " + actual.count().to_string())
     }
@@ -302,7 +302,7 @@ private let match_exact_lines(actual List[String], expected List[String]) Pair[B
     return Pair[Bool, String](true, "")
 }
 
-private let build_captured_command(
+file_private let build_captured_command(
     config RunnerConfig,
     program String,
     args List[String],
@@ -323,7 +323,7 @@ private let build_captured_command(
         .set_stderr(IoRedirect.File(stderr_file)))
 }
 
-private let execute_command_with_timeout(
+file_private let execute_command_with_timeout(
     config RunnerConfig,
     program String,
     args List[String],
@@ -435,7 +435,7 @@ private let execute_command_with_timeout(
     }
 }
 
-private let execute_built_executable_with_retry(
+file_private let execute_built_executable_with_retry(
     config RunnerConfig,
     info CaseInfo,
     output_dir Path,
@@ -496,7 +496,7 @@ private let execute_built_executable_with_retry(
     }
 }
 
-private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Path] = {
+file_private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Path] = {
     let root = config.output_root
     when create_dir_all(root) in {
         .Ok(_) then {},

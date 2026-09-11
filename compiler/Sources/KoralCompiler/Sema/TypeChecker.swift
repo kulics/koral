@@ -870,7 +870,7 @@ public class TypeChecker {
     let defId = getOrAllocateTypeDefId(
       name: "String",
       kind: .structure,
-      access: .protected,
+      access: .module_private,
       modulePath: [],
       sourceFile: ""
     )
@@ -1023,7 +1023,7 @@ public class TypeChecker {
     modulePath: [String],
     sourceFile: String
   ) -> DefId {
-    let lookupSourceFile = access == .private ? sourceFile : nil
+    let lookupSourceFile = access == .file_private ? sourceFile : nil
     if let existing = defIdMap.lookup(
       modulePath: modulePath,
       name: name,
@@ -1082,7 +1082,7 @@ public class TypeChecker {
       name: name,
       kind: defKind,
       sourceFile: "",
-      access: .protected,
+      access: .module_private,
       span: .unknown
     )
     defIdMap.addSymbolInfo(
@@ -1127,13 +1127,13 @@ public class TypeChecker {
     switch fieldAccess {
     case .public:
       return true
-    case .private:
+    case .file_private:
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return isSameSourceFile(defSourceFile, currentSourceFile)
-    case .protected:
+    case .module_private:
       let defModulePath = context.getModulePath(defId) ?? []
       return defModulePath == currentModulePath
-    case .protectedPublic:
+    case .package_private:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(defId) == currentPackageID
     }

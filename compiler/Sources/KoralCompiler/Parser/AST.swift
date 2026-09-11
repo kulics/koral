@@ -4,9 +4,9 @@
 
 public enum AccessModifier: String, Sendable {
   case `public`
-  case `private`
-  case `protected`
-  case protectedPublic = "protected public"
+  case `file_private`
+  case `module_private`
+  case `package_private`
 }
 
 extension AccessModifier: CustomStringConvertible {

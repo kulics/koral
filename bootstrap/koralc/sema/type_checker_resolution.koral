@@ -1,5 +1,5 @@
 given TypeChecker {
-    protected to_type_ref_list_in_resolution(self, args List[Type]) List[* Type] = {
+    module_private to_type_ref_list_in_resolution(self, args List[Type]) List[* Type] = {
         let mutable refs = List[* Type].new()
         for arg in args then {
             refs.push(box(arg))
@@ -7,7 +7,7 @@ given TypeChecker {
         return refs
     }
 
-    protected resolve_visible_generic_template_type(self, base String, resolved_args List[Type], base_type Type) Type = {
+    module_private resolve_visible_generic_template_type(self, base String, resolved_args List[Type], base_type Type) Type = {
         let canonical = self.canonicalize_alias_type(base_type)
         return when canonical in {
             .StructureType(def_id) then {
@@ -29,7 +29,7 @@ given TypeChecker {
         }
     }
 
-    protected resolve_type(self, node TypeNode) Type = {
+    module_private resolve_type(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type(name),
             .Reference(inner, is_mutable) then {
@@ -114,7 +114,7 @@ given TypeChecker {
         }
     }
 
-    protected resolve_type_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
+    module_private resolve_type_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -209,7 +209,7 @@ given TypeChecker {
         }
     }
 
-    protected try_resolve_named_type_in_scope_without_diag(self, name String, scope Scope) Option[Type] = {
+    module_private try_resolve_named_type_in_scope_without_diag(self, name String, scope Scope) Option[Type] = {
         if name == "Self" then {
             return scope.lookup_type("Self")
         }
@@ -219,7 +219,7 @@ given TypeChecker {
         return self.try_resolve_named_type_without_diag(name)
     }
 
-    protected resolve_named_type_in_scope(self, name String, scope Scope) Type = {
+    module_private resolve_named_type_in_scope(self, name String, scope Scope) Type = {
         if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
             let canonical = self.canonicalize_alias_type(t)
             self.check_type_visibility(canonical, name, scope)
@@ -229,7 +229,7 @@ given TypeChecker {
         return Type.Unknown()
     }
 
-    protected resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
+    module_private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
         return when node in {
             .Identifier(name) then self.resolve_named_type_in_scope(name, scope),
             .Reference(inner, is_mutable) then {
@@ -313,7 +313,7 @@ given TypeChecker {
         }
     }
 
-    protected variable_kind_for_param_type(self, param_type Type, is_mutable Bool) VariableKind = {
+    module_private variable_kind_for_param_type(self, param_type Type, is_mutable Bool) VariableKind = {
         let is_mutable_ref_like = when param_type in {
             .MutableReferenceType(_) then true,
             .MutablePointerType(_) then true,
@@ -335,7 +335,7 @@ given TypeChecker {
         return if is_mutable then VariableKind.MutableValue() else VariableKind.Value()
     }
 
-    protected try_resolve_named_type_without_diag(self, name String) Option[Type] = {
+    module_private try_resolve_named_type_without_diag(self, name String) Option[Type] = {
         if name == "Int" then { return Option[Type].Some(Type.IntType()) }
         if name == "Int8" then { return Option[Type].Some(Type.Int8Type()) }
         if name == "Int16" then { return Option[Type].Some(Type.Int16Type()) }
@@ -371,21 +371,21 @@ given TypeChecker {
         return Option[Type].None()
     }
 
-    protected builtin_string_type(self) Type = {
+    module_private builtin_string_type(self) Type = {
         return when self.storage.global_scope.lookup_type("String") in {
             .Some(t) then self.canonicalize_alias_type(t),
             .None() then Type.Unknown(),
         }
     }
 
-    protected builtin_rune_type(self) Type = {
+    module_private builtin_rune_type(self) Type = {
         return when self.storage.global_scope.lookup_type("Rune") in {
             .Some(t) then self.canonicalize_alias_type(t),
             .None() then Type.Unknown(),
         }
     }
 
-    protected rune_literal_scalar_value(self, value String) String = {
+    module_private rune_literal_scalar_value(self, value String) String = {
         let bytes = value.to_bytes()
         if bytes.is_empty() then {
             return "0"
@@ -415,7 +415,7 @@ given TypeChecker {
         return "0"
     }
 
-    protected build_rune_constructor_expr(self, scalar_value String, rune_type Type) TypedExpr = {
+    module_private build_rune_constructor_expr(self, scalar_value String, rune_type Type) TypedExpr = {
         return when rune_type in {
             .StructureType(def_id) then {
                 let type_name = self.context().get_name(def_id) or else "Rune"
@@ -429,7 +429,7 @@ given TypeChecker {
         }
     }
 
-    protected lower_rune_literal(self, value String, expected Option[Type]) TypedExpr = {
+    module_private lower_rune_literal(self, value String, expected Option[Type]) TypedExpr = {
         let scalar_value = self.rune_literal_scalar_value(value)
         when expected in {
             .Some(target_type) then {
@@ -459,7 +459,7 @@ given TypeChecker {
         }
     }
 
-    protected lower_rune_literal_for_cast(self, value String, target_type Type) TypedExpr = {
+    module_private lower_rune_literal_for_cast(self, value String, target_type Type) TypedExpr = {
         let scalar_value = self.rune_literal_scalar_value(value)
         if self.is_numeric_type(target_type) or self.is_float_type(target_type) then {
             return make_typed_expr(TypedExprKind.IntegerLiteral(scalar_value), target_type)
@@ -470,11 +470,11 @@ given TypeChecker {
         return self.lower_rune_literal(value, Option[Type].None())
     }
 
-    protected is_string_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "String"
+    module_private is_string_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "String"
 
-    protected is_rune_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "Rune"
+    module_private is_rune_type(self, t Type) Bool = self.context().type_display_name(self.canonicalize_alias_type(t)) == "Rune"
 
-    protected type_module_path(self, t Type) Option[List[String]] = {
+    module_private type_module_path(self, t Type) Option[List[String]] = {
         return when t in {
             .StructureType(def_id) then self.context().get_module_path(def_id),
             .EnumType(def_id) then self.context().get_module_path(def_id),
@@ -491,7 +491,7 @@ given TypeChecker {
         }
     }
 
-    protected resolve_named_type(self, name String) Type = {
+    module_private resolve_named_type(self, name String) Type = {
         // Check current_scope first (analogous to Swift's currentScope.resolveType)
         // The scope chain is walked automatically by lookup_type
         if self.storage.current_scope.lookup_type(name) is .Some(t) then {

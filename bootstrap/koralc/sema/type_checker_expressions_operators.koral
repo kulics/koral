@@ -1,6 +1,6 @@
 given TypeChecker {
 
-    protected should_use_trait_placeholder_for_eq_ord_receiver(self, receiver_type Type) Bool = {
+    module_private should_use_trait_placeholder_for_eq_ord_receiver(self, receiver_type Type) Bool = {
         return when receiver_type in {
             .GenericParameter(_) then true,
             .BorrowedReferenceType(inner) then self.contains_generic_parameter(*inner),
@@ -9,7 +9,7 @@ given TypeChecker {
         }
     }
 
-    protected method_symbol_matches_binary_call(self, method_symbol Symbol, base_type Type, rhs_type Type) Bool = {
+    module_private method_symbol_matches_binary_call(self, method_symbol Symbol, base_type Type, rhs_type Type) Bool = {
         return when method_symbol.symbol_type in {
             .FunctionType(params, _) then {
                 if params.count() < 2(UInt) then {
@@ -27,7 +27,7 @@ given TypeChecker {
         }
     }
 
-    protected make_binary_method_placeholder_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
+    module_private make_binary_method_placeholder_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function())
         let mutable param_types = List[Type].new()
         param_types.push(base_type)
@@ -35,7 +35,7 @@ given TypeChecker {
         return Symbol(def_id, make_function_type(self.to_type_ref_list(param_types), fallback_return), SymbolKind.Function())
     }
 
-    protected resolved_or_placeholder_method_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
+    module_private resolved_or_placeholder_method_symbol(self, base_type Type, rhs_type Type, method_name String, fallback_return Type) Symbol = {
         return when self.resolve_source_method_signature(base_type, method_name) in {
             .Some(symbol) then if self.method_symbol_matches_binary_call(symbol, base_type, rhs_type)
                 then symbol
@@ -44,7 +44,7 @@ given TypeChecker {
         }
     }
 
-    protected is_numeric_literal_expr(self, expr TypedExpr) Bool = {
+    module_private is_numeric_literal_expr(self, expr TypedExpr) Bool = {
         return when expr.expr_kind in {
             .IntegerLiteral(_) then true,
             .FloatLiteral(_) then true,
@@ -52,7 +52,7 @@ given TypeChecker {
         }
     }
 
-    protected check_arithmetic_expr_ref(self, left * Expr, op ArithmeticOperator, right * Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_arithmetic_expr_ref(self, left * Expr, op ArithmeticOperator, right * Expr, expected Option[Type], scope Scope) TypedExpr = {
 
         let initial_typed_left = when left in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
@@ -244,7 +244,7 @@ given TypeChecker {
         return result
     }
 
-    protected check_bitwise_expr_ref(self, left * Expr, op BitwiseOperator, right * Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_bitwise_expr_ref(self, left * Expr, op BitwiseOperator, right * Expr, expected Option[Type], scope Scope) TypedExpr = {
 
         let chain = self.collect_bitwise_chain(left, op, right)
         let operands = chain.first
@@ -266,7 +266,7 @@ given TypeChecker {
         return result
     }
 
-    protected describe_expr_shallow(self, expr * Expr) String = {
+    module_private describe_expr_shallow(self, expr * Expr) String = {
         return when expr in {
             .Identifier(_, _) then "identifier",
             .IntegerLiteral(_, _) then "int",
@@ -306,7 +306,7 @@ given TypeChecker {
         }
     }
 
-    protected validate_lambda_parameter_types(self, params List[LambdaParam], typed_params List[TypedParam]) Void = {
+    module_private validate_lambda_parameter_types(self, params List[LambdaParam], typed_params List[TypedParam]) Void = {
         let mutable i UInt = 0
         while i < params.count() and i < typed_params.count() then {
             let param = params[i]
@@ -326,7 +326,7 @@ given TypeChecker {
         }
     }
 
-    protected validate_lambda_return_type(self, expected_ret Type, typed_body TypedExpr) Void = {
+    module_private validate_lambda_return_type(self, expected_ret Type, typed_body TypedExpr) Void = {
         if self.is_unresolved_expr_type(expected_ret) then {
             return
         }
@@ -348,7 +348,7 @@ given TypeChecker {
         )
     }
 
-    protected validate_lambda_captures(self, params List[TypedParam], body * TypedExpr) Void = {
+    module_private validate_lambda_captures(self, params List[TypedParam], body * TypedExpr) Void = {
         let mutable local_names = Set[String].new()
         for p in params then {
             local_names.insert(p.name)
@@ -358,7 +358,7 @@ given TypeChecker {
         self.validate_lambda_captures_in_expr(body, local_names, local_ids, &mutable reported_ids)
     }
 
-    protected is_lambda_captured_symbol(self, symbol * Symbol, local_names Set[String], local_ids Set[UInt]) Bool = {
+    module_private is_lambda_captured_symbol(self, symbol * Symbol, local_names Set[String], local_ids Set[UInt]) Bool = {
         let is_variable = when symbol.kind in {
             .Variable(_) then true,
             _ then false,
@@ -375,7 +375,7 @@ given TypeChecker {
         return module_path.is_empty() and source_file.is_empty()
     }
 
-    protected report_mutable_lambda_capture(self, symbol * Symbol, reported_ids *mutable Set[UInt]) Void = {
+    module_private report_mutable_lambda_capture(self, symbol * Symbol, reported_ids *mutable Set[UInt]) Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return
         }
@@ -389,7 +389,7 @@ given TypeChecker {
         )
     }
 
-    protected report_borrowed_lambda_capture(self, symbol * Symbol, reported_ids *mutable Set[UInt]) Void = {
+    module_private report_borrowed_lambda_capture(self, symbol * Symbol, reported_ids *mutable Set[UInt]) Void = {
         if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(symbol.def_id.id) then {
             return
         }
@@ -403,7 +403,7 @@ given TypeChecker {
         )
     }
 
-    protected collect_pattern_binding_names(self, pattern * TypedPattern, names *mutable Set[String]) Void = {
+    module_private collect_pattern_binding_names(self, pattern * TypedPattern, names *mutable Set[String]) Void = {
         when pattern in {
             .Variable(symbol) then {
                 let symbol_name = self.context().symbol_name(*symbol)
@@ -433,20 +433,20 @@ given TypeChecker {
         }
     }
 
-    protected collect_lambda_param_names(self, params List[TypedParam], names *mutable Set[String]) Void = {
+    module_private collect_lambda_param_names(self, params List[TypedParam], names *mutable Set[String]) Void = {
         for param in params then {
             names.insert(param.name)
         }
     }
 
-    protected collect_pair_binding_name(self, binding PairBindingElement, names *mutable Set[String]) Void = {
+    module_private collect_pair_binding_name(self, binding PairBindingElement, names *mutable Set[String]) Void = {
         if binding.is_discard or binding.name == "_" then {
             return
         }
         names.insert(binding.name)
     }
 
-    protected validate_lambda_captures_in_stmt(self, stmt * TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids *mutable Set[UInt]) Void = {
+    module_private validate_lambda_captures_in_stmt(self, stmt * TypedStatement, local_names Set[String], local_ids Set[UInt], reported_ids *mutable Set[UInt]) Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(value_ref, local_names, local_ids, reported_ids)
@@ -499,7 +499,7 @@ given TypeChecker {
         }
     }
 
-    protected validate_lambda_captures_in_expr(self, expr * TypedExpr, local_names Set[String], local_ids Set[UInt], reported_ids *mutable Set[UInt]) Void = {
+    module_private validate_lambda_captures_in_expr(self, expr * TypedExpr, local_names Set[String], local_ids Set[UInt], reported_ids *mutable Set[UInt]) Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -696,7 +696,7 @@ given TypeChecker {
         }
     }
 
-    protected is_null_ptr_call_expr(self, expr * Expr) Bool = {
+    module_private is_null_ptr_call_expr(self, expr * Expr) Bool = {
         return when expr in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then name == "null_ptr" and args.is_empty(),
@@ -706,7 +706,7 @@ given TypeChecker {
         }
     }
 
-    protected normalize_comparison_operands(
+    module_private normalize_comparison_operands(
         self,
         initial_left TypedExpr,
         left_source Option[* Expr],
@@ -802,7 +802,7 @@ given TypeChecker {
         return Pair[TypedExpr, TypedExpr](typed_left, typed_right)
     }
 
-    protected build_typed_comparison_expr(self, typed_left TypedExpr, op ComparisonOperator, typed_right TypedExpr) TypedExpr = {
+    module_private build_typed_comparison_expr(self, typed_left TypedExpr, op ComparisonOperator, typed_right TypedExpr) TypedExpr = {
         let same_type = self.same_expr_type(typed_left.expr_type, typed_right.expr_type)
         let is_eq_op = when op in {
             .Equal() then true,
@@ -842,7 +842,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.ComparisonExpr(box(typed_left), op, box(typed_right)), Type.BoolType())
     }
 
-    protected lower_comparison_chain_step(
+    module_private lower_comparison_chain_step(
         self,
         operands List[* Expr],
         operators List[ComparisonOperator],
@@ -875,7 +875,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Block(block_statements), Type.BoolType())
     }
 
-    protected check_comparison_chain_expr_ref(self, operands List[* Expr], operators List[ComparisonOperator], scope Scope) TypedExpr = {
+    module_private check_comparison_chain_expr_ref(self, operands List[* Expr], operators List[ComparisonOperator], scope Scope) TypedExpr = {
         if operands.is_empty() or operands.count() <> operators.count() + 1(UInt) or operators.count() < 2(UInt) then {
             self.push_diagnostic_at_span("Invalid comparison chain", unknown_span())
             return self.empty_typed_block(Type.Unknown())
@@ -886,7 +886,7 @@ given TypeChecker {
         return self.lower_comparison_chain_step(operands, operators, 0(UInt), typed_left, Option[* Expr].Some(first_operand_ref), scope)
     }
 
-    protected check_comparison_expr_ref(self, left * Expr, op ComparisonOperator, right * Expr, scope Scope) TypedExpr = {
+    module_private check_comparison_expr_ref(self, left * Expr, op ComparisonOperator, right * Expr, scope Scope) TypedExpr = {
         let typed_left = self.check_expr_core_ref(left, .None(), scope)
         let typed_right = self.check_expr_scoped_ref(right, .Some(typed_left.expr_type), scope)
         let normalized = self.normalize_comparison_operands(
@@ -899,7 +899,7 @@ given TypeChecker {
         return self.build_typed_comparison_expr(normalized.first, op, normalized.second)
     }
 
-    protected is_builtin_equality_comparable(self, t Type) Bool = {
+    module_private is_builtin_equality_comparable(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -920,7 +920,7 @@ given TypeChecker {
         }
     }
 
-    protected is_builtin_ordering_comparable(self, t Type) Bool = {
+    module_private is_builtin_ordering_comparable(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -938,7 +938,7 @@ given TypeChecker {
         }
     }
 
-    protected build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
+    module_private build_equals_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
         if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Eq", "operator 'equals'") then {
             return make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown())
         }
@@ -969,7 +969,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
-    protected build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
+    module_private build_compare_call(self, lhs TypedExpr, rhs TypedExpr) TypedExpr = {
         if not self.enforce_explicit_trait_requirement_with_context(lhs.expr_type, "Ord", "operator 'compare'") then {
             return make_typed_expr(TypedExprKind.Block(List[* TypedStatement].new()), Type.Unknown())
         }
@@ -1000,7 +1000,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
-    protected arithmetic_trait_name(self, op ArithmeticOperator) Option[String] = {
+    module_private arithmetic_trait_name(self, op ArithmeticOperator) Option[String] = {
         return when op in {
             .Add() then Option[String].Some("Add"),
             .Subtract() then Option[String].Some("Sub"),
@@ -1010,7 +1010,7 @@ given TypeChecker {
         }
     }
 
-    protected arithmetic_method_name(self, op ArithmeticOperator) String = {
+    module_private arithmetic_method_name(self, op ArithmeticOperator) String = {
         return when op in {
             .Add() then "add",
             .Subtract() then "sub",
@@ -1020,7 +1020,7 @@ given TypeChecker {
         }
     }
 
-    protected arithmetic_operation_name(self, op ArithmeticOperator) String = {
+    module_private arithmetic_operation_name(self, op ArithmeticOperator) String = {
         return when op in {
             .Add() then "plus",
             .Subtract() then "minus",
@@ -1030,14 +1030,14 @@ given TypeChecker {
         }
     }
 
-    protected generic_parameter_satisfies_trait_constraint(self, t Type, trait_name String, trait_args List[Type]) Bool = {
+    module_private generic_parameter_satisfies_trait_constraint(self, t Type, trait_name String, trait_args List[Type]) Bool = {
         return when t in {
             .GenericParameter(name) then self.generic_param_has_trait_bound(name, trait_name, trait_args),
             _ then false,
         }
     }
 
-    protected build_arithmetic_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
+    module_private build_arithmetic_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
         let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type)
@@ -1054,7 +1054,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
-    protected build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
+    module_private build_binary_method_call(self, lhs TypedExpr, rhs TypedExpr, method_name String, fallback_type Type) TypedExpr = {
         self.maybe_record_extension_method_instantiation(lhs.expr_type, method_name, List[Type].new())
         let ret_type = self.resolve_method_return_type(lhs.expr_type, method_name)
         let method_symbol = self.resolved_or_placeholder_method_symbol(lhs.expr_type, rhs.expr_type, method_name, ret_type)
@@ -1071,7 +1071,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(box(callee), args), call_ret_type)
     }
 
-    protected build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
+    module_private build_unary_method_call(self, operand TypedExpr, method_name String, fallback_type Type) TypedExpr = {
         let call_expr = self.lower_receiver_method_call_expr(operand, method_name, List[* TypedExpr].new())
         return when call_expr.expr_type in {
             .Unknown() then make_typed_expr_ref(call_expr.expr_kind, fallback_type),
@@ -1079,7 +1079,7 @@ given TypeChecker {
         }
     }
 
-    protected convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
+    module_private convert_interpolated_part_to_string(self, part InterpolatedStringPart, scope Scope) TypedExpr = {
         return when part in {
             .Literal(value) then make_typed_expr(TypedExprKind.StringLiteral(value), self.builtin_string_type()),
             .Expression(expr_ref) then {
@@ -1100,7 +1100,7 @@ given TypeChecker {
         }
     }
 
-    protected lower_interpolated_string(self, parts List[InterpolatedStringPart], scope Scope) TypedExpr = {
+    module_private lower_interpolated_string(self, parts List[InterpolatedStringPart], scope Scope) TypedExpr = {
         if parts.is_empty() then {
             return make_typed_expr(TypedExprKind.StringLiteral(""), self.builtin_string_type())
         }

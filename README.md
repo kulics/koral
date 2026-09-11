@@ -272,7 +272,7 @@ when upgrade_mutable(weak) in {
 Module rules summary:
 
 - `using "path"` merges another file into the current module scope.
-- `using module::path { Symbol, Other as Alias }` imports explicit symbols visible to the importing file: `public` from any package, plus `protected public` when importing from the same package.
+- `using module::path { Symbol, Other as Alias }` imports explicit symbols visible to the importing file: `public` from any package, plus `package_private` when importing from the same package.
 - `using module::path { .. }` imports all symbols visible to the importing file from that module, and `..` must be the only item.
 - Module imports bind symbols only; they do not bind a module name or namespace. Use `Symbol`, not `module.Symbol`.
 - Entry file basenames must match `[a-z][a-z0-9_]*`.
@@ -282,7 +282,7 @@ Module rules summary:
 - Top-level manifest `entry` is the default target module name (for example `app::main`), not a source file path
 - Per-module dependency edges use `requires`; non-`std` packages do not need to list `std` manually
 - Imports are file-local bindings and never re-export automatically
-- Access control: `public`, `protected public` (same-package), `protected` (same module, default for top-level declarations), `private`
+- Access control: `public`, `package_private` (same-package), `module_private` (same module, default for top-level declarations), `file_private`
 - Direct `Type(...)` construction requires constructor field visibility at call site; non-public fields should be initialized via public factory methods
 - Module entry file basename must match `[a-z][a-z0-9_]*`
 - String in `using "file"` is the literal file name (no case conversion); file is resolved relative to the current file's directory

@@ -27,19 +27,19 @@ given ModuleError {
     }
 }
 
-private type PendingUsing {
+file_private type PendingUsing {
     Module(path_segments List[String], items List[UsingModuleItem]),
     File(file_name String),
 }
 
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
-protected type ModuleResolverStorage(
+module_private type ModuleResolverStorage(
     mutable resolving_files List[String],
     mutable manifest_module_aliases List[ResolvedModuleAliasRule],
 )
 
-public type ModuleResolver(protected mutable storage *mutable ModuleResolverStorage)
+public type ModuleResolver(module_private mutable storage *mutable ModuleResolverStorage)
 
 public type ResolvedModuleGraph(
     root_module_path String,
@@ -61,7 +61,7 @@ given ModuleResolver {
         self.storage.manifest_module_aliases = aliases
     }
 
-    private resolve_manifest_aliased_module_path(*self, path_segments List[String]) List[String] = {
+    file_private resolve_manifest_aliased_module_path(*self, path_segments List[String]) List[String] = {
         if self.storage.manifest_module_aliases.is_empty() then {
             return path_segments
         }
@@ -169,7 +169,7 @@ given ModuleResolver {
         return Result[ResolvedModuleGraph].Ok(self.build_resolved_module_graph(std_unit, user_unit_ref))
     }
 
-    private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) Option[* CompilationUnit] = {
+    file_private load_std_unit_for_typecheck(self, no_std Bool, user_has_std Bool) Option[* CompilationUnit] = {
         if no_std or user_has_std then {
             return Option[* CompilationUnit].None()
         }
@@ -182,7 +182,7 @@ given ModuleResolver {
         }
     }
 
-    private collect_effective_std_nodes_with_path(
+    file_private collect_effective_std_nodes_with_path(
         self,
         std_unit Option[* CompilationUnit],
         user_unit * CompilationUnit,
@@ -204,7 +204,7 @@ given ModuleResolver {
         return result
     }
 
-    private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
+    file_private collect_unique_module_paths(self, loaded_nodes_with_path List[Pair[LoadedNode, List[String]]]) List[List[String]] = {
         let mutable seen = Set[String].new()
         let mutable module_paths = List[List[String]].new()
         for pair in loaded_nodes_with_path.iterator() then {
@@ -219,7 +219,7 @@ given ModuleResolver {
         return module_paths
     }
 
-    private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
+    file_private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
         let mutable seen = Set[String].new()
         let mutable source_files = List[String].new()
         for node in loaded_nodes.iterator() then {
@@ -232,7 +232,7 @@ given ModuleResolver {
         return source_files
     }
 
-    private build_resolved_module_graph(
+    file_private build_resolved_module_graph(
         self,
         std_unit Option[* CompilationUnit],
         user_unit * CompilationUnit,
@@ -279,7 +279,7 @@ given ModuleResolver {
     }
 
     // Parse and process a single file into a module.
-    private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) Result[Void] = {
+    file_private resolve_file(self, file String, module ModuleInfo, unit CompilationUnit) Result[Void] = {
         let normalized_file = when absolute_path(file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
@@ -327,7 +327,7 @@ given ModuleResolver {
         return Result[Void].Ok({})
     }
 
-    private collect_pending_usings(self, normalized_file String, module ModuleInfo) Result[List[PendingUsing]] = {
+    file_private collect_pending_usings(self, normalized_file String, module ModuleInfo) Result[List[PendingUsing]] = {
         module_debug("[module] read: begin")
 
         let source = read_text_file(normalized_file.into_path()) or else {
@@ -368,7 +368,7 @@ given ModuleResolver {
         return Result[List[PendingUsing]].Ok(pending)
     }
 
-    private record_module_using(
+    file_private record_module_using(
         self,
         path_segments List[String],
         items List[UsingModuleItem],
@@ -408,7 +408,7 @@ given ModuleResolver {
         return Result[Void].Ok({})
     }
 
-    private resolve_local_module_import(self, target_path List[String], module ModuleInfo, unit CompilationUnit) Result[Void] = {
+    file_private resolve_local_module_import(self, target_path List[String], module ModuleInfo, unit CompilationUnit) Result[Void] = {
         let current_path = module.path()
         if target_path.count() <= current_path.count() then {
             return Result[Void].Ok({})
@@ -456,7 +456,7 @@ given ModuleResolver {
 
     // Resolve file merge: using "file_name"
     // Resolves a normalized relative source path against the current file's directory and merges it.
-    private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
+    file_private resolve_file_merge(self, file_name String, module ModuleInfo, unit CompilationUnit, current_file String) Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string()
         let merge_path = if file_name.ends_with(".koral") then file_name else file_name + ".koral"
         let file_path = current_dir.into_path().join(merge_path).normalize().to_string()
@@ -519,7 +519,7 @@ public let module_file_name_to_identifier(filename String) String = {
 
 // Validate a PascalCase module identifier (used in source code)
 // Returns Some(reason) if invalid, None if valid
-private let validate_module_identifier(name String) Option[String] = {
+file_private let validate_module_identifier(name String) Option[String] = {
     if name.is_empty() then {
         return .Some("Module name cannot be empty")
     }
@@ -536,7 +536,7 @@ private let validate_module_identifier(name String) Option[String] = {
     return .None()
 }
 
-private let module_debug(message String) Void = {
+file_private let module_debug(message String) Void = {
     if env("KORAL_DEBUG_MODULE") is .Some(v) and (v == "1" or v == "true" or v == "TRUE") then {
         eprintln(message)
     }

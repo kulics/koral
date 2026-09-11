@@ -1,5 +1,5 @@
 given TypeChecker {
-    protected validate_drop_member_signature(self, target_type Type, members List[* TypedGivenMember]) Void = {
+    module_private validate_drop_member_signature(self, target_type Type, members List[* TypedGivenMember]) Void = {
         let expected_param_type = Type.MutablePointerType(box(target_type))
         for member_ref in members then {
             let member = *member_ref
@@ -39,7 +39,7 @@ given TypeChecker {
         }
     }
 
-    protected check_decl(*mutable self, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
+    module_private check_decl(*mutable self, decl Decl, retain_checked_template_bodies Bool) TypedDecl = {
         return when decl in {
             .LetDecl(access, name, is_mutable, type_name, initializer, span) then {
                 let expected_type = when type_name in {
@@ -399,12 +399,12 @@ given TypeChecker {
                 yield TypedDecl.ForeignTypeDecl(access, name, typed_fields, span, box(self.make_top_level_type_symbol(name, type_kind, symbol_type, access, span)))
             },
             .ModuleUsingDecl(path_segments, items, span) then {
-                yield TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
+                yield TypedDecl.UsingDecl(AccessModifier.FilePrivate(), path_segments, span)
             },
             .FileUsingDecl(file_name, span) then {
                 let mutable path_segments = List[String].new()
                 path_segments.push(file_name)
-                yield TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
+                yield TypedDecl.UsingDecl(AccessModifier.FilePrivate(), path_segments, span)
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(type_params)
@@ -623,12 +623,12 @@ given TypeChecker {
             },
             .GivenNotTraitDecl(_, _, _, span) then {
                 // Reached only if a not-Deref declaration was not filtered by the pass driver.
-                yield TypedDecl.UsingDecl(AccessModifier.Private(), List[String].new(), span)
+                yield TypedDecl.UsingDecl(AccessModifier.FilePrivate(), List[String].new(), span)
             },
         }
     }
 
-    protected type_node_name(self, node TypeNode) String = {
+    module_private type_node_name(self, node TypeNode) String = {
         return when node in {
             .Identifier(name) then name,
             .Generic(base, _) then base,
@@ -636,11 +636,11 @@ given TypeChecker {
         }
     }
 
-    protected concrete_type_modifier_given_message(self) String = {
+    module_private concrete_type_modifier_given_message(self) String = {
         return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] *T as SomeTrait { ... }'"
     }
 
-    protected is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
+    module_private is_concrete_type_modifier_given_target(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
         if not type_params.is_empty() then {
             return false
         }
@@ -652,7 +652,7 @@ given TypeChecker {
         }
     }
 
-    protected reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
+    module_private reject_concrete_type_modifier_given_if_needed(self, target_type TypeNode, type_params List[TypeParameter]) Bool = {
         if self.is_concrete_type_modifier_given_target(target_type, type_params) then {
             self.storage.diagnostics.push(
                 make_diagnostic(
@@ -666,7 +666,7 @@ given TypeChecker {
         return false
     }
 
-    protected validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
+    module_private validate_trait_parent_arity(self, trait_name String, actual_count UInt) Void = {
         if actual_count == 0(UInt) then {
             return
         }
@@ -687,12 +687,12 @@ given TypeChecker {
         }
     }
 
-    protected validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
+    module_private validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
         let scope = Scope.new_child(self.storage.global_scope)
         self.validate_trait_parent_type_arguments_in_scope(parents, scope)
     }
 
-    protected validate_trait_parent_type_arguments_in_scope(self, parents List[TypeNode], scope Scope) Void = {
+    module_private validate_trait_parent_type_arguments_in_scope(self, parents List[TypeNode], scope Scope) Void = {
         for parent in parents then {
             when parent in {
                 .Identifier(name) then {

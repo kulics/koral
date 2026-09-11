@@ -1,5 +1,5 @@
 // 访问控制检查器
-// 检查 public/protected/private 访问控制
+// 检查 public/module_private/package_private/file_private 访问控制
 
 // ── AccessChecker ─────────────────────────────────────────────────────────────
 
@@ -24,32 +24,32 @@ given AccessChecker {
     ) Result[Void] = {
         return when access in {
             .Public() then Result[Void].Ok({}),
-            .Protected() then {
-                // protected 只能从同一逻辑模块访问
+            .ModulePrivate() then {
+                // module_private 只能从同一逻辑模块访问
                 if string_list_eq(from_module, defined_in_module) then {
                     return Result[Void].Ok({})
                 } else {
                     return Result[Void].Error(box(
-                        "Cannot access protected symbol '\(symbol_name)'"
+                        "Cannot access module_private symbol '\(symbol_name)'"
                     ))
                 }
             },
-            .ProtectedPublic() then {
+            .PackagePrivate() then {
                 if string_list_eq(from_module, defined_in_module) then {
                     return Result[Void].Ok({})
                 } else {
                     return Result[Void].Error(box(
-                        "Cannot access protected public symbol '\(symbol_name)'"
+                        "Cannot access module_private public symbol '\(symbol_name)'"
                     ))
                 }
             },
-            .Private() then {
-                // private 只能从同一文件访问
+            .FilePrivate() then {
+                // file_private 只能从同一文件访问
                 if defined_in_file == from_file then {
                     return Result[Void].Ok({})
                 } else {
                     return Result[Void].Error(box(
-                        "Cannot access private symbol '\(symbol_name)'"
+                        "Cannot access file_private symbol '\(symbol_name)'"
                     ))
                 }
             },
@@ -77,7 +77,7 @@ given AccessChecker {
     }
 
     // 检查函数签名中类型的可见性一致性
-    // 规则：public 函数不能在签名中使用 private/protected 类型
+    // 规则：public 函数不能在签名中使用 file_private/module_private 类型
     public check_signature_visibility(
         self,
         symbol_name String,
@@ -89,19 +89,19 @@ given AccessChecker {
             .Public() then {
                 for type_access in type_accesses then {
                     when type_access in {
-                        .Private() then {
+                        .FilePrivate() then {
                             return Result[Void].Error(box(
-                                "Public symbol '\(symbol_name)' cannot use private type in its signature"
+                                "Public symbol '\(symbol_name)' cannot use file_private type in its signature"
                             ))
                         },
-                        .Protected() then {
+                        .ModulePrivate() then {
                             return Result[Void].Error(box(
-                                "Public symbol '\(symbol_name)' cannot use protected type in its signature"
+                                "Public symbol '\(symbol_name)' cannot use module_private type in its signature"
                             ))
                         },
-                        .ProtectedPublic() then {
+                        .PackagePrivate() then {
                             return Result[Void].Error(box(
-                                "Public symbol '\(symbol_name)' cannot use protected public type in its signature"
+                                "Public symbol '\(symbol_name)' cannot use package_private type in its signature"
                             ))
                         },
                         _ then {},
@@ -144,3 +144,4 @@ given AccessChecker {
     }
 
 }
+// 规则：public 函数不能在签名中使用 file_private/module_private/package_private 类型

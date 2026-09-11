@@ -717,11 +717,11 @@ resolveModule(entryFile:)
 
 | Declaration | Default Access |
 |-------------|----------------|
-| global function/type/trait | `protected` |
+| global function/type/trait | `module_private` |
 | struct field | `public` |
 | enum case | `public` |
 | trait method | `public` |
-| given method | `protected` |
+| given method | `module_private` |
 | using declaration | file-local (imported bindings are not re-exported) |
 
 ## Code Generation Development

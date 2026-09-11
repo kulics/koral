@@ -8,13 +8,13 @@
 // - parse_call_suffix, parse_subscript_suffix, parse_dot_suffix
 // - parse_postfix_suffixes, parse_call, parse_unary
 
-private type StaticDispatchReceiver(
+file_private type StaticDispatchReceiver(
     type_name String,
     type_args List[* TypeNode],
 )
 
 given Parser {
-    protected is_lambda_expression(*mutable self) Bool = {
+    module_private is_lambda_expression(*mutable self) Bool = {
         // Must start with (
         when self.current().kind in {
             .LParen() then {},
@@ -64,7 +64,7 @@ given Parser {
     }
 
     // Parse a lambda expression: (params) [ReturnType] -> body
-    protected parse_lambda_expression(*mutable self) Result[* Expr] = {
+    module_private parse_lambda_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
 
         if self.current().kind is .LParen() then {
@@ -139,7 +139,7 @@ given Parser {
         return .Ok(box(Expr.LambdaExpr(params, return_type, body, self.span_from_start(start))))
     }
 
-    protected build_duration_literal_expression(self, value String, unit String, span SourceSpan) Result[* Expr] = {
+    module_private build_duration_literal_expression(self, value String, unit String, span SourceSpan) Result[* Expr] = {
         let mutable secs_expr = box(Expr.IntegerLiteral("0", span))
         let mutable nanos_expr = box(Expr.IntegerLiteral("0", span))
 
@@ -175,7 +175,7 @@ given Parser {
         return .Ok(box(Expr.Call(callee, List[* Expr].new(), span)))
     }
 
-    protected parse_primary(*mutable self) Result[* Expr] = {
+    module_private parse_primary(*mutable self) Result[* Expr] = {
         let t = self.current()
 
         when t.kind in {
@@ -287,11 +287,11 @@ given Parser {
         }
     }
 
-    protected parse_bracket_leading_expression(*mutable self) Result[* Expr] = {
+    module_private parse_bracket_leading_expression(*mutable self) Result[* Expr] = {
         return self.parse_collection_or_dict_literal()
     }
 
-    protected extract_static_dispatch_receiver(self, expr * Expr) Option[StaticDispatchReceiver] = {
+    module_private extract_static_dispatch_receiver(self, expr * Expr) Option[StaticDispatchReceiver] = {
         return when expr in {
             .Identifier(base_name, _) then if self.is_upper_first(base_name)
                 then Option[StaticDispatchReceiver].Some(StaticDispatchReceiver(base_name, List[* TypeNode].new()))
@@ -331,7 +331,7 @@ given Parser {
         }
     }
 
-    protected member_path_call_receiver_expr(self, base * Expr, path List[String]) * Expr = {
+    module_private member_path_call_receiver_expr(self, base * Expr, path List[String]) * Expr = {
         return if path.count() == 1 then base else {
             let mutable receiver_path = List[String].new()
             let mutable idx UInt = 0
@@ -343,7 +343,7 @@ given Parser {
         }
     }
 
-    protected parse_parenthesized_expression(*mutable self) Result[* Expr] = {
+    module_private parse_parenthesized_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         let saved = self.save_state()
         when self.parse_lambda_expression() in {
@@ -411,7 +411,7 @@ given Parser {
         }
     }
 
-    protected parse_block_expression(*mutable self) Result[* Expr] = {
+    module_private parse_block_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         when self.current().kind in {
             .LBrace() then { self.advance() },
@@ -425,7 +425,7 @@ given Parser {
         return .Ok(box(Expr.Block(statements, span)))
     }
 
-    protected parse_call_argument(*mutable self, context String) Result[* Expr] = {
+    module_private parse_call_argument(*mutable self, context String) Result[* Expr] = {
         let start = self.current()
         let saved = self.save_state()
 
@@ -451,7 +451,7 @@ given Parser {
         return self.parse_expression_checked("\(context) arguments")
     }
 
-    protected parse_pattern_argument(*mutable self, stop_on_in Bool) Result[PatternElement] = {
+    module_private parse_pattern_argument(*mutable self, stop_on_in Bool) Result[PatternElement] = {
         let saved = self.save_state()
 
         when self.current_labeled_argument_name(false) in {
@@ -472,7 +472,7 @@ given Parser {
         return .Ok(PatternElement(Option[String].None(), box(pattern)))
     }
 
-    protected parse_argument_list_until_rparen(*mutable self, context String) Result[List[* Expr]] = {
+    module_private parse_argument_list_until_rparen(*mutable self, context String) Result[List[* Expr]] = {
         self.enter_line_join_grouping()
         let mutable args = List[* Expr].new()
         if self.current().kind is .RParen() then {
@@ -500,7 +500,7 @@ given Parser {
         return .Ok(args)
     }
 
-    protected reject_non_constructor_call_args(self, args List[* Expr]) Result[List[* Expr]] = {
+    module_private reject_non_constructor_call_args(self, args List[* Expr]) Result[List[* Expr]] = {
         for arg in args then {
             when arg in {
                 .NamedArgument(label, _, _) then {
@@ -515,7 +515,7 @@ given Parser {
         return .Ok(args)
     }
 
-    protected call_target_allows_constructor_argument_syntax(self, callee * Expr) Bool = {
+    module_private call_target_allows_constructor_argument_syntax(self, callee * Expr) Bool = {
         return when callee in {
             .Identifier(name, _) then self.is_upper_first(name),
             .GenericInstantiation(base, _, _) then self.is_upper_first(base),
@@ -526,16 +526,16 @@ given Parser {
         }
     }
 
-    protected static_dispatch_allows_constructor_argument_syntax(self, receiver Option[StaticDispatchReceiver], member String) Bool = {
+    module_private static_dispatch_allows_constructor_argument_syntax(self, receiver Option[StaticDispatchReceiver], member String) Bool = {
         let _ = self
         return self.is_upper_first(member) and receiver is .Some(_)
     }
 
-    protected parse_control_flow_body(*mutable self) Result[* Expr] = {
+    module_private parse_control_flow_body(*mutable self) Result[* Expr] = {
         return self.parse_expression_checked("control-flow body")
     }
 
-    protected parse_when_arm_body(*mutable self) Result[* Expr] = {
+    module_private parse_when_arm_body(*mutable self) Result[* Expr] = {
         // `when` arm body follows expression grammar; block is one expression form.
         if self.current().kind is .LBrace() then {
             let body = self.parse_block_expression() or return
@@ -544,7 +544,7 @@ given Parser {
         return self.parse_expression_checked("when arm body")
     }
 
-    protected expect_kw_then(*mutable self, context String) Result[Token] = {
+    module_private expect_kw_then(*mutable self, context String) Result[Token] = {
         let t = self.current()
         when t.kind in {
             .KwThen() then {
@@ -557,7 +557,7 @@ given Parser {
         }
     }
 
-    protected expect_kw_in(*mutable self, context String) Result[Token] = {
+    module_private expect_kw_in(*mutable self, context String) Result[Token] = {
         let t = self.current()
         when t.kind in {
             .KwIn() then {
@@ -570,7 +570,7 @@ given Parser {
         }
     }
 
-    protected expect_lbrace(*mutable self, context String) Result[Token] = {
+    module_private expect_lbrace(*mutable self, context String) Result[Token] = {
         let t = self.current()
         when t.kind in {
             .LBrace() then {
@@ -583,7 +583,7 @@ given Parser {
         }
     }
 
-    protected parse_when_arm(*mutable self) Result[WhenArm] = {
+    module_private parse_when_arm(*mutable self) Result[WhenArm] = {
         let arm_start_index = self.index
         let arm_start = self.current()
         self.parse_debug("when arm begin @ \(arm_start.line):\(arm_start.column) token=\(token_text(arm_start))")
@@ -601,7 +601,7 @@ given Parser {
         return .Ok(WhenArm(pattern, body))
     }
 
-    protected parse_when_arms(*mutable self) Result[List[WhenArm]] = {
+    module_private parse_when_arms(*mutable self) Result[List[WhenArm]] = {
         let mutable arms = List[WhenArm].new()
         while true then {
             when self.current().kind in {
@@ -624,7 +624,7 @@ given Parser {
         return .Ok(arms)
     }
 
-    protected try_parse_postfix_cast_suffix(*mutable self, base * Expr) Option[* Expr] = {
+    module_private try_parse_postfix_cast_suffix(*mutable self, base * Expr) Option[* Expr] = {
         let saved = self.save_state()
         when self.current().kind in {
             .LParen() then {},
@@ -648,7 +648,7 @@ given Parser {
         return Option[* Expr].Some(box(Expr.CastExpr(cast_type, base, self.span_from_expr_start(base))))
     }
 
-    protected parse_pattern_primary(*mutable self, stop_on_in Bool) Result[PatternNode] = {
+    module_private parse_pattern_primary(*mutable self, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
 
         when self.current().kind in {
@@ -883,7 +883,7 @@ given Parser {
         return .Ok(node)
     }
 
-    protected parse_pattern_not(*mutable self, stop_on_in Bool) Result[PatternNode] = {
+    module_private parse_pattern_not(*mutable self, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
         if self.current().kind is .KwNot() then {
             self.advance()
@@ -893,7 +893,7 @@ given Parser {
         return self.parse_pattern_primary(stop_on_in)
     }
 
-    protected parse_pattern_and(*mutable self, stop_on_in Bool) Result[PatternNode] = {
+    module_private parse_pattern_and(*mutable self, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
         let mutable left = self.parse_pattern_not(stop_on_in) or return
 
@@ -906,7 +906,7 @@ given Parser {
         return .Ok(left)
     }
 
-    protected parse_pattern_or(*mutable self, stop_on_in Bool) Result[PatternNode] = {
+    module_private parse_pattern_or(*mutable self, stop_on_in Bool) Result[PatternNode] = {
         let start = self.current()
         let mutable left = self.parse_pattern_and(stop_on_in) or return
 
@@ -923,7 +923,7 @@ given Parser {
         return .Ok(left)
     }
 
-    protected collect_pattern_until_then(*mutable self) Result[PatternNode] = {
+    module_private collect_pattern_until_then(*mutable self) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
@@ -931,11 +931,11 @@ given Parser {
         }
     }
 
-    protected parse_single_pattern(*mutable self) Result[PatternNode] = {
+    module_private parse_single_pattern(*mutable self) Result[PatternNode] = {
         return self.parse_pattern_primary(false)
     }
 
-    protected collect_pattern_until_clause_end(*mutable self) Result[PatternNode] = {
+    module_private collect_pattern_until_clause_end(*mutable self) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return
         when self.current().kind in {
             .KwThen() then { return .Ok(pattern) },
@@ -944,7 +944,7 @@ given Parser {
         }
     }
 
-    protected collect_pattern_until_in(*mutable self) Result[PatternNode] = {
+    module_private collect_pattern_until_in(*mutable self) Result[PatternNode] = {
         let pattern = self.parse_pattern_or(true) or return
         when self.current().kind in {
             .KwIn() then { return .Ok(pattern) },
@@ -952,7 +952,7 @@ given Parser {
         }
     }
 
-    protected parse_collection_or_dict_literal(*mutable self) Result[* Expr] = {
+    module_private parse_collection_or_dict_literal(*mutable self) Result[* Expr] = {
         let start = self.current()
         self.advance()
         self.enter_line_join_grouping()
@@ -1037,7 +1037,7 @@ given Parser {
         return .Ok(box(Expr.CollectionLiteral(elements, self.span_from_start(start))))
     }
 
-    protected parse_when_expression(*mutable self) Result[* Expr] = {
+    module_private parse_when_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         self.advance()
         let subject = self.parse_expression_checked("when subject") or return
@@ -1051,7 +1051,7 @@ given Parser {
         return .Ok(box(Expr.WhenExpr(subject, arms, self.span_from_start(start))))
     }
 
-    protected parse_if_expression(*mutable self) Result[* Expr] = {
+    module_private parse_if_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         self.advance()
         let condition = self.parse_expression_checked("if condition") or return
@@ -1070,7 +1070,7 @@ given Parser {
         return .Ok(box(Expr.IfExpr(condition, then_expr, else_expr, span)))
     }
 
-    protected parse_while_expression(*mutable self) Result[* Expr] = {
+    module_private parse_while_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         self.advance()
         let condition = self.parse_expression_checked("while condition") or return
@@ -1082,7 +1082,7 @@ given Parser {
         return .Ok(box(Expr.WhileExpr(condition, body, span)))
     }
 
-    protected parse_for_binding_element(*mutable self) Result[PairBindingElement] = {
+    module_private parse_for_binding_element(*mutable self) Result[PairBindingElement] = {
         let start = self.current()
 
         if start.kind is .Identifier(name) and name == "_" then {
@@ -1114,7 +1114,7 @@ given Parser {
         return .Ok(PairBindingElement(name, is_mut, type_name, false, self.span_from_start(start)))
     }
 
-    protected parse_for_binding_pattern(*mutable self) Result[ForBindingPattern] = {
+    module_private parse_for_binding_pattern(*mutable self) Result[ForBindingPattern] = {
         let start = self.current()
 
         if self.current().kind is .LParen() then {
@@ -1136,7 +1136,7 @@ given Parser {
         return .Ok(ForBindingPattern.Single(binding))
     }
 
-    protected parse_for_expression(*mutable self) Result[* Expr] = {
+    module_private parse_for_expression(*mutable self) Result[* Expr] = {
         let start = self.current()
         self.advance()
         let pattern = self.parse_for_binding_pattern() or return
@@ -1152,7 +1152,7 @@ given Parser {
         return .Ok(box(Expr.ForExpr(pattern, iterable, body, self.span_from_start(start))))
     }
 
-    protected parse_postfix_generic_application(*mutable self, base * Expr) Result[* Expr] = {
+    module_private parse_postfix_generic_application(*mutable self, base * Expr) Result[* Expr] = {
         return when base in {
             .Identifier(name, _) then {
                 let type_args = self.parse_type_arg_list() or else {
@@ -1164,7 +1164,7 @@ given Parser {
         }
     }
 
-    protected try_parse_postfix_generic_application(*mutable self, base * Expr) Option[* Expr] = {
+    module_private try_parse_postfix_generic_application(*mutable self, base * Expr) Option[* Expr] = {
         let saved = self.save_state()
         let parsed = self.parse_postfix_generic_application(base)
         return when parsed in {
@@ -1176,7 +1176,7 @@ given Parser {
         }
     }
 
-    protected try_parse_method_type_args(*mutable self) Option[List[* TypeNode]] = {
+    module_private try_parse_method_type_args(*mutable self) Option[List[* TypeNode]] = {
         if self.current().kind is not .LBracket() then {
             return Option[List[* TypeNode]].None()
         }
@@ -1194,7 +1194,7 @@ given Parser {
         return Option[List[* TypeNode]].None()
     }
 
-    protected has_bare_method_type_args(*mutable self) Bool = {
+    module_private has_bare_method_type_args(*mutable self) Bool = {
         if self.current().kind is not .LBracket() then {
             return false
         }
@@ -1208,7 +1208,7 @@ given Parser {
         return has_missing_call
     }
 
-    protected parse_call_suffix(*mutable self, base * Expr) Result[* Expr] = {
+    module_private parse_call_suffix(*mutable self, base * Expr) Result[* Expr] = {
         self.advance()
         let args = self.parse_argument_list_until_rparen("call") or return
         when self.current().kind in {
@@ -1283,7 +1283,7 @@ given Parser {
         return .Ok(box(Expr.Call(base, args, self.span_from_expr_start(base))))
     }
 
-    protected parse_subscript_suffix(*mutable self, base * Expr) Result[* Expr] = {
+    module_private parse_subscript_suffix(*mutable self, base * Expr) Result[* Expr] = {
         self.advance()
         self.enter_line_join_grouping()
         if self.current().kind is .RBracket() then {
@@ -1311,7 +1311,7 @@ given Parser {
         return .Ok(box(Expr.SubscriptExpr(base, args, self.span_from_expr_start(base))))
     }
 
-    protected append_member_path_segment(self, base * Expr, member String) * Expr = {
+    module_private append_member_path_segment(self, base * Expr, member String) * Expr = {
         let span = self.span_from_expr_start(base)
         return when base in {
             .MemberPath(path_base, path, _) then {
@@ -1330,7 +1330,7 @@ given Parser {
         }
     }
 
-    protected parse_dot_suffix(*mutable self, base * Expr) Result[* Expr] = {
+    module_private parse_dot_suffix(*mutable self, base * Expr) Result[* Expr] = {
         self.advance()
 
 
@@ -1429,7 +1429,7 @@ given Parser {
         return .Ok(member_path)
     }
 
-    protected parse_postfix_suffixes(*mutable self, base * Expr) Result[* Expr] = {
+    module_private parse_postfix_suffixes(*mutable self, base * Expr) Result[* Expr] = {
         let mutable expr = base
 
         while true then {
@@ -1470,12 +1470,12 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_call(*mutable self) Result[* Expr] = {
+    module_private parse_call(*mutable self) Result[* Expr] = {
         let expr = self.parse_primary() or return
         return self.parse_postfix_suffixes(expr)
     }
 
-    protected parse_unary(*mutable self) Result[* Expr] = {
+    module_private parse_unary(*mutable self) Result[* Expr] = {
         if self.current().kind is .Minus() then {
             let start = self.current()
             self.advance()

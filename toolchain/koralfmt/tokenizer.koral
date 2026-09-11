@@ -84,8 +84,8 @@ given Token {
         .KwDefer then "defer",
         .KwRef then "*", .KwPtr then "*unsafe", .Bang then "!", .KwDeptr then "deptr",
         .KwVal then "val", .KwWeakref then "?*",
-        .KwPublic then "public", .KwPrivate then "private", .KwProtected then "protected",
-        .KwProtectedPublic then "protected public",
+        .KwPublic then "public", .KwPrivate then "file_private", .KwProtected then "module_private",
+        .KwProtectedPublic then "module_private public",
         .KwSuper then "super",
         .BoolTrue then "true", .BoolFalse then "false",
         .IntLit(t) then t, .FloatLit(t) then t,
@@ -204,13 +204,13 @@ given Tokenizer {
     public new(source String) Tokenizer = Tokenizer(source.to_runes(), 0)
 
     // Peek at current rune without consuming
-    private peek(*self) Option[Rune] =
+    file_private peek(*self) Option[Rune] =
         if self.pos >= self.runes.count()
             then .None()
             else .Some(self.runes[self.pos])
 
     // Peek at rune at offset from current position
-    private peek_at(*self, offset UInt) Option[Rune] = {
+    file_private peek_at(*self, offset UInt) Option[Rune] = {
         let idx = self.pos + offset
         return if idx >= self.runes.count()
             then .None()
@@ -218,17 +218,17 @@ given Tokenizer {
     }
 
     // Advance and return current rune
-    private advance(*mutable self) Rune = {
+    file_private advance(*mutable self) Rune = {
         let r = self.runes[self.pos]
         self.pos += 1
         return r
     }
 
     // Check if at end
-    private is_eof(*self) Bool = self.pos >= self.runes.count()
+    file_private is_eof(*self) Bool = self.pos >= self.runes.count()
 
     // Check if rune equals a specific character
-    private rune_eq(r Rune, ch Rune) Bool = r == ch
+    file_private rune_eq(r Rune, ch Rune) Bool = r == ch
 
     // ========================================================================
     // Main tokenize entry point
@@ -309,7 +309,7 @@ given Tokenizer {
     // Line comment: // ...
     // ========================================================================
 
-    private scan_line_comment(*mutable self) Token = {
+    file_private scan_line_comment(*mutable self) Token = {
         let mutable text = String.new()
         // Consume // and rest of line, but don't consume the newline
         while not self.is_eof() then {
@@ -325,7 +325,7 @@ given Tokenizer {
     // Block comment: /* ... */
     // ========================================================================
 
-    private scan_block_comment(*mutable self) Token = {
+    file_private scan_block_comment(*mutable self) Token = {
         let mutable text = String.new()
         let mutable depth UInt = 0
         while not self.is_eof() then {
@@ -366,7 +366,7 @@ given Tokenizer {
     // String literal: "..." or "\(...)" interpolation
     // ========================================================================
 
-    private scan_string(*mutable self) Result[Token] = {
+    file_private scan_string(*mutable self) Result[Token] = {
         if self.peek_at(1) is .Some(q1) and Tokenizer.rune_eq(q1, '"') then {
             if self.peek_at(2) is .Some(q2) and Tokenizer.rune_eq(q2, '"') then {
                 return self.scan_multiline_string()
@@ -431,7 +431,7 @@ given Tokenizer {
         return Result[Token].Error(box("unterminated string literal"))
     }
 
-    private scan_multiline_string(*mutable self) Result[Token] = {
+    file_private scan_multiline_string(*mutable self) Result[Token] = {
         let mutable text = String.new()
         text.push_string("\"\"\"")
         self.pos += 3
@@ -488,7 +488,7 @@ given Tokenizer {
     // Number literal
     // ========================================================================
 
-    private scan_number(*mutable self) Token = {
+    file_private scan_number(*mutable self) Token = {
         let mutable text = String.new()
         let mutable is_float = false
 
@@ -574,7 +574,7 @@ given Tokenizer {
     // Identifier or keyword
     // ========================================================================
 
-    private scan_identifier(*mutable self) Token = {
+    file_private scan_identifier(*mutable self) Token = {
         let mutable text = String.new()
         while not self.is_eof() then {
             let r = self.runes[self.pos]
@@ -615,8 +615,8 @@ given Tokenizer {
             "defer" then .KwDefer(),
             "unsafe" then .KwUnsafe(),
             "public" then .KwPublic(),
-            "private" then .KwPrivate(),
-            "protected" then .KwProtected(),
+            "file_private" then .KwPrivate(),
+            "module_private" then .KwProtected(),
             "true" then .BoolTrue(),
             "false" then .BoolFalse(),
             _ then .Ident(text),
@@ -627,7 +627,7 @@ given Tokenizer {
     // Operators and punctuation
     // ========================================================================
 
-    private scan_operator(*mutable self) Option[Token] = {
+    file_private scan_operator(*mutable self) Option[Token] = {
         let r = self.runes[self.pos]
         let cp = r.to_uint32()
 
@@ -926,7 +926,7 @@ given Tokenizer {
     // Character literal: '...'
     // ========================================================================
 
-    private scan_char_literal(*mutable self) Token = {
+    file_private scan_char_literal(*mutable self) Token = {
         let mutable text = String.new()
         text.push_byte('\'')
         self.pos += 1 // skip opening '

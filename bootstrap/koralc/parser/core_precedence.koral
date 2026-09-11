@@ -4,18 +4,18 @@
 // trait/given 声明解析、using 声明解析、顶层声明解析、
 // 以及字符串插值解析。
 
-private let access_modifier_text(access AccessModifier) String = {
+file_private let access_modifier_text(access AccessModifier) String = {
     return when access in {
         .Public() then "public",
-        .Protected() then "protected",
-        .Private() then "private",
-        .ProtectedPublic() then "protected public",
+        .ModulePrivate() then "module_private",
+        .FilePrivate() then "file_private",
+        .PackagePrivate() then "package_private",
     }
 }
 
 given Parser {
 
-    protected comparison_kind_is_equality(self, kind TokenKind) Bool = {
+    module_private comparison_kind_is_equality(self, kind TokenKind) Bool = {
         let _ = self
         return when kind in {
             .EqualEqual() then true,
@@ -24,7 +24,7 @@ given Parser {
         }
     }
 
-    protected comparison_kind_is_ordering(self, kind TokenKind) Bool = {
+    module_private comparison_kind_is_ordering(self, kind TokenKind) Bool = {
         let _ = self
         return when kind in {
             .Greater() then true,
@@ -35,7 +35,7 @@ given Parser {
         }
     }
 
-    protected comparison_kind_is_ascending(self, kind TokenKind) Bool = {
+    module_private comparison_kind_is_ascending(self, kind TokenKind) Bool = {
         let _ = self
         return when kind in {
             .Less() then true,
@@ -46,7 +46,7 @@ given Parser {
         }
     }
 
-    protected comparison_operator_from_kind(self, kind TokenKind) ComparisonOperator = {
+    module_private comparison_operator_from_kind(self, kind TokenKind) ComparisonOperator = {
         let _ = self
         return when kind in {
             .EqualEqual() then ComparisonOperator.Equal(),
@@ -59,7 +59,7 @@ given Parser {
         }
     }
 
-    protected expr_is_ordering_comparison(self, expr * Expr) Bool = {
+    module_private expr_is_ordering_comparison(self, expr * Expr) Bool = {
         return when expr in {
             .ComparisonExpr(_, op, _, _) then when op in {
                 .Greater() then true,
@@ -73,11 +73,11 @@ given Parser {
         }
     }
 
-    protected invalid_comparison_chain_error(self) Result[* Expr] = {
+    module_private invalid_comparison_chain_error(self) Result[* Expr] = {
         return .Error(self.parser_error("Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly."))
     }
 
-    protected parse_factor(*mutable self) Result[* Expr] = {
+    module_private parse_factor(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_unary() or return
 
         while true then {
@@ -108,7 +108,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_term(*mutable self) Result[* Expr] = {
+    module_private parse_term(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_factor() or return
 
         while true then {
@@ -133,7 +133,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_range(*mutable self) Result[* Expr] = {
+    module_private parse_range(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_comparison() or return
 
         while true then {
@@ -176,7 +176,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_shift(*mutable self) Result[* Expr] = {
+    module_private parse_shift(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_term() or return
 
         while true then {
@@ -201,7 +201,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_bitwise_and(*mutable self) Result[* Expr] = {
+    module_private parse_bitwise_and(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_range() or return
 
         while self.current().kind is .Ampersand() then {
@@ -215,7 +215,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_bitwise_xor(*mutable self) Result[* Expr] = {
+    module_private parse_bitwise_xor(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_bitwise_and() or return
 
         while self.current().kind is .Caret() then {
@@ -229,7 +229,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_bitwise_or(*mutable self) Result[* Expr] = {
+    module_private parse_bitwise_or(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_bitwise_xor() or return
 
         while self.current().kind is .Pipe() then {
@@ -243,7 +243,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_comparison(*mutable self) Result[* Expr] = {
+    module_private parse_comparison(*mutable self) Result[* Expr] = {
         let start = self.current()
         let expr = self.parse_shift() or return
 
@@ -319,7 +319,7 @@ given Parser {
 
 
 
-    protected parse_is(*mutable self) Result[* Expr] = {
+    module_private parse_is(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_bitwise_or() or return
 
         if self.should_break_binary_at_current_token() then {
@@ -344,7 +344,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_logical_not(*mutable self) Result[* Expr] = {
+    module_private parse_logical_not(*mutable self) Result[* Expr] = {
         if self.current().kind is .KwNot() then {
             let start = self.current()
             self.advance()
@@ -355,7 +355,7 @@ given Parser {
         return self.parse_is()
     }
 
-    protected parse_and_then(*mutable self) Result[* Expr] = {
+    module_private parse_and_then(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_and() or return
 
         while self.current().kind is .KwAnd() then {
@@ -373,7 +373,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_and(*mutable self) Result[* Expr] = {
+    module_private parse_and(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_logical_not() or return
 
         while self.current().kind is .KwAnd() then {
@@ -391,7 +391,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_or_else(*mutable self) Result[* Expr] = {
+    module_private parse_or_else(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_or() or return
 
         while self.current().kind is .KwOr() then {
@@ -415,7 +415,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_or(*mutable self) Result[* Expr] = {
+    module_private parse_or(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_and_then() or return
 
         while self.current().kind is .KwOr() then {
@@ -442,7 +442,7 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_or_return(*mutable self) Result[* Expr] = {
+    module_private parse_or_return(*mutable self) Result[* Expr] = {
         let mutable expr = self.parse_or_else() or return
 
         while self.current().kind is .KwOr() then {
@@ -459,27 +459,27 @@ given Parser {
         return .Ok(expr)
     }
 
-    protected parse_expression(*mutable self) Result[* Expr] = {
+    module_private parse_expression(*mutable self) Result[* Expr] = {
         return self.parse_or_return()
     }
 
-    protected parse_access_modifier(*mutable self, default AccessModifier) AccessModifier = {
+    module_private parse_access_modifier(*mutable self, default AccessModifier) AccessModifier = {
         when self.current().kind in {
             .KwPublic() then {
                 self.advance()
                 return AccessModifier.Public()
             },
-            .KwProtected() then {
+            .KwModulePrivate() then {
                 self.advance()
-                if self.current().kind is .KwPublic() then {
-                    self.advance()
-                    return AccessModifier.ProtectedPublic()
-                }
-                return AccessModifier.Protected()
+                return AccessModifier.ModulePrivate()
             },
-            .KwPrivate() then {
+            .KwPackagePrivate() then {
                 self.advance()
-                return AccessModifier.Private()
+                return AccessModifier.PackagePrivate()
+            },
+            .KwFilePrivate() then {
+                self.advance()
+                return AccessModifier.FilePrivate()
             },
             _ then {
                 return default
@@ -487,7 +487,7 @@ given Parser {
         }
     }
 
-    protected parse_trait_member(*mutable self) Result[TraitMember] = {
+    module_private parse_trait_member(*mutable self) Result[TraitMember] = {
         let access = self.parse_access_modifier(AccessModifier.Public())
         let name = self.expect_identifier("trait member") or else {
             return .Error(self.parser_error("parse trait member error"))
@@ -525,8 +525,8 @@ given Parser {
         return .Ok(TraitMember(name, type_params, access, params, return_type))
     }
 
-    protected parse_given_member(*mutable self, allow_body Bool) Result[GivenMember] = {
-        let access = self.parse_access_modifier(AccessModifier.Protected())
+    module_private parse_given_member(*mutable self, allow_body Bool) Result[GivenMember] = {
+        let access = self.parse_access_modifier(AccessModifier.ModulePrivate())
         let name = self.expect_identifier("given member") or else {
             return .Error(self.parser_error("parse given member error"))
         }
@@ -576,7 +576,7 @@ given Parser {
         return .Ok(GivenMember(name, type_params, access, params, return_type, body))
     }
 
-    protected parse_trait_members(*mutable self) Result[List[TraitMember]] = {
+    module_private parse_trait_members(*mutable self) Result[List[TraitMember]] = {
         let mutable members = List[TraitMember].new()
 
         while true then {
@@ -608,7 +608,7 @@ given Parser {
         return .Ok(members)
     }
 
-    protected parse_given_members(*mutable self, allow_body Bool) Result[List[GivenMember]] = {
+    module_private parse_given_members(*mutable self, allow_body Bool) Result[List[GivenMember]] = {
         let mutable members = List[GivenMember].new()
 
         while true then {
@@ -640,7 +640,7 @@ given Parser {
         return .Ok(members)
     }
 
-    protected parse_module_using_items(*mutable self) Result[List[UsingModuleItem]] = {
+    module_private parse_module_using_items(*mutable self) Result[List[UsingModuleItem]] = {
         let mutable items = List[UsingModuleItem].new()
         let mutable saw_all_public = false
 
@@ -715,7 +715,7 @@ given Parser {
         return .Ok(items)
     }
 
-    protected parse_using_decl(*mutable self, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    module_private parse_using_decl(*mutable self, access AccessModifier, has_explicit_access Bool, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
 
@@ -780,7 +780,7 @@ given Parser {
         return .Ok(Decl.ModuleUsingDecl(path_segments, items, self.span_from_start(start)))
     }
 
-    protected parse_trait_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    module_private parse_trait_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
         let name = self.expect_identifier("trait declaration") or return
@@ -819,7 +819,7 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    protected parse_given_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
+    module_private parse_given_decl(*mutable self, access AccessModifier, is_foreign Bool, is_intrinsic Bool) Result[Decl] = {
         let start = self.current()
         self.advance()
         let type_params = self.parse_type_parameters() or else {
@@ -862,7 +862,7 @@ given Parser {
         return self.wrap_decl(access, is_foreign, is_intrinsic, base)
     }
 
-    protected parse_top_level_decl(*mutable self) Result[Decl] = {
+    module_private parse_top_level_decl(*mutable self) Result[Decl] = {
         let flags = self.parse_decl_flags()
 
         when flags.invalid_access_message in {
@@ -882,7 +882,7 @@ given Parser {
                 return self.parse_type_decl(flags.access, flags.is_foreign, flags.is_intrinsic)
             },
             .KwUsing() then {
-                let mutable using_access = AccessModifier.Private()
+                let mutable using_access = AccessModifier.FilePrivate()
                 if flags.has_explicit_access then {
                     using_access = flags.access
                 }
@@ -943,7 +943,7 @@ given Parser {
 
 given Parser {
 
-    protected parse_interpolated_string_expr(*mutable self, parts List[InterpolatedStringTokenPart], span SourceSpan) Result[* Expr] = {
+    module_private parse_interpolated_string_expr(*mutable self, parts List[InterpolatedStringTokenPart], span SourceSpan) Result[* Expr] = {
         let mutable ast_parts = List[InterpolatedStringPart].new()
         let mutable literal_value = String.new()
         let mutable has_expression = false
@@ -972,11 +972,11 @@ given Parser {
         return .Ok(box(Expr.InterpolatedString(ast_parts, span)))
     }
 
-    protected parse_string_literal_expr(*mutable self, value String, span SourceSpan) Result[* Expr] = {
+    module_private parse_string_literal_expr(*mutable self, value String, span SourceSpan) Result[* Expr] = {
         return .Ok(box(Expr.StringLiteral(value, span)))
     }
 
-    protected parse_embedded_expression(*mutable self, expr_tokens List[* Token]) Result[* Expr] = {
+    module_private parse_embedded_expression(*mutable self, expr_tokens List[* Token]) Result[* Expr] = {
         let mutable token_list = List[Token].new()
         for token_ref in expr_tokens then {
             token_list.push(*token_ref)
@@ -1021,8 +1021,9 @@ let token_text(token Token) String = {
         .KwIntrinsic() then "intrinsic",
         .KwForeign() then "foreign",
         .KwUsing() then "using",
-        .KwPrivate() then "private",
-        .KwProtected() then "protected",
+        .KwFilePrivate() then "file_private",
+        .KwModulePrivate() then "module_private",
+        .KwPackagePrivate() then "package_private",
         .KwPublic() then "public",
         .KwSelf() then "self",
         .KwSelfType() then "Self",

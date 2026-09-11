@@ -44,7 +44,7 @@ given NameCollector {
         self.package_id = saved_package_id
     }
 
-    private make_var_symbol(*mutable self, name String, is_mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
+    file_private make_var_symbol(*mutable self, name String, is_mutable Bool, access AccessModifier, span SourceSpan) Symbol = {
         let kind = if is_mutable
             then SymbolKind.Variable(VariableKind.MutableValue())
             else SymbolKind.Variable(VariableKind.Value())
@@ -53,46 +53,46 @@ given NameCollector {
         return Symbol(def_id, Type.Unknown(), kind)
     }
 
-    private make_fn_symbol(*mutable self, name String, access AccessModifier, span SourceSpan) Symbol = {
+    file_private make_fn_symbol(*mutable self, name String, access AccessModifier, span SourceSpan) Symbol = {
         let mutable context = self.context
         let def_id = context.allocate_full_in_package(name, DefKind.Function(), self.module_path, self.source_file, self.package_id, access, span)
         return Symbol(def_id, Type.Unknown(), SymbolKind.Function())
     }
 
-    private duplicate_definition_message(self, name String) String = {
+    file_private duplicate_definition_message(self, name String) String = {
         let _ = self
         let mutable message = "Duplicate definition: "
         message.push_string(name)
         return message
     }
 
-    private push_name_diagnostic(*mutable self, message String) Void = {
+    file_private push_name_diagnostic(*mutable self, message String) Void = {
         self.diagnostics.push(make_diagnostic(DiagnosticStage.Semantic(), self.source_file, message))
     }
 
-    private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
+    file_private has_conflicting_top_level_name(self, name String, access AccessModifier) Bool = {
         let source_file = when access in {
-            .Private() then Option[String].Some(self.source_file),
+            .FilePrivate() then Option[String].Some(self.source_file),
             _ then Option[String].None(),
         }
         return self.context.lookup_def_id(self.module_path, name, source_file) is .Some(_)
     }
 
-    private has_conflicting_top_level_type_name(self, name String, access AccessModifier) Bool = {
+    file_private has_conflicting_top_level_type_name(self, name String, access AccessModifier) Bool = {
         let source_file = when access in {
-            .Private() then Option[String].Some(self.source_file),
+            .FilePrivate() then Option[String].Some(self.source_file),
             _ then Option[String].None(),
         }
         if self.context.lookup_def_id(self.module_path, name, source_file) is .Some(_) then {
             return true
         }
-        if access is .Private() then {
+        if access is .FilePrivate() then {
             return false
         }
         return self.global_scope.lookup_local_type(name) is .Some(_)
     }
 
-    private collect_decl(*mutable self, decl Decl) Void = {
+    file_private collect_decl(*mutable self, decl Decl) Void = {
         when decl in {
             .TypeStructDecl(access, name, type_params, fields, span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
@@ -179,7 +179,7 @@ given NameCollector {
             },
             .TraitDecl(access, name, type_params, parents, members, span) then {
                 let trait_source_file = when access in {
-                    .Private() then Option[String].Some(self.source_file),
+                    .FilePrivate() then Option[String].Some(self.source_file),
                     _ then Option[String].None(),
                 }
                 if self.context.lookup_def_id(self.module_path, name, trait_source_file) is .Some(_) then {

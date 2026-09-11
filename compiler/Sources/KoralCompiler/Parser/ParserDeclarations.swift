@@ -314,7 +314,7 @@ extension Parser {
     var methods: [IntrinsicMethodDeclaration] = []
 
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier(default: .protected)
+      let methodAccess = try parseAccessModifier(default: .module_private)
 
       // Intrinsic methods inside intrinsic given are implicitly intrinsic, so no need for keyword check?
       // Or do we disallow nested modifiers?
@@ -420,7 +420,7 @@ extension Parser {
     try match(.leftBrace)
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier(default: .protected)
+      let methodAccess = try parseAccessModifier(default: .module_private)
 
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description)
@@ -507,12 +507,12 @@ extension Parser {
   }
 
   private func isCurrentAccessModifierToken() -> Bool {
-    currentToken === .publicKeyword || currentToken === .protectedKeyword || currentToken === .privateKeyword
+    currentToken === .publicKeyword || currentToken === .filePrivateKeyword || currentToken === .modulePrivateKeyword || currentToken === .packagePrivateKeyword
   }
 
   private func parseTopLevelDeclFlags() throws -> TopLevelDeclFlags {
     var explicitAccess: AccessModifier? = nil
-    var access: AccessModifier = .protected
+    var access: AccessModifier = .module_private
 
     var isIntrinsic = false
     var isForeign = false
@@ -522,11 +522,11 @@ extension Parser {
         if let existingAccess = explicitAccess {
           throw ParserError.invalidAccessModifierOrder(
             span: currentSpan,
-            message: "Invalid access modifier order: '\(existingAccess.description) \(currentToken.description)'. Use 'protected public' only in that exact order"
+            message: "Invalid access modifier order: '\(existingAccess.description) \(currentToken.description)'."
           )
         }
         explicitAccess = try parseExplicitAccessModifier()
-        access = explicitAccess ?? .protected
+        access = explicitAccess ?? .module_private
         continue
       }
 
@@ -560,32 +560,27 @@ extension Parser {
   }
 
   private func ensureNoTrailingAccessModifier(after accessText: String) throws {
-    if currentToken === .publicKeyword || currentToken === .protectedKeyword || currentToken === .privateKeyword {
+    if currentToken === .publicKeyword || currentToken === .filePrivateKeyword || currentToken === .modulePrivateKeyword || currentToken === .packagePrivateKeyword {
       let next = currentToken.description
       throw ParserError.invalidAccessModifierOrder(
         span: currentSpan,
-        message: "Invalid access modifier order: '\(accessText) \(next)'. Use 'protected public' only in that exact order"
+        message: "Invalid access modifier order: '\(accessText) \(next)'"
       )
     }
   }
 
   func parseExplicitAccessModifier() throws -> AccessModifier? {
-    if currentToken === .privateKeyword {
-      try match(.privateKeyword)
-      try ensureNoTrailingAccessModifier(after: "private")
-      return .private
-    } else if currentToken === .protectedKeyword {
-      try match(.protectedKeyword)
-      if currentToken === .publicKeyword {
-        try match(.publicKeyword)
-        try ensureNoTrailingAccessModifier(after: "protected public")
-        return .protectedPublic
-      }
-      try ensureNoTrailingAccessModifier(after: "protected")
-      return .protected
+    if currentToken === .filePrivateKeyword {
+      try match(.filePrivateKeyword)
+      return .file_private
+    } else if currentToken === .modulePrivateKeyword {
+      try match(.modulePrivateKeyword)
+      return .module_private
+    } else if currentToken === .packagePrivateKeyword {
+      try match(.packagePrivateKeyword)
+      return .package_private
     } else if currentToken === .publicKeyword {
       try match(.publicKeyword)
-      try ensureNoTrailingAccessModifier(after: "public")
       return .public
     }
     return nil

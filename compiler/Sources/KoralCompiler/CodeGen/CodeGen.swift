@@ -101,8 +101,8 @@ public class CodeGen {
     case .variable:
       let modulePath = context.getModulePath(symbol.defId) ?? []
       let sourceFile = context.getSourceFile(symbol.defId) ?? ""
-      let access = context.getAccess(symbol.defId) ?? .protected
-      isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
+      let access = context.getAccess(symbol.defId) ?? .module_private
+      isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .file_private
     }
 
     if isGlobalSymbol {
@@ -120,7 +120,7 @@ public class CodeGen {
     var foreignDefIds: Set<UInt64> = []
 
     func register(defId: DefId, access: AccessModifier) {
-      if access == .private {
+      if access == .file_private {
         privateDefIds.append(defId)
       } else {
         publicDefIds.append(defId)
@@ -130,54 +130,54 @@ public class CodeGen {
     for node in mirProgram.globals {
       switch node {
       case .foreignType(let identifier):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
         foreignDefIds.insert(defIdKey(identifier.defId))
         if case .opaque(let defId) = identifier.type {
-          register(defId: defId, access: context.getAccess(defId) ?? .protected)
+          register(defId: defId, access: context.getAccess(defId) ?? .module_private)
           foreignDefIds.insert(defIdKey(defId))
         }
       case .foreignStruct(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
         foreignDefIds.insert(defIdKey(identifier.defId))
         if case .structure(let defId) = identifier.type {
-          register(defId: defId, access: context.getAccess(defId) ?? .protected)
+          register(defId: defId, access: context.getAccess(defId) ?? .module_private)
           foreignDefIds.insert(defIdKey(defId))
         }
       case .foreignFunction(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
         foreignDefIds.insert(defIdKey(identifier.defId))
       case .foreignGlobalVariable(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
         foreignDefIds.insert(defIdKey(identifier.defId))
       case .structDeclaration(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
         if case .structure(let defId) = identifier.type {
-          let access = context.getAccess(defId) ?? .protected
+          let access = context.getAccess(defId) ?? .module_private
           register(defId: defId, access: access)
         }
       case .enumDeclaration(let identifier, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
         if case .`enum`(let defId) = identifier.type {
-          let access = context.getAccess(defId) ?? .protected
+          let access = context.getAccess(defId) ?? .module_private
           register(defId: defId, access: access)
         }
       case .function(let identifier, _, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
       case .globalVariable(let identifier, _, _):
-        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .protected)
+        register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .module_private)
       case .given(let type, _, let methods):
         switch type {
         case .structure(let defId):
-          let access = context.getAccess(defId) ?? .protected
+          let access = context.getAccess(defId) ?? .module_private
           register(defId: defId, access: access)
         case .`enum`(let defId):
-          let access = context.getAccess(defId) ?? .protected
+          let access = context.getAccess(defId) ?? .module_private
           register(defId: defId, access: access)
         default:
           break
         }
         for method in methods {
-          register(defId: method.defId, access: context.getAccess(method.defId) ?? .protected)
+          register(defId: method.defId, access: context.getAccess(method.defId) ?? .module_private)
         }
       case .traitVTable, .templatePlaceholder:
         break
@@ -214,8 +214,8 @@ public class CodeGen {
     case .variable:
       let modulePath = context.getModulePath(symbol.defId) ?? []
       let sourceFile = context.getSourceFile(symbol.defId) ?? ""
-      let access = context.getAccess(symbol.defId) ?? .protected
-      isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .private
+      let access = context.getAccess(symbol.defId) ?? .module_private
+      isGlobalSymbol = !modulePath.isEmpty || !sourceFile.isEmpty || access == .file_private
     }
 
     if case .variable = symbol.kind {
@@ -1030,12 +1030,12 @@ public class CodeGen {
          dispatch.methodName == "drop",
          isStdDropTraitName(dispatch.conformanceTraitName),
          case .concreteType(let ownerTypeName) = dispatch.owner {
-        let access = context.getAccess(identifier.defId) ?? .protected
+        let access = context.getAccess(identifier.defId) ?? .module_private
         let sourceFile = context.getSourceFile(identifier.defId)
         let ownerDefId = context.lookupDefId(
           modulePath: [],
           name: ownerTypeName,
-          sourceFile: access == .private ? sourceFile : nil
+          sourceFile: access == .file_private ? sourceFile : nil
         )
         let cTypeName = ownerDefId.flatMap { defId in
           cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId)

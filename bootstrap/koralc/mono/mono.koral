@@ -38,7 +38,7 @@ public type ConcreteCallableInfo(
     trait_conformance Option[String],
 )
 
-private let mono_receiver_lookup_type(context * CompilerContext, t Type) Type = {
+file_private let mono_receiver_lookup_type(context * CompilerContext, t Type) Type = {
     return when t in {
         .OpaqueType(def_id) then {
             yield when context.lookup_type(def_id) in {
@@ -60,7 +60,7 @@ private let mono_receiver_lookup_type(context * CompilerContext, t Type) Type = 
 
 /// Get the simple type name for a type, matching Swift's context.getName(defId).
 /// Used as the type-name component in method lookup keys ("typeName.methodName").
-protected let mono_type_simple_name(context * CompilerContext, t Type) String = {
+module_private let mono_type_simple_name(context * CompilerContext, t Type) String = {
     return when t in {
         .StructureType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
         .EnumType(def_id) then context.get_name(def_id) or else context.type_display_name(t),
@@ -84,11 +84,11 @@ protected let mono_type_simple_name(context * CompilerContext, t Type) String = 
     }
 }
 
-private let mono_concrete_layout_key_for_def_id(context * CompilerContext, def_id DefId) Option[String] = {
+file_private let mono_concrete_layout_key_for_def_id(context * CompilerContext, def_id DefId) Option[String] = {
     let name = context.get_name(def_id) or else { return Option[String].None() }
     let module_path = context.get_module_path(def_id) or else List[String].new()
     let is_private = when context.get_access(def_id) in {
-        .Some(access) then access is .Private(),
+        .Some(access) then access is .FilePrivate(),
         .None() then false,
     }
     let source_file = context.get_source_file(def_id) or else ""
@@ -123,7 +123,7 @@ private let mono_concrete_layout_key_for_def_id(context * CompilerContext, def_i
     return Option[String].Some(out)
 }
 
-private type MonoConcreteLayoutWrapperKind {
+file_private type MonoConcreteLayoutWrapperKind {
     Reference(),
     MutableReference(),
     BorrowedReference(),
@@ -134,12 +134,12 @@ private type MonoConcreteLayoutWrapperKind {
     MutableWeakReference(),
 }
 
-private type MonoConcreteLayoutWrapperChain(
+file_private type MonoConcreteLayoutWrapperChain(
     wrappers List[MonoConcreteLayoutWrapperKind],
     inner Type,
 )
 
-private let split_mono_concrete_layout_wrappers(t Type) MonoConcreteLayoutWrapperChain = {
+file_private let split_mono_concrete_layout_wrappers(t Type) MonoConcreteLayoutWrapperChain = {
     let mutable wrappers = List[MonoConcreteLayoutWrapperKind].new()
     let mutable current = t
     while true then {
@@ -182,7 +182,7 @@ private let split_mono_concrete_layout_wrappers(t Type) MonoConcreteLayoutWrappe
     return MonoConcreteLayoutWrapperChain(wrappers, current)
 }
 
-private let mono_concrete_layout_wrapper_prefix(kind MonoConcreteLayoutWrapperKind) String = {
+file_private let mono_concrete_layout_wrapper_prefix(kind MonoConcreteLayoutWrapperKind) String = {
     return when kind in {
         .Reference() then "ref_",
         .MutableReference() then "mutref_",
@@ -195,7 +195,7 @@ private let mono_concrete_layout_wrapper_prefix(kind MonoConcreteLayoutWrapperKi
     }
 }
 
-private let prefix_mono_concrete_layout_key(base String, wrappers List[MonoConcreteLayoutWrapperKind]) String = {
+file_private let prefix_mono_concrete_layout_key(base String, wrappers List[MonoConcreteLayoutWrapperKind]) String = {
     if wrappers.is_empty() then {
         return base
     }
@@ -208,7 +208,7 @@ private let prefix_mono_concrete_layout_key(base String, wrappers List[MonoConcr
     return out
 }
 
-private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type) String = {
+file_private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type) String = {
     let chain = split_mono_concrete_layout_wrappers(t)
     let inner_key = when chain.inner in {
         .ReferenceType(inner) then "ref_\(mono_concrete_layout_key_for_type(context, *inner))",
@@ -254,13 +254,13 @@ private let mono_concrete_layout_key_for_type(context * CompilerContext, t Type)
     return prefix_mono_concrete_layout_key(inner_key, chain.wrappers)
 }
 
-private let concrete_receiver_method_lookup_key(context * CompilerContext, receiver_type Type, method_name String) String = {
+file_private let concrete_receiver_method_lookup_key(context * CompilerContext, receiver_type Type, method_name String) String = {
     let normalized = mono_receiver_lookup_type(context, receiver_type)
     let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
     return "\(receiver_key).\(method_name)"
 }
 
-private let push_concrete_receiver_lookup_alias(alias_list List[String], alias String) List[String] = {
+file_private let push_concrete_receiver_lookup_alias(alias_list List[String], alias String) List[String] = {
     if alias.is_empty() then { return alias_list }
     if alias_list.contains(alias) then { return alias_list }
     let mutable updated = alias_list
@@ -268,7 +268,7 @@ private let push_concrete_receiver_lookup_alias(alias_list List[String], alias S
     return updated
 }
 
-private let concrete_receiver_lookup_aliases(context * CompilerContext, t Type) List[String] = {
+file_private let concrete_receiver_lookup_aliases(context * CompilerContext, t Type) List[String] = {
     let mutable aliases = List[String].new()
     aliases = push_concrete_receiver_lookup_alias(aliases, mono_concrete_layout_key_for_type(context, t))
 
@@ -298,7 +298,7 @@ private let concrete_receiver_lookup_aliases(context * CompilerContext, t Type) 
     return aliases
 }
 
-private let concrete_trait_method_lookup_key(context * CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
+file_private let concrete_trait_method_lookup_key(context * CompilerContext, receiver_type Type, trait_name String, method_name String) String = {
     let normalized = mono_receiver_lookup_type(context, receiver_type)
     let receiver_key = mono_concrete_layout_key_for_type(context, normalized)
     return "\(receiver_key)|\(trait_name)|\(method_name)"
@@ -400,7 +400,7 @@ public type TypeCheckerOutput(
 
 // All mutable Monomorphizer state lives here so Monomorphizer can be passed by
 // ref without copying large data onto the stack (mirrors TypeCheckerStorage).
-protected type MonomorphizerStorage(
+module_private type MonomorphizerStorage(
     // ── Input ────────────────────────────────────────────────────────────────
     generic_templates GenericTemplateRegistry,
     source_given_decls List[* TypedDecl],
@@ -483,13 +483,13 @@ protected type MonomorphizerStorage(
 
 // Core monomorphization engine.  All mutable state lives in storage (heap-allocated)
 // so passing Monomorphizer by ref never copies large data onto the stack.
-public type Monomorphizer(protected mutable storage *mutable MonomorphizerStorage)
+public type Monomorphizer(module_private mutable storage *mutable MonomorphizerStorage)
 
 // ── Monomorphizer initialisation ──────────────────────────────────────────────
 
 // Returns true when a TypedDecl is a non-generic global node that should be
 // preserved verbatim in the monomorphized output.
-private let is_non_generic_decl(decl * TypedDecl) Bool = {
+file_private let is_non_generic_decl(decl * TypedDecl) Bool = {
     return when decl in {
         .UsingDecl(_, _, _)              then false,
         .ForeignFunctionDecl(_, _, _, _, _, _) then true,
@@ -518,21 +518,21 @@ private let is_non_generic_decl(decl * TypedDecl) Bool = {
     }
 }
 
-private let given_member_has_generic_parameter(member * TypedGivenMember) Bool = {
+file_private let given_member_has_generic_parameter(member * TypedGivenMember) Bool = {
     for param in member.params then {
         if has_generic_parameter(param.param_type) then { return true }
     }
     return has_generic_parameter(member.return_type)
 }
 
-private let given_members_have_generic_parameter(members List[* TypedGivenMember]) Bool = {
+file_private let given_members_have_generic_parameter(members List[* TypedGivenMember]) Bool = {
     for member_ref in members then {
         if given_member_has_generic_parameter(member_ref) then { return true }
     }
     return false
 }
 
-private let is_source_given_decl(decl * TypedDecl) Bool = {
+file_private let is_source_given_decl(decl * TypedDecl) Bool = {
     return when decl in {
         .GivenDecl(_, _, _) then true,
         .GivenTraitDecl(_, _, _, _, _) then true,
@@ -541,7 +541,7 @@ private let is_source_given_decl(decl * TypedDecl) Bool = {
     }
 }
 
-private let mono_env_uint(_name String, fallback UInt) UInt = {
+file_private let mono_env_uint(_name String, fallback UInt) UInt = {
     return when env(_name) in {
         .Some(env_value) then when UInt.parse(env_value.trim_ascii()) in {
             .Ok(value) then value,
@@ -551,7 +551,7 @@ private let mono_env_uint(_name String, fallback UInt) UInt = {
     }
 }
 
-private let instantiation_kind_profile_name(kind InstantiationKind) String = {
+file_private let instantiation_kind_profile_name(kind InstantiationKind) String = {
     return when kind in {
         .StructType(_, _) then "struct",
         .EnumType(_, _) then "enum",
@@ -561,7 +561,7 @@ private let instantiation_kind_profile_name(kind InstantiationKind) String = {
     }
 }
 
-private let mono_decl_kind_name(decl * TypedDecl) String = {
+file_private let mono_decl_kind_name(decl * TypedDecl) String = {
     return when decl in {
         .LetDecl(_, _, _, _, _, _, _) then "let",
         .FunctionDecl(_, _, _, _, _, _, _) then "function",
@@ -584,7 +584,7 @@ private let mono_decl_kind_name(decl * TypedDecl) String = {
     }
 }
 
-private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
+file_private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
     when decl_def_id(decl) in {
         .Some(node_def_id) then {
             return Option[String].Some("def:\(node_def_id.id)")
@@ -626,7 +626,7 @@ private let mono_decl_dedup_key(decl * TypedDecl) Option[String] = {
 }
 
 /// Extract the DefId from a TypedDecl node's embedded identifier, if present.
-protected let decl_def_id(decl * TypedDecl) Option[DefId] = {
+module_private let decl_def_id(decl * TypedDecl) Option[DefId] = {
     return when decl in {
         .FunctionDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
         .IntrinsicFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
@@ -640,16 +640,16 @@ protected let decl_def_id(decl * TypedDecl) Option[DefId] = {
     }
 }
 
-private type MonoProgramInputs(
+file_private type MonoProgramInputs(
     initial_nodes List[* TypedDecl],
     source_given_decls List[* TypedDecl],
 )
 
-private let strip_given_member_body(member_ref * TypedGivenMember) * TypedGivenMember = {
+file_private let strip_given_member_body(member_ref * TypedGivenMember) * TypedGivenMember = {
     return box(TypedGivenMember(member_ref.def_id, member_ref.name, member_ref.params, member_ref.return_type, Option[* TypedExpr].None()))
 }
 
-private let strip_given_decl_bodies_for_source_lookup(decl_ref * TypedDecl) * TypedDecl = {
+file_private let strip_given_decl_bodies_for_source_lookup(decl_ref * TypedDecl) * TypedDecl = {
     return when decl_ref in {
         .GivenDecl(target_type, members, span) then {
             let mutable stripped_members = List[* TypedGivenMember].new()
@@ -676,7 +676,7 @@ private let strip_given_decl_bodies_for_source_lookup(decl_ref * TypedDecl) * Ty
     }
 }
 
-private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
+file_private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs = {
     let mutable initial_nodes = List[* TypedDecl].new()
     let mutable source_given_decls = List[* TypedDecl].new()
     for decl_ref in program.declarations then {
@@ -693,25 +693,25 @@ private let collect_mono_program_inputs(program TypedProgram) MonoProgramInputs 
 given Monomorphizer {
     public diagnostics(self) DiagnosticCollector = self.storage.diagnostics
 
-    protected report_monomorphization_error(*self, def_id DefId, message String) Void = {
+    module_private report_monomorphization_error(*self, def_id DefId, message String) Void = {
         let file_path = self.storage.context.get_source_file(def_id) or else ""
         let span = self.storage.context.get_span(def_id) or else unknown_span()
         self.storage.diagnostics.push(make_diagnostic_at(DiagnosticStage.Other(), file_path, message, span))
     }
 
-    protected report_monomorphization_internal_error(*self, message String) Void = {
+    module_private report_monomorphization_internal_error(*self, message String) Void = {
         self.storage.diagnostics.push(make_diagnostic(DiagnosticStage.Other(), "", message))
     }
 
-    protected receiver_method_dispatch_info(*self, def_id DefId) Option[ReceiverMethodDispatchInfo] = {
+    module_private receiver_method_dispatch_info(*self, def_id DefId) Option[ReceiverMethodDispatchInfo] = {
         return self.storage.receiver_method_dispatch.get(def_id)
     }
 
-    protected concrete_callable_info(*self, def_id DefId) Option[ConcreteCallableInfo] = {
+    module_private concrete_callable_info(*self, def_id DefId) Option[ConcreteCallableInfo] = {
         return self.storage.concrete_callables_by_def_id.get(def_id)
     }
 
-    protected register_concrete_callable_if_absent(*self, info ConcreteCallableInfo) Void = {
+    module_private register_concrete_callable_if_absent(*self, info ConcreteCallableInfo) Void = {
         if not self.storage.concrete_callables_by_def_id.contains_key(info.def_id) then {
             self.storage.concrete_callables_by_def_id.insert(info.def_id, info)
             // Build secondary index: "layout_key(owner).method_name" -> [def_id, ...]
@@ -727,7 +727,7 @@ given Monomorphizer {
         }
     }
 
-    protected set_receiver_method_dispatch_if_absent(*self, callsite_def_id DefId, info ReceiverMethodDispatchInfo) Void = {
+    module_private set_receiver_method_dispatch_if_absent(*self, callsite_def_id DefId, info ReceiverMethodDispatchInfo) Void = {
         if not self.storage.receiver_method_dispatch.contains_key(callsite_def_id) then {
             self.storage.receiver_method_dispatch.insert(callsite_def_id, info)
         }
@@ -846,7 +846,7 @@ given Monomorphizer {
     // Register method DefIds from GivenDecl/GivenTraitDecl/IntrinsicGivenDecl
     // into extension_method_def_ids so that resolve_static_method_call_to_call
     // can find them, using a single stable concrete receiver key.
-    private seed_given_method_def_ids(*self, node * TypedDecl) Void = {
+    file_private seed_given_method_def_ids(*self, node * TypedDecl) Void = {
         when node in {
             .GivenDecl(target_type, members, _) then {
                 self.register_given_members_def_ids(target_type, Option[String].None(), members)
@@ -861,7 +861,7 @@ given Monomorphizer {
         }
     }
 
-    private register_given_members_def_ids(*self, target_type Type, trait_conformance Option[String], members List[* TypedGivenMember]) Void = {
+    file_private register_given_members_def_ids(*self, target_type Type, trait_conformance Option[String], members List[* TypedGivenMember]) Void = {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
@@ -890,7 +890,7 @@ given Monomorphizer {
         }
     }
 
-    private enqueue_forced_drop_request_for_type_def(*self, def_id DefId) Void = {
+    file_private enqueue_forced_drop_request_for_type_def(*self, def_id DefId) Void = {
         let mapped_type = self.storage.context.lookup_type(def_id)
 
         let template_name = when self.storage.context.get_template_name(def_id) in {
@@ -988,7 +988,7 @@ given Monomorphizer {
         }
     }
 
-    private enqueue_forced_drop_request_for_extension_base(
+    file_private enqueue_forced_drop_request_for_extension_base(
         *self,
         template_name String,
         base_type Type,
@@ -1498,7 +1498,7 @@ given Monomorphizer {
         return lookup
     }
 
-    private build_materialized_def_ids(self) Set[UInt] = {
+    file_private build_materialized_def_ids(self) Set[UInt] = {
         let mutable materialized = Set[UInt].new()
 
         for node_ref in self.storage.generated_nodes then {
@@ -1557,7 +1557,7 @@ given Monomorphizer {
         return lookup
     }
 
-    private append_codegen_def_id_name_index(self, index *mutable Dict[String, List[DefId]], name String, def_id DefId) Void = {
+    file_private append_codegen_def_id_name_index(self, index *mutable Dict[String, List[DefId]], name String, def_id DefId) Void = {
         if name.is_empty() then {
             return
         }
@@ -1569,7 +1569,7 @@ given Monomorphizer {
         }
     }
 
-    private build_codegen_type_def_id_name_index(self) Dict[String, List[DefId]] = {
+    file_private build_codegen_type_def_id_name_index(self) Dict[String, List[DefId]] = {
         let mutable index = Dict[String, List[DefId]].new()
         let mutable id UInt = 1
         while id < self.storage.context.next_def_id() then {
@@ -1591,7 +1591,7 @@ given Monomorphizer {
         return index
     }
 
-    private find_codegen_type_def_id(self, type_def_ids_by_name Dict[String, List[DefId]], name String) Option[DefId] = {
+    file_private find_codegen_type_def_id(self, type_def_ids_by_name Dict[String, List[DefId]], name String) Option[DefId] = {
         return when type_def_ids_by_name.get(name) in {
             .Some(def_ids) then when def_ids.get(0(UInt)) in {
                 .Some(def_id) then Option[DefId].Some(def_id),
@@ -1601,7 +1601,7 @@ given Monomorphizer {
         }
     }
 
-    private codegen_emitted_identifier_for_def(self, def_id DefId, name String, foreign_def_ids Set[UInt]) String = {
+    file_private codegen_emitted_identifier_for_def(self, def_id DefId, name String, foreign_def_ids Set[UInt]) String = {
         if foreign_def_ids.contains(def_id.id) then {
             return name
         }
@@ -1613,7 +1613,7 @@ given Monomorphizer {
         return self.storage.context.get_c_identifier(def_id) or else name
     }
 
-    private codegen_compose_method_c_name(self, type_c_name String, method_name String) String = {
+    file_private codegen_compose_method_c_name(self, type_c_name String, method_name String) String = {
         let prefix = "\(type_c_name)_"
         let raw_name = if method_name.starts_with(prefix)
             then method_name
@@ -1621,11 +1621,11 @@ given Monomorphizer {
         return if raw_name.starts_with("_k__k__") then raw_name.substring(3..) else raw_name
     }
 
-    private codegen_identifier_for_def_id(self, c_identifier_by_def_id Dict[UInt, String], def_id DefId) Option[String] = {
+    file_private codegen_identifier_for_def_id(self, c_identifier_by_def_id Dict[UInt, String], def_id DefId) Option[String] = {
         return c_identifier_by_def_id.get(def_id.id)
     }
 
-    private codegen_emitted_type_name(self, c_identifier_by_def_id Dict[UInt, String], type_def_ids_by_name Dict[String, List[DefId]], t Type) String = {
+    file_private codegen_emitted_type_name(self, c_identifier_by_def_id Dict[UInt, String], type_def_ids_by_name Dict[String, List[DefId]], t Type) String = {
         return when t in {
             .StructureType(def_id) then {
                 yield when self.codegen_identifier_for_def_id(c_identifier_by_def_id, def_id) in {
@@ -1695,7 +1695,7 @@ given Monomorphizer {
         }
     }
 
-    private collect_codegen_foreign_def_ids(
+    file_private collect_codegen_foreign_def_ids(
         self,
         foreign_def_ids *mutable Set[UInt]
     ) Void = {
@@ -1715,7 +1715,7 @@ given Monomorphizer {
         }
     }
 
-    private collect_codegen_c_identifiers(
+    file_private collect_codegen_c_identifiers(
         self,
         type_def_ids_by_name Dict[String, List[DefId]],
         foreign_def_ids Set[UInt],
@@ -1786,7 +1786,7 @@ given Monomorphizer {
 
 // ── MonomorphizedProgram printing ─────────────────────────────────────────────
 
-private let mono_type_name(t Type, context * CompilerContext) String = {
+file_private let mono_type_name(t Type, context * CompilerContext) String = {
     return when t in {
         .StructureType(def_id) then {
             yield when context.get_name(def_id) in {
@@ -1804,7 +1804,7 @@ private let mono_type_name(t Type, context * CompilerContext) String = {
     }
 }
 
-private let print_mono_node(node TypedDecl, context * CompilerContext) Void = {
+file_private let print_mono_node(node TypedDecl, context * CompilerContext) Void = {
     when node in {
         .FunctionDecl(access, name, params, return_type, body, span, _) then {
             println("  fn \(name)(...): \(mono_type_name(return_type, context))")

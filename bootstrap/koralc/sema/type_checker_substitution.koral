@@ -1,6 +1,6 @@
 given TypeChecker {
 
-    protected apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
+    module_private apply_subst_to_decl(self, subst TypeSubstitution, decl TypedDecl) TypedDecl = {
         if subst.mapping.is_empty() then {
             return decl
         }
@@ -59,7 +59,7 @@ given TypeChecker {
         }
     }
 
-    protected apply_subst_to_params(self, subst TypeSubstitution, params List[TypedParam]) List[TypedParam] = {
+    module_private apply_subst_to_params(self, subst TypeSubstitution, params List[TypedParam]) List[TypedParam] = {
         let mutable out = List[TypedParam].new()
         for p in params then {
             out.push(TypedParam(p.name, p.is_mutable, subst.apply(p.param_type), p.named))
@@ -67,7 +67,7 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_fields(self, subst TypeSubstitution, fields List[TypedField]) List[TypedField] = {
+    module_private apply_subst_to_fields(self, subst TypeSubstitution, fields List[TypedField]) List[TypedField] = {
         let mutable out = List[TypedField].new()
         for field in fields then {
             out.push(TypedField(field.access, field.name, field.is_mutable, subst.apply(field.field_type), field.named))
@@ -75,7 +75,7 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_enum_cases(self, subst TypeSubstitution, cases List[TypedEnumCase]) List[TypedEnumCase] = {
+    module_private apply_subst_to_enum_cases(self, subst TypeSubstitution, cases List[TypedEnumCase]) List[TypedEnumCase] = {
         let mutable out = List[TypedEnumCase].new()
         for case_ in cases then {
             let mutable new_fields = List[TypedEnumCaseField].new()
@@ -87,7 +87,7 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_trait_members(self, subst TypeSubstitution, members List[TypedTraitMember]) List[TypedTraitMember] = {
+    module_private apply_subst_to_trait_members(self, subst TypeSubstitution, members List[TypedTraitMember]) List[TypedTraitMember] = {
         let mutable out = List[TypedTraitMember].new()
         for member in members then {
             out.push(TypedTraitMember(member.name, self.apply_subst_to_params(subst, member.params), subst.apply(member.return_type)))
@@ -95,7 +95,7 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_given_members(self, subst TypeSubstitution, members List[* TypedGivenMember]) List[* TypedGivenMember] = {
+    module_private apply_subst_to_given_members(self, subst TypeSubstitution, members List[* TypedGivenMember]) List[* TypedGivenMember] = {
         let mutable out = List[* TypedGivenMember].new()
         for m_ref in members then {
             let m = *m_ref
@@ -110,11 +110,11 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_symbol(self, subst TypeSubstitution, symbol * Symbol) Symbol = {
+    module_private apply_subst_to_symbol(self, subst TypeSubstitution, symbol * Symbol) Symbol = {
         return Symbol(symbol.def_id, subst.apply(symbol.symbol_type), symbol.kind)
     }
 
-    protected apply_subst_to_statement(self, subst TypeSubstitution, stmt * TypedStatement) TypedStatement = {
+    module_private apply_subst_to_statement(self, subst TypeSubstitution, stmt * TypedStatement) TypedStatement = {
         return when stmt in {
             .LetStmt(symbol, value, span) then {
                 yield TypedStatement.LetStmt(box(self.apply_subst_to_symbol(subst, symbol)), self.apply_subst_to_expr(subst, value), span)
@@ -180,7 +180,7 @@ given TypeChecker {
         }
     }
 
-    protected bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) Option[* Symbol] = {
+    module_private bind_pair_let_symbol(self, binding PairBindingElement, binding_type Type, scope Scope) Option[* Symbol] = {
         if binding.is_discard then {
             return Option[* Symbol].None()
         }
@@ -221,7 +221,7 @@ given TypeChecker {
         return Option[* Symbol].Some(box(sym))
     }
 
-    protected get_pair_binding_type(self, pair_type Type, field_name String) Option[Type] = {
+    module_private get_pair_binding_type(self, pair_type Type, field_name String) Option[Type] = {
         let field_types = self.get_struct_pattern_field_types(pair_type, "Pair")
         if field_name == "first" and field_types.count() > 0 then {
             return Option[Type].Some(field_types[0(UInt)])
@@ -232,7 +232,7 @@ given TypeChecker {
         return Option[Type].None()
     }
 
-    protected pair_binding_type_needs_literal_inference(self, binding_type Option[Type]) Bool = {
+    module_private pair_binding_type_needs_literal_inference(self, binding_type Option[Type]) Bool = {
         return when binding_type in {
             .Some(t) then when t in {
                 .GenericParameter(_) then true,
@@ -242,7 +242,7 @@ given TypeChecker {
         }
     }
 
-    protected infer_pair_literal_binding_type(self, value * Expr, binding PairBindingElement, index UInt, scope Scope) Option[Type] = {
+    module_private infer_pair_literal_binding_type(self, value * Expr, binding PairBindingElement, index UInt, scope Scope) Option[Type] = {
         return when value in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then {
@@ -262,7 +262,7 @@ given TypeChecker {
         }
     }
 
-    protected concretize_pair_constructor_binding_type(self, binding_type Type, value * Expr, scope Scope) Type = {
+    module_private concretize_pair_constructor_binding_type(self, binding_type Type, value * Expr, scope Scope) Type = {
         let needs_pair_args = when binding_type in {
             .StructureType(def_id) then (self.context().get_name(def_id) or else "") == "Pair",
             .GenericStruct(template_name, args) then {
@@ -303,7 +303,7 @@ given TypeChecker {
         }
     }
 
-    protected apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[* TypedWhenArm]) List[* TypedWhenArm] = {
+    module_private apply_subst_to_when_arms(self, subst TypeSubstitution, arms List[* TypedWhenArm]) List[* TypedWhenArm] = {
         let mutable out = List[* TypedWhenArm].new()
         for arm in arms then {
             let new_body = self.apply_subst_to_expr(subst, arm.body)
@@ -313,7 +313,7 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_expr_list(self, subst TypeSubstitution, exprs List[* TypedExpr]) List[* TypedExpr] = {
+    module_private apply_subst_to_expr_list(self, subst TypeSubstitution, exprs List[* TypedExpr]) List[* TypedExpr] = {
         let mutable out = List[* TypedExpr].new()
         for expr in exprs then {
             out.push(self.apply_subst_to_expr(subst, expr))
@@ -321,7 +321,7 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries List[Pair[* TypedExpr, * TypedExpr]]) List[Pair[* TypedExpr, * TypedExpr]] = {
+    module_private apply_subst_to_expr_pair_list(self, subst TypeSubstitution, entries List[Pair[* TypedExpr, * TypedExpr]]) List[Pair[* TypedExpr, * TypedExpr]] = {
         let mutable out = List[Pair[* TypedExpr, * TypedExpr]].new()
         for entry in entries then {
             out.push(Pair[* TypedExpr, * TypedExpr](
@@ -332,14 +332,14 @@ given TypeChecker {
         return out
     }
 
-    protected apply_subst_to_optional_expr(self, subst TypeSubstitution, expr Option[* TypedExpr]) Option[* TypedExpr] = {
+    module_private apply_subst_to_optional_expr(self, subst TypeSubstitution, expr Option[* TypedExpr]) Option[* TypedExpr] = {
         return when expr in {
             .Some(e) then Option[* TypedExpr].Some(self.apply_subst_to_expr(subst, e)),
             .None() then Option[* TypedExpr].None(),
         }
     }
 
-    protected apply_subst_to_expr_kind(self, subst TypeSubstitution, kind * TypedExprKind) * TypedExprKind = {
+    module_private apply_subst_to_expr_kind(self, subst TypeSubstitution, kind * TypedExprKind) * TypedExprKind = {
         return when kind in {
             .Variable(symbol) then box(TypedExprKind.Variable(box(self.apply_subst_to_symbol(subst, symbol)))),
             .IntegerLiteral(value) then box(TypedExprKind.IntegerLiteral(value)),
@@ -474,7 +474,7 @@ given TypeChecker {
     }
 
     // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
-    protected apply_subst_to_expr(self, subst TypeSubstitution, expr * TypedExpr) * TypedExpr = {
+    module_private apply_subst_to_expr(self, subst TypeSubstitution, expr * TypedExpr) * TypedExpr = {
         if subst.mapping.is_empty() then {
             return expr
         }

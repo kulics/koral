@@ -10,7 +10,7 @@ given MIRLowerer {
     public new(program *mutable MonomorphizedProgram, context * CompilerContext) MIRLowerer =
         MIRLowerer(program, context, List[* MIRFunctionWorkItem].new(), false, DiagnosticCollector.new())
 
-    protected unique_vtable_requests(self) List[VtableRequest] = {
+    module_private unique_vtable_requests(self) List[VtableRequest] = {
         let _ = self
         let mutable seen = Set[String].new()
         let mutable unique = List[VtableRequest].new()
@@ -161,7 +161,7 @@ given MIRLowerer {
         return Option[* MIRFunction].None()
     }
 
-    protected prepare_streaming_nodes(*mutable self) Void = {
+    module_private prepare_streaming_nodes(*mutable self) Void = {
         if self.streaming_nodes_prepared then {
             return
         }
@@ -174,7 +174,7 @@ given MIRLowerer {
         self.streaming_nodes_prepared = true
     }
 
-    protected enqueue_node_work_items(*mutable self, node_ref * TypedDecl) Void = {
+    module_private enqueue_node_work_items(*mutable self, node_ref * TypedDecl) Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier)
@@ -375,7 +375,7 @@ given MIRLowerer {
         return self.make_function(item.identifier, item.params, item.return_type, item.kind, item.body)
     }
 
-    protected make_function(
+    module_private make_function(
         *mutable self,
         identifier * Symbol,
         params List[TypedParam],
@@ -400,12 +400,12 @@ given MIRLowerer {
         return function
     }
 
-    protected should_lower_function(self, identifier * Symbol) Bool = {
+    module_private should_lower_function(self, identifier * Symbol) Bool = {
         let _ = self
         return not self.context.contains_generic_parameter(identifier.symbol_type)
     }
 
-    protected make_global_initializer_symbol(self, identifier * Symbol) * Symbol = {
+    module_private make_global_initializer_symbol(self, identifier * Symbol) * Symbol = {
         let function_type = Type.FunctionType(List[* FunctionParamEntry].new(), box(identifier.symbol_type))
         let mutable context = *(self.context)
         return box(context.create_symbol(
@@ -415,13 +415,13 @@ given MIRLowerer {
             function_type,
             SymbolKind.Function(),
             MethodKind.Normal(),
-            AccessModifier.Private(),
+            AccessModifier.FilePrivate(),
             unknown_span(),
             false,
         ))
     }
 
-    protected make_given_member_symbol(self, member * TypedGivenMember) * Symbol = {
+    module_private make_given_member_symbol(self, member * TypedGivenMember) * Symbol = {
         let mutable rebuilt_param_types = List[* Type].new()
         for param in member.params then {
             rebuilt_param_types.push(box(param.param_type))
@@ -437,7 +437,7 @@ given MIRLowerer {
         return box(Symbol(member.def_id, function_type, SymbolKind.Function()))
     }
 
-    protected make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
+    module_private make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
         return MIRTraitVTable(
             request.concrete_type,
             request.trait_name,
@@ -446,13 +446,13 @@ given MIRLowerer {
         )
     }
 
-    protected copy_type_ref_list(self, values List[* Type]) List[Type] = {
+    module_private copy_type_ref_list(self, values List[* Type]) List[Type] = {
         let mutable out = List[Type].new()
         for value in values then { out.push(*value) }
         return out
     }
 
-    protected make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
+    module_private make_trait_vtable_methods(self, request VtableRequest) List[MIRTraitVTableMethod] = {
         let mutable ordered_members = List[TypedTraitMember].new()
         let mutable visited_traits = Set[String].new()
         let mutable seen_methods = Set[String].new()
@@ -466,7 +466,7 @@ given MIRLowerer {
         return methods
     }
 
-    protected type_module_path(self, t Type) List[String] = {
+    module_private type_module_path(self, t Type) List[String] = {
         return when t in {
             .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
             .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(),
@@ -475,14 +475,14 @@ given MIRLowerer {
         }
     }
 
-    protected trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
+    module_private trait_info(self, trait_name String, preferred_module_path List[String]) Option[TraitDeclInfo] = {
         return when self.program.traits.get(qualified_trait_key(preferred_module_path, trait_name)) in {
             .Some(info) then Option[TraitDeclInfo].Some(info),
             .None() then self.program.traits.get(trait_name),
         }
     }
 
-    protected collect_instantiated_trait_members(
+    module_private collect_instantiated_trait_members(
         self,
         trait_name String,
         preferred_module_path List[String],
@@ -513,7 +513,7 @@ given MIRLowerer {
         }
     }
 
-    protected trait_binding_visit_key(self, trait_name String, preferred_module_path List[String], bindings Dict[String, Type]) String = {
+    module_private trait_binding_visit_key(self, trait_name String, preferred_module_path List[String], bindings Dict[String, Type]) String = {
         let mutable key = qualified_trait_key(preferred_module_path, trait_name)
         when self.trait_info(trait_name, preferred_module_path) in {
             .Some(trait_info) then {
@@ -531,7 +531,7 @@ given MIRLowerer {
         return key
     }
 
-    protected parent_trait_bindings(self, parent ParentTraitConstraint, preferred_module_path List[String], concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
+    module_private parent_trait_bindings(self, parent ParentTraitConstraint, preferred_module_path List[String], concrete_type Type, bindings Dict[String, Type]) Dict[String, Type] = {
         let mutable result = Dict[String, Type].new()
         for entry in bindings then {
             result.insert(entry.first, entry.second)
@@ -551,7 +551,7 @@ given MIRLowerer {
         return result
     }
 
-    protected resolve_trait_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
+    module_private resolve_trait_type_node_with_bindings(self, node TypeNode, bindings Dict[String, Type]) Type = {
         return when node in {
             .Identifier(name) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -609,14 +609,14 @@ given MIRLowerer {
         }
     }
 
-    protected trait_member_has_receiver(self, member TypedTraitMember) Bool = {
+    module_private trait_member_has_receiver(self, member TypedTraitMember) Bool = {
         let _ = self
         if member.params.is_empty() then { return false }
         let first_param = member.params[0]
         return first_param.name == "self"
     }
 
-    protected trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
+    module_private trait_member_type_bindings(self, request VtableRequest) Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new()
         bindings.insert("Self", request.concrete_type)
         let preferred_module_path = self.type_module_path(request.concrete_type)
@@ -633,7 +633,7 @@ given MIRLowerer {
         return bindings
     }
 
-    protected apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+    module_private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
         let _ = self
         if bindings.is_empty() then { return t }
         return when t in {
@@ -672,7 +672,7 @@ given MIRLowerer {
         }
     }
 
-    protected apply_type_bindings_to_trait_member(self, member TypedTraitMember, bindings Dict[String, Type]) TypedTraitMember = {
+    module_private apply_type_bindings_to_trait_member(self, member TypedTraitMember, bindings Dict[String, Type]) TypedTraitMember = {
         let mutable params = List[TypedParam].new()
         for param in member.params then {
             params.push(TypedParam(param.name, param.is_mutable, self.apply_type_bindings(param.param_type, bindings), param.named))
@@ -680,7 +680,7 @@ given MIRLowerer {
         return TypedTraitMember(member.name, params, self.apply_type_bindings(member.return_type, bindings))
     }
 
-    protected make_trait_vtable_method(self, member TypedTraitMember) MIRTraitVTableMethod = {
+    module_private make_trait_vtable_method(self, member TypedTraitMember) MIRTraitVTableMethod = {
         let mutable params = List[MIRTraitVTableParameter].new()
         let mutable first = true
         let mutable self_by_value = false
@@ -731,7 +731,7 @@ type MIREscapeSummary(
     direct_reference_escaping_parameter_indices Set[UInt],
 )
 
-private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
+file_private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
     return when place in {
         .Local(local_id) then Option[UInt].Some(local_id.raw_value),
         .Global(_) then Option[UInt].None(),
@@ -748,7 +748,7 @@ private let base_local_id_of_place(place MIRPlace) Option[UInt] = {
     }
 }
 
-private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) Void = {
+file_private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) Void = {
     when value in {
         .Operand(.Local(local_id)) then { escaping.insert(local_id.raw_value) },
         .PlaceRead(place, _) then {
@@ -767,7 +767,7 @@ private let mark_local_escape(value MIRValue, escaping *mutable Set[UInt]) Void 
     }
 }
 
-private let visit_local_escape_value(
+file_private let visit_local_escape_value(
     value MIRValue,
     summaries Dict[UInt, MIREscapeSummary],
     escaping *mutable Set[UInt]
@@ -852,7 +852,7 @@ private let visit_local_escape_value(
     }
 }
 
-private let compute_escaping_locals_for_function(function * MIRFunction, summaries Dict[UInt, MIREscapeSummary]) Set[UInt] = {
+file_private let compute_escaping_locals_for_function(function * MIRFunction, summaries Dict[UInt, MIREscapeSummary]) Set[UInt] = {
     let mutable escaping = Set[UInt].new()
     for block in function.blocks then {
         for statement in block.statements then {
@@ -908,7 +908,7 @@ private let compute_escaping_locals_for_function(function * MIRFunction, summari
     return escaping
 }
 
-private let compute_escaping_value_locals_for_function(function * MIRFunction) Set[UInt] = {
+file_private let compute_escaping_value_locals_for_function(function * MIRFunction) Set[UInt] = {
     let mutable escaping = Set[UInt].new()
     for block in function.blocks then {
         when block.terminator in {
@@ -955,7 +955,7 @@ private let compute_escaping_value_locals_for_function(function * MIRFunction) S
     return escaping
 }
 
-private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
+file_private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
     let mutable temps = Set[UInt].new()
     for local in function.locals then {
         if local.storage is .Temporary() then {
@@ -965,7 +965,7 @@ private let compute_temporary_local_ids(function * MIRFunction) Set[UInt] = {
     return temps
 }
 
-private let build_temporary_value_sources(function * MIRFunction, temporary_local_ids Set[UInt]) Dict[UInt, MIRValue] = {
+file_private let build_temporary_value_sources(function * MIRFunction, temporary_local_ids Set[UInt]) Dict[UInt, MIRValue] = {
     let mutable sources = Dict[UInt, MIRValue].new()
     let mutable ambiguous = Set[UInt].new()
     for block in function.blocks then {
@@ -1000,7 +1000,7 @@ private let build_temporary_value_sources(function * MIRFunction, temporary_loca
     return sources
 }
 
-private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
+file_private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
     let mutable param_local_ids = List[UInt].new()
     for local in function.locals then {
         if local.storage is .Parameter() then {
@@ -1016,11 +1016,11 @@ private let build_param_local_map(function * MIRFunction) Dict[UInt, UInt] = {
     return local_to_param
 }
 
-private let escape_mark(value MIRValue, param_map Dict[UInt, UInt], local_sources Dict[UInt, Set[UInt]], escaping *mutable Set[UInt]) Void = {
+file_private let escape_mark(value MIRValue, param_map Dict[UInt, UInt], local_sources Dict[UInt, Set[UInt]], escaping *mutable Set[UInt]) Void = {
     collect_parameter_sources(value, param_map, local_sources, escaping)
 }
 
-private let collect_parameter_sources(
+file_private let collect_parameter_sources(
     value MIRValue,
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
@@ -1047,7 +1047,7 @@ private let collect_parameter_sources(
     }
 }
 
-private let merge_value_parameter_sources(
+file_private let merge_value_parameter_sources(
     target_local UInt,
     value MIRValue,
     param_map Dict[UInt, UInt],
@@ -1069,7 +1069,7 @@ private let merge_value_parameter_sources(
     return changed
 }
 
-private let mark_returning_from_value(
+file_private let mark_returning_from_value(
     value MIRValue,
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
@@ -1078,7 +1078,7 @@ private let mark_returning_from_value(
     collect_parameter_sources(value, param_map, local_sources, returning)
 }
 
-private let visit_escape_value(
+file_private let visit_escape_value(
     value MIRValue,
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
@@ -1175,7 +1175,7 @@ private let visit_escape_value(
     }
 }
 
-private let visit_escape_statement(
+file_private let visit_escape_statement(
     value MIRValue,
     param_map Dict[UInt, UInt],
     local_sources Dict[UInt, Set[UInt]],
@@ -1186,7 +1186,7 @@ private let visit_escape_statement(
     visit_escape_value(value, param_map, local_sources, summaries, returning, direct_escaping)
 }
 
-private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeSummary] = {
+file_private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeSummary] = {
     let mutable param_maps = Dict[UInt, Dict[UInt, UInt]].new()
     for function_ref in program.functions then {
         param_maps.insert(function_ref.identifier.def_id.id, build_param_local_map(function_ref))
@@ -1241,7 +1241,7 @@ private let compute_escape_summaries(program * MIRProgram) Dict[UInt, MIREscapeS
     return summaries
 }
 
-private let sets_equal(a Set[UInt], b Set[UInt]) Bool = {
+file_private let sets_equal(a Set[UInt], b Set[UInt]) Bool = {
     for item in a then {
         if not b.contains(item) then { return false }
     }
@@ -1252,7 +1252,7 @@ private let sets_equal(a Set[UInt], b Set[UInt]) Bool = {
 }
 
 
-private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
+file_private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
     return when value in {
         .Ref(_, _, allocation) then allocation is .StackBorrow(),
         .Call(call) then {
@@ -1307,7 +1307,7 @@ private let mir_value_contains_stack_borrow_ref(value MIRValue) Bool = {
     }
 }
 
-private let is_member_path_place(place MIRPlace) Bool = {
+file_private let is_member_path_place(place MIRPlace) Bool = {
     return when place in {
         .Local(_) then false,
         .Global(_) then false,
@@ -1318,7 +1318,7 @@ private let is_member_path_place(place MIRPlace) Bool = {
     }
 }
 
-private let mir_statement_needs_reference_allocation_promotion(statement MIRStatement) Bool = {
+file_private let mir_statement_needs_reference_allocation_promotion(statement MIRStatement) Bool = {
     return when statement in {
         .Assign(_, value) then mir_value_contains_stack_borrow_ref(value),
         .CompoundAssign(assignment) then mir_value_contains_stack_borrow_ref(assignment.value),
@@ -1327,7 +1327,7 @@ private let mir_statement_needs_reference_allocation_promotion(statement MIRStat
     }
 }
 
-private let mir_function_needs_reference_allocation_promotion(function * MIRFunction) Bool = {
+file_private let mir_function_needs_reference_allocation_promotion(function * MIRFunction) Bool = {
     for block in function.blocks then {
         for statement in block.statements then {
             if mir_statement_needs_reference_allocation_promotion(*statement) then {
@@ -1388,7 +1388,7 @@ given MIRReferenceAllocationPromoter {
         ))
     }
 
-    protected build_parameter_types_by_def_id(self) Dict[UInt, List[* FunctionParamEntry]] = {
+    module_private build_parameter_types_by_def_id(self) Dict[UInt, List[* FunctionParamEntry]] = {
         let mutable map = Dict[UInt, List[* FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
             map.insert(function_ref.identifier.def_id.id, self.function_param_entries(function_ref))
@@ -1396,7 +1396,7 @@ given MIRReferenceAllocationPromoter {
         return map
     }
 
-    protected build_parameter_types_by_name(self) Dict[String, List[* FunctionParamEntry]] = {
+    module_private build_parameter_types_by_name(self) Dict[String, List[* FunctionParamEntry]] = {
         let mutable map = Dict[String, List[* FunctionParamEntry]].new()
         for function_ref in self.program.functions then {
             let param_types = self.function_param_entries(function_ref)
@@ -1410,7 +1410,7 @@ given MIRReferenceAllocationPromoter {
         return map
     }
 
-    protected callable_logical_name(self, symbol * Symbol) String = {
+    module_private callable_logical_name(self, symbol * Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.program.receiver_method_dispatch.get(symbol.def_id) in {
                 .Some(info) then { return info.method_name },
@@ -1428,7 +1428,7 @@ given MIRReferenceAllocationPromoter {
         return self.program.context.symbol_name(*symbol)
     }
 
-    protected callable_name_aliases(self, symbol * Symbol) List[String] = {
+    module_private callable_name_aliases(self, symbol * Symbol) List[String] = {
         let mutable names = List[String].new()
         let logical = self.callable_logical_name(symbol)
         if not logical.is_empty() then {
@@ -1449,7 +1449,7 @@ given MIRReferenceAllocationPromoter {
         return names
     }
 
-    protected function_param_entries(self, function * MIRFunction) List[* FunctionParamEntry] = {
+    module_private function_param_entries(self, function * MIRFunction) List[* FunctionParamEntry] = {
         when function.identifier.symbol_type in {
             .FunctionType(params, _) then { return params },
             _ then {},
@@ -1523,7 +1523,7 @@ given MIRReferenceAllocationFunctionPromoter {
         ))
     }
 
-    protected promote_statement(*mutable self, statement MIRStatement) MIRStatement = {
+    module_private promote_statement(*mutable self, statement MIRStatement) MIRStatement = {
         return when statement in {
             .Assign(place, value) then {
                 let destination_type = self.destination_type_for_place(place)
@@ -1540,7 +1540,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected destination_type_for_place(*self, place MIRPlace) Option[Type] = {
+    module_private destination_type_for_place(*self, place MIRPlace) Option[Type] = {
         return when place in {
             .Local(local) then Option[Type].Some(self.local_type(local)),
             .Global(def_id) then self.context.get_symbol_type(def_id),
@@ -1550,11 +1550,11 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_value(*mutable self, value MIRValue, destination_type Option[Type]) MIRValue = {
+    module_private promote_value(*mutable self, value MIRValue, destination_type Option[Type]) MIRValue = {
         return self.promote_value_with_place(value, destination_type, Option[MIRPlace].None())
     }
 
-    protected promote_value_with_place(*mutable self, value MIRValue, destination_type Option[Type], destination_place Option[MIRPlace]) MIRValue = {
+    module_private promote_value_with_place(*mutable self, value MIRValue, destination_type Option[Type], destination_place Option[MIRPlace]) MIRValue = {
         let promoted = when value in {
             .Call(call) then MIRValue.Call(MIRCall(
                 call.callee,
@@ -1638,7 +1638,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return promoted
     }
 
-    protected rewrite_escaping_mutable_lambda(*mutable self, lambda MIRLambda) MIRLambda = {
+    module_private rewrite_escaping_mutable_lambda(*mutable self, lambda MIRLambda) MIRLambda = {
         let mutable rewritten_capture_symbols = Dict[UInt, Symbol].new()
         let mutable rewritten_captures = List[* Symbol].new()
         let mutable index UInt = 0
@@ -1656,7 +1656,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return MIRLambda(lambda.params, rewritten_captures, lambda.capture_sources, rewritten_function, lambda.lambda_type)
     }
 
-    protected rewrite_escaping_mutable_capture_symbol(*self, capture * Symbol, source MIRPlace) Symbol = {
+    module_private rewrite_escaping_mutable_capture_symbol(*self, capture * Symbol, source MIRPlace) Symbol = {
         return when capture.kind in {
             .Variable(variable_kind) then when variable_kind in {
                 .MutableReference() then when capture.symbol_type in {
@@ -1674,7 +1674,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected rewrite_lambda_capture_function(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) * MIRFunction = {
+    module_private rewrite_lambda_capture_function(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) * MIRFunction = {
         let rewritten_local_ids = self.rewritten_capture_local_ids(function, rewritten_capture_symbols)
         let mutable locals = List[* MIRLocal].new()
         for local in function.locals then {
@@ -1713,7 +1713,7 @@ given MIRReferenceAllocationFunctionPromoter {
         ))
     }
 
-    protected rewritten_capture_local_ids(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) Set[UInt] = {
+    module_private rewritten_capture_local_ids(*self, function * MIRFunction, rewritten_capture_symbols Dict[UInt, Symbol]) Set[UInt] = {
         let _ = self
         let mutable ids = Set[UInt].new()
         for local in function.locals then {
@@ -1727,7 +1727,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return ids
     }
 
-    protected rewrite_capture_statement(*self, statement MIRStatement, rewritten_local_ids Set[UInt]) MIRStatement = {
+    module_private rewrite_capture_statement(*self, statement MIRStatement, rewritten_local_ids Set[UInt]) MIRStatement = {
         return when statement in {
             .Assign(place, value) then MIRStatement.Assign(self.rewrite_capture_place(place, rewritten_local_ids), self.rewrite_capture_value(value, rewritten_local_ids)),
             .CompoundAssign(assignment) then MIRStatement.CompoundAssign(MIRCompoundAssignment(self.rewrite_capture_place(assignment.target, rewritten_local_ids), assignment.operator_kind, self.rewrite_capture_value(assignment.value, rewritten_local_ids))),
@@ -1739,13 +1739,13 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected rewrite_capture_terminator(*self, terminator MIRTerminator, rewritten_local_ids Set[UInt]) MIRTerminator = {
+    module_private rewrite_capture_terminator(*self, terminator MIRTerminator, rewritten_local_ids Set[UInt]) MIRTerminator = {
         let _ = self
         let _ = rewritten_local_ids
         return terminator
     }
 
-    protected rewrite_capture_place(*self, place MIRPlace, rewritten_local_ids Set[UInt]) MIRPlace = {
+    module_private rewrite_capture_place(*self, place MIRPlace, rewritten_local_ids Set[UInt]) MIRPlace = {
         return when place in {
             .Field(base, field) then MIRPlace.Field(box(self.rewrite_capture_place(*base, rewritten_local_ids)), field),
             .EnumPayload(base, case_name, field_name, field_index, field_type) then {
@@ -1771,7 +1771,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected rewrite_capture_value(*self, value MIRValue, rewritten_local_ids Set[UInt]) MIRValue = {
+    module_private rewrite_capture_value(*self, value MIRValue, rewritten_local_ids Set[UInt]) MIRValue = {
         return when value in {
             .PlaceRead(place, ownership) then MIRValue.PlaceRead(self.rewrite_capture_place(place, rewritten_local_ids), ownership),
             .Call(call) then {
@@ -1810,7 +1810,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_call_arguments(*mutable self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {
+    module_private promote_call_arguments(*mutable self, arguments List[* MIRValue], callee MIROperand, result_type Type) List[* MIRValue] = {
         let params = when callee in {
             .Function(symbol) then self.parameters_for_call(symbol),
             _ then List[* FunctionParamEntry].new(),
@@ -1872,7 +1872,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return promoted
     }
 
-    protected promotion_destination_type_for_param(*self, param FunctionParamEntry) Type = {
+    module_private promotion_destination_type_for_param(*self, param FunctionParamEntry) Type = {
         let _ = self
         return when param.pass_kind in {
             .ByReference() then when param.param_type in {
@@ -1889,7 +1889,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected parameters_for_call(*self, symbol * Symbol) List[* FunctionParamEntry] = {
+    module_private parameters_for_call(*self, symbol * Symbol) List[* FunctionParamEntry] = {
         when self.parameter_types_by_def_id.get(symbol.def_id.id) in {
             .Some(types) then {
                 let mutable params = List[* FunctionParamEntry].new()
@@ -1918,7 +1918,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return List[* FunctionParamEntry].new()
     }
 
-    protected promote_intrinsic(*mutable self, node MIRIntrinsic) MIRIntrinsic = {
+    module_private promote_intrinsic(*mutable self, node MIRIntrinsic) MIRIntrinsic = {
         return when node in {
             .AllocMemory(count, result_type) then MIRIntrinsic.AllocMemory(box(self.promote_value(*count, Option[Type].None())), result_type),
             .DeallocMemory(pointer) then MIRIntrinsic.DeallocMemory(box(self.promote_value(*pointer, Option[Type].None()))),
@@ -1942,7 +1942,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_requires_owned_reference_storage(*self, t Type) Bool = {
+    module_private type_requires_owned_reference_storage(*self, t Type) Bool = {
         return when t in {
             .ReferenceType(_) then true,
             .MutableReferenceType(_) then true,
@@ -1988,12 +1988,12 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected resolve_temporary_ref_source(*self, value MIRValue) MIRValue = {
+    module_private resolve_temporary_ref_source(*self, value MIRValue) MIRValue = {
         let mutable seen = Set[UInt].new()
         return self.resolve_temporary_ref_source_with_seen(value, &mutable seen)
     }
 
-    protected resolve_temporary_ref_local(*self, local_id UInt, original MIRValue, seen *mutable Set[UInt]) MIRValue = {
+    module_private resolve_temporary_ref_local(*self, local_id UInt, original MIRValue, seen *mutable Set[UInt]) MIRValue = {
         if seen.contains(local_id) then {
             return original
         }
@@ -2011,7 +2011,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected resolve_temporary_ref_source_with_seen(*self, value MIRValue, seen *mutable Set[UInt]) MIRValue = {
+    module_private resolve_temporary_ref_source_with_seen(*self, value MIRValue, seen *mutable Set[UInt]) MIRValue = {
         return when value in {
             .Ref(_, _, _) then value,
             .Operand(.Local(local_id)) then self.resolve_temporary_ref_local(local_id.raw_value, value, seen),
@@ -2020,7 +2020,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected promote_direct_references(*mutable self, value MIRValue) MIRValue = {
+    module_private promote_direct_references(*mutable self, value MIRValue) MIRValue = {
         let resolved = self.resolve_temporary_ref_source(value)
         return when resolved in {
             .Ref(place, kind, allocation) then when allocation in {
@@ -2054,7 +2054,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected callable_logical_name(self, symbol * Symbol) String = {
+    module_private callable_logical_name(self, symbol * Symbol) String = {
         if symbol.def_id.id > 0 then {
             when self.receiver_method_dispatch.get(symbol.def_id) in {
                 .Some(info) then { return info.method_name },
@@ -2072,7 +2072,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return self.context.symbol_name(*symbol)
     }
 
-    protected callable_name_aliases(self, symbol * Symbol) List[String] = {
+    module_private callable_name_aliases(self, symbol * Symbol) List[String] = {
         let mutable names = List[String].new()
         let logical = self.callable_logical_name(symbol)
         if not logical.is_empty() then {
@@ -2093,7 +2093,7 @@ given MIRReferenceAllocationFunctionPromoter {
         return names
     }
 
-    protected type_of_value(*self, value MIRValue) Type = {
+    module_private type_of_value(*self, value MIRValue) Type = {
         return when value in {
             .Operand(operand) then self.type_of_operand(operand),
             .PlaceRead(place, _) then self.type_of_place(place),
@@ -2127,7 +2127,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_of_place(*self, place MIRPlace) Type = {
+    module_private type_of_place(*self, place MIRPlace) Type = {
         return when place in {
             .Local(local) then self.local_type(local),
             .Global(def_id) then self.context.get_symbol_type(def_id) or else Type.Unknown(),
@@ -2138,7 +2138,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_of_operand(*self, operand MIROperand) Type = {
+    module_private type_of_operand(*self, operand MIROperand) Type = {
         return when operand in {
             .Local(local) then self.local_type(local),
             .Function(symbol) then symbol.symbol_type,
@@ -2152,7 +2152,7 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected type_of_ref(*self, place MIRPlace, kind MIRReferenceKind) Type = {
+    module_private type_of_ref(*self, place MIRPlace, kind MIRReferenceKind) Type = {
         let inner = self.type_of_place(place)
         return when kind in {
             .Mutable() then Type.MutableReferenceType(box(inner)),
@@ -2162,11 +2162,11 @@ given MIRReferenceAllocationFunctionPromoter {
         }
     }
 
-    protected local_type(*self, local MIRLocalID) Type = {
+    module_private local_type(*self, local MIRLocalID) Type = {
         return self.local_types_by_id.get(local.raw_value) or else Type.Unknown()
     }
 
-    protected local_storage(*self, local MIRLocalID) MIRStorage = {
+    module_private local_storage(*self, local MIRLocalID) MIRStorage = {
         return self.local_storages_by_id.get(local.raw_value) or else MIRStorage.Local()
     }
 

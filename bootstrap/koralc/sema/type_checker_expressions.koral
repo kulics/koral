@@ -9,7 +9,7 @@
 
 
 given TypeChecker {
-    protected lookup_non_global_scope_symbol(self, scope Scope, name String) Option[Symbol] = {
+    module_private lookup_non_global_scope_symbol(self, scope Scope, name String) Option[Symbol] = {
         let _ = self
         let mutable current_opt = Option[Scope].Some(scope)
         let mutable traversed UInt = 0
@@ -41,7 +41,7 @@ given TypeChecker {
         return Option[Symbol].None()
     }
 
-    protected report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointer_type Type, pointee Type, member String) Void = {
+    module_private report_pointer_member_access_issue_if_needed(self, resolved Type, has_pointer_method Bool, pointer_type Type, pointee Type, member String) Void = {
         if resolved is not .Unknown() or has_pointer_method then {
             return
         }
@@ -71,7 +71,7 @@ given TypeChecker {
         }
     }
 
-    protected report_weak_member_access_issue_if_needed(self, resolved Type, has_method Bool, base_type Type, member String) Void = {
+    module_private report_weak_member_access_issue_if_needed(self, resolved Type, has_method Bool, base_type Type, member String) Void = {
         if resolved is not .Unknown() or has_method then {
             return
         }
@@ -84,7 +84,7 @@ given TypeChecker {
         )
     }
 
-    protected expr_contains_or_return(self, expr * Expr) Bool = {
+    module_private expr_contains_or_return(self, expr * Expr) Bool = {
         let _ = self
         return when expr in {
             .OrReturnExpr(_, _) then true,
@@ -175,7 +175,7 @@ given TypeChecker {
         }
     }
 
-    protected stmts_contain_or_return(self, statements List[Statement]) Bool = {
+    module_private stmts_contain_or_return(self, statements List[Statement]) Bool = {
         for stmt in statements then {
             when stmt in {
                 .LetStmt(_, _, _, value, _) then if self.expr_contains_or_return(value) then { return true },
@@ -193,7 +193,7 @@ given TypeChecker {
         return false
     }
 
-    protected is_std_drop_trait(self, trait_name String) Bool = {
+    module_private is_std_drop_trait(self, trait_name String) Bool = {
         if trait_name <> "Drop" then { return false }
         return when self.storage.trait_registry.get(trait_name) in {
             .Some(info) then {
@@ -205,7 +205,7 @@ given TypeChecker {
         }
     }
 
-    protected has_explicit_std_drop_conformance(self, base_type Type) Bool = {
+    module_private has_explicit_std_drop_conformance(self, base_type Type) Bool = {
         let normalized = when base_type in {
             .MutableReferenceType(inner) then *inner,
             .ReferenceType(inner) then *inner,
@@ -221,12 +221,12 @@ given TypeChecker {
         return self.is_std_drop_trait("Drop")
     }
 
-    protected resolve_source_method_signature(self, base_type Type, method_name String) Option[Symbol] = {
+    module_private resolve_source_method_signature(self, base_type Type, method_name String) Option[Symbol] = {
         let raw_method_signature = self.resolve_method_signature(base_type, method_name)
         return self.resolve_source_method_signature_from_raw(base_type, method_name, raw_method_signature)
     }
 
-    protected resolve_source_method_signature_from_raw(self, base_type Type, method_name String, raw_method_signature Option[Symbol]) Option[Symbol] = {
+    module_private resolve_source_method_signature_from_raw(self, base_type Type, method_name String, raw_method_signature Option[Symbol]) Option[Symbol] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[Symbol].None()
         }
@@ -238,7 +238,7 @@ given TypeChecker {
         }
     }
 
-    protected check_expr_global_ref(self, expr * Expr, expected Option[Type]) TypedExpr = {
+    module_private check_expr_global_ref(self, expr * Expr, expected Option[Type]) TypedExpr = {
         let prev_function_return_context = self.storage.function_return_context
         let prev_in_loop = self.storage.in_loop
         let prev_loop_depth = self.storage.loop_depth
@@ -273,9 +273,9 @@ given TypeChecker {
         return typed
     }
 
-    protected ast_expr_span(self, expr * Expr) SourceSpan = expr_span(expr)
+    module_private ast_expr_span(self, expr * Expr) SourceSpan = expr_span(expr)
 
-    protected check_identifier_expr_at(self, name String, span SourceSpan, scope Scope) TypedExpr = {
+    module_private check_identifier_expr_at(self, name String, span SourceSpan, scope Scope) TypedExpr = {
         let local_sym_opt = self.lookup_non_global_scope_symbol(scope, name)
         let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None() else self.lookup_current_file_symbol(name)
         let file_sym_opt = raw_file_sym_opt
@@ -353,15 +353,15 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Variable(box(normalized_sym)), normalized_sym.symbol_type)
     }
 
-    protected check_identifier_expr(self, name String, scope Scope) TypedExpr = {
+    module_private check_identifier_expr(self, name String, scope Scope) TypedExpr = {
         return self.check_identifier_expr_at(name, unknown_span(), scope)
     }
 
-    protected check_operand_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_operand_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         return self.check_child_expr_ref(expr, expected, scope)
     }
 
-    protected check_child_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
+    module_private check_child_expr_ref(self, expr * Expr, expected Option[Type], scope Scope) TypedExpr = {
         return when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(left, op, right, expected, scope),
@@ -502,7 +502,7 @@ given TypeChecker {
         }
     }
 
-    protected make_typed_member_path_expr(self, typed_base TypedExpr, member String, member_type Type) TypedExpr = {
+    module_private make_typed_member_path_expr(self, typed_base TypedExpr, member String, member_type Type) TypedExpr = {
         let member_access = when typed_base.expr_kind in {
             .MemberPath(path_base, path) then {
                 if self.is_ref_like_assignment_type(typed_base.expr_type) then {
@@ -540,7 +540,7 @@ given TypeChecker {
         }
     }
 
-    protected split_member_path_call_callee(self, callee * Expr) Option[Pair[* Expr, String]] = {
+    module_private split_member_path_call_callee(self, callee * Expr) Option[Pair[* Expr, String]] = {
         return when callee in {
             .MemberPath(base, path, _) then {
                 let mutable copied_path = List[String].new()
@@ -566,7 +566,7 @@ given TypeChecker {
         }
     }
 
-    protected check_member_expr_ref(self, base * Expr, member String, scope Scope) TypedExpr = {
+    module_private check_member_expr_ref(self, base * Expr, member String, scope Scope) TypedExpr = {
         let typed_base = when base in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             _ then self.check_expr_core_ref(base, .None(), scope),
@@ -648,8 +648,8 @@ given TypeChecker {
                                 found = f.field_type
                             } else {
                                 let access_label = when f.access in {
-                                    .Private() then "private",
-                                    _ then "protected",
+                                    .FilePrivate() then "file_private",
+                                    _ then "module_private",
                                 }
                                 self.storage.diagnostics.push(
                                     make_diagnostic(
@@ -693,8 +693,8 @@ given TypeChecker {
                                             found = f.field_type
                                         } else {
                                             let access_label = when f.access in {
-                                                .Private() then "private",
-                                                _ then "protected",
+                                                .FilePrivate() then "file_private",
+                                                _ then "module_private",
                                             }
                                             self.storage.diagnostics.push(
                                                 make_diagnostic(
@@ -755,7 +755,7 @@ given TypeChecker {
         return self.make_typed_member_path_expr(typed_base, member, member_type)
     }
 
-    protected check_call_callee_expr_ref(self, callee * Expr, scope Scope) TypedExpr = {
+    module_private check_call_callee_expr_ref(self, callee * Expr, scope Scope) TypedExpr = {
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(name, span, scope),
             .MemberPath(_, _, _) then {
@@ -899,7 +899,7 @@ given TypeChecker {
         }
     }
 
-    protected ref_target_expr_name(self, expr * Expr) String = {
+    module_private ref_target_expr_name(self, expr * Expr) String = {
         return when expr in {
             .Identifier(name, _) then name,
             .MemberPath(_, path, _) then if path.is_empty() then "member" else path[path.count() - 1],
@@ -910,7 +910,7 @@ given TypeChecker {
         }
     }
 
-    protected ref_target_typed_name(self, expr * TypedExpr) String = {
+    module_private ref_target_typed_name(self, expr * TypedExpr) String = {
         return when expr.expr_kind in {
             .Variable(sym) then self.context().symbol_name(*sym),
             .MemberPath(_, path) then if path.is_empty() then "member" else path[path.count() - 1],
@@ -920,7 +920,7 @@ given TypeChecker {
         }
     }
 
-    protected is_literal_expr(self, expr * Expr) Bool = {
+    module_private is_literal_expr(self, expr * Expr) Bool = {
         return when expr in {
             .StringLiteral(_, _) then true,
             .IntegerLiteral(_, _) then true,
@@ -935,7 +935,7 @@ given TypeChecker {
         }
     }
 
-    protected is_implicit_ref_candidate_shape(self, expr * TypedExpr) Bool = {
+    module_private is_implicit_ref_candidate_shape(self, expr * TypedExpr) Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
             .MemberPath(_, _) then true,
@@ -945,11 +945,11 @@ given TypeChecker {
         }
     }
 
-    protected can_take_implicit_ref_receiver(self, expr * TypedExpr) Bool = {
+    module_private can_take_implicit_ref_receiver(self, expr * TypedExpr) Bool = {
         return self.can_take_ref_of_expr(expr)
     }
 
-    protected type_matches_expected_pattern(self, expected_pattern Type, actual_type Type) Bool = {
+    module_private type_matches_expected_pattern(self, expected_pattern Type, actual_type Type) Bool = {
         if self.same_expr_type(expected_pattern, actual_type) then {
             return true
         }
@@ -958,7 +958,7 @@ given TypeChecker {
         return self.same_expr_type(self.apply_type_bindings(expected_pattern, bindings), actual_type)
     }
 
-    protected report_trait_flatten_failure(self, trait_name String, method_name String, error * Error) Void = {
+    module_private report_trait_flatten_failure(self, trait_name String, method_name String, error * Error) Void = {
         let mutable message = "failed to flatten trait "
         message.push_string(trait_name)
         message.push_string(" while resolving method '")
@@ -968,7 +968,7 @@ given TypeChecker {
         self.push_diagnostic(message)
     }
 
-    protected find_trait_constraint_for_method(self, base_type Type, method_name String) Option[String] = {
+    module_private find_trait_constraint_for_method(self, base_type Type, method_name String) Option[String] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[String].None()
         }
@@ -1056,7 +1056,7 @@ given TypeChecker {
         }
     }
 
-    protected can_convert_to_trait_object(self, actual_type Type, trait_name String) Bool = {
+    module_private can_convert_to_trait_object(self, actual_type Type, trait_name String) Bool = {
         let normalized = when actual_type in {
             .MutableReferenceType(inner) then *inner,
             .ReferenceType(inner) then *inner,
@@ -1085,7 +1085,7 @@ given TypeChecker {
     }
 
 
-    protected trait_object_concrete_type(self, source_type Type) Type = {
+    module_private trait_object_concrete_type(self, source_type Type) Type = {
         return when source_type in {
             .ReferenceType(inner) then when *inner in {
                 .TraitObject(_, _) then *inner,
@@ -1107,7 +1107,7 @@ given TypeChecker {
         }
     }
 
-    protected wrap_trait_object_conversion(self, expr TypedExpr, trait_type Type, result_type Type) TypedExpr = {
+    module_private wrap_trait_object_conversion(self, expr TypedExpr, trait_type Type, result_type Type) TypedExpr = {
         let already_trait_object = when expr.expr_type in {
             .TraitObject(_, _) then true,
             .ReferenceType(inner) then *inner is .TraitObject(_, _),
@@ -1145,7 +1145,7 @@ given TypeChecker {
         )
     }
 
-    protected trait_object_conversion_result_type(self, source_type Type, trait_type Type) Type = {
+    module_private trait_object_conversion_result_type(self, source_type Type, trait_type Type) Type = {
         return when source_type in {
             .MutableReferenceType(_) then Type.MutableReferenceType(box(trait_type)),
             .ReferenceType(_) then Type.ReferenceType(box(trait_type)),
@@ -1156,7 +1156,7 @@ given TypeChecker {
             _ then trait_type,
         }
     }
-    protected adapt_expr_to_expected_type_at(self, expr TypedExpr, expected_type_opt Option[Type], source_span_opt Option[SourceSpan]) TypedExpr = {
+    module_private adapt_expr_to_expected_type_at(self, expr TypedExpr, expected_type_opt Option[Type], source_span_opt Option[SourceSpan]) TypedExpr = {
         let expr_ref = box(expr)
         let diagnostic_span = when source_span_opt in {
             .Some(source_span) then if is_known_span(source_span) then source_span else self.typed_expr_span(expr_ref),
@@ -1800,7 +1800,7 @@ given TypeChecker {
         return expr
     }
 
-    protected adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt Option[Type]) TypedExpr = {
+    module_private adapt_expr_to_expected_type(self, expr TypedExpr, expected_type_opt Option[Type]) TypedExpr = {
         return self.adapt_expr_to_expected_type_at(expr, expected_type_opt, Option[SourceSpan].None())
     }
 }

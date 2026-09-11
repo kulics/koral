@@ -73,15 +73,15 @@ extension TypeChecker {
     switch fieldAccess {
     case .public:
       return true
-    case .private:
+    case .file_private:
       // Private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return isSameSourceFile(defSourceFile, currentSourceFile)
-    case .protected:
+    case .module_private:
       // Protected: accessible from the same logical module only.
       let defModulePath = context.getModulePath(defId) ?? []
       return defModulePath == currentModulePath
-    case .protectedPublic:
+    case .package_private:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(defId) == currentPackageID
     }
@@ -238,7 +238,7 @@ extension TypeChecker {
             // Wildcard doesn't access the field value, allowed
           } else {
             let fieldName = caseDef.parameters[idx].name
-            let accessLabel = fieldAccess == .private ? "private" : "protected"
+            let accessLabel = fieldAccess.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(fieldName)' of type '\(typeName)' in destructuring pattern"
             ), span: span)
@@ -405,7 +405,7 @@ extension TypeChecker {
             // Wildcard doesn't access the field value, allowed
           } else {
             let fieldName = members[idx].name
-            let accessLabel = fieldAccess == .private ? "private" : "protected"
+            let accessLabel = fieldAccess.description
             throw SemanticError(.generic(
               "Cannot access \(accessLabel) field '\(fieldName)' of type '\(typeName)' in destructuring pattern"
             ), span: span)

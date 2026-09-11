@@ -103,7 +103,7 @@ public class UnifiedScope {
     mutable: Bool,
     modulePath: [String] = [],
     sourceFile: String = "",
-    access: AccessModifier = .protected
+    access: AccessModifier = .module_private
   ) {
     guard let map = defIdMap else {
       return
@@ -143,7 +143,7 @@ public class UnifiedScope {
       name: name,
       kind: .variable,
       sourceFile: "",
-      access: .protected,
+      access: .module_private,
       span: .unknown
     )
     map.addSymbolInfo(
@@ -171,7 +171,7 @@ public class UnifiedScope {
     }
   }
 
-  public func defineFunctionWithModulePath(_ name: String, _ type: Type, modulePath: [String], access: AccessModifier = .protected) {
+  public func defineFunctionWithModulePath(_ name: String, _ type: Type, modulePath: [String], access: AccessModifier = .module_private) {
     guard let map = defIdMap else {
       return
     }
@@ -202,7 +202,7 @@ public class UnifiedScope {
       name: name,
       kind: .function,
       sourceFile: sourceFile,
-      access: .private,
+      access: .file_private,
       span: .unknown
     )
     map.addSymbolInfo(
@@ -215,7 +215,7 @@ public class UnifiedScope {
     privateFunctionSymbols.insert("\(name)@\(sourceFile)")
   }
 
-  public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String], access: AccessModifier = .protected) {
+  public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String], access: AccessModifier = .module_private) {
     define(name, type, mutable: mutable, modulePath: modulePath, sourceFile: "", access: access)
   }
 
@@ -228,7 +228,7 @@ public class UnifiedScope {
       name: name,
       kind: .variable,
       sourceFile: sourceFile,
-      access: .private,
+      access: .file_private,
       span: .unknown
     )
     let kind: SymbolKind = .variable(mutable ? .MutableValue : .Value)
@@ -308,7 +308,7 @@ public class UnifiedScope {
       return (
         type: type,
         mutable: map.isSymbolMutable(defId) ?? false,
-        isPrivate: map.getAccess(defId) == .private,
+        isPrivate: map.getAccess(defId) == .file_private,
         sourceFile: map.getSourceFile(defId),
         modulePath: map.getModulePath(defId) ?? []
       )
@@ -342,7 +342,7 @@ public class UnifiedScope {
       return (
         type: type,
         mutable: map.isSymbolMutable(defId) ?? false,
-        isPrivate: map.getAccess(defId) == .private,
+        isPrivate: map.getAccess(defId) == .file_private,
         sourceFile: map.getSourceFile(defId),
         modulePath: map.getModulePath(defId) ?? []
       )
@@ -392,7 +392,7 @@ public class UnifiedScope {
         name: name,
         kind: .type(.structure),
         sourceFile: "",
-        access: .protected,
+        access: .module_private,
         span: .unknown
       )
     }
@@ -414,7 +414,7 @@ public class UnifiedScope {
         name: name,
         kind: .type(.structure),
         sourceFile: "",
-        access: .protected,
+        access: .module_private,
         span: .unknown
       )
     }
@@ -440,7 +440,7 @@ public class UnifiedScope {
         name: name,
         kind: .type(.structure),
         sourceFile: sourceFile,
-        access: .private,
+        access: .file_private,
         span: .unknown
       )
     }
@@ -463,7 +463,7 @@ public class UnifiedScope {
         name: name,
         kind: .type(.structure),
         sourceFile: sourceFile,
-        access: .private,
+        access: .file_private,
         span: .unknown
       )
     }
