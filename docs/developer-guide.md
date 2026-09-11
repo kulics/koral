@@ -916,3 +916,109 @@ Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier(
 2. Declare external functions with `foreign let`
 3. Declare external types with `foreign type` (optional fields)
 4. CodeGen emits C declarations; Driver appends linker flags from the resolved manifest graph
+
+## Canonical sources and change workflow
+
+### Change control principle
+
+Every functional change must follow a documentation-first loop:
+
+1. update the specification or workflow doc first,
+2. update the implementation,
+3. update or add tests/samples,
+4. validate the affected toolchain in the documented order.
+
+Code alone is not the source of truth. If the behavior changes, the docs must change first.
+
+### Canonical source map
+
+Use these files as the authoritative references:
+
+- `docs/developer-guide.md` — required change workflow, bootstrap/compiler ordering, and validation checklist.
+- `tests/README.md` — unified test runner contract, flags, buckets, and rerun guidance.
+- `bootstrap/koral.json`, `tests/compiler-runner/koral.json`, `std/koral.json` — build/package targets for the compiler-side builds.
+- `toolchain/koralfmt/test/README.md` — formatter regression test contract and execution steps.
+- `README.md` — top-level repo shape, prerequisites, quick start, and public contribution guidance.
+
+### Required change workflow
+
+1. **Document first**: update the governing doc in `docs/`, or `tests/README.md` / toolchain docs when behavior, workflow, or validation steps change.
+2. **Update implementation**: change compiler/runtime/toolchain code only after the doc baseline is updated.
+3. **Update tests**: update existing expectations or add regression coverage before merge.
+4. **Validate compiler bootstrap order**: rebuild the host compiler first, then rebuild bootstrap, then run the shared runner against bootstrap and Swift builds.
+5. **Validate samples**: build representative samples after compiler/runtime changes.
+6. **Validate toolchain**: run formatter and/or doc-generator validation when formatting rules, std surface, or generated docs are affected.
+7. **Self-review**: confirm the diff aligns with the updated docs and the checklist below.
+
+### Ordering rules
+
+#### Compiler changes (host -> bootstrap -> tests)
+
+Use this order when changing compiler, std, runtime, or test-runner behavior:
+
+```bash
+# 1) Build Swift host compiler
+cd compiler
+swift build -c debug
+cd ..
+
+# 2) Build bootstrap compiler using the host-built compiler
+compiler/.build/debug/koralc build --package-config bootstrap/koral.json --target-module koralc -o bin/bootstrap
+
+# 3) Build shared test runner
+compiler/.build/debug/koralc build --package-config tests/compiler-runner/koral.json --target-module compiler_runner -o bin/compiler-test-runner
+
+# 4) Run tests against bootstrap
+./bin/compiler-test-runner/compiler_runner.exe --compiler bootstrap --bootstrap-koralc bin/bootstrap/koralc.exe -j=8
+
+# 5) Run tests against Swift host compiler
+./bin/compiler-test-runner/compiler_runner.exe --compiler swift --swift-koralc compiler/.build/debug/koralc.exe -j=8
+```
+
+Do not use a bootstrap-built next-stage binary as the default test harness unless the task is explicitly self-hosting validation.
+
+#### Bootstrap changes
+
+When changing bootstrap sources only, rebuild in the same host-first order:
+
+1. rebuild Swift host compiler,
+2. rebuild bootstrap with host-built compiler,
+3. rerun the shared test runner for `--compiler bootstrap` and relevant buckets.
+
+### Samples verification
+
+After compiler/runtime changes, build representative samples to catch compilation regressions outside the test suite.
+
+```bash
+# Example: build a sample using the host-built compiler
+compiler/.build/debug/koralc build samples/expr-eval/expr_eval.koral -o bin/samples
+```
+
+Use the repository's sample build/package targets if the sample uses a manifest.
+
+### Toolchain verification
+
+Run these validations when the change affects formatting, std API surface, or generated documentation:
+
+```bash
+# Build formatter regression runner
+compiler/.build/debug/koralc build toolchain/koralfmt/test_fmt.koral -o toolchain/koralfmt/build
+
+# Run formatter regression suite
+toolchain/koralfmt/build/test_fmt.exe
+
+# Build std API doc generator
+compiler/.build/debug/koralc build toolchain/doc/generate_std_api_docs.koral -o bin/toolchain-doc-gen
+
+# Run doc generator from repo root so it can locate std sources
+bin/toolchain-doc-gen/toolchain_doc_gen.exe
+```
+
+### PR/change checklist
+
+- [ ] The governing doc was updated before or alongside the code change.
+- [ ] The change preserves host-first build ordering for compiler/bootstrap flows.
+- [ ] The shared test runner passes for both bootstrap and Swift targets when affected.
+- [ ] Samples are built when the compiler/runtime surface changes.
+- [ ] Toolchain validation is rerun when formatting or docs are affected.
+- [ ] The final diff documents the exact verification performed.
