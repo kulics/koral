@@ -943,25 +943,24 @@ given Parser {
 
 given Parser {
 
-    protected parse_string_literal_expr(*mutable self, value String, span SourceSpan) Result[* Expr] = {
-        if not value.contains("\\(") then {
-            return .Ok(box(Expr.StringLiteral(value, span)))
-        }
-
-        let parts = self.parse_interpolated_parts(value) or else {
-            let mutable message = "Invalid interpolated string: "
-            message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
-            return .Error(self.parser_error_without_span(message))
-        }
-
+    protected parse_interpolated_string_expr(*mutable self, parts List[InterpolatedStringTokenPart], span SourceSpan) Result[* Expr] = {
+        let mutable ast_parts = List[InterpolatedStringPart].new()
         let mutable literal_value = String.new()
         let mutable has_expression = false
+
         for part in parts then {
             when part in {
                 .Literal(part_value) then {
                     literal_value.push_string(part_value)
+                    ast_parts.push(InterpolatedStringPart.Literal(part_value))
                 },
-                .Expression(_) then {
+                .ExpressionTokens(expr_tokens) then {
+                    let expr = self.parse_embedded_expression(expr_tokens) or else {
+                        let mutable message = "Invalid interpolation expression: "
+                        message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
+                        return .Error(self.parser_error_without_span(message))
+                    }
+                    ast_parts.push(InterpolatedStringPart.Expression(box(*expr)))
                     has_expression = true
                 },
             }
@@ -970,119 +969,20 @@ given Parser {
         if not has_expression then {
             return .Ok(box(Expr.StringLiteral(literal_value, span)))
         }
-        return .Ok(box(Expr.InterpolatedString(parts, span)))
+        return .Ok(box(Expr.InterpolatedString(ast_parts, span)))
     }
 
-    protected parse_interpolated_parts(*mutable self, value String) Result[List[InterpolatedStringPart]] = {
-        let runes = value.to_runes()
-        let total = runes.count()
-        let mutable i UInt = 0
-
-        let mutable parts = List[InterpolatedStringPart].new()
-        let mutable literal = String.new()
-
-        while i < total then {
-            let ch = runes[i]
-
-            if ch == '\\' then {
-                let mutable slash_count UInt = 0
-                while i + slash_count < total and runes[i + slash_count] == '\\' then {
-                    slash_count += 1
-                }
-                let consumed_slashes = slash_count
-
-                if i + slash_count < total and runes[i + slash_count] == '(' then {
-                    let mutable literal_slashes UInt = 0
-                    while literal_slashes < slash_count / 2 then {
-                        literal.push_rune('\\')
-                        literal_slashes += 1
-                    }
-
-                    if slash_count % 2 == 0 then {
-                        literal.push_rune('(')
-                        i += slash_count + 1
-                        continue
-                    }
-
-                    if not literal.is_empty() then {
-                        let mutable literal_part = String.new()
-                        literal_part.push_string(literal)
-                        parts.push(InterpolatedStringPart.Literal(literal_part))
-                        literal = String.new()
-                    }
-
-                    i += slash_count + 1
-                    let mutable expr_source = String.new()
-                    let mutable depth UInt = 1
-
-                    while i < total then {
-                        let cur = runes[i]
-                        i += 1
-
-                        if cur == '(' then {
-                            depth += 1
-                            expr_source.push_rune(cur)
-                            continue
-                        }
-
-                        if cur == ')' then {
-                            depth -= 1
-                            if depth == 0 then {
-                                break
-                            }
-                            expr_source.push_rune(cur)
-                            continue
-                        }
-
-                        expr_source.push_rune(cur)
-                    }
-
-                    if depth <> 0 then {
-                        return .Error(self.parser_error_without_span("Unterminated interpolation in string literal"))
-                    }
-
-                    if expr_source.trim_ascii().is_empty() then {
-                        return .Error(self.parser_error_without_span("empty interpolation expression"))
-                    }
-
-                    let expr = self.parse_embedded_expression(expr_source) or else {
-                        let mutable message = "Invalid interpolation expression: "
-                        message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
-                        return .Error(self.parser_error_without_span(message))
-                    }
-                    parts.push(InterpolatedStringPart.Expression(box(*expr)))
-                    continue
-                }
-
-                while slash_count > 0 then {
-                    literal.push_rune('\\')
-                    slash_count -= 1
-                }
-                i += consumed_slashes
-                continue
-            }
-
-            literal.push_rune(ch)
-            i += 1
-        }
-
-        if not literal.is_empty() then {
-            let mutable literal_part = String.new()
-            literal_part.push_string(literal)
-            parts.push(InterpolatedStringPart.Literal(literal_part))
-        }
-
-        return .Ok(parts)
+    protected parse_string_literal_expr(*mutable self, value String, span SourceSpan) Result[* Expr] = {
+        return .Ok(box(Expr.StringLiteral(value, span)))
     }
 
-    protected parse_embedded_expression(*mutable self, expr_source String) Result[* Expr] = {
-        let tokens = lex(expr_source) or else {
-            let mutable message = "lex failed: "
-            message.push_string(it.message())
-            return .Error(self.parser_error_without_span(message))
+    protected parse_embedded_expression(*mutable self, expr_tokens List[* Token]) Result[* Expr] = {
+        let mutable token_list = List[Token].new()
+        for token_ref in expr_tokens then {
+            token_list.push(*token_ref)
         }
 
-        let mutable nested = Parser.new_in_file(tokens, self.file_path)
+        let mutable nested = Parser.new_in_file(token_list, self.file_path)
         let expr = nested.parse_expression() or else {
             let mutable message = "parse failed: "
             message.push_string(wrap_error_as_diagnostic(DiagnosticStage.Parser(), self.file_path, it).message)
@@ -1104,6 +1004,7 @@ let token_text(token Token) String = {
         .DurationLiteral(v, u) then "\(v)\(u)",
         .FloatLiteral(v) then v,
         .StringLiteral(v) then "\"\(v)\"",
+        .InterpolatedString(_) then "<interpolated-string>",
         .RuneLiteral(v) then "'\(v)'",
         .KwLet() then "let",
         .KwMut() then "mutable",

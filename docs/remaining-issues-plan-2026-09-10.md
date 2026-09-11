@@ -15,35 +15,10 @@ This document renumbers only the issues that are still not fully resolved after 
 ## Closed Since This Renumbered List
 
 - `R1`: parser acceptance logic is now consolidated enough to close for the current backlog. The latest work pulled named-argument lookahead, range-bound starts, generic function/method instantiation diagnostics, control-statement terminator checks, and top-level declaration flag classification into shared parser helper layers on both compilers. The current shared suite is green end-to-end on both compilers, including the newly added parser regressions.
+- `R2`: interpolation now crosses the lexer/parser boundary as a structured lexer-level token stream in bootstrap rather than as a plain string re-scanned by parser helpers. Single-line and multiline interpolation parts preserve embedded-expression start locations well enough for file-relative diagnostics, and the current full shared suite is clean on both compilers.
 - `R4`: MIR-lowering invariant panic chain is resolved in the current local code state. Bootstrap parser/sema/mono/driver crash paths now route through diagnostics instead of unrecovered panics.
 
 ## Remaining Issues (Renumbered)
-
-### R2. Interpolation Is Not Yet A True Lexer-Level Sublanguage
-
-Maps from old issue: `#4`
-
-Current state:
-
-- Error reporting for interpolation is now file-aware and structurally diagnostic.
-- Bootstrap still lexes normal string bodies first, then reparses embedded expression source text via parser-side helper recursion.
-
-Why this is still open:
-
-- Interpolation still relies on parser-side embedded lex/parse (`parse_embedded_expression`) rather than a first-class lexer mode.
-- Escape handling is duplicated across string processing helpers in the lexer.
-- Embedded-expression spans and token ownership are still reconstructed rather than preserved at tokenization time.
-
-Primary files:
-
-- `bootstrap/koralc/lexer/scanner.koral`
-- `bootstrap/koralc/parser/core_precedence.koral`
-
-Exit criteria:
-
-- String interpolation is tokenized through a dedicated lexer mode or equivalent structured token stream.
-- Embedded expressions preserve source positions without reparsing opaque string fragments.
-- Escape processing logic for string/interpolation stops being duplicated in two separate helper stacks.
 
 ### R3. Managed-Reference Lifetime / Escape Analysis Is Still Heuristic
 
@@ -101,12 +76,14 @@ Exit criteria:
 
 ## Recommended Execution Order
 
-1. `R2` — now the next parser/frontend architecture item after `R1` closure.
-2. `R5` — broad audit after the parser acceptance work has been stabilized.
-3. `R3` — largest architectural item; likely requires a dedicated design pass.
+1. `R5` — broad audit after the parser/interpolation frontend work has been stabilized.
+2. `R3` — largest architectural item; likely requires a dedicated design pass.
 
 ## Current Validation Anchors
 
+- Final local `R2` closure full-suite anchors:
+  - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-11-r2-final.report.log` (`575/575`)
+  - `tests/compiler-cases_output/_reports/swift-validation-2026-09-11-r2-final.report.log` (`575/575`)
 - Final local `R1` closure full-suite anchors:
   - `tests/compiler-cases_output/_reports/bootstrap-validation-2026-09-10-r1-final.report.log` (`575/575`)
   - `tests/compiler-cases_output/_reports/swift-validation-2026-09-10-r1-final.report.log` (`575/575`)
